@@ -22,6 +22,7 @@ import freechips.rocketchip.util.uintToBitPat
 import freechips.rocketchip.rocket.CSR
 
 import boom.common._
+import boom.common.MicroOpcodes._
 
 /**
  * Control signal bundle for register renaming

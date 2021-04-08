@@ -20,6 +20,7 @@ import freechips.rocketchip.tile
 
 import boom.exu.FUConstants._
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.util.{BoomCoreStringPrefix}
 
 /**

@@ -42,6 +42,7 @@ import freechips.rocketchip.devices.tilelink.{PLICConsts, CLINTConsts}
 import testchipip.{ExtendedTracedInstruction}
 
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.ifu.{GlobalHistory, HasBoomFrontendParameters}
 import boom.exu.FUConstants._
 import boom.common.BoomTilesKey
@@ -269,6 +270,14 @@ class BoomCore(implicit p: Parameters) extends BoomModule
   val csr = Module(new freechips.rocketchip.rocket.CSRFile(perfEvents, boomParams.customCSRs.decls))
   csr.io.inst foreach { c => c := DontCare }
   csr.io.rocc_interrupt := io.rocc.interrupt
+  if (usingVector) {
+    csr.io.vector.get.set_vs_dirty := false.B
+    csr.io.vector.get.set_vconfig.valid := false.B
+    csr.io.vector.get.set_vconfig.bits := DontCare
+    csr.io.vector.get.set_vstart.valid := false.B
+    csr.io.vector.get.set_vstart.bits := 0.U
+    csr.io.vector.get.set_vxsat := false.B
+  }
 
   val custom_csrs = Wire(new BoomCustomCSRs)
   (custom_csrs.csrs zip csr.io.customCSRs).map { case (lhs, rhs) => lhs := rhs }
@@ -344,6 +353,7 @@ class BoomCore(implicit p: Parameters) extends BoomModule
         "Load/Store Unit Size  : " + numLdqEntries + "/" + numStqEntries,
         "Num Int Phys Registers: " + numIntPhysRegs,
         "Num FP  Phys Registers: " + numFpPhysRegs,
+        "Num Vec Phys Registers: " + numVecPhysRegs,
         "Max Branch Count      : " + maxBrCount)
     + iregfile.toString + "\n"
     + BoomCoreStringPrefix(
@@ -362,6 +372,9 @@ class BoomCore(implicit p: Parameters) extends BoomModule
         "Vaddr Bits            : " + vaddrBits) + "\n"
     + BoomCoreStringPrefix(
         "Using FPU Unit?       : " + usingFPU.toString,
+        "Using Vector?         : " + usingVector.toString,
+        "VLEN Bits             : " + vLen,
+        "ELEN Bits             : " + eLen,
         "Using FDivSqrt?       : " + usingFDivSqrt.toString,
         "Using VM?             : " + usingVM.toString) + "\n")
 

@@ -18,6 +18,7 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.tile.FPConstants._
 import freechips.rocketchip.tile
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.util._
 
 /**

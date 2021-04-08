@@ -18,6 +18,7 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util.{Str}
 
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.exu.FUConstants._
 import boom.util.{BoolToChar}
 

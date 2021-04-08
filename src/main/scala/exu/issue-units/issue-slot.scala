@@ -21,6 +21,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.util._
 import FUConstants._
 

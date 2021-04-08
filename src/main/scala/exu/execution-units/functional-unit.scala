@@ -27,6 +27,7 @@ import freechips.rocketchip.tile
 import freechips.rocketchip.rocket.{PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR}
 
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.ifu._
 import boom.util._
 

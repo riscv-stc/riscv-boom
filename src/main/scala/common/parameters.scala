@@ -91,6 +91,13 @@ case class BoomCoreParams(
   useBPWatch: Boolean = false,
   clockGate: Boolean = false,
 
+  /* vector extension */
+  useVector: Boolean = false,
+  override val vLen: Int = 0,
+  override val eLen: Int = 0,
+  override val vMemDataBits: Int = 0,
+  numVecPhysRegisters: Int = 0,
+
   /* debug stuff */
   enableCommitLogPrintf: Boolean = false,
   enableBranchPrintf: Boolean = false,
@@ -244,6 +251,10 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val enableSFBOpt = boomParams.enableSFBOpt
   val enableGHistStallRepair = boomParams.enableGHistStallRepair
   val enableBTBFastRepair = boomParams.enableBTBFastRepair
+
+  //************************************
+  // vector stuff
+  val numVecPhysRegs = boomParams.numVecPhysRegisters
 
   //************************************
   // Implicitly calculated constants

@@ -16,6 +16,7 @@ import freechips.rocketchip.rocket
 import freechips.rocketchip.util.uintToBitPat
 
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.util.{ImmGenRm, ImmGenTyp}
 
 /**

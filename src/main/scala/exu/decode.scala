@@ -16,6 +16,7 @@ import freechips.rocketchip.util.{uintToBitPat,UIntIsOneOf}
 
 import FUConstants._
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.util._
 
 // scalastyle:off

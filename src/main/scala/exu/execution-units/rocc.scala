@@ -20,6 +20,7 @@ import freechips.rocketchip.tile.{RoCCCoreIO, RoCCInstruction}
 import freechips.rocketchip.rocket._
 
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.util._
 
 /**
