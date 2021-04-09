@@ -15,6 +15,7 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.rocket.VConfig
 
 import boom.exu.FUConstants
 
@@ -135,6 +136,26 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val bp_debug_if      = Bool()             // Breakpoint
   val bp_xcpt_if       = Bool()             // Breakpoint
 
+  // vector extension
+  val is_rvv           = Bool()             // is vector instruction
+  val v_ls_ew          = UInt(2.W)          // EEW encoded in load/store instruction
+  val v_unmasked       = Bool()
+  val vstart           = UInt((log2Ceil(vLen)+1).W)
+  val vconfig          = new VConfig
+  val v_is_split       = Bool()             // is a split of a vector instruction
+  val v_is_first       = Bool()
+  val v_is_last        = Bool()
+  val v_re_alloc       = Bool()             // do rename allocation on first split for every vreg
+//val pvm              = UInt(maxPregSz.W)  // FIXME:vm0 phiscal name for masked
+//val pvm_busy         = Bool()
+//val pvd_grpnum       = UInt(3.W)          // store mappings in ROB for rollback
+//val pvs1_grpnum      = UInt(3.W)
+//val pvs2_grpnum      = UInt(3.W)
+//val pvs3_grpnum      = UInt(3.W)
+//val pvd_grpmap       = Vec(7,UInt(maxPregSz.W))
+//val pvs1_grpmap      = Vec(7,UInt(maxPregSz.W))
+//val pvs2_grpmap      = Vec(7,UInt(maxPregSz.W))
+//val pvs3_grpmap      = Vec(7,UInt(maxPregSz.W))
 
   // What prediction structure provides the prediction FROM this op
   val debug_fsrc       = UInt(BSRC_SZ.W)
