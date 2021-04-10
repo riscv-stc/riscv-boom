@@ -96,8 +96,8 @@ case class BoomCoreParams(
   scontextWidth: Int = 0,
 
   /* debug stuff */
-  enableCommitLogPrintf: Boolean = false,
-  enableBranchPrintf: Boolean = false,
+  enableCommitLogPrintf: Boolean = true,
+  enableBranchPrintf: Boolean = true,
   enableMemtracePrintf: Boolean = false
 
 // DOC include end: BOOM Parameters

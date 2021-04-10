@@ -174,6 +174,16 @@ abstract class IssueUnit(
 
   //-------------------------------------------------------------
 
+  if (O3PIPEVIEW_PRINTF) {
+    for (i <- 0 until issueWidth) {
+      // only print stores once!
+      when (io.iss_valids(i) && io.iss_uops(i).uopc =/= uopSTD) {
+         printf("%d; O3PipeView:issue:%d\n",
+           io.iss_uops(i).debug_events.fetch_seq,
+           io.tsc_reg)
+      }
+    }
+  }
 
   def getType: String =
     if (iqType == IQT_INT.litValue) "int"

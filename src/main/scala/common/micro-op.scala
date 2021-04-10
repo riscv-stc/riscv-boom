@@ -135,6 +135,9 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val bp_debug_if      = Bool()             // Breakpoint
   val bp_xcpt_if       = Bool()             // Breakpoint
 
+    // purely debug information
+  val debug_wdata      = UInt(xLen.W)
+  val debug_events     = new DebugStageEvents
 
   // What prediction structure provides the prediction FROM this op
   val debug_fsrc       = UInt(BSRC_SZ.W)
@@ -173,5 +176,11 @@ class CtrlSignals extends Bundle()
   val is_std      = Bool()
 }
 
-
-
+/**
+ * Debug stage events for Fetch stage
+ */
+class DebugStageEvents extends Bundle()
+{
+  // Track the sequence number of each instruction fetched.
+  val fetch_seq        = UInt(32.W)
+}

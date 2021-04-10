@@ -347,6 +347,11 @@ class Rob(
         rob_bsy(row_idx)      := false.B
         rob_unsafe(row_idx)   := false.B
         rob_predicated(row_idx)  := wb_resp.bits.predicated
+        if (O3PIPEVIEW_PRINTF) {
+          printf("%d; O3PipeView:complete:%d\n",
+            rob_uop(row_idx).debug_events.fetch_seq,
+            io.debug_tsc)
+        }
       }
       // TODO check that fflags aren't overwritten
       // TODO check that the wb is to a valid ROB entry, give it a time stamp
@@ -364,6 +369,10 @@ class Rob(
         rob_unsafe(cidx) := false.B
         assert (rob_val(cidx) === true.B, "[rob] store writing back to invalid entry.")
         assert (rob_bsy(cidx) === true.B, "[rob] store writing back to a not-busy entry.")
+        if (O3PIPEVIEW_PRINTF) {
+	  printf("%d; O3PipeView:complete:%d\n",
+	    rob_uop(GetRowIdx(clr_rob_idx.bits)).debug_events.fetch_seq, io.debug_tsc)
+        }
       }
     }
     for (clr <- io.lsu_clr_unsafe) {

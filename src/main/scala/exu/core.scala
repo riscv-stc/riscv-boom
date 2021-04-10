@@ -35,7 +35,7 @@ import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
-import freechips.rocketchip.rocket.{Causes, PRV}
+import freechips.rocketchip.rocket.{CSR, Causes, PRV}
 import freechips.rocketchip.util.{Str, UIntIsOneOf, CoreMonitorBundle}
 import freechips.rocketchip.devices.tilelink.{PLICConsts, CLINTConsts}
 
@@ -206,7 +206,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     mispredict_val = mispredict_val || (b.valid && b.mispredict)
     oldest_mispredict = Mux(use_this_mispredict, b, oldest_mispredict)
   }
-
+  val mispredict_cnt = RegInit(0.U(64.W))
+  when (mispredict_val.asBool) {
+    mispredict_cnt := mispredict_cnt + 1.U
+    printf("mispredict_cnt: %d\n", mispredict_cnt.asUInt())
+  }
   b2.mispredict  := mispredict_val
   b2.cfi_type    := oldest_mispredict.cfi_type
   b2.taken       := oldest_mispredict.taken
@@ -240,31 +244,113 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   //-------------------------------------------------------------
   // Uarch Hardware Performance Events (HPEs)
+  val commit_store = Wire(Vec(coreWidth, Bool()))
+  val commit_load = Wire(Vec(coreWidth, Bool()))
+  val commit_amo = Wire(Vec(coreWidth, Bool()))
+  val commit_system = Wire(Vec(coreWidth, Bool()))
+
+  val commit_fp_store = Wire(Vec(coreWidth, Bool()))
+  val commit_fp_load = Wire(Vec(coreWidth, Bool()))
+  val commit_fp_add = Wire(Vec(coreWidth, Bool()))
+  val commit_fp_mul = Wire(Vec(coreWidth, Bool()))
+  val commit_fp_div = Wire(Vec(coreWidth, Bool()))
+  val commit_fp_other = Wire(Vec(coreWidth, Bool()))
+
+  val is_arith = Wire(Vec(coreWidth, Bool()))
+  val is_branch = Wire(Vec(coreWidth, Bool()))
+  val is_jal = Wire(Vec(coreWidth, Bool()))
+  val is_jalr = Wire(Vec(coreWidth, Bool()))
+  val branch_cnt = RegInit(0.U(64.W))
+  val store_cnt = RegInit(0.U(64.W))
+  val load_cnt = RegInit(0.U(64.W))
+
+  for (w <- 0 until coreWidth) {
+    commit_store(w) := rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_stq
+    commit_load(w)  := rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_ldq
+    commit_amo(w) := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_amo
+    commit_system(w) := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_sys_pc2epc
+
+    commit_fp_store(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_stq 
+    commit_fp_load(w)  := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_ldq
+    commit_fp_add(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_ALU)
+    commit_fp_mul(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_MUL)
+    commit_fp_div(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_DIV)
+    commit_fp_other(w) := rob.io.commit.uops(w).fp_val && !(commit_fp_store(w) || commit_fp_load(w) || commit_fp_add(w) || commit_fp_mul(w) || commit_fp_div(w))
+
+    is_arith(w) := dis_valids(w) && !(dis_uops(w).is_jal || dis_uops(w).is_jalr || dis_uops(w).uses_stq || dis_uops(w).uses_ldq || dis_uops(w).is_amo)
+
+    is_branch(w) := dis_valids(w) && dis_uops(w).is_br
+    is_jal(w) := dis_valids(w) && dis_uops(w).is_jal
+    is_jalr(w) := dis_valids(w) && dis_uops(w).is_jalr
+    when(is_branch(w).asBool) {
+      branch_cnt := branch_cnt + 1.U
+      printf("branch_cnt: %d\n", branch_cnt.asUInt())
+    }
+
+    when(commit_load(w).asBool) {
+      load_cnt := load_cnt + 1.U
+      printf("load_cnt: %d\n", load_cnt.asUInt())
+    }
+
+    when(commit_store(w).asBool) {
+      store_cnt := store_cnt + 1.U
+      printf("store_cnt: %d\n", store_cnt.asUInt())
+    }
+
+    when(commit_fp_load(w).asBool) {
+      load_cnt := load_cnt + 1.U
+      printf("load_cnt: %d\n", load_cnt.asUInt())
+    }
+
+    when(commit_fp_store(w).asBool) {
+      store_cnt := store_cnt + 1.U
+      printf("store_cnt: %d\n", store_cnt.asUInt())
+    }
+  }
 
   val perfEvents = new freechips.rocketchip.rocket.EventSets(Seq(
+
     new freechips.rocketchip.rocket.EventSet((mask, hits) => (mask & hits).orR, Seq(
       ("exception", () => rob.io.com_xcpt.valid),
-      ("nop",       () => false.B),
-      ("nop",       () => false.B),
-      ("nop",       () => false.B))),
+      ("load",      () => commit_load.reduce(_||_)),
+      ("store",     () => commit_store.reduce(_||_)),
+      ("amo",       () => usingAtomics.asBool() && commit_amo.reduce(_||_)),
+      ("system",    () => commit_system.reduce(_||_)),
+      ("arith",     () =>  is_arith.reduce(_||_)),
+      ("branch",    () => is_branch.reduce(_||_)),
+      ("jal",       () => is_jal.reduce(_||_)),
+      ("jalr",      () => is_jalr.reduce(_||_)))
+       ++ (if (!usingFPU) Seq() else Seq(
+        ("fp load",     () => commit_fp_load.reduce(_||_)),
+        ("fp store",    () => commit_fp_store.reduce(_||_)),
+        ("fp add",      () => commit_fp_add.reduce(_||_)),
+        ("fp mul",      () => commit_fp_mul.reduce(_||_)),
+        ("fp mul-add",  () => false.B),
+        ("fp div",      () => commit_fp_div.reduce(_||_)),
+        ("fp other",    () => commit_fp_other.reduce(_||_))
+        )
+      )
+    ), 
 
     new freechips.rocketchip.rocket.EventSet((mask, hits) => (mask & hits).orR, Seq(
-//      ("I$ blocked",                        () => icache_blocked),
+      ("I$ blocked",                        () => icache_blocked),
       ("nop",                               () => false.B),
-      // ("branch misprediction",              () => br_unit.brinfo.mispredict),
-      // ("control-flow target misprediction", () => br_unit.brinfo.mispredict &&
-      //                                             br_unit.brinfo.cfi_type === CFI_JALR),
-      ("flush",                             () => rob.io.flush.valid)
-      //("branch resolved",                   () => br_unit.brinfo.valid)
-    )),
-
+      ("branch misprediction",              () => mispredict_val),
+      ("control-flow target misprediction", () => mispredict_val && oldest_mispredict.cfi_type === CFI_JALR),
+      ("flush",                             () => rob.io.flush.valid),
+      ("branch resolved",                   () => b1.resolve_mask =/= 0.U)
+      )),
+    
     new freechips.rocketchip.rocket.EventSet((mask, hits) => (mask & hits).orR, Seq(
       ("I$ miss",     () => io.ifu.perf.acquire),
       ("D$ miss",     () => io.lsu.perf.acquire),
       ("D$ release",  () => io.lsu.perf.release),
       ("ITLB miss",   () => io.ifu.perf.tlbMiss),
       ("DTLB miss",   () => io.lsu.perf.tlbMiss),
-      ("L2 TLB miss", () => io.ptw.perf.l2miss)))))
+      ("L2 TLB miss", () => io.ptw.perf.l2miss)
+      ))
+  ))
+      
   val csr = Module(new freechips.rocketchip.rocket.CSRFile(perfEvents, boomParams.customCSRs.decls))
   csr.io.inst foreach { c => c := DontCare }
   csr.io.rocc_interrupt := io.rocc.interrupt
@@ -307,7 +393,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   dontTouch(debug_jals)
   dontTouch(debug_jalrs)
 
-  debug_tsc_reg := debug_tsc_reg + 1.U
+  debug_tsc_reg := debug_tsc_reg + Mux(O3PIPEVIEW_PRINTF.B, O3_CYCLE_TIME.U, 1.U)
   debug_irt_reg := debug_irt_reg + PopCount(rob.io.commit.arch_valids.asUInt)
   dontTouch(debug_tsc_reg)
   dontTouch(debug_irt_reg)
@@ -377,6 +463,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   io.ifu.bp      := csr.io.bp
   io.ifu.mcontext := csr.io.mcontext
   io.ifu.scontext := csr.io.scontext
+  io.ifu.tsc_reg := debug_tsc_reg
 
   io.ifu.flush_icache := (0 until coreWidth).map { i =>
     (rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_fencei) ||
@@ -464,10 +551,12 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   assert(!(rob.io.commit.valids.reduce(_|_) && rob.io.com_xcpt.valid),
     "ROB can't commit and except in same cycle!")
-
+  val sfence_take_pc = Wire(Bool())
+  sfence_take_pc := false.B
   for (i <- 0 until memWidth) {
     when (RegNext(io.lsu.exe(i).req.bits.sfence.valid)) {
       io.ifu.sfence := RegNext(io.lsu.exe(i).req.bits.sfence)
+      sfence_take_pc := true.B
     }
   }
 
@@ -1392,6 +1481,47 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   coreMonitorBundle.clock  := clock
   coreMonitorBundle.reset  := reset
 
+
+   //-------------------------------------------------------------
+  //-------------------------------------------------------------
+  // Pipeview Visualization
+  val flush_ifu = brupdate.b2.mispredict || // In practice, means flushing everything prior to dispatch.
+                  rob.io.flush.valid || // i.e. 'flush in-order part of the pipeline'
+                  sfence_take_pc
+
+  if (O3PIPEVIEW_PRINTF) {
+    println("   O3Pipeview Visualization Enabled\n")
+
+    // did we already print out the instruction sitting at the front of the fetchbuffer/decode stage?
+    val dec_printed_mask = RegInit(0.U(coreWidth.W))
+
+    for (w <- 0 until coreWidth) {
+      when (dec_valids(w) && !dec_printed_mask(w)) {
+        printf("%d; O3PipeView:decode:%d\n", dec_uops(w).debug_events.fetch_seq, debug_tsc_reg)
+      }
+      // Rename begins when uop leaves fetch buffer (Dec+Ren1 are in same stage).
+      when (dec_fire(w)) {
+        printf("%d; O3PipeView:rename:%d\n", dec_uops(w).debug_events.fetch_seq, debug_tsc_reg)
+      }
+      when (dispatcher.io.ren_uops(w).valid) {
+        printf("%d; O3PipeView:dispatch:%d\n", dispatcher.io.ren_uops(w).bits.debug_events.fetch_seq, debug_tsc_reg)
+      }
+
+      when (dec_ready || flush_ifu) {
+        dec_printed_mask := 0.U
+      } .otherwise {
+        dec_printed_mask := dec_valids.asUInt | dec_printed_mask
+      }
+    }
+
+    for (i <- 0 until coreWidth) {
+      when (rob.io.commit.valids(i)) {
+        printf("%d; O3PipeView:retire:%d:store:0\n",
+          rob.io.commit.uops(i).debug_events.fetch_seq,
+          debug_tsc_reg)
+      }
+    }
+  }
 
   //-------------------------------------------------------------
   //-------------------------------------------------------------

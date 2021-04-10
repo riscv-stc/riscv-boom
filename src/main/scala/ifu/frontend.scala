@@ -247,6 +247,8 @@ class FetchBundle(implicit p: Parameters) extends BoomBundle
   val fsrc    = UInt(BSRC_SZ.W)
   // Source of the prediction to this bundle
   val tsrc    = UInt(BSRC_SZ.W)
+
+  val debug_events  = Vec(fetchWidth, new DebugStageEvents)
 }
 
 
@@ -286,6 +288,7 @@ class BoomFrontendIO(implicit p: Parameters) extends BoomBundle
   val flush_icache = Output(Bool())
 
   val perf = Input(new FrontendPerfEvents)
+  val tsc_reg           = Output(UInt(xLen.W))
 }
 
 /**
@@ -588,6 +591,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   // Tracks if last fetchpacket contained a half-inst
   val f3_prev_is_half = RegInit(false.B)
 
+  val f3_debug_pcs  = Wire(Vec(fetchWidth, UInt(vaddrBitsExtended.W)))
+
   require(fetchWidth >= 4) // Logic gets kind of annoying with fetchWidth = 2
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
   var redirect_found = false.B
@@ -631,6 +636,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
           f3_fetch_bundle.insts(i)     := inst0
           f3_fetch_bundle.exp_insts(i) := exp_inst0
           bpu.io.pc                    := pc0
+          f3_debug_pcs(i) := pc0
+
           brsigs                       := bpd_decoder0.io.out
           f3_fetch_bundle.edge_inst(b) := true.B
           if (b > 0) {
@@ -652,6 +659,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
           f3_fetch_bundle.insts(i)     := inst1
           f3_fetch_bundle.exp_insts(i) := exp_inst1
           bpu.io.pc                    := pc1
+          f3_debug_pcs(i) := pc1
           brsigs                       := bpd_decoder1.io.out
           f3_fetch_bundle.edge_inst(b) := false.B
         }
@@ -668,6 +676,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
         f3_fetch_bundle.insts(i)     := inst
         f3_fetch_bundle.exp_insts(i) := exp_inst
         bpu.io.pc                    := pc
+        f3_debug_pcs(i) := pc
         brsigs                       := bpd_decoder.io.out
         if (w == 1) {
           // Need special case since 0th instruction may carry over the wrap around
@@ -850,6 +859,45 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   f4_btb_corrections.io.enq.bits.lhist                := f3_fetch_bundle.lhist
   f4_btb_corrections.io.enq.bits.meta                 := f3_fetch_bundle.bpd_meta
 
+
+  val f3_valid = f3.io.deq.valid
+  val f3_fire = f3_valid && f4_ready && !f3_clear
+  val fseq_reg = RegInit(0.U(xLen.W))
+
+  for (w <- 0 until fetchWidth) {
+    f3_fetch_bundle.debug_events(w).fetch_seq := DontCare
+  }
+
+  when (f3_fire) {
+    for (i <- 0 until fetchWidth) {
+        if (i == 0) {
+          f3_fetch_bundle.debug_events(i).fetch_seq := fseq_reg
+        } else {
+          f3_fetch_bundle.debug_events(i).fetch_seq := fseq_reg +
+            PopCount(f3_fetch_bundle.mask.asUInt()(i-1,0))
+        }
+      }
+  }
+
+  if (O3PIPEVIEW_PRINTF) {
+    when (f3_fire) {
+      fseq_reg := fseq_reg + PopCount(f3_fetch_bundle.mask)
+      val bundle = f3_fetch_bundle
+      for (i <- 0 until fetchWidth) {
+        when (bundle.mask(i)) {
+          // TODO for now, manually set the fetch_tsc to point to when the fetch
+          // started. This doesn't properly account for i-cache and i-tlb misses. :(
+          // Also not factoring in NPC.
+          printf("%d; O3PipeView:fetch:%d:0x%x:0:%d:DASM(%x)\n",
+            bundle.debug_events(i).fetch_seq,
+            io.cpu.tsc_reg - (2*O3_CYCLE_TIME).U,
+            f3_debug_pcs(i),
+            bundle.debug_events(i).fetch_seq,
+            bundle.insts(i))
+        }
+      }
+    }
+  }
 
   // -------------------------------------------------------
   // **** F4 ****

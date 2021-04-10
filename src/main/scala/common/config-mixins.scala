@@ -83,6 +83,7 @@ class WithRationalBoomTiles extends Config((site, here, up) => {
  * 1-wide BOOM.
  */
 class WithNSmallBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Config(
+  new WithBoomBranchPrintf ++
   new WithTAGELBPD ++ // Default to TAGE-L BPD
   new Config((site, here, up) => {
     case TilesLocated(InSubsystem) => {
@@ -200,6 +201,7 @@ class WithNLargeBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends 
               maxBrCount = 16,
               numFetchBufferEntries = 24,
               ftq = FtqParameters(nEntries=32),
+              nPerfCounters = 29,
               fpu = Some(freechips.rocketchip.tile.FPUParams(sfmaLatency=4, dfmaLatency=4, divSqrt=true))
             ),
             dcache = Some(
