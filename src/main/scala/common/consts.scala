@@ -89,6 +89,7 @@ trait ScalarOpConstants
   val OP2_ZERO= 2.U(3.W) // constant 0
   val OP2_NEXT= 3.U(3.W) // constant 2/4 (for PC+2/4)
   val OP2_IMMC= 4.U(3.W) // for CSR imm found in RS1
+  val OP2_VL  = 5.U(3.W) // for vset{i}vl{i}
   val OP2_X   = BitPat("b???")
 
   // Register File Write Enable Signal

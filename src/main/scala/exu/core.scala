@@ -270,14 +270,6 @@ class BoomCore(implicit p: Parameters) extends BoomModule
   val csr = Module(new freechips.rocketchip.rocket.CSRFile(perfEvents, boomParams.customCSRs.decls))
   csr.io.inst foreach { c => c := DontCare }
   csr.io.rocc_interrupt := io.rocc.interrupt
-  if (usingVector) {
-    csr.io.vector.get.set_vs_dirty := false.B
-    csr.io.vector.get.set_vconfig.valid := false.B
-    csr.io.vector.get.set_vconfig.bits := DontCare
-    csr.io.vector.get.set_vstart.valid := false.B
-    csr.io.vector.get.set_vstart.bits := 0.U
-    csr.io.vector.get.set_vxsat := false.B
-  }
 
   val custom_csrs = Wire(new BoomCustomCSRs)
   (custom_csrs.csrs zip csr.io.customCSRs).map { case (lhs, rhs) => lhs := rhs }
@@ -516,6 +508,7 @@ class BoomCore(implicit p: Parameters) extends BoomModule
     decode_units(w).io.csr_decode      <> csr.io.decode(w)
     decode_units(w).io.interrupt       := csr.io.interrupt
     decode_units(w).io.interrupt_cause := csr.io.interrupt_cause
+    decode_units(w).io.vconfig         := csr.io.vector.get.vconfig
 
     dec_uops(w) := decode_units(w).io.deq.uop
   }
@@ -1066,6 +1059,20 @@ class BoomCore(implicit p: Parameters) extends BoomModule
 
   csr.io.hartid := io.hartid
   csr.io.interrupts := io.interrupts
+
+  if (usingVector) {
+    val csr_vld = csr_exe_unit.io.iresp.valid
+    val csr_uop = csr_exe_unit.io.iresp.bits.uop
+    val vsetvl = csr_uop.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
+    csr.io.vector.get.set_vs_dirty := csr_vld & vsetvl
+    csr.io.vector.get.set_vconfig.valid := csr_vld & vsetvl
+    csr.io.vector.get.set_vconfig.bits := csr_uop.vconfig
+    csr.io.vector.get.set_vstart.valid := false.B
+    csr.io.vector.get.set_vstart.bits := csr_uop.vstart
+    csr.io.vector.get.set_vxsat := false.B
+
+    csr_exe_unit.io.vconfig := csr.io.vector.get.vconfig
+  }
 
 // TODO can we add this back in, but handle reset properly and save us
 //      the mux above on csr.io.rw.cmd?

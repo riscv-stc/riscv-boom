@@ -193,9 +193,9 @@ object CsrRRdDecode extends RRdDecodeConstants
                                  // |      |  |  use mem pipe        |         |         |     rf wen |
                                  // |      |  |  |  alu fcn  wd/word?|         |         |     |      |
                                  // |      |  |  |  |        |       |         |         |     |      |
-         BitPat(uopVSETVLI) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.W),
-         BitPat(uopVSETIVLI)-> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.W),
-         BitPat(uopVSETVL)  -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.W),
+         BitPat(uopVSETVLI) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_VL  , IS_I, REN_1, CSR.N),
+         BitPat(uopVSETIVLI)-> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_VL  , IS_I, REN_1, CSR.N),
+         BitPat(uopVSETVL)  -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_VL  , IS_X, REN_1, CSR.N),
 
          BitPat(uopCSRRW)   -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.W),
          BitPat(uopCSRRS)   -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.S),

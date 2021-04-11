@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.config.{Parameters}
-import freechips.rocketchip.rocket.{BP}
+import freechips.rocketchip.rocket.{BP, VConfig}
 import freechips.rocketchip.tile.{XLen, RoCCCoreIO}
 import freechips.rocketchip.tile
 
@@ -128,6 +128,7 @@ abstract class ExecutionUnit(
 
     // only used by the fpu unit
     val fcsr_rm = if (hasFcsr) Input(Bits(tile.FPConstants.RM_SZ.W)) else null
+    val vconfig = if (hasVConfig) Input(new VConfig) else null
 
     // only used by the mem unit
     val lsu_io = if (hasMem) Flipped(new boom.lsu.LSUExeIO) else null
@@ -162,6 +163,7 @@ abstract class ExecutionUnit(
   require ((hasFpu || hasFdiv) ^ (hasAlu || hasMul || hasMem || hasIfpu),
     "[execute] we no longer support mixing FP and Integer functional units in the same exe unit.")
   def hasFcsr = hasIfpu || hasFpu || hasFdiv
+  def hasVConfig = usingVector && hasCSR
 
   require (bypassable || !alwaysBypassable,
     "[execute] an execution unit must be bypassable if it is always bypassable")
@@ -259,6 +261,7 @@ class ALUExeUnit(
   var alu: ALUUnit = null
   if (hasAlu) {
     alu = Module(new ALUUnit(isJmpUnit = hasJmpUnit,
+                             isCsrUnit = hasCSR,
                              numStages = numBypassStages,
                              dataWidth = xLen))
     alu.io.req.valid := (
@@ -287,6 +290,8 @@ class ALUExeUnit(
     if (hasJmpUnit) {
       alu.io.get_ftq_pc <> io.get_ftq_pc
     }
+
+    if (usingVector && hasCSR) alu.io.vconfig := io.vconfig
   }
 
   var rocc: RoCCShim = null

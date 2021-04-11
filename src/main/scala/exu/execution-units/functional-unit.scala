@@ -24,7 +24,7 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.ALU._
 import freechips.rocketchip.util._
 import freechips.rocketchip.tile
-import freechips.rocketchip.rocket.{PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR}
+import freechips.rocketchip.rocket.{PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR,VConfig,VType}
 
 import boom.common._
 import boom.common.MicroOpcodes._
@@ -163,6 +163,7 @@ abstract class FunctionalUnit(
   val dataWidth: Int,
   val isJmpUnit: Boolean = false,
   val isAluUnit: Boolean = false,
+  val isCsrUnit: Boolean = false,
   val isMemAddrCalcUnit: Boolean = false,
   val needsFcsr: Boolean = false)
   (implicit p: Parameters) extends BoomModule
@@ -177,6 +178,7 @@ abstract class FunctionalUnit(
 
     // only used by the fpu unit
     val fcsr_rm = if (needsFcsr) Input(UInt(tile.FPConstants.RM_SZ.W)) else null
+    val vconfig = if (usingVector & isCsrUnit) Input(new VConfig) else null
 
     // only used by branch unit
     val brinfo     = if (isAluUnit) Output(new BrResolutionInfo()) else null
@@ -208,6 +210,7 @@ abstract class PipelinedFunctionalUnit(
   dataWidth: Int,
   isJmpUnit: Boolean = false,
   isAluUnit: Boolean = false,
+  isCsrUnit: Boolean = false,
   isMemAddrCalcUnit: Boolean = false,
   needsFcsr: Boolean = false
   )(implicit p: Parameters) extends FunctionalUnit(
@@ -217,6 +220,7 @@ abstract class PipelinedFunctionalUnit(
     dataWidth = dataWidth,
     isJmpUnit = isJmpUnit,
     isAluUnit = isAluUnit,
+    isCsrUnit = isCsrUnit,
     isMemAddrCalcUnit = isMemAddrCalcUnit,
     needsFcsr = needsFcsr)
 {
@@ -279,13 +283,14 @@ abstract class PipelinedFunctionalUnit(
  * @param dataWidth width of the data being operated on in the functional unit
  */
 @chiselName
-class ALUUnit(isJmpUnit: Boolean = false, numStages: Int = 1, dataWidth: Int)(implicit p: Parameters)
+class ALUUnit(isJmpUnit: Boolean = false, isCsrUnit: Boolean = false, numStages: Int = 1, dataWidth: Int)(implicit p: Parameters)
   extends PipelinedFunctionalUnit(
     numStages = numStages,
     numBypassStages = numStages,
     isAluUnit = true,
     earliestBypassStage = 0,
     dataWidth = dataWidth,
+    isCsrUnit = isCsrUnit,
     isJmpUnit = isJmpUnit)
   with boom.ifu.HasBoomFrontendParameters
 {
@@ -293,6 +298,8 @@ class ALUUnit(isJmpUnit: Boolean = false, numStages: Int = 1, dataWidth: Int)(im
 
   // immediate generation
   val imm_xprlen = ImmGen(uop.imm_packed, uop.ctrl.imm_sel)
+  val rs1 = io.req.bits.rs1_data
+  val rs2 = io.req.bits.rs2_data
 
   // operand 1 select
   var op1_data: UInt = null
@@ -310,11 +317,33 @@ class ALUUnit(isJmpUnit: Boolean = false, numStages: Int = 1, dataWidth: Int)(im
   }
 
   // operand 2 select
-  val op2_data = Mux(uop.ctrl.op2_sel === OP2_IMM,  Sext(imm_xprlen.asUInt, xLen),
-                 Mux(uop.ctrl.op2_sel === OP2_IMMC, io.req.bits.uop.prs1(4,0),
-                 Mux(uop.ctrl.op2_sel === OP2_RS2 , io.req.bits.rs2_data,
-                 Mux(uop.ctrl.op2_sel === OP2_NEXT, Mux(uop.is_rvc, 2.U, 4.U),
-                                                    0.U))))
+  val op2_data = WireInit(0.U(xLen.W))
+  if (usingVector & isCsrUnit) {
+    val vsetvl    = (uop.uopc === uopVSETVL)
+    val vsetvli   = (uop.uopc === uopVSETVLI)
+    val vsetivli  = (uop.uopc === uopVSETIVLI)
+    val vtypei    = Mux(vsetvl, rs2(7,0), uop.imm_packed(15,8))
+    val useCurrentVL = (vsetvli | vsetvl) & (uop.ldst === 0.U) & (uop.lrs1 === 0.U)
+    val useMaxVL     = (vsetvli | vsetvl) & (uop.ldst =/= 0.U) & (uop.lrs1 === 0.U)
+    val avl       = Mux(vsetivli, uop.lrs1, rs1)
+    val new_vl    = VType.computeVL(avl, vtypei, io.vconfig.vl, useCurrentVL, useMaxVL, false.B)
+
+    op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,  Sext(imm_xprlen.asUInt, xLen),
+               Mux(uop.ctrl.op2_sel === OP2_IMMC, io.req.bits.uop.prs1(4,0),
+               Mux(uop.ctrl.op2_sel === OP2_RS2 , io.req.bits.rs2_data,
+               Mux(uop.ctrl.op2_sel === OP2_NEXT, Mux(uop.is_rvc, 2.U, 4.U),
+               Mux(uop.ctrl.op2_sel === OP2_VL,   new_vl, 0.U)))))
+
+    val set_vconfig = vsetvl | vsetvli | vsetivli
+    io.resp.bits.uop.vconfig.vl := RegEnable(new_vl, set_vconfig)
+    io.resp.bits.uop.vconfig.vtype := RegEnable(VType.fromUInt(vtypei), set_vconfig)
+  } else {
+    op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,  Sext(imm_xprlen.asUInt, xLen),
+               Mux(uop.ctrl.op2_sel === OP2_IMMC, io.req.bits.uop.prs1(4,0),
+               Mux(uop.ctrl.op2_sel === OP2_RS2 , io.req.bits.rs2_data,
+               Mux(uop.ctrl.op2_sel === OP2_NEXT, Mux(uop.is_rvc, 2.U, 4.U),
+                                                  0.U))))
+  }
 
   val alu = Module(new freechips.rocketchip.rocket.ALU())
 
@@ -331,8 +360,6 @@ class ALUUnit(isJmpUnit: Boolean = false, numStages: Int = 1, dataWidth: Int)(im
     killed := true.B
   }
 
-  val rs1 = io.req.bits.rs1_data
-  val rs2 = io.req.bits.rs2_data
   val br_eq  = (rs1 === rs2)
   val br_ltu = (rs1.asUInt < rs2.asUInt)
   val br_lt  = (~(rs1(xLen-1) ^ rs2(xLen-1)) & br_ltu |

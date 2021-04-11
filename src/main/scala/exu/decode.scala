@@ -11,7 +11,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.rocket.RVCExpander
-import freechips.rocketchip.rocket.{CSR,Causes}
+import freechips.rocketchip.rocket.{CSR,Causes,VConfig,VType}
 import freechips.rocketchip.util.{uintToBitPat,UIntIsOneOf}
 
 import FUConstants._
@@ -420,9 +420,9 @@ object VectorDecode extends DecodeConstants
             //     |  |  |  |               iq-type  func    dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
             //     |  |  |  |               |        unit    regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit
             //     |  |  |  |               |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd
-  VSETVLI   ->List(Y, N, X, uopVSETVLI,     IQT_INT, FU_CSR, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.W, Y, N, N, 0.U), // TODO optimize us
-  VSETIVLI  ->List(Y, N, X, uopVSETIVLI,    IQT_INT, FU_CSR, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.W, Y, N, N, 0.U),
-  VSETVL    ->List(Y, N, X, uopVSETVL ,     IQT_INT, FU_CSR, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.W, Y, N, N, 0.U)
+  VSETVLI   ->List(Y, N, X, uopVSETVLI,     IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.W, Y, N, N, 0.U), // TODO optimize us
+  VSETIVLI  ->List(Y, N, X, uopVSETIVLI,    IQT_INT, FU_CSR, RT_FIX, RT_X  , RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.W, Y, N, N, 0.U),
+  VSETVL    ->List(Y, N, X, uopVSETVL ,     IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.W, Y, N, N, 0.U)
   )
 }
 //scalastyle:on
@@ -489,6 +489,7 @@ class DecodeUnitIo(implicit p: Parameters) extends BoomBundle
   val csr_decode = Flipped(new freechips.rocketchip.rocket.CSRDecodeIO)
   val interrupt = Input(Bool())
   val interrupt_cause = Input(UInt(xLen.W))
+  val vconfig = Input(new VConfig)
 }
 
 /**
@@ -505,6 +506,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   var decode_table = XDecode.table
   if (usingFPU) decode_table ++= FDecode.table
   if (usingFPU && usingFDivSqrt) decode_table ++= FDivSqrtDecode.table
+  if (usingVector) decode_table ++= VectorDecode.table
   if (usingRoCC) decode_table ++= RoCCDecode.table
   decode_table ++= (if (xLen == 64) X64Decode.table else X32Decode.table)
 
@@ -524,6 +526,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
   val id_illegal_insn = !cs_legal ||
     cs.fp_val && io.csr_decode.fp_illegal || // TODO check for illegal rm mode: (io.fpu.illegal_rm)
+    cs.is_rvv && io.csr_decode.vector_illegal ||
     cs.rocc && io.csr_decode.rocc_illegal ||
     cs.is_amo && !io.status.isa('a'-'a')  ||
     (cs.fp_val && !cs.fp_single) && !io.status.isa('d'-'a') ||
@@ -623,19 +626,18 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.is_rvv      := cs.is_rvv
   uop.v_ls_ew     := cs.v_ls_ew
   uop.v_unmasked  := cs.use_vm
+  uop.vxsat       := false.B
   uop.vstart      := 0.U
-  uop.vconfig.vl  := ~(0.U)
-  uop.vconfig.vtype.vill := false.B
-  uop.vconfig.vtype.vma  := false.B
-  uop.vconfig.vtype.vta  := false.B
-  uop.vconfig.vtype.vsew := 2.U
-  uop.vconfig.vtype.vlmul:= 0.U
+  uop.vconfig.vl  := 0.U
+  uop.vconfig.vtype := VType.fromUInt(0.U)
   uop.v_is_split  := false.B
   uop.v_is_first  := false.B
   uop.v_is_last   := false.B
   uop.v_re_alloc  := true.B
 
   io.deq.uop := uop
+
+  //assert(!id_illegal_insn)
 }
 
 /**

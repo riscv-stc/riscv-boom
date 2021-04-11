@@ -140,12 +140,13 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val is_rvv           = Bool()             // is vector instruction
   val v_ls_ew          = UInt(2.W)          // EEW encoded in load/store instruction
   val v_unmasked       = Bool()
-  val vstart           = UInt((log2Ceil(vLen)+1).W)
-  val vconfig          = new VConfig
+  val vstart           = UInt(log2Ceil(vLen).W)
   val v_is_split       = Bool()             // is a split of a vector instruction
   val v_is_first       = Bool()
   val v_is_last        = Bool()
   val v_re_alloc       = Bool()             // do rename allocation on first split for every vreg
+  val vxsat            = Bool()             // saturating flag
+  val vconfig          = new VConfig        // TODO: tag since DECODE
 //val pvm              = UInt(maxPregSz.W)  // FIXME:vm0 phiscal name for masked
 //val pvm_busy         = Bool()
 //val pvd_grpnum       = UInt(3.W)          // store mappings in ROB for rollback
