@@ -60,8 +60,9 @@ class LSUExeIO(implicit p: Parameters) extends BoomBundle()(p)
   // The "resp" of the maddrcalc is really a "req" to the LSU
   val req       = Flipped(new ValidIO(new FuncUnitResp(xLen)))
   // Send load data to regfiles
-  val iresp    = new DecoupledIO(new boom.exu.ExeUnitResp(xLen))
-  val fresp    = new DecoupledIO(new boom.exu.ExeUnitResp(xLen+1)) // TODO: Should this be fLen?
+  val iresp    = new DecoupledIO(new ExeUnitResp(xLen))
+  val fresp    = new DecoupledIO(new ExeUnitResp(xLen+1)) // TODO: Should this be fLen?
+  val vresp    = if (usingVector) new DecoupledIO(new ExeUnitResp(eLen)) else null
 }
 
 class BoomDCacheReq(implicit p: Parameters) extends BoomBundle()(p)
@@ -121,6 +122,7 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
   val stq_full    = Output(Vec(coreWidth, Bool()))
 
   val fp_stdata   = Flipped(Decoupled(new ExeUnitResp(fLen)))
+  //val vec_stdata  = Flipped(Decoupled(new ExeUnitResp(eLen)))
 
   val commit      = Input(new CommitSignals)
   val commit_load_at_rob_head = Input(Bool())
@@ -1274,6 +1276,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   for (w <- 0 until memWidth) {
     io.core.exe(w).iresp.valid := false.B
     io.core.exe(w).fresp.valid := false.B
+    if (usingVector) io.core.exe(w).vresp.valid := false.B
   }
 
   val dmem_resp_fired = WireInit(widthMap(w => false.B))
@@ -1317,11 +1320,17 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         io.core.exe(w).iresp.bits.data := io.dmem.resp(w).bits.data
         io.core.exe(w).fresp.valid     := send_fresp
         io.core.exe(w).fresp.bits.data := io.dmem.resp(w).bits.data
+        if (usingVector) {
+          val send_vresp = ldq(ldq_idx).bits.uop.dst_rtype === RT_VEC
+          io.core.exe(w).vresp.valid     := send_vresp
+          io.core.exe(w).vresp.bits.uop  := ldq(ldq_idx).bits.uop
+          io.core.exe(w).vresp.bits.data := io.dmem.resp(w).bits.data
+        }
 
         assert(send_iresp ^ send_fresp)
         dmem_resp_fired(w) := true.B
 
-        ldq(ldq_idx).bits.succeeded      := io.core.exe(w).iresp.valid || io.core.exe(w).fresp.valid
+        ldq(ldq_idx).bits.succeeded      := send_iresp
         ldq(ldq_idx).bits.debug_wb_data  := io.dmem.resp(w).bits.data
       }
         .elsewhen (io.dmem.resp(w).bits.uop.uses_stq)
@@ -1365,6 +1374,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       io.core.exe(w).fresp.bits.uop  := forward_uop
       io.core.exe(w).iresp.bits.data := loadgen.data
       io.core.exe(w).fresp.bits.data := loadgen.data
+      if (usingVector) {
+        io.core.exe(w).vresp.valid := (forward_uop.dst_rtype === RT_VEC) && data_ready && live
+        io.core.exe(w).vresp.bits.uop  := forward_uop
+        io.core.exe(w).vresp.bits.data := loadgen.data
+      }
 
       when (data_ready && live) {
         ldq(f_idx).bits.succeeded := data_ready

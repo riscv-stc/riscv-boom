@@ -39,16 +39,16 @@ object FUConstants
   // bit mask, since a given execution pipeline may support multiple functional units
   val FUC_SZ = 10
   val FU_X   = BitPat.dontCare(FUC_SZ)
-  val FU_ALU =   1.U(FUC_SZ.W)
-  val FU_JMP =   2.U(FUC_SZ.W)
-  val FU_MEM =   4.U(FUC_SZ.W)
-  val FU_MUL =   8.U(FUC_SZ.W)
-  val FU_DIV =  16.U(FUC_SZ.W)
-  val FU_CSR =  32.U(FUC_SZ.W)
-  val FU_FPU =  64.U(FUC_SZ.W)
-  val FU_FDV = 128.U(FUC_SZ.W)
-  val FU_I2F = 256.U(FUC_SZ.W)
-  val FU_F2I = 512.U(FUC_SZ.W)
+  val FU_ALU = (1<<0).U(FUC_SZ.W)
+  val FU_JMP = (1<<1).U(FUC_SZ.W)
+  val FU_MEM = (1<<2).U(FUC_SZ.W)
+  val FU_MUL = (1<<3).U(FUC_SZ.W)
+  val FU_DIV = (1<<4).U(FUC_SZ.W)
+  val FU_CSR = (1<<5).U(FUC_SZ.W)
+  val FU_FPU = (1<<6).U(FUC_SZ.W)
+  val FU_FDV = (1<<7).U(FUC_SZ.W)
+  val FU_I2F = (1<<8).U(FUC_SZ.W)
+  val FU_F2I = (1<<9).U(FUC_SZ.W)
 
   // FP stores generate data through FP F2I, and generate address through MemAddrCalc
   val FU_F2IMEM = 516.U(FUC_SZ.W)
@@ -508,8 +508,20 @@ class MemAddrCalcUnit(implicit p: Parameters)
   with freechips.rocketchip.rocket.constants.MemoryOpConstants
   with freechips.rocketchip.rocket.constants.ScalarOpConstants
 {
+  val uop = io.req.bits.uop
+  // unit stride
+  val vsew = Mux(usingVector.B & uop.is_rvv, uop.vconfig.vtype.vsew, 0.U)
+  // unit stride load/store
+  val vec_us_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVL, uopVSA) // or uopVLFF
+  // FIXME: constant stride load/store
+  //val vec_cs_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLS, uopVSSA)
+  // FIXME: indexed load/store
+  //val vec_idx_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+  val op1 = io.req.bits.rs1_data.asSInt
+  val op2 = Mux(vec_us_ls, (uop.vstart << vsew).asSInt, uop.imm_packed(19,8).asSInt)
+
   // perform address calculation
-  val sum = (io.req.bits.rs1_data.asSInt + io.req.bits.uop.imm_packed(19,8).asSInt).asUInt
+  val sum = (op1 + op2).asUInt
   val ea_sign = Mux(sum(vaddrBits-1), ~sum(63,vaddrBits) === 0.U,
                                        sum(63,vaddrBits) =/= 0.U)
   val effective_address = Cat(ea_sign, sum(vaddrBits-1,0)).asUInt
@@ -520,19 +532,18 @@ class MemAddrCalcUnit(implicit p: Parameters)
   io.resp.bits.data := store_data
 
   if (dataWidth > 63) {
-    assert (!(io.req.valid && io.req.bits.uop.ctrl.is_std &&
+    assert (!(io.req.valid && uop.ctrl.is_std &&
       io.resp.bits.data(64).asBool === true.B), "65th bit set in MemAddrCalcUnit.")
 
-    assert (!(io.req.valid && io.req.bits.uop.ctrl.is_std && io.req.bits.uop.fp_val),
+    assert (!(io.req.valid && uop.ctrl.is_std && uop.fp_val),
       "FP store-data should now be going through a different unit.")
   }
 
-  assert (!(io.req.bits.uop.fp_val && io.req.valid && io.req.bits.uop.uopc =/=
-          uopLD && io.req.bits.uop.uopc =/= uopSTA),
+  assert (!(uop.fp_val && io.req.valid && uop.uopc =/= uopLD && uop.uopc =/= uopSTA),
           "[maddrcalc] assert we never get store data in here.")
 
   // Handle misaligned exceptions
-  val size = io.req.bits.uop.mem_size
+  val size = uop.mem_size
   val misaligned =
     (size === 1.U && (effective_address(0) =/= 0.U)) ||
     (size === 2.U && (effective_address(1,0) =/= 0.U)) ||
@@ -544,12 +555,22 @@ class MemAddrCalcUnit(implicit p: Parameters)
   bkptu.io.pc     := DontCare
   bkptu.io.ea     := effective_address
 
-  val ma_ld  = io.req.valid && io.req.bits.uop.uopc === uopLD && misaligned
-  val ma_st  = io.req.valid && (io.req.bits.uop.uopc === uopSTA || io.req.bits.uop.uopc === uopAMO_AG) && misaligned
-  val dbg_bp = io.req.valid && ((io.req.bits.uop.uopc === uopLD  && bkptu.io.debug_ld) ||
-                                (io.req.bits.uop.uopc === uopSTA && bkptu.io.debug_st))
-  val bp     = io.req.valid && ((io.req.bits.uop.uopc === uopLD  && bkptu.io.xcpt_ld) ||
-                                (io.req.bits.uop.uopc === uopSTA && bkptu.io.xcpt_st))
+  val ma_ld, ma_st, dbg_bp, bp = Wire(Bool())
+  if (usingVector) {
+    ma_ld  := io.req.valid && uop.uopc.isOneOf(uopLD, uopVL) && misaligned
+    ma_st  := io.req.valid && uop.uopc.isOneOf(uopSTA, uopVSA, uopAMO_AG) && misaligned
+    dbg_bp := io.req.valid && ((uop.uopc.isOneOf(uopLD, uopVL)   && bkptu.io.debug_ld) ||
+                               (uop.uopc.isOneOf(uopSTA, uopVSA) && bkptu.io.debug_st))
+    bp     := io.req.valid && ((uop.uopc.isOneOf(uopLD, uopVL)   && bkptu.io.xcpt_ld) ||
+                               (uop.uopc.isOneOf(uopSTA, uopVSA) && bkptu.io.xcpt_st))
+  } else {
+    ma_ld  := io.req.valid && uop.uopc === uopLD && misaligned
+    ma_st  := io.req.valid && (uop.uopc === uopSTA || uop.uopc === uopAMO_AG) && misaligned
+    dbg_bp := io.req.valid && ((uop.uopc === uopLD  && bkptu.io.debug_ld) ||
+                               (uop.uopc === uopSTA && bkptu.io.debug_st))
+    bp     := io.req.valid && ((uop.uopc === uopLD  && bkptu.io.xcpt_ld) ||
+                               (uop.uopc === uopSTA && bkptu.io.xcpt_st))
+  }
 
   def checkExceptions(x: Seq[(Bool, UInt)]) =
     (x.map(_._1).reduce(_||_), PriorityMux(x))
@@ -563,9 +584,9 @@ class MemAddrCalcUnit(implicit p: Parameters)
   io.resp.bits.mxcpt.bits  := xcpt_cause
   assert (!(ma_ld && ma_st), "Mutually-exclusive exceptions are firing.")
 
-  io.resp.bits.sfence.valid := io.req.valid && io.req.bits.uop.mem_cmd === M_SFENCE
-  io.resp.bits.sfence.bits.rs1 := io.req.bits.uop.mem_size(0)
-  io.resp.bits.sfence.bits.rs2 := io.req.bits.uop.mem_size(1)
+  io.resp.bits.sfence.valid := io.req.valid && uop.mem_cmd === M_SFENCE
+  io.resp.bits.sfence.bits.rs1 := uop.mem_size(0)
+  io.resp.bits.sfence.bits.rs2 := uop.mem_size(1)
   io.resp.bits.sfence.bits.addr := io.req.bits.rs1_data
   io.resp.bits.sfence.bits.asid := io.req.bits.rs2_data
 }

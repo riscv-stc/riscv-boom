@@ -29,7 +29,7 @@ import FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.ifu.{GetPCFromFtqIO}
-import boom.util.{ImmGen, IsKilledByBranch, BranchKillableQueue, BoomCoreStringPrefix}
+import boom.util.{ImmGen, IsKilledByBranch, BranchKillableQueue, BoomCoreStringPrefix, VDataSwap}
 
 /**
  * Response from Execution Unit. Bundles a MicroOp with data
@@ -83,8 +83,11 @@ abstract class ExecutionUnit(
   val writesIrf        : Boolean       = false,
   val readsFrf         : Boolean       = false,
   val writesFrf        : Boolean       = false,
+  val readsVrf         : Boolean       = false,
+  val writesVrf        : Boolean       = false,
   val writesLlIrf      : Boolean       = false,
   val writesLlFrf      : Boolean       = false,
+  val writesLlVrf      : Boolean       = false,
   val numBypassStages  : Int,
   val dataWidth        : Int,
   val bypassable       : Boolean       = false, // TODO make override def for code clarity
@@ -99,6 +102,7 @@ abstract class ExecutionUnit(
   val hasFdiv          : Boolean       = false,
   val hasIfpu          : Boolean       = false,
   val hasFpiu          : Boolean       = false,
+  val hasVector        : Boolean       = false,
   val hasRocc          : Boolean       = false
   )(implicit p: Parameters) extends BoomModule
 {
@@ -110,8 +114,10 @@ abstract class ExecutionUnit(
 
     val iresp    = if (writesIrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val fresp    = if (writesFrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
+    val vresp    = if (writesVrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_iresp = if (writesLlIrf) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_fresp = if (writesLlFrf) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
+    val ll_vresp = if (writesLlVrf) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
 
 
     val bypass   = Output(Vec(numBypassStages, Valid(new ExeUnitResp(dataWidth))))
@@ -122,7 +128,7 @@ abstract class ExecutionUnit(
     val rocc = if (hasRocc) new RoCCShimCoreIO else null
 
     // only used by the branch unit
-    val brinfo     = if (hasAlu) Output(new BrResolutionInfo()) else null
+    val brinfo     = if (hasAlu && !hasVector) Output(new BrResolutionInfo()) else null
     val get_ftq_pc = if (hasJmpUnit) Flipped(new GetPCFromFtqIO()) else null
     val status     = Input(new freechips.rocketchip.rocket.MStatus())
 
@@ -155,6 +161,15 @@ abstract class ExecutionUnit(
   if (writesLlFrf) {
     io.ll_fresp.bits.fflags.valid := false.B
     io.ll_fresp.bits.predicated := false.B
+  }
+  if (writesVrf)   {
+    io.vresp.bits.fflags.valid := false.B
+    io.vresp.bits.predicated := false.B
+    assert(io.vresp.ready)
+  }
+  if (writesLlVrf) {
+    io.ll_vresp.bits.fflags.valid := false.B
+    io.ll_vresp.bits.predicated := false.B
   }
 
   // TODO add "number of fflag ports", so we can properly account for FPU+Mem combinations
@@ -208,6 +223,7 @@ class ALUExeUnit(
     writesIrf        = hasAlu || hasMul || hasDiv,
     writesLlIrf      = hasMem || hasRocc,
     writesLlFrf      = (hasIfpu || hasMem) && p(tile.TileKey).core.fpu != None,
+    writesLlVrf      = (p(tile.TileKey).core.useVector && hasMem),
     numBypassStages  =
       if (hasAlu && hasMul) 3 //TODO XXX p(tile.TileKey).core.imulLatency
       else if (hasAlu) 1 else 0,
@@ -395,6 +411,15 @@ class ALUExeUnit(
     if (usingFPU) {
       io.ll_fresp <> io.lsu_io.fresp
     }
+    if (usingVector) {
+      io.ll_vresp <> io.lsu_io.vresp
+//    io.ll_vresp.data := Mux1H(Seq(
+//      (io.lsu_io.vresp.v_ls_ew === 0.U, io.lsu_io.vresp.data),
+//      (io.lsu_io.vresp.v_ls_ew === 1.U, VDataSwap(io.lsu_io.vresp.data, 1, eLen)),
+//      (io.lsu_io.vresp.v_ls_ew === 2.U, VDataSwap(io.lsu_io.vresp.data, 2, eLen)),
+//      (io.lsu_io.vresp.v_ls_ew === 3.U, VDataSwap(io.lsu_io.vresp.data, 3, eLen))
+//    )
+    }
   }
 
   // Outputs (Write Port #0)  ---------------
@@ -563,3 +588,113 @@ class FPUExeUnit(
 
   override def toString: String = out_str.toString
 }
+
+/**
+ * VEC execution unit that can have a branch, alu, mul, div, int to FP,
+ * and memory unit.
+ *
+ * @param hasAlu does the exe unit have a alu
+ * @param hasMul does the exe unit have a multiplier
+ * @param hasDiv does the exe unit have a divider
+ */
+class VecExeUnit(
+  hasAlu         : Boolean = true,
+  hasMul         : Boolean = true,
+  hasDiv         : Boolean = true)
+  (implicit p: Parameters)
+  extends ExecutionUnit(
+    readsVrf         = true,
+    writesVrf        = true,
+    numBypassStages  = if (hasMul) 3 else 1,
+    dataWidth        = p(tile.TileKey).core.eLen,
+    bypassable       = false,
+    alwaysBypassable = false,
+    hasAlu           = hasAlu,
+    hasMul           = hasMul,
+    hasDiv           = hasDiv,
+    hasVector        = true)
+  with freechips.rocketchip.rocket.constants.MemoryOpConstants
+{
+  val out_str =
+    BoomCoreStringPrefix("==VecExeUnit==") +
+    (if (hasAlu)  BoomCoreStringPrefix(" - ALU") else "") +
+    (if (hasMul)  BoomCoreStringPrefix(" - Mul") else "") +
+    (if (hasDiv)  BoomCoreStringPrefix(" - Div") else "")
+
+  override def toString: String = out_str.toString
+
+  val div_busy  = WireInit(false.B)
+
+  // The Functional Units --------------------
+  val vec_fu_units   = ArrayBuffer[FunctionalUnit]()
+  val vresp_fu_units = ArrayBuffer[FunctionalUnit]()
+
+  io.fu_types := Mux(hasAlu.B, FU_ALU, 0.U) |
+                 Mux(hasMul.B, FU_MUL, 0.U) |
+                 Mux(!div_busy && hasDiv.B, FU_DIV, 0.U)
+
+  // ALU Unit -------------------------------
+  var alu: ALUUnit = null
+  if (hasAlu) {
+    alu = Module(new ALUUnit(numStages = numBypassStages, dataWidth = eLen))
+    alu.io.req.valid := (io.req.valid && io.req.bits.uop.fu_code === FU_ALU)
+    vec_fu_units += alu
+    vresp_fu_units += alu
+  }
+
+  // Pipelined, IMul Unit ------------------
+  var imul: PipelinedMulUnit = null
+  if (hasMul) {
+    imul = Module(new PipelinedMulUnit(numBypassStages, eLen))
+    imul.io <> DontCare
+    imul.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_MUL)
+    vec_fu_units += imul
+    vresp_fu_units += imul
+  }
+
+  // Div/Rem Unit -----------------------
+  var div: DivUnit = null
+  val div_resp_val = WireInit(false.B)
+  if (hasDiv) {
+    div = Module(new DivUnit(xLen))
+    div.io <> DontCare
+    div.io.req.valid           := io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV) && hasDiv.B
+
+    // share write port with the pipelined units
+    div.io.resp.ready := !(vresp_fu_units.map(_.io.resp.valid).reduce(_|_))
+
+    div_resp_val := div.io.resp.valid
+    div_busy     := !div.io.req.ready ||
+                    (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV))
+
+    vec_fu_units += div
+    vresp_fu_units += div
+  }
+
+  vec_fu_units.map(f => {
+    f.io.req.bits.uop := io.req.bits.uop
+    f.io.req.bits.rs1_data := io.req.bits.rs1_data
+    f.io.req.bits.rs2_data := io.req.bits.rs2_data
+    f.io.req.bits.rs3_data := io.req.bits.rs3_data
+    f.io.req.bits.pred_data := io.req.bits.pred_data
+    f.io.req.bits.kill := io.req.bits.kill
+    f.io.brupdate := io.brupdate
+    if (f != div) f.io.resp.ready := DontCare
+  })
+
+  // Outputs (Write Port #0)  ---------------
+  if (writesVrf) {
+    io.vresp.valid     := vresp_fu_units.map(_.io.resp.valid).reduce(_|_)
+    io.vresp.bits.uop  := PriorityMux(vresp_fu_units.map(f =>
+      (f.io.resp.valid, f.io.resp.bits.uop)))
+    io.vresp.bits.data := PriorityMux(vresp_fu_units.map(f =>
+      (f.io.resp.valid, f.io.resp.bits.data)))
+    io.vresp.bits.predicated := PriorityMux(vresp_fu_units.map(f =>
+      (f.io.resp.valid, f.io.resp.bits.predicated)))
+  }
+
+  assert ((PopCount(vresp_fu_units.map(_.io.resp.valid)) <= 1.U && !div_resp_val) ||
+          (PopCount(vresp_fu_units.map(_.io.resp.valid)) <= 2.U && (div_resp_val)),
+          "Multiple functional units are fighting over the write port.")
+}
+

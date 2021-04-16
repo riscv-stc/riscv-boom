@@ -85,9 +85,9 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val prs3             = UInt(maxPregSz.W)
   val ppred            = UInt(log2Ceil(ftqSz).W)
 
-  val prs1_busy        = Bool()
-  val prs2_busy        = Bool()
-  val prs3_busy        = Bool()
+  val prs1_busy        = if (usingVector) UInt(vLenb.W) else Bool()
+  val prs2_busy        = if (usingVector) UInt(vLenb.W) else Bool()
+  val prs3_busy        = if (usingVector) UInt(vLenb.W) else Bool()
   val ppred_busy       = Bool()
   val stale_pdst       = UInt(maxPregSz.W)
   val exception        = Bool()
@@ -142,6 +142,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_unmasked       = Bool()
   val vstart           = UInt(log2Ceil(vLen).W)
   val v_is_split       = Bool()             // is a split of a vector instruction
+  val v_split_ecnt     = UInt((log2Ceil(vLenb)+1).W)
   val v_is_first       = Bool()
   val v_is_last        = Bool()
   val v_re_alloc       = Bool()             // do rename allocation on first split for every vreg
@@ -446,21 +447,21 @@ object MicroOpcodes extends Enumeration {
   val uopVSETIVLI       = uopVSETIVLI_enum.id.U(UOPC_SZ.W)
   // RVV load / store
   val uopVL_enum        = Value
-  val uopVL             = uopVL_enum.id.U(UOPC_SZ.W)(128.U(UOPC_SZ.W))
-  val uopVS_enum        = Value
-  val uopVS             = uopVS_enum.id.U(UOPC_SZ.W)
+  val uopVL             = uopVL_enum.id.U(UOPC_SZ.W)
+  val uopVSA_enum       = Value
+  val uopVSA            = uopVSA_enum.id.U(UOPC_SZ.W)
   val uopVLS_enum       = Value
   val uopVLS            = uopVLS_enum.id.U(UOPC_SZ.W)
-  val uopVSS_enum       = Value
-  val uopVSS            = uopVSS_enum.id.U(UOPC_SZ.W)
+  val uopVSSA_enum      = Value
+  val uopVSSA           = uopVSSA_enum.id.U(UOPC_SZ.W)
   val uopVLUX_enum      = Value
   val uopVLUX           = uopVLUX_enum.id.U(UOPC_SZ.W)
-  val uopVSUX_enum      = Value
-  val uopVSUX           = uopVSUX_enum.id.U(UOPC_SZ.W)
+  val uopVSUXA_enum     = Value
+  val uopVSUXA          = uopVSUXA_enum.id.U(UOPC_SZ.W)
   val uopVLOX_enum      = Value
   val uopVLOX           = uopVLOX_enum.id.U(UOPC_SZ.W)
-  val uopVSOX_enum      = Value
-  val uopVSOX           = uopVSOX_enum.id.U(UOPC_SZ.W)
+  val uopVSOXA_enum     = Value
+  val uopVSOXA          = uopVSOXA_enum.id.U(UOPC_SZ.W)
 //val uopVLR_enum       = Value
 //val uopVLR            = uopVLR_enum.id.U(UOPC_SZ.W) // sub to uopVL
 //val uopVSR_enum       = Value

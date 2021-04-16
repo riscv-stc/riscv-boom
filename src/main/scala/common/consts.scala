@@ -23,12 +23,15 @@ import freechips.rocketchip.rocket.RVCExpander
  */
 trait IQType
 {
-  val IQT_SZ  = 3
+  val IQT_SZ  = 4
   val IQT_INT = 1.U(IQT_SZ.W)
   val IQT_MEM = 2.U(IQT_SZ.W)
   val IQT_FP  = 4.U(IQT_SZ.W)
+  val IQT_VEC = 8.U(IQT_SZ.W)
 
   val IQT_MFP = 6.U(IQT_SZ.W)
+  val IQT_MVEC= 0xA.U(IQT_SZ.W)
+  val IQT_VFP = 0xC.U(IQT_SZ.W)
 }
 
 
@@ -119,7 +122,7 @@ trait ScalarOpConstants
   // Decode Stage Control Signals
   val RT_FIX   = 0.U(2.W)
   val RT_FLT   = 1.U(2.W)
-  val RT_PAS   = 3.U(2.W) // pass-through (prs1 := lrs1, etc)
+  val RT_VEC   = 3.U(2.W) // pass-through (prs1 := lrs1, etc)
   val RT_X     = 2.U(2.W) // not-a-register (but shouldn't get a busy-bit, etc.)
                              // TODO rename RT_NAR
 

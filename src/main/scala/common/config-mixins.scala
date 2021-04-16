@@ -502,6 +502,7 @@ class WithStcBooms extends Config((site, here, up) => {
       decodeWidth = 3,
       numRobEntries = 96,
       issueParams = Seq(
+        IssueParams(issueWidth=3, numEntries=32, iqType=IQT_VEC.litValue, dispatchWidth=3),
         IssueParams(issueWidth=1, numEntries=16, iqType=IQT_MEM.litValue, dispatchWidth=3),
         IssueParams(issueWidth=3, numEntries=32, iqType=IQT_INT.litValue, dispatchWidth=3),
         IssueParams(issueWidth=1, numEntries=24, iqType=IQT_FP.litValue , dispatchWidth=3)),

@@ -167,9 +167,15 @@ class IssueSlot(val numWakeupPorts: Int)(implicit p: Parameters)
   val next_ppred = WireInit(ppred)
 
   when (io.in_uop.valid) {
-    p1 := !(io.in_uop.bits.prs1_busy)
-    p2 := !(io.in_uop.bits.prs2_busy)
-    p3 := !(io.in_uop.bits.prs3_busy)
+    if (usingVector) {
+      p1 := !io.in_uop.bits.prs1_busy(0)
+      p2 := !io.in_uop.bits.prs2_busy(0)
+      p3 := !io.in_uop.bits.prs3_busy(0)
+    } else {
+      p1 := !io.in_uop.bits.prs1_busy
+      p2 := !io.in_uop.bits.prs2_busy
+      p3 := !io.in_uop.bits.prs3_busy
+    }
     ppred := !(io.in_uop.bits.ppred_busy)
   }
 
@@ -268,9 +274,15 @@ class IssueSlot(val numWakeupPorts: Int)(implicit p: Parameters)
   io.out_uop.lrs1_rtype := next_lrs1_rtype
   io.out_uop.lrs2_rtype := next_lrs2_rtype
   io.out_uop.br_mask    := next_br_mask
-  io.out_uop.prs1_busy  := !p1
-  io.out_uop.prs2_busy  := !p2
-  io.out_uop.prs3_busy  := !p3
+  if (usingVector) {
+    io.out_uop.prs1_busy  := Cat(0.U, !p1)
+    io.out_uop.prs2_busy  := Cat(0.U, !p2)
+    io.out_uop.prs3_busy  := Cat(0.U, !p3)
+  } else {
+    io.out_uop.prs1_busy  := !p1
+    io.out_uop.prs2_busy  := !p2
+    io.out_uop.prs3_busy  := !p3
+  }
   io.out_uop.ppred_busy := !ppred
   io.out_uop.iw_p1_poisoned := p1_poisoned
   io.out_uop.iw_p2_poisoned := p2_poisoned

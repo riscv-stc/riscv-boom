@@ -656,3 +656,36 @@ object BoomCoreStringPrefix
     strs.map(str => prefix + str + "\n").mkString("")
   }
 }
+
+object VDataSwap {
+  def apply(d: UInt, sew: Int, elen: Int): UInt = {
+    val ret = Wire(UInt(elen.W))
+    val e_cnt = elen >> (3+sew)
+    for (e <- 0 until e_cnt) {
+      val e_lsb = e << (3+sew)
+      val e_bcnt = 1 << sew
+      for (b <- 0 until e_bcnt) {
+        val b_lsb = e_lsb + b * 8
+        val d_lsb = e_lsb + (e_bcnt-1-b)*8
+        ret(b_lsb+7, b_lsb) := d(d_lsb+7, d_lsb)
+      }
+    }
+    ret
+  }
+}
+
+object VRegMask {
+  def apply(lsb: UInt, len: UInt, width: Int): UInt = {
+    val ret = Wire(UInt(width.W))
+    val full = Fill(width, 1.U(1.W))
+    ret := (full << lsb) & (full >> (width.U-lsb-len))
+    ret
+  }
+
+  def apply(vstart: UInt, vsew: UInt, ecnt: UInt, elenb: Int): UInt = {
+    val lsb = (vstart << vsew)(2, 0)
+    val len = ecnt << vsew
+    val ret = apply(lsb, len, elenb)
+    ret
+  }
+}

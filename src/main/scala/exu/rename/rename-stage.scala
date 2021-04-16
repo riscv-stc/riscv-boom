@@ -44,17 +44,18 @@ class RenameStageIO(
 /**
  * IO bundle to debug the rename stage
  */
-class DebugRenameStageIO(val numPhysRegs: Int)(implicit p: Parameters) extends BoomBundle
+class DebugRenameStageIO(val numPhysRegs: Int, val vector: Boolean = false)(implicit p: Parameters) extends BoomBundle
 {
   val freelist  = Bits(numPhysRegs.W)
   val isprlist  = Bits(numPhysRegs.W)
-  val busytable = UInt(numPhysRegs.W)
+  val busytable = if (vector) Vec(numPhysRegs, UInt(vLenb.W)) else UInt(numPhysRegs.W)
 }
 
 abstract class AbstractRenameStage(
   plWidth: Int,
   numPhysRegs: Int,
-  numWbPorts: Int)
+  numWbPorts: Int,
+  val vector: Boolean = false)
   (implicit p: Parameters) extends BoomModule
 {
   val io = IO(new Bundle {
@@ -85,7 +86,7 @@ abstract class AbstractRenameStage(
     val rollback = Input(Bool())
 
     val debug_rob_empty = Input(Bool())
-    val debug = Output(new DebugRenameStageIO(numPhysRegs))
+    val debug = Output(new DebugRenameStageIO(numPhysRegs, vector))
   })
 
   def BypassAllocations(uop: MicroOp, older_uops: Seq[MicroOp], alloc_reqs: Seq[Bool]): MicroOp
@@ -158,11 +159,12 @@ class RenameStage(
   plWidth: Int,
   numPhysRegs: Int,
   numWbPorts: Int,
-  float: Boolean)
-(implicit p: Parameters) extends AbstractRenameStage(plWidth, numPhysRegs, numWbPorts)(p)
+  float: Boolean, vector: Boolean=false)
+(implicit p: Parameters) extends AbstractRenameStage(plWidth, numPhysRegs, numWbPorts, vector)(p)
 {
+  require(!(float & vector))
   val pregSz = log2Ceil(numPhysRegs)
-  val rtype = if (float) RT_FLT else RT_FIX
+  val rtype = if (float) RT_FLT else if (vector) RT_VEC else RT_FIX
 
   //-------------------------------------------------------------
   // Helper Functions
@@ -193,13 +195,25 @@ class RenameStage(
     when (do_bypass_rs3) { bypassed_uop.prs3       := Mux1H(bypass_sel_rs3, bypass_pdsts) }
     when (do_bypass_dst) { bypassed_uop.stale_pdst := Mux1H(bypass_sel_dst, bypass_pdsts) }
 
-    bypassed_uop.prs1_busy := uop.prs1_busy || do_bypass_rs1
-    bypassed_uop.prs2_busy := uop.prs2_busy || do_bypass_rs2
-    bypassed_uop.prs3_busy := uop.prs3_busy || do_bypass_rs3
+    if (usingVector) {
+      if (vector) {
+        bypassed_uop.prs1_busy := uop.prs1_busy | Fill(vLenb, do_bypass_rs1.asUInt)
+        bypassed_uop.prs2_busy := uop.prs2_busy | Fill(vLenb, do_bypass_rs2.asUInt)
+        bypassed_uop.prs3_busy := uop.prs3_busy | Fill(vLenb, do_bypass_rs3.asUInt)
+      } else {
+        bypassed_uop.prs1_busy := Cat(0.U, (uop.prs1_busy(0) || do_bypass_rs1).asUInt)
+        bypassed_uop.prs2_busy := Cat(0.U, (uop.prs2_busy(0) || do_bypass_rs2).asUInt)
+        bypassed_uop.prs3_busy := Cat(0.U, (uop.prs3_busy(0) || do_bypass_rs3).asUInt)
+      }
+    } else {
+      bypassed_uop.prs1_busy := uop.prs1_busy | do_bypass_rs1
+      bypassed_uop.prs2_busy := uop.prs2_busy | do_bypass_rs2
+      bypassed_uop.prs3_busy := uop.prs3_busy | do_bypass_rs3
+    }
 
-    if (!float) {
+    if (!float && !vector) {
       bypassed_uop.prs3      := DontCare
-      bypassed_uop.prs3_busy := false.B
+      bypassed_uop.prs3_busy := 0.U
     }
 
     bypassed_uop
@@ -223,7 +237,7 @@ class RenameStage(
     numPhysRegs,
     numWbPorts,
     false,
-    float))
+    float, usingVector & vector))
 
 
 
@@ -234,7 +248,8 @@ class RenameStage(
   val rbk_valids      = Wire(Vec(plWidth, Bool()))
 
   for (w <- 0 until plWidth) {
-    ren2_alloc_reqs(w)    := ren2_uops(w).ldst_val && ren2_uops(w).dst_rtype === rtype && ren2_fire(w)
+    ren2_alloc_reqs(w)    := ren2_uops(w).ldst_val && ren2_uops(w).dst_rtype === rtype && ren2_fire(w) &&
+                             (~ren2_uops(w).v_is_split || ren2_uops(w).v_re_alloc)
     ren2_br_tags(w).valid := ren2_fire(w) && ren2_uops(w).allocate_brtag
 
     com_valids(w)         := io.com_uops(w).ldst_val && io.com_uops(w).dst_rtype === rtype && io.com_valids(w)
@@ -275,7 +290,7 @@ class RenameStage(
 
     uop.prs1       := mappings.prs1
     uop.prs2       := mappings.prs2
-    uop.prs3       := mappings.prs3 // only FP has 3rd operand
+    uop.prs3       := mappings.prs3 // scalar integer will not use rs3
     uop.stale_pdst := mappings.stale_pdst
   }
 
@@ -297,10 +312,31 @@ class RenameStage(
   assert (ren2_alloc_reqs zip freelist.io.alloc_pregs map {case (r,p) => !r || p.bits =/= 0.U} reduce (_&&_),
            "[rename-stage] A uop is trying to allocate the zero physical register.")
 
+  val prs1, prs2, prs3, stale_pdst, pdst = Reg(Vec(plWidth, UInt(maxPregSz.W)))
   // Freelist outputs.
   for ((uop, w) <- ren2_uops.zipWithIndex) {
     val preg = freelist.io.alloc_pregs(w).bits
     uop.pdst := Mux(uop.ldst =/= 0.U || float.B, preg, 0.U)
+
+    if (usingVector) {
+      // record physical names of first split
+      when (uop.v_is_split & uop.v_is_first) {
+        when(uop.lrs1_rtype === rtype) { prs1(w) := uop.prs1 }
+        when(uop.lrs2_rtype === rtype) { prs2(w) := uop.prs2 }
+        when(uop.frs3_en && (float.B || vector.B)) { prs3(w) := uop.prs3 }
+        when(uop.ldst_val && uop.dst_rtype === rtype) { stale_pdst(w) := uop.stale_pdst }
+        when(uop.ldst_val && uop.dst_rtype === rtype) { pdst(w) := uop.pdst }
+      }
+
+      // recover physical names for splits other than the first
+      when (uop.v_is_split & ~uop.v_is_first) {
+        when(uop.lrs1_rtype === rtype) { uop.prs1 := prs1(w) }
+        when(uop.lrs2_rtype === rtype) { uop.prs2 := prs2(w) }
+        when(uop.frs3_en && (float.B || vector.B)) { uop.prs3 := prs3(w) }
+        when(uop.ldst_val && uop.dst_rtype === rtype) { uop.stale_pdst := stale_pdst(w) }
+        when(uop.ldst_val && uop.dst_rtype === rtype) { uop.pdst := pdst(w) }
+      }
+    }
   }
 
   //-------------------------------------------------------------
@@ -310,20 +346,40 @@ class RenameStage(
   busytable.io.rebusy_reqs := ren2_alloc_reqs
   busytable.io.wb_valids := io.wakeups.map(_.valid)
   busytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
+  if (usingVector & vector) {
+    busytable.io.wb_bits.map(b => b := 0.U) // FIXME
+  }
 
   assert (!(io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype =/= rtype).reduce(_||_)),
    "[rename] Wakeup has wrong rtype.")
 
   for ((uop, w) <- ren2_uops.zipWithIndex) {
-    val busy = busytable.io.busy_resps(w)
+    if (usingVector) {
+      if (vector) {
+        val vbusy = busytable.io.vbusy_resps(w)
+        uop.prs1_busy := vbusy.prs1_busy & Fill(vLenb, (uop.lrs1_rtype === rtype).asUInt)
+        uop.prs2_busy := vbusy.prs2_busy & Fill(vLenb, (uop.lrs2_rtype === rtype).asUInt)
+        uop.prs3_busy := vbusy.prs3_busy & Fill(vLenb, uop.frs3_en.asUInt)
+      } else {
+        val busy = busytable.io.busy_resps(w)
+        uop.prs1_busy := Cat(0.U, (uop.lrs1_rtype === rtype && busy.prs1_busy).asUInt)
+        uop.prs2_busy := Cat(0.U, (uop.lrs2_rtype === rtype && busy.prs2_busy).asUInt)
+        uop.prs3_busy := Cat(0.U, (uop.frs3_en && busy.prs3_busy).asUInt)
 
-    uop.prs1_busy := uop.lrs1_rtype === rtype && busy.prs1_busy
-    uop.prs2_busy := uop.lrs2_rtype === rtype && busy.prs2_busy
-    uop.prs3_busy := uop.frs3_en && busy.prs3_busy
+        val valid = ren2_valids(w)
+        assert (!(valid && busy.prs1_busy(0) && rtype === RT_FIX && uop.lrs1 === 0.U), "[rename] x0 is busy??")
+        assert (!(valid && busy.prs2_busy(0) && rtype === RT_FIX && uop.lrs2 === 0.U), "[rename] x0 is busy??")
+      }
+    } else {
+      val busy = busytable.io.busy_resps(w)
+      uop.prs1_busy := uop.lrs1_rtype === rtype && busy.prs1_busy
+      uop.prs2_busy := uop.lrs2_rtype === rtype && busy.prs2_busy
+      uop.prs3_busy := uop.frs3_en && busy.prs3_busy
 
-    val valid = ren2_valids(w)
-    assert (!(valid && busy.prs1_busy && rtype === RT_FIX && uop.lrs1 === 0.U), "[rename] x0 is busy??")
-    assert (!(valid && busy.prs2_busy && rtype === RT_FIX && uop.lrs2 === 0.U), "[rename] x0 is busy??")
+      val valid = ren2_valids(w)
+      assert (!(valid && busy.prs1_busy && rtype === RT_FIX && uop.lrs1 === 0.U), "[rename] x0 is busy??")
+      assert (!(valid && busy.prs2_busy && rtype === RT_FIX && uop.lrs2 === 0.U), "[rename] x0 is busy??")
+    }
   }
 
   //-------------------------------------------------------------

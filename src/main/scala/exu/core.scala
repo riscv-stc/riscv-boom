@@ -82,8 +82,12 @@ class BoomCore(implicit p: Parameters) extends BoomModule
   // Clear fp_pipeline before use
   if (usingFPU) {
     fp_pipeline.io.ll_wports := DontCare
-    fp_pipeline.io.wb_valids := DontCare
-    fp_pipeline.io.wb_pdsts  := DontCare
+  }
+
+  var v_pipeline: VecPipeline = null
+  if (usingVector) {
+    v_pipeline = Module(new VecPipeline)
+    v_pipeline.io.ll_wports := DontCare
   }
 
   val numIrfWritePorts        = exe_units.numIrfWritePorts + memWidth
@@ -96,13 +100,15 @@ class BoomCore(implicit p: Parameters) extends BoomModule
   val numIntIssueWakeupPorts  = numIrfWritePorts + numFastWakeupPorts - numAlwaysBypassable // + memWidth for ll_wb
   val numIntRenameWakeupPorts = numIntIssueWakeupPorts
   val numFpWakeupPorts        = if (usingFPU) fp_pipeline.io.wakeups.length else 0
+  val numVecWakeupPorts       = if (usingVector) v_pipeline.io.wakeups.length else 0
 
   val decode_units     = for (w <- 0 until decodeWidth) yield { val d = Module(new DecodeUnit); d }
   val dec_brmask_logic = Module(new BranchMaskGenerationLogic(coreWidth))
   val rename_stage     = Module(new RenameStage(coreWidth, numIntPhysRegs, numIntRenameWakeupPorts, false))
   val fp_rename_stage  = Module(new RenameStage(coreWidth, numFpPhysRegs, numFpWakeupPorts, true))
+  val v_rename_stage   = Module(new RenameStage(coreWidth, numVecPhysRegs, numVecWakeupPorts, false, true))
   val pred_rename_stage = Module(new PredRenameStage(coreWidth, ftqSz, 1))
-  val rename_stages    = Seq(rename_stage, fp_rename_stage, pred_rename_stage)
+  val rename_stages    = Seq(rename_stage, fp_rename_stage, v_rename_stage, pred_rename_stage)
 
   val mem_iss_unit     = Module(new IssueUnitCollapsing(memIssueParam, numIntIssueWakeupPorts))
   mem_iss_unit.suggestName("mem_issue_unit")
@@ -155,6 +161,7 @@ class BoomCore(implicit p: Parameters) extends BoomModule
   // Decode/Rename1 Stage
   val dec_valids = Wire(Vec(coreWidth, Bool()))  // are the decoded instruction valid? It may be held up though.
   val dec_uops   = Wire(Vec(coreWidth, new MicroOp()))
+  val dec_fe_fire= Wire(Vec(coreWidth, Bool()))  // can the instruction pop from instruction buffer
   val dec_fire   = Wire(Vec(coreWidth, Bool()))  // can the instruction fire beyond decode?
                                                     // (can still be stopped in ren or dis)
   val dec_ready  = Wire(Bool())
@@ -231,6 +238,10 @@ class BoomCore(implicit p: Parameters) extends BoomModule
 
   if (usingFPU) {
     fp_pipeline.io.brupdate := brupdate
+  }
+
+  if (usingVector) {
+    v_pipeline.io.brupdate := brupdate
   }
 
   // Load/Store Unit & ExeUnits
@@ -504,6 +515,8 @@ class BoomCore(implicit p: Parameters) extends BoomModule
     dec_valids(w)                      := io.ifu.fetchpacket.valid && dec_fbundle.uops(w).valid &&
                                           !dec_finished_mask(w)
     decode_units(w).io.enq.uop         := dec_fbundle.uops(w).bits
+    decode_units(w).io.deq_fire        := dec_fire(w)
+    decode_units(w).io.kill            := io.ifu.redirect_flush
     decode_units(w).io.status          := csr.io.status
     decode_units(w).io.csr_decode      <> csr.io.decode(w)
     decode_units(w).io.interrupt       := csr.io.interrupt
@@ -576,15 +589,17 @@ class BoomCore(implicit p: Parameters) extends BoomModule
                       || io.ifu.redirect_flush))
 
   val dec_stalls = dec_hazards.scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
+  val dec_enq_stalls = decode_units.map(_.io.enq_stall).scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
+  dec_fe_fire := (0 until coreWidth).map(w => dec_valids(w) && !dec_stalls(w) && !dec_enq_stalls(w))
   dec_fire := (0 until coreWidth).map(w => dec_valids(w) && !dec_stalls(w))
 
   // all decoders are empty and ready for new instructions
-  dec_ready := dec_fire.last
+  dec_ready := dec_fe_fire.last
 
   when (dec_ready || io.ifu.redirect_flush) {
     dec_finished_mask := 0.U
   } .otherwise {
-    dec_finished_mask := dec_fire.asUInt | dec_finished_mask
+    dec_finished_mask := dec_fe_fire.asUInt | dec_finished_mask
   }
 
   //-------------------------------------------------------------
@@ -643,26 +658,43 @@ class BoomCore(implicit p: Parameters) extends BoomModule
   for (w <- 0 until coreWidth) {
     val i_uop   = rename_stage.io.ren2_uops(w)
     val f_uop   = if (usingFPU) fp_rename_stage.io.ren2_uops(w) else NullMicroOp
+    val v_uop   = if (usingVector) v_rename_stage.io.ren2_uops(w) else NullMicroOp
     val p_uop   = if (enableSFBOpt) pred_rename_stage.io.ren2_uops(w) else NullMicroOp
     val f_stall = if (usingFPU) fp_rename_stage.io.ren_stalls(w) else false.B
+    val v_stall = if (usingVector) v_rename_stage.io.ren_stalls(w) else false.B
     val p_stall = if (enableSFBOpt) pred_rename_stage.io.ren_stalls(w) else false.B
 
     // lrs1 can "pass through" to prs1. Used solely to index the csr file.
-    dis_uops(w).prs1 := Mux(dis_uops(w).lrs1_rtype === RT_FLT, f_uop.prs1,
-                        Mux(dis_uops(w).lrs1_rtype === RT_FIX, i_uop.prs1, dis_uops(w).lrs1))
-    dis_uops(w).prs2 := Mux(dis_uops(w).lrs2_rtype === RT_FLT, f_uop.prs2, i_uop.prs2)
-    dis_uops(w).prs3 := f_uop.prs3
+    dis_uops(w).prs1 := Mux(dis_uops(w).lrs1_rtype === RT_VEC, v_uop.prs1,
+                        Mux(dis_uops(w).lrs1_rtype === RT_FLT, f_uop.prs1,
+                        Mux(dis_uops(w).lrs1_rtype === RT_FIX, i_uop.prs1, dis_uops(w).lrs1)))
+    dis_uops(w).prs2 := Mux(dis_uops(w).lrs2_rtype === RT_VEC, v_uop.prs2,
+                        Mux(dis_uops(w).lrs2_rtype === RT_FLT, f_uop.prs2,
+                        Mux(dis_uops(w).lrs2_rtype === RT_FIX, i_uop.prs2, dis_uops(w).lrs2)))
+    dis_uops(w).prs3 := Mux(dis_uops(w).is_rvv, v_uop.prs3, f_uop.prs3)
     dis_uops(w).ppred := p_uop.ppred
-    dis_uops(w).pdst := Mux(dis_uops(w).dst_rtype  === RT_FLT, f_uop.pdst,
-                        Mux(dis_uops(w).dst_rtype  === RT_FIX, i_uop.pdst,
-                                                               p_uop.pdst))
-    dis_uops(w).stale_pdst := Mux(dis_uops(w).dst_rtype === RT_FLT, f_uop.stale_pdst, i_uop.stale_pdst)
+    dis_uops(w).pdst := Mux(dis_uops(w).dst_rtype  === RT_VEC, v_uop.pdst,
+                        Mux(dis_uops(w).dst_rtype  === RT_FLT, f_uop.pdst,
+                        Mux(dis_uops(w).dst_rtype  === RT_FIX, i_uop.pdst, p_uop.pdst)))
+    dis_uops(w).stale_pdst := Mux(dis_uops(w).dst_rtype === RT_VEC, v_uop.stale_pdst,
+                              Mux(dis_uops(w).dst_rtype === RT_FLT, f_uop.stale_pdst, i_uop.stale_pdst))
 
-    dis_uops(w).prs1_busy := i_uop.prs1_busy && (dis_uops(w).lrs1_rtype === RT_FIX) ||
-                             f_uop.prs1_busy && (dis_uops(w).lrs1_rtype === RT_FLT)
-    dis_uops(w).prs2_busy := i_uop.prs2_busy && (dis_uops(w).lrs2_rtype === RT_FIX) ||
-                             f_uop.prs2_busy && (dis_uops(w).lrs2_rtype === RT_FLT)
-    dis_uops(w).prs3_busy := f_uop.prs3_busy && dis_uops(w).frs3_en
+    if (usingVector) {
+      dis_uops(w).prs1_busy := Mux1H(Seq((dis_uops(w).lrs1_rtype === RT_FIX,          i_uop.prs1_busy),
+                                         (dis_uops(w).lrs1_rtype === RT_FLT,          f_uop.prs1_busy),
+                                         (dis_uops(w).lrs1_rtype === RT_VEC,          v_uop.prs1_busy)))
+      dis_uops(w).prs2_busy := Mux1H(Seq((dis_uops(w).lrs2_rtype === RT_FIX,          i_uop.prs2_busy),
+                                         (dis_uops(w).lrs2_rtype === RT_FLT,          f_uop.prs2_busy),
+                                         (dis_uops(w).lrs2_rtype === RT_VEC,          v_uop.prs2_busy)))
+      dis_uops(w).prs3_busy := Mux1H(Seq((dis_uops(w).is_rvv && dis_uops(w).frs3_en,  v_uop.prs3_busy),
+                                         (!dis_uops(w).is_rvv && dis_uops(w).frs3_en, f_uop.prs3_busy)))
+    } else {
+      dis_uops(w).prs1_busy := i_uop.prs1_busy & (dis_uops(w).lrs1_rtype === RT_FIX) |
+                               f_uop.prs1_busy & (dis_uops(w).lrs1_rtype === RT_FLT)
+      dis_uops(w).prs2_busy := i_uop.prs2_busy & (dis_uops(w).lrs2_rtype === RT_FIX) |
+                               f_uop.prs2_busy & (dis_uops(w).lrs2_rtype === RT_FLT)
+      dis_uops(w).prs3_busy := f_uop.prs3_busy & dis_uops(w).frs3_en
+    }
     dis_uops(w).ppred_busy := p_uop.ppred_busy && dis_uops(w).is_sfb_shadow
 
     ren_stalls(w) := rename_stage.io.ren_stalls(w) || f_stall || p_stall
@@ -770,7 +802,9 @@ class BoomCore(implicit p: Parameters) extends BoomModule
   // Send dispatched uops to correct issue queues
   // Backpressure through dispatcher if necessary
   for (i <- 0 until issueParams.size) {
-    if (issueParams(i).iqType == IQT_FP.litValue) {
+    if (issueParams(i).iqType == IQT_VEC.litValue) {
+       v_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
+    } else if (issueParams(i).iqType == IQT_FP.litValue) {
        fp_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
     } else {
        issue_units(iu_idx).io.dis_uops <> dispatcher.io.dis_uops(i)
@@ -894,6 +928,13 @@ class BoomCore(implicit p: Parameters) extends BoomModule
     }
   } else {
     fp_rename_stage.io.wakeups := DontCare
+  }
+  if (usingVector) {
+    for ((renport, fpport) <- v_rename_stage.io.wakeups zip v_pipeline.io.wakeups) {
+       renport <> fpport
+    }
+  } else {
+    v_rename_stage.io.wakeups := DontCare
   }
   if (enableSFBOpt) {
     pred_rename_stage.io.wakeups(0) := pred_wakeup
@@ -1070,6 +1111,7 @@ class BoomCore(implicit p: Parameters) extends BoomModule
     csr.io.vector.get.set_vstart.valid := false.B
     csr.io.vector.get.set_vstart.bits := csr_uop.vstart
     csr.io.vector.get.set_vxsat := false.B
+    v_pipeline.io.fcsr_rm := csr.io.fcsr_rm
 
     csr_exe_unit.io.vconfig := csr.io.vector.get.vconfig
   }
@@ -1139,6 +1181,11 @@ class BoomCore(implicit p: Parameters) extends BoomModule
     io.lsu.fp_stdata <> fp_pipeline.io.to_sdq
   }
 
+  if (usingVector) {
+    //io.lsu.vec_stdata <> v_pipeline.io.to_sdq
+    //v_pipeline.io.to_sdq.ready := true.B
+  }
+
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Writeback Stage ****
@@ -1203,6 +1250,18 @@ class BoomCore(implicit p: Parameters) extends BoomModule
     // Connect FLDs
     fp_pipeline.io.ll_wports <> exe_units.memory_units.map(_.io.ll_fresp)
   }
+
+  if (usingVector) {
+    // FIXME
+    v_pipeline.io.from_int.valid := false.B
+    v_pipeline.io.from_int.bits := DontCare
+    v_pipeline.io.to_int.ready := true.B
+    v_pipeline.io.from_fp.valid := false.B
+    v_pipeline.io.from_fp.bits := DontCare
+    v_pipeline.io.to_fp.ready := true.B
+    v_pipeline.io.ll_wports  <> exe_units.memory_units.map(_.io.ll_vresp)
+  }
+
   if (usingRoCC) {
     require(usingFPU)
     ll_wbarb.io.in(2)       <> exe_units.rocc_unit.io.ll_iresp
@@ -1285,6 +1344,10 @@ class BoomCore(implicit p: Parameters) extends BoomModule
   if (usingFPU)
     fp_pipeline.io.status := csr.io.status
 
+  if (usingVector) {
+    v_pipeline.io.status := csr.io.status
+  }
+
   // Connect breakpoint info to memaddrcalcunit
   for (i <- 0 until memWidth) {
     mem_units(i).io.status := csr.io.status
@@ -1306,6 +1369,10 @@ class BoomCore(implicit p: Parameters) extends BoomModule
 
   if (usingFPU) {
     fp_pipeline.io.flush_pipeline := RegNext(rob.io.flush.valid)
+  }
+
+  if (usingVector) {
+    v_pipeline.io.flush_pipeline := RegNext(rob.io.flush.valid)
   }
 
   for (w <- 0 until exe_units.length) {
@@ -1333,6 +1400,10 @@ class BoomCore(implicit p: Parameters) extends BoomModule
 
   if (usingFPU) {
     fp_pipeline.io.debug_tsc_reg := debug_tsc_reg
+  }
+
+  if (usingVector) {
+    v_pipeline.io.debug_tsc_reg := debug_tsc_reg
   }
 
   //-------------------------------------------------------------
@@ -1369,6 +1440,11 @@ class BoomCore(implicit p: Parameters) extends BoomModule
         } .elsewhen (rob.io.commit.uops(w).dst_rtype === RT_FLT) {
           printf(" f%d 0x%x\n",
             rob.io.commit.uops(w).ldst,
+            rob.io.commit.debug_wdata(w))
+        } .elsewhen (rob.io.commit.uops(w).dst_rtype === RT_VEC) {
+          printf(" v%d[%d] 0x%x\n",
+            rob.io.commit.uops(w).ldst,
+            rob.io.commit.uops(w).vstart,
             rob.io.commit.debug_wdata(w))
         } .otherwise {
           printf("\n")

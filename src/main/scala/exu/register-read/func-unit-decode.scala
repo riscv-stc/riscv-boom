@@ -172,8 +172,10 @@ object MemRRdDecode extends RRdDecodeConstants
                                // |      |  |  use mem pipe        |         |         |     rf wen |
                                // |      |  |  |  alu fcn  wd/word?|         |         |     |      |
                                // |      |  |  |  |        |       |         |         |     |      |
-         BitPat(uopLD)    -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_IMM , IS_I, REN_0, CSR.N),
-         BitPat(uopSTA)   -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_IMM , IS_S, REN_0, CSR.N),
+         BitPat(uopVL)    -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_X, REN_0, CSR.N),
+         BitPat(uopVSA)   -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_X, REN_0, CSR.N),
+         BitPat(uopLD)    -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_I, REN_0, CSR.N),
+         BitPat(uopSTA)   -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_S, REN_0, CSR.N),
          BitPat(uopSTD)   -> List(BR_N , N, N, Y, FN_X   , DW_X  , OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
          BitPat(uopSFENCE)-> List(BR_N , N, N, Y, FN_X   , DW_X  , OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
 

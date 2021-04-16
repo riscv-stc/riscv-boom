@@ -254,7 +254,12 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
 
   //************************************
   // vector stuff
-  val numVecPhysRegs = boomParams.numVecPhysRegisters
+  require (issueParams.count(_.iqType == IQT_VEC.litValue) == 1 || !usingVector)
+  val vecIssueParam = if (usingVector) issueParams.find(_.iqType == IQT_VEC.litValue).get else null
+  val vecWidth = if (usingVector) vecIssueParam.issueWidth else 0
+  val numVecPhysRegs = boomParams.numVecPhysRegisters * (vLen/eLen)
+  def vLenb = vLen/8
+  def eLenb = eLen/8
 
   //************************************
   // Implicitly calculated constants
