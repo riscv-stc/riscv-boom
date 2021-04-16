@@ -140,7 +140,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val is_rvv           = Bool()             // is vector instruction
   val v_ls_ew          = UInt(2.W)          // EEW encoded in load/store instruction
   val v_unmasked       = Bool()
-  val vstart           = UInt(log2Ceil(vLen).W)
+  val vstart           = UInt(vLenSz.W)
   val v_is_split       = Bool()             // is a split of a vector instruction
   val v_split_ecnt     = UInt((log2Ceil(vLenb)+1).W)
   val v_is_first       = Bool()

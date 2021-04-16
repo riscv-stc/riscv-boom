@@ -259,6 +259,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val vecWidth = if (usingVector) vecIssueParam.issueWidth else 0
   val numVecPhysRegs = boomParams.numVecPhysRegisters * (vLen/eLen)
   def vLenb = vLen/8
+  def vLenSz = log2Ceil(vLen)
   def eLenb = eLen/8
 
   //************************************
