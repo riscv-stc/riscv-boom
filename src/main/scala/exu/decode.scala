@@ -649,7 +649,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
   val is_v_ls_stride = false.B // FIXME
   val is_v_ls_index = false.B // FIXME
-  val vstart = RegInit(0.U((log2Ceil(vLen)+1).W))
+  val vstart = RegInit(0.U((vLenSz+1).W))
   val vlmax = io.vconfig.vtype.vlMax
   val vsew = io.vconfig.vtype.vsew
 
@@ -685,7 +685,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   assert(Mux(cs.can_be_split, cs.is_rvv, true.B), "can_be_split applies only to vector instructions.")
   uop.v_is_first  := (vstart === 0.U)
   uop.v_is_last   := split_last
-  uop.v_re_alloc  := (vstart & (Fill(log2Ceil(vLen)+1,1.U) << (6.U - vsew))(log2Ceil(vLen),0)) === 0.U
+  val ren_mask = ~(Fill(vLenSz,1.U) << (7.U - vsew))
+  uop.v_re_alloc  := (vstart & ren_mask(vLenSz,0)) === 0.U
 
   io.enq_stall := cs.can_be_split & ~uop.v_is_last
   io.deq.uop := uop
