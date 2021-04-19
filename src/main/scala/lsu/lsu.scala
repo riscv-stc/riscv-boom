@@ -1335,6 +1335,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         val ldq_idx = io.dmem.resp(w).bits.uop.ldq_idx
         val send_iresp = ldq(ldq_idx).bits.uop.dst_rtype === RT_FIX
         val send_fresp = ldq(ldq_idx).bits.uop.dst_rtype === RT_FLT
+        val send_vresp = ldq(ldq_idx).bits.uop.dst_rtype === RT_VEC
 
         io.core.exe(w).iresp.bits.uop  := ldq(ldq_idx).bits.uop
         io.core.exe(w).fresp.bits.uop  := ldq(ldq_idx).bits.uop
@@ -1343,13 +1344,12 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         io.core.exe(w).fresp.valid     := send_fresp
         io.core.exe(w).fresp.bits.data := io.dmem.resp(w).bits.data
         if (usingVector) {
-          val send_vresp = ldq(ldq_idx).bits.uop.dst_rtype === RT_VEC
           io.core.exe(w).vresp.valid     := send_vresp
           io.core.exe(w).vresp.bits.uop  := ldq(ldq_idx).bits.uop
           io.core.exe(w).vresp.bits.data := io.dmem.resp(w).bits.data
         }
 
-        assert(send_iresp ^ send_fresp)
+        assert(send_iresp ^ send_fresp ^ send_vresp)
         dmem_resp_fired(w) := true.B
 
         ldq(ldq_idx).bits.succeeded      := send_iresp

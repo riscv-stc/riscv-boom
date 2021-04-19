@@ -179,7 +179,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   // Cut up critical path by delaying the write by a cycle.
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
-  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, fpregSz, eLen, RT_VEC))
+  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, fpregSz, eLen, RT_VEC, true))
 
   assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
   when (io.from_int.valid) { assert (io.from_int.bits.uop.rf_wen && io.from_int.bits.uop.dst_rtype === RT_VEC) }
@@ -187,18 +187,24 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   var w_cnt = 1
   for (i <- 1 until memWidth) {
-    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), fpregSz, eLen, RT_VEC))
+    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), fpregSz, eLen, RT_VEC, true))
     w_cnt += 1
   }
   for (eu <- exe_units) {
+    val eu_vresp = eu.io.vresp
+    val eu_vresp_uop = eu_vresp.bits.uop
+    val vstart = eu_vresp_uop.vstart
+    val vsew = eu_vresp_uop.vconfig.vtype.vsew
     if (eu.writesVrf) {
       if (eu.hasVMX) {
-        vregfile.io.write_ports(w_cnt).valid     := eu.io.vresp.valid && eu.io.vresp.bits.uop.rf_wen && !eu.io.vresp.bits.uop.uses_stq
+        vregfile.io.write_ports(w_cnt).valid     := eu_vresp.valid && eu_vresp_uop.rf_wen && !eu_vresp_uop.uopc != uopVSA
       } else {
-        vregfile.io.write_ports(w_cnt).valid     := eu.io.vresp.valid && eu.io.vresp.bits.uop.rf_wen
+        vregfile.io.write_ports(w_cnt).valid     := eu_vresp.valid && eu_vresp_uop.rf_wen
       }
-      vregfile.io.write_ports(w_cnt).bits.addr := eu.io.vresp.bits.uop.pdst
-      vregfile.io.write_ports(w_cnt).bits.data := eu.io.vresp.bits.data
+      val rinc = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(8,6),vstart(7,5),vstart(6,4),vstart(5,3)))
+      val rsel = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(5,3),vstart(4,2),vstart(3,1),vstart(2,0)))
+      vregfile.io.write_ports(w_cnt).bits.addr := Cat(eu_vresp_uop.pdst+rinc(2,0), rsel(2,0))
+      vregfile.io.write_ports(w_cnt).bits.data := eu_vresp.bits.data
       eu.io.vresp.ready                        := true.B
       when (eu.io.vresp.valid) {
         //assert(eu.io.vresp.ready, "No backpressuring the Vec EUs")
@@ -213,7 +219,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   val vmx_unit = exe_units.vmx_unit
   val vmx_resp = vmx_unit.io.vresp
 
-  io.to_sdq.valid := vmx_resp.valid & vmx_resp.bits.uop.uses_stq
+  io.to_sdq.valid := vmx_resp.valid & vmx_resp.bits.uop.uopc === uopVSA
   io.to_sdq.bits  := vmx_resp.bits
   io.to_int.valid := false.B // FIXME
   io.to_int.bits  := DontCare

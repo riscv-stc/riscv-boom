@@ -50,13 +50,21 @@ class RegisterFileWritePort(val addrWidth: Int, val dataWidth: Int)(implicit p: 
  */
 object WritePort
 {
-  def apply(enq: DecoupledIO[ExeUnitResp], addrWidth: Int, dataWidth: Int, rtype: UInt)
+  def apply(enq: DecoupledIO[ExeUnitResp], addrWidth: Int, dataWidth: Int, rtype: UInt, vector: Boolean = false)
     (implicit p: Parameters): Valid[RegisterFileWritePort] = {
      val wport = Wire(Valid(new RegisterFileWritePort(addrWidth, dataWidth)))
+     val enq_uop = enq.bits.uop
 
-     wport.valid     := enq.valid && enq.bits.uop.dst_rtype === rtype
-     wport.bits.addr := enq.bits.uop.pdst
+     wport.valid     := enq.valid && enq_uop.dst_rtype === rtype
+     wport.bits.addr := enq_uop.pdst
      wport.bits.data := enq.bits.data
+     when (vector.B) {
+       val vstart = enq_uop.vstart
+       val vsew = enq_uop.vconfig.vtype.vsew
+       val rinc = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(8,6),vstart(7,5),vstart(6,4),vstart(5,3)))
+       val rsel = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(5,3),vstart(4,2),vstart(3,1),vstart(2,0)))
+       wport.bits.addr := Cat(enq_uop.pdst+rinc(2,0), rsel(2,0))
+     }
      enq.ready       := true.B
      wport
   }

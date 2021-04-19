@@ -560,7 +560,8 @@ class MemAddrCalcUnit(implicit p: Parameters)
       "FP store-data should now be going through a different unit.")
   }
 
-  assert (!(uop.fp_val && io.req.valid && uop.uopc =/= uopLD && uop.uopc =/= uopSTA),
+  assert (!(uop.fp_val && io.req.valid && uop.uopc =/= uopLD && uop.uopc =/= uopSTA) &&
+          !(uop.is_rvv && io.req.valid && uop.uopc =/= uopVL && uop.uopc =/= uopVSA),
           "[maddrcalc] assert we never get store data in here.")
 
   // Handle misaligned exceptions

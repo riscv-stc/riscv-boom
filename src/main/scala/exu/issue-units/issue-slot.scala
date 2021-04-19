@@ -218,14 +218,14 @@ class IssueSlot(val numWakeupPorts: Int)(implicit p: Parameters)
       next_uop.lrs1_rtype === RT_FIX) {
       p1 := true.B
       p1_poisoned := true.B
-      assert (is_valid && !next_p1_poisoned)
+      assert (!is_valid || !next_p1_poisoned)
     }
     when (io.spec_ld_wakeup(w).valid &&
       io.spec_ld_wakeup(w).bits === next_uop.prs2 &&
       next_uop.lrs2_rtype === RT_FIX) {
       p2 := true.B
       p2_poisoned := true.B
-      assert (is_valid && !next_p2_poisoned)
+      assert (!is_valid || !next_p2_poisoned)
     }
   }
 

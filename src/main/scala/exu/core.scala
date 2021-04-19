@@ -581,10 +581,12 @@ class BoomCore(implicit p: Parameters) extends BoomModule
   // stall fetch/dcode because we ran out of branch tags
   val branch_mask_full = Wire(Vec(coreWidth, Bool()))
 
-  val dec_enq_stalls = decode_units.map(_.io.enq_stall).scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
+  val dec_enq_stalls = decode_units.zipWithIndex.map{
+    case (d,i) => dec_valids(i) && d.io.enq_stall
+  }.scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
   val dec_prev_enq_stalls = Wire(Vec(coreWidth, Bool()))
   dec_prev_enq_stalls(0) := false.B
-  (1 until coreWidth).map(w => dec_prev_enq_stalls(w) := dec_valids(w-1) & dec_enq_stalls(w-1))
+  (1 until coreWidth).map(w => dec_prev_enq_stalls(w) := dec_enq_stalls(w-1))
 
   val dec_hazards = (0 until coreWidth).map(w =>
                       dec_valids(w) &&
