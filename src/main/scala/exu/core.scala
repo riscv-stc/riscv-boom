@@ -105,8 +105,11 @@ class BoomCore(implicit p: Parameters) extends BoomModule
   val decode_units     = for (w <- 0 until decodeWidth) yield { val d = Module(new DecodeUnit); d }
   val dec_brmask_logic = Module(new BranchMaskGenerationLogic(coreWidth))
   val rename_stage     = Module(new RenameStage(coreWidth, numIntPhysRegs, numIntRenameWakeupPorts, false))
+  rename_stage.suggestName("i_rename_stage")
   val fp_rename_stage  = Module(new RenameStage(coreWidth, numFpPhysRegs, numFpWakeupPorts, true))
+  fp_rename_stage.suggestName("fp_rename_stage")
   val v_rename_stage   = Module(new RenameStage(coreWidth, numVecPhysRegs, numVecWakeupPorts, false, true))
+  v_rename_stage.suggestName("v_rename_stage")
   val pred_rename_stage = Module(new PredRenameStage(coreWidth, ftqSz, 1))
   val rename_stages    = Seq(rename_stage, fp_rename_stage, v_rename_stage, pred_rename_stage)
 
@@ -578,9 +581,15 @@ class BoomCore(implicit p: Parameters) extends BoomModule
   // stall fetch/dcode because we ran out of branch tags
   val branch_mask_full = Wire(Vec(coreWidth, Bool()))
 
+  val dec_enq_stalls = decode_units.map(_.io.enq_stall).scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
+  val dec_prev_enq_stalls = Wire(Vec(coreWidth, Bool()))
+  dec_prev_enq_stalls(0) := false.B
+  (1 until coreWidth).map(w => dec_prev_enq_stalls(w) := dec_valids(w-1) & dec_enq_stalls(w-1))
+
   val dec_hazards = (0 until coreWidth).map(w =>
                       dec_valids(w) &&
                       (  !dis_ready
+                      || dec_prev_enq_stalls(w)
                       || rob.io.commit.rollback
                       || dec_xcpt_stall
                       || branch_mask_full(w)
@@ -589,7 +598,6 @@ class BoomCore(implicit p: Parameters) extends BoomModule
                       || io.ifu.redirect_flush))
 
   val dec_stalls = dec_hazards.scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
-  val dec_enq_stalls = decode_units.map(_.io.enq_stall).scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
   dec_fe_fire := (0 until coreWidth).map(w => dec_valids(w) && !dec_stalls(w) && !dec_enq_stalls(w))
   dec_fire := (0 until coreWidth).map(w => dec_valids(w) && !dec_stalls(w))
 
@@ -1179,11 +1187,18 @@ class BoomCore(implicit p: Parameters) extends BoomModule
 
   if (usingFPU) {
     io.lsu.fp_stdata <> fp_pipeline.io.to_sdq
+//} else {
+//  io.lsu.fp_stdata.valid := false.B
+//  io.lsu.fp_stdata.bits := DontCare
+//  fp_pipeline.io.to_sdq.ready := false.B
   }
 
   if (usingVector) {
-    //io.lsu.vec_stdata <> v_pipeline.io.to_sdq
-    //v_pipeline.io.to_sdq.ready := true.B
+    io.lsu.v_stdata <> v_pipeline.io.to_sdq
+//} else {
+//  io.lsu.v_stdata.valid := false.B
+//  io.lsu.v_stdata.bits := DontCare
+//  v_pipeline.io.to_sdq.ready := false.B
   }
 
   //-------------------------------------------------------------

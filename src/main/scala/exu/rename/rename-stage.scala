@@ -146,6 +146,68 @@ abstract class AbstractRenameStage(
 
 }
 
+class RenameBypass(
+  val oldWidth: Int,
+  val float: Boolean = false,
+  val vector: Boolean = false)
+(implicit p: Parameters) extends BoomModule {
+  val io = IO(new Bundle{
+    val i_uop = Input(new MicroOp)
+    val older_uops = Input(Vec(oldWidth, new MicroOp()))
+    val alloc_reqs = Input(Vec(oldWidth, Bool()))
+    val o_uop = Output(new MicroOp)
+  })
+  val bypassed_uop = Wire(new MicroOp)
+  val older_uops = io.older_uops
+  val alloc_reqs = io.alloc_reqs
+  val uop = io.i_uop
+  bypassed_uop := uop
+
+  val bypass_hits_rs1 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.lrs1 }
+  val bypass_hits_rs2 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.lrs2 }
+  val bypass_hits_rs3 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.lrs3 }
+  val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.ldst }
+
+  val bypass_sel_rs1 = PriorityEncoderOH(bypass_hits_rs1.reverse).reverse
+  val bypass_sel_rs2 = PriorityEncoderOH(bypass_hits_rs2.reverse).reverse
+  val bypass_sel_rs3 = PriorityEncoderOH(bypass_hits_rs3.reverse).reverse
+  val bypass_sel_dst = PriorityEncoderOH(bypass_hits_dst.reverse).reverse
+
+  val do_bypass_rs1 = bypass_hits_rs1.reduce(_||_)
+  val do_bypass_rs2 = bypass_hits_rs2.reduce(_||_)
+  val do_bypass_rs3 = bypass_hits_rs3.reduce(_||_)
+  val do_bypass_dst = bypass_hits_dst.reduce(_||_)
+
+  val bypass_pdsts = older_uops.map(_.pdst)
+
+  when (do_bypass_rs1) { bypassed_uop.prs1       := Mux1H(bypass_sel_rs1, bypass_pdsts) }
+  when (do_bypass_rs2) { bypassed_uop.prs2       := Mux1H(bypass_sel_rs2, bypass_pdsts) }
+  when (do_bypass_rs3) { bypassed_uop.prs3       := Mux1H(bypass_sel_rs3, bypass_pdsts) }
+  when (do_bypass_dst) { bypassed_uop.stale_pdst := Mux1H(bypass_sel_dst, bypass_pdsts) }
+
+  if (usingVector) {
+    if (vector) {
+      bypassed_uop.prs1_busy := uop.prs1_busy | Fill(vLenb, do_bypass_rs1.asUInt)
+      bypassed_uop.prs2_busy := uop.prs2_busy | Fill(vLenb, do_bypass_rs2.asUInt)
+      bypassed_uop.prs3_busy := uop.prs3_busy | Fill(vLenb, do_bypass_rs3.asUInt)
+    } else {
+      bypassed_uop.prs1_busy := Cat(0.U, (uop.prs1_busy(0) || do_bypass_rs1).asUInt)
+      bypassed_uop.prs2_busy := Cat(0.U, (uop.prs2_busy(0) || do_bypass_rs2).asUInt)
+      bypassed_uop.prs3_busy := Cat(0.U, (uop.prs3_busy(0) || do_bypass_rs3).asUInt)
+    }
+  } else {
+    bypassed_uop.prs1_busy := uop.prs1_busy | do_bypass_rs1
+    bypassed_uop.prs2_busy := uop.prs2_busy | do_bypass_rs2
+    bypassed_uop.prs3_busy := uop.prs3_busy | do_bypass_rs3
+  }
+
+  if (!float && !vector) {
+    bypassed_uop.prs3      := DontCare
+    bypassed_uop.prs3_busy := 0.U
+  }
+
+  io.o_uop := bypassed_uop
+}
 
 /**
  * Rename stage that connets the map table, free list, and busy table.
@@ -170,52 +232,13 @@ class RenameStage(
   // Helper Functions
 
   def BypassAllocations(uop: MicroOp, older_uops: Seq[MicroOp], alloc_reqs: Seq[Bool]): MicroOp = {
+    require(older_uops.length == alloc_reqs.length)
     val bypassed_uop = Wire(new MicroOp)
-    bypassed_uop := uop
-
-    val bypass_hits_rs1 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.lrs1 }
-    val bypass_hits_rs2 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.lrs2 }
-    val bypass_hits_rs3 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.lrs3 }
-    val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.ldst }
-
-    val bypass_sel_rs1 = PriorityEncoderOH(bypass_hits_rs1.reverse).reverse
-    val bypass_sel_rs2 = PriorityEncoderOH(bypass_hits_rs2.reverse).reverse
-    val bypass_sel_rs3 = PriorityEncoderOH(bypass_hits_rs3.reverse).reverse
-    val bypass_sel_dst = PriorityEncoderOH(bypass_hits_dst.reverse).reverse
-
-    val do_bypass_rs1 = bypass_hits_rs1.reduce(_||_)
-    val do_bypass_rs2 = bypass_hits_rs2.reduce(_||_)
-    val do_bypass_rs3 = bypass_hits_rs3.reduce(_||_)
-    val do_bypass_dst = bypass_hits_dst.reduce(_||_)
-
-    val bypass_pdsts = older_uops.map(_.pdst)
-
-    when (do_bypass_rs1) { bypassed_uop.prs1       := Mux1H(bypass_sel_rs1, bypass_pdsts) }
-    when (do_bypass_rs2) { bypassed_uop.prs2       := Mux1H(bypass_sel_rs2, bypass_pdsts) }
-    when (do_bypass_rs3) { bypassed_uop.prs3       := Mux1H(bypass_sel_rs3, bypass_pdsts) }
-    when (do_bypass_dst) { bypassed_uop.stale_pdst := Mux1H(bypass_sel_dst, bypass_pdsts) }
-
-    if (usingVector) {
-      if (vector) {
-        bypassed_uop.prs1_busy := uop.prs1_busy | Fill(vLenb, do_bypass_rs1.asUInt)
-        bypassed_uop.prs2_busy := uop.prs2_busy | Fill(vLenb, do_bypass_rs2.asUInt)
-        bypassed_uop.prs3_busy := uop.prs3_busy | Fill(vLenb, do_bypass_rs3.asUInt)
-      } else {
-        bypassed_uop.prs1_busy := Cat(0.U, (uop.prs1_busy(0) || do_bypass_rs1).asUInt)
-        bypassed_uop.prs2_busy := Cat(0.U, (uop.prs2_busy(0) || do_bypass_rs2).asUInt)
-        bypassed_uop.prs3_busy := Cat(0.U, (uop.prs3_busy(0) || do_bypass_rs3).asUInt)
-      }
-    } else {
-      bypassed_uop.prs1_busy := uop.prs1_busy | do_bypass_rs1
-      bypassed_uop.prs2_busy := uop.prs2_busy | do_bypass_rs2
-      bypassed_uop.prs3_busy := uop.prs3_busy | do_bypass_rs3
-    }
-
-    if (!float && !vector) {
-      bypassed_uop.prs3      := DontCare
-      bypassed_uop.prs3_busy := 0.U
-    }
-
+    val bypLogic = Module(new RenameBypass(older_uops.length, float, vector))
+    bypLogic.io.i_uop := uop
+    bypLogic.io.older_uops := older_uops
+    bypLogic.io.alloc_reqs := alloc_reqs
+    bypassed_uop := bypLogic.io.o_uop
     bypassed_uop
   }
 
@@ -227,11 +250,11 @@ class RenameStage(
     32,
     numPhysRegs,
     false,
-    float))
+    float | vector))
   val freelist = Module(new RenameFreeList(
     plWidth,
     numPhysRegs,
-    if (float) 32 else 31))
+    if (float | vector) 32 else 31))
   val busytable = Module(new RenameBusyTable(
     plWidth,
     numPhysRegs,

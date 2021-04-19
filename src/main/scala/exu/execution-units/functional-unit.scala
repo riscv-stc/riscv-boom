@@ -37,21 +37,35 @@ import boom.util._
 object FUConstants
 {
   // bit mask, since a given execution pipeline may support multiple functional units
-  val FUC_SZ = 10
   val FU_X   = BitPat.dontCare(FUC_SZ)
-  val FU_ALU = (1<<0).U(FUC_SZ.W)
-  val FU_JMP = (1<<1).U(FUC_SZ.W)
-  val FU_MEM = (1<<2).U(FUC_SZ.W)
-  val FU_MUL = (1<<3).U(FUC_SZ.W)
-  val FU_DIV = (1<<4).U(FUC_SZ.W)
-  val FU_CSR = (1<<5).U(FUC_SZ.W)
-  val FU_FPU = (1<<6).U(FUC_SZ.W)
-  val FU_FDV = (1<<7).U(FUC_SZ.W)
-  val FU_I2F = (1<<8).U(FUC_SZ.W)
-  val FU_F2I = (1<<9).U(FUC_SZ.W)
+  val FU_ALU_ID = 0
+  val FU_JMP_ID = 1
+  val FU_MEM_ID = 2
+  val FU_MUL_ID = 3
+  val FU_DIV_ID = 4
+  val FU_CSR_ID = 5
+  val FU_FPU_ID = 6
+  val FU_FDV_ID = 7
+  val FU_I2F_ID = 8
+  val FU_F2I_ID = 9
+  val FU_VMX_ID = 10 // vec load /store index vec store data
+  val FUC_SZ = 11
+  val FU_ALU = (1<<FU_ALU_ID).U(FUC_SZ.W)
+  val FU_JMP = (1<<FU_JMP_ID).U(FUC_SZ.W)
+  val FU_MEM = (1<<FU_MEM_ID).U(FUC_SZ.W)
+  val FU_MUL = (1<<FU_MUL_ID).U(FUC_SZ.W)
+  val FU_DIV = (1<<FU_DIV_ID).U(FUC_SZ.W)
+  val FU_CSR = (1<<FU_CSR_ID).U(FUC_SZ.W)
+  val FU_FPU = (1<<FU_FPU_ID).U(FUC_SZ.W)
+  val FU_FDV = (1<<FU_FDV_ID).U(FUC_SZ.W)
+  val FU_I2F = (1<<FU_I2F_ID).U(FUC_SZ.W)
+  val FU_F2I = (1<<FU_F2I_ID).U(FUC_SZ.W)
+  val FU_VMX = (1<<FU_VMX_ID).U(FUC_SZ.W)
 
   // FP stores generate data through FP F2I, and generate address through MemAddrCalc
-  val FU_F2IMEM = 516.U(FUC_SZ.W)
+  def FU_F2IMEM = ((1 << FU_MEM_ID) | (1 << FU_F2I_ID)).U(FUC_SZ.W)
+  // VEC load / store, vs3 read by ALU of Vec Exe Unit
+  def FU_MEMV =   ((1 << FU_MEM_ID) | (1 << FU_VMX_ID)).U(FUC_SZ.W)
 }
 import FUConstants._
 
@@ -283,7 +297,14 @@ abstract class PipelinedFunctionalUnit(
  * @param dataWidth width of the data being operated on in the functional unit
  */
 @chiselName
-class ALUUnit(isJmpUnit: Boolean = false, isCsrUnit: Boolean = false, numStages: Int = 1, dataWidth: Int)(implicit p: Parameters)
+class ALUUnit(
+  isJmpUnit: Boolean = false,
+  isCsrUnit: Boolean = false,
+  numStages: Int = 1,
+  dataWidth: Int,
+  hasVMX: Boolean = false
+  )
+(implicit p: Parameters)
   extends PipelinedFunctionalUnit(
     numStages = numStages,
     numBypassStages = numStages,

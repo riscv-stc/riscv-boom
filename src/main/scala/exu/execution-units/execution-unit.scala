@@ -103,6 +103,7 @@ abstract class ExecutionUnit(
   val hasIfpu          : Boolean       = false,
   val hasFpiu          : Boolean       = false,
   val hasVector        : Boolean       = false,
+  val hasVMX           : Boolean       = false,
   val hasRocc          : Boolean       = false
   )(implicit p: Parameters) extends BoomModule
 {
@@ -165,7 +166,7 @@ abstract class ExecutionUnit(
   if (writesVrf)   {
     io.vresp.bits.fflags.valid := false.B
     io.vresp.bits.predicated := false.B
-    assert(io.vresp.ready)
+//  assert(io.vresp.ready)
   }
   if (writesLlVrf) {
     io.ll_vresp.bits.fflags.valid := false.B
@@ -598,6 +599,7 @@ class FPUExeUnit(
  * @param hasDiv does the exe unit have a divider
  */
 class VecExeUnit(
+  hasVMX         : Boolean = false,
   hasAlu         : Boolean = true,
   hasMul         : Boolean = true,
   hasDiv         : Boolean = true)
@@ -612,7 +614,8 @@ class VecExeUnit(
     hasAlu           = hasAlu,
     hasMul           = hasMul,
     hasDiv           = hasDiv,
-    hasVector        = true)
+    hasVector        = true,
+    hasVMX           = hasVMX)
   with freechips.rocketchip.rocket.constants.MemoryOpConstants
 {
   val out_str =
@@ -631,6 +634,7 @@ class VecExeUnit(
 
   io.fu_types := Mux(hasAlu.B, FU_ALU, 0.U) |
                  Mux(hasMul.B, FU_MUL, 0.U) |
+                 Mux(hasVMX.B, FU_VMX, 0.U) |
                  Mux(!div_busy && hasDiv.B, FU_DIV, 0.U)
 
   // ALU Unit -------------------------------
@@ -661,7 +665,7 @@ class VecExeUnit(
     div.io.req.valid           := io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV) && hasDiv.B
 
     // share write port with the pipelined units
-    div.io.resp.ready := !(vresp_fu_units.map(_.io.resp.valid).reduce(_|_))
+    div.io.resp.ready := !(vresp_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
 
     div_resp_val := div.io.resp.valid
     div_busy     := !div.io.req.ready ||
@@ -679,7 +683,7 @@ class VecExeUnit(
     f.io.req.bits.pred_data := io.req.bits.pred_data
     f.io.req.bits.kill := io.req.bits.kill
     f.io.brupdate := io.brupdate
-    if (f != div) f.io.resp.ready := DontCare
+    if (f != div) f.io.resp.ready := io.vresp.ready
   })
 
   // Outputs (Write Port #0)  ---------------
