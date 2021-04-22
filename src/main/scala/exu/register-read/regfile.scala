@@ -19,7 +19,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 
 import boom.common._
-import boom.util.{BoomCoreStringPrefix}
+import boom.util._
 
 /**
  * IO bundle for a register read port
@@ -50,7 +50,12 @@ class RegisterFileWritePort(val addrWidth: Int, val dataWidth: Int)(implicit p: 
  */
 object WritePort
 {
-  def apply(enq: DecoupledIO[ExeUnitResp], addrWidth: Int, dataWidth: Int, rtype: UInt, vector: Boolean = false)
+  def apply(
+    enq: DecoupledIO[ExeUnitResp],
+    addrWidth: Int,
+    dataWidth: Int,
+    rtype: UInt,
+    vector: Boolean = false, eLenb: Int = 8, eLenSelSz: Int = 4)
     (implicit p: Parameters): Valid[RegisterFileWritePort] = {
      val wport = Wire(Valid(new RegisterFileWritePort(addrWidth, dataWidth)))
      val enq_uop = enq.bits.uop
@@ -61,9 +66,10 @@ object WritePort
      when (vector.B) {
        val vstart = enq_uop.vstart
        val vsew = enq_uop.vconfig.vtype.vsew
-       val rinc = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(8,6),vstart(7,5),vstart(6,4),vstart(5,3)))
-       val rsel = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(5,3),vstart(4,2),vstart(3,1),vstart(2,0)))
-       wport.bits.addr := Cat(enq_uop.pdst+rinc(2,0), rsel(2,0))
+       val ecnt = enq_uop.v_split_ecnt
+       val (rsel, rmsk) = VRegSel(vstart, vsew, ecnt, eLenb, eLenSelSz)
+       wport.bits.addr := Cat(enq_uop.pdst, rsel)
+//     wport.bits.mask := rmsk
      }
      enq.ready       := true.B
      wport

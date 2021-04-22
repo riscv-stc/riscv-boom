@@ -658,7 +658,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   val vLen_ecnt = vLen.U >> (vsew+3.U)
   val split_ecnt = Mux(is_v_ls_index | is_v_ls_stride, 1.U,
                    Mux(is_v_ls, eLen_ecnt, vLen_ecnt))
-  val total_ecnt  = Mux(is_v_ls_index | is_v_ls_stride, vlmax, vlmax >> vsew(1,0))
+  val total_ecnt  = vlmax
   val split_last = vstart + split_ecnt === total_ecnt
 
   when (io.kill) {

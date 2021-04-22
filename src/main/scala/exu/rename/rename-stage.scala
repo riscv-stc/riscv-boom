@@ -275,8 +275,15 @@ class RenameStage(
                              (~ren2_uops(w).v_is_split || ren2_uops(w).v_re_alloc)
     ren2_br_tags(w).valid := ren2_fire(w) && ren2_uops(w).allocate_brtag
 
-    com_valids(w)         := io.com_uops(w).ldst_val && io.com_uops(w).dst_rtype === rtype && io.com_valids(w)
-    rbk_valids(w)         := io.com_uops(w).ldst_val && io.com_uops(w).dst_rtype === rtype && io.rbk_valids(w)
+    if (usingVector && vector) {
+      com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).dst_rtype === rtype && io.com_valids(w) &&
+                       (~io.com_uops(w).v_is_split || io.com_uops(w).v_is_last)
+      rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).dst_rtype === rtype && io.rbk_valids(w) &&
+                       (~io.com_uops(w).v_is_split || io.com_uops(w).v_is_first)
+    } else {
+      com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).dst_rtype === rtype && io.com_valids(w)
+      rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).dst_rtype === rtype && io.rbk_valids(w)
+    }
     ren2_br_tags(w).bits  := ren2_uops(w).br_tag
   }
 
@@ -369,8 +376,11 @@ class RenameStage(
   busytable.io.rebusy_reqs := ren2_alloc_reqs
   busytable.io.wb_valids := io.wakeups.map(_.valid)
   busytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
-  if (usingVector & vector) {
-    busytable.io.wb_bits.map(b => b := 0.U) // FIXME
+  if (usingVector && vector) {
+    for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) {
+      val (rsel, rmsk) = VRegSel(wk.bits.uop, eLenb, eLenSelSz)
+      bs := rmsk << Cat(rsel, 0.U(3.W))
+    }
   }
 
   assert (!(io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype =/= rtype).reduce(_||_)),
@@ -380,9 +390,10 @@ class RenameStage(
     if (usingVector) {
       if (vector) {
         val vbusy = busytable.io.vbusy_resps(w)
-        uop.prs1_busy := vbusy.prs1_busy & Fill(vLenb, (uop.lrs1_rtype === rtype).asUInt)
-        uop.prs2_busy := vbusy.prs2_busy & Fill(vLenb, (uop.lrs2_rtype === rtype).asUInt)
-        uop.prs3_busy := vbusy.prs3_busy & Fill(vLenb, uop.frs3_en.asUInt)
+        val (rsel, rmsk) = VRegSel(uop, eLenb, eLenSelSz)
+        uop.prs1_busy := vbusy.prs1_busy & Fill(vLenb, (uop.lrs1_rtype === rtype).asUInt) & (rmsk << Cat(rsel, 0.U(3.W)))
+        uop.prs2_busy := vbusy.prs2_busy & Fill(vLenb, (uop.lrs2_rtype === rtype).asUInt) & (rmsk << Cat(rsel, 0.U(3.W)))
+        uop.prs3_busy := vbusy.prs3_busy & Fill(vLenb, uop.frs3_en.asUInt) & (rmsk << Cat(rsel, 0.U(3.W)))
       } else {
         val busy = busytable.io.busy_resps(w)
         uop.prs1_busy := Cat(0.U, (uop.lrs1_rtype === rtype && busy.prs1_busy).asUInt)

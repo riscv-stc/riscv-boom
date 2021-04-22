@@ -674,18 +674,38 @@ object VDataSwap {
   }
 }
 
-object VRegMask {
+object MaskGen {
   def apply(lsb: UInt, len: UInt, width: Int): UInt = {
     val ret = Wire(UInt(width.W))
     val full = Fill(width, 1.U(1.W))
     ret := (full << lsb) & (full >> (width.U-lsb-len))
     ret
   }
+}
 
+object VRegMask {
   def apply(vstart: UInt, vsew: UInt, ecnt: UInt, elenb: Int): UInt = {
     val lsb = (vstart << vsew)(2, 0)
     val len = ecnt << vsew
-    val ret = apply(lsb, len, elenb)
+    val ret = MaskGen(lsb, len, elenb)
+    ret
+  }
+}
+
+object VRegSel {
+  /**
+   * Get an eLen piece selector of a vLen register
+   */
+  def apply(vstart: UInt, vsew: UInt, ecnt: UInt, elenb: Int, eLenSelSz: Int): (UInt, UInt) = {
+    val rsel = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(eLenSelSz+2,3),vstart(eLenSelSz+1,2),vstart(eLenSelSz,1),vstart(eLenSelSz-1,0)))
+    val emsk = VRegMask(vstart, vsew, ecnt, elenb)
+    val rmsh = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(2,0),vstart(1,0),vstart(0),0.U))
+    val rmsk = (emsk << rmsh)(elenb-1,0)
+    (rsel, rmsk)
+  }
+
+  def apply(uop: MicroOp, elenb: Int, eLenSelSz: Int): (UInt, UInt) = {
+    val ret = apply(uop.vstart, uop.vconfig.vtype.vsew, uop.v_split_ecnt, elenb, eLenSelSz)
     ret
   }
 }

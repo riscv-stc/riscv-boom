@@ -15,12 +15,12 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
-import freechips.rocketchip.util.{Str}
+import freechips.rocketchip.util._
 
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.exu.FUConstants._
-import boom.util.{BoolToChar}
+import boom.util._
 
 /**
  * Class used for configurations
@@ -53,10 +53,13 @@ trait IssueUnitConstants
  *
  * @param pregSz size of physical destination register
  */
-class IqWakeup(val pregSz: Int) extends Bundle
-{
+class IqWakeup(
+  val pregSz: Int,
+  val vector: Boolean = false,
+)(implicit p: Parameters) extends BoomBundle {
   val pdst = UInt(width=pregSz.W)
   val poisoned = Bool()
+  val uop = if (vector) new MicroOp() else null
 }
 
 /**
@@ -68,14 +71,14 @@ class IqWakeup(val pregSz: Int) extends Bundle
 class IssueUnitIO(
   val issueWidth: Int,
   val numWakeupPorts: Int,
-  val dispatchWidth: Int)
-  (implicit p: Parameters) extends BoomBundle
-{
+  val dispatchWidth: Int,
+  val vector: Boolean = false)
+(implicit p: Parameters) extends BoomBundle {
   val dis_uops         = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
 
   val iss_valids       = Output(Vec(issueWidth, Bool()))
   val iss_uops         = Output(Vec(issueWidth, new MicroOp()))
-  val wakeup_ports     = Flipped(Vec(numWakeupPorts, Valid(new IqWakeup(maxPregSz))))
+  val wakeup_ports     = Flipped(Vec(numWakeupPorts, Valid(new IqWakeup(maxPregSz, vector))))
   val pred_wakeup_port = Flipped(Valid(UInt(log2Ceil(ftqSz).W)))
 
   val spec_ld_wakeup   = Flipped(Vec(memWidth, Valid(UInt(width=maxPregSz.W))))
@@ -105,12 +108,10 @@ abstract class IssueUnit(
   val issueWidth: Int,
   val numWakeupPorts: Int,
   val iqType: BigInt,
-  val dispatchWidth: Int)
-  (implicit p: Parameters)
-  extends BoomModule
-  with IssueUnitConstants
-{
-  val io = IO(new IssueUnitIO(issueWidth, numWakeupPorts, dispatchWidth))
+  val dispatchWidth: Int,
+  val vector: Boolean = false)
+(implicit p: Parameters) extends BoomModule with IssueUnitConstants {
+  val io = IO(new IssueUnitIO(issueWidth, numWakeupPorts, dispatchWidth, vector))
 
   //-------------------------------------------------------------
   // Set up the dispatch uops
@@ -128,20 +129,18 @@ abstract class IssueUnit(
       when ((io.dis_uops(w).bits.uopc === uopSTA && io.dis_uops(w).bits.lrs2_rtype === RT_FIX) ||
              io.dis_uops(w).bits.uopc === uopAMO_AG) {
         dis_uops(w).iw_state := s_valid_2
+      } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopSTA, uopVSA) && io.dis_uops(w).bits.lrs2_rtype =/= RT_FIX) {
         // For store addr gen for FP, rs2 is the FP/VEC register, and we don't wait for that here
-      } .elsewhen (io.dis_uops(w).bits.uopc === uopSTA && io.dis_uops(w).bits.lrs2_rtype =/= RT_FIX) {
         when (io.dis_uops(w).bits.fp_val) {
-          dis_uops(w).lrs2_rtype := RT_X
+          //dis_uops(w).lrs2_rtype := RT_X
           dis_uops(w).prs2_busy  := 0.U
         }
       }
-      when (!(usingVector.B && io.dis_uops(w).bits.is_rvv && io.dis_uops(w).bits.frs3_en)) {
-        dis_uops(w).prs3_busy := 0.U
-      }
+      dis_uops(w).prs3_busy := 0.U
     } else if (iqType == IQT_FP.litValue || iqType == IQT_VEC.litValue) {
       // FP/VEC "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
-      when (io.dis_uops(w).bits.uopc === uopSTA) {
-        dis_uops(w).lrs1_rtype := RT_X
+      when (io.dis_uops(w).bits.uopc.isOneOf(uopSTA, uopVSA)) {
+        //dis_uops(w).lrs1_rtype := RT_FIX
         dis_uops(w).prs1_busy  := 0.U
       }
     }
@@ -155,7 +154,10 @@ abstract class IssueUnit(
   //-------------------------------------------------------------
   // Issue Table
 
-  val slots = for (i <- 0 until numIssueSlots) yield { val slot = Module(new IssueSlot(numWakeupPorts)); slot }
+  val slots = for (i <- 0 until numIssueSlots) yield {
+    val slot = Module(new IssueSlot(numWakeupPorts, vector));
+    slot
+  }
   val issue_slots = VecInit(slots.map(_.io))
 
   for (i <- 0 until numIssueSlots) {

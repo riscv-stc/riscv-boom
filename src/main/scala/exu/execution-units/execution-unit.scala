@@ -641,7 +641,7 @@ class VecExeUnit(
   var alu: ALUUnit = null
   if (hasAlu) {
     alu = Module(new ALUUnit(numStages = numBypassStages, dataWidth = eLen))
-    alu.io.req.valid := (io.req.valid && io.req.bits.uop.fu_code === FU_ALU)
+    alu.io.req.valid := io.req.valid && (io.req.bits.uop.fu_code === FU_ALU || io.req.bits.uop.fu_code_is(FU_VMX))
     vec_fu_units += alu
     vresp_fu_units += alu
   }

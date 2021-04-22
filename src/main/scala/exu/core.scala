@@ -149,7 +149,7 @@ class BoomCore(implicit p: Parameters) extends BoomModule
                            jmp_unit.numBypassStages,
                            xLen))
   val rob              = Module(new Rob(
-                           numIrfWritePorts + numFpWakeupPorts, // +memWidth for ll writebacks
+                           numIrfWritePorts+numFpWakeupPorts+numVecWakeupPorts, // +memWidth for ll writebacks
                            numFpWakeupPorts))
   // Used to wakeup registers in rename and issue. ROB needs to listen to something else.
   val int_iss_wakeups  = Wire(Vec(numIntIssueWakeupPorts, Valid(new ExeUnitResp(xLen))))
@@ -696,8 +696,9 @@ class BoomCore(implicit p: Parameters) extends BoomModule
       dis_uops(w).prs2_busy := Mux1H(Seq((dis_uops(w).lrs2_rtype === RT_FIX,          i_uop.prs2_busy),
                                          (dis_uops(w).lrs2_rtype === RT_FLT,          f_uop.prs2_busy),
                                          (dis_uops(w).lrs2_rtype === RT_VEC,          v_uop.prs2_busy)))
-      dis_uops(w).prs3_busy := Mux1H(Seq((dis_uops(w).is_rvv && dis_uops(w).frs3_en,  v_uop.prs3_busy),
-                                         (!dis_uops(w).is_rvv && dis_uops(w).frs3_en, f_uop.prs3_busy)))
+      dis_uops(w).prs3_busy := Mux1H(Seq((dis_uops(w).frs3_en && dis_uops(w).is_rvv,  v_uop.prs3_busy),
+                                         (dis_uops(w).frs3_en && !dis_uops(w).is_rvv, f_uop.prs3_busy),
+                                         (!dis_uops(w).frs3_en,                       0.U)))
     } else {
       dis_uops(w).prs1_busy := i_uop.prs1_busy & (dis_uops(w).lrs1_rtype === RT_FIX) |
                                f_uop.prs1_busy & (dis_uops(w).lrs1_rtype === RT_FLT)
@@ -940,8 +941,8 @@ class BoomCore(implicit p: Parameters) extends BoomModule
     fp_rename_stage.io.wakeups := DontCare
   }
   if (usingVector) {
-    for ((renport, fpport) <- v_rename_stage.io.wakeups zip v_pipeline.io.wakeups) {
-       renport <> fpport
+    for ((renport, vport) <- v_rename_stage.io.wakeups zip v_pipeline.io.wakeups) {
+       renport <> vport
     }
   } else {
     v_rename_stage.io.wakeups := DontCare
@@ -1332,8 +1333,8 @@ class BoomCore(implicit p: Parameters) extends BoomModule
       cnt += 1
     }
   }
-
   require(cnt == numIrfWritePorts)
+
   if (usingFPU) {
     for ((wdata, wakeup) <- fp_pipeline.io.debug_wb_wdata zip fp_pipeline.io.wakeups) {
       rob.io.wb_resps(cnt) <> wakeup
@@ -1350,9 +1351,24 @@ class BoomCore(implicit p: Parameters) extends BoomModule
         "[core] FP wakeup does not involve an FP instruction.")
     }
   }
+  require (f_cnt == rob.numFpuPorts)
+
+  if (usingVector) {
+    for ((wdata, wakeup) <- v_pipeline.io.debug_wb_wdata zip v_pipeline.io.wakeups) {
+      rob.io.wb_resps(cnt) <> wakeup
+      rob.io.debug_wb_valids(cnt) := wakeup.valid
+      rob.io.debug_wb_wdata(cnt) := wdata
+      cnt += 1
+
+      assert (!(wakeup.valid && wakeup.bits.uop.dst_rtype =/= RT_VEC),
+        "[core] VEC wakeup does not write back to a VEC register.")
+
+      assert (!(wakeup.valid && !wakeup.bits.uop.is_rvv),
+        "[core] VEC wakeup does not involve an VEC instruction.")
+    }
+  }
 
   require (cnt == rob.numWakeupPorts)
-  require (f_cnt == rob.numFpuPorts)
 
   // branch resolution
   rob.io.brupdate <> brupdate

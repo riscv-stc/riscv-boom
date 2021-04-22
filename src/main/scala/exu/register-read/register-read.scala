@@ -41,7 +41,8 @@ class RegisterRead(
                         // numTotalReadPorts)
   numTotalBypassPorts: Int,
   numTotalPredBypassPorts: Int,
-  registerWidth: Int
+  registerWidth: Int,
+  vector: Boolean = false
 )(implicit p: Parameters) extends BoomModule
 {
   val io = IO(new Bundle {
@@ -115,9 +116,19 @@ class RegisterRead(
     val rs3_addr = io.iss_uops(w).prs3
     val pred_addr = io.iss_uops(w).ppred
 
-    if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := rs1_addr
-    if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := rs2_addr
-    if (numReadPorts > 2) io.rf_read_ports(idx+2).addr := rs3_addr
+    if (vector) {
+      val vstart = io.iss_uops(w).vstart
+      val vsew = io.iss_uops(w).vconfig.vtype.vsew
+      val ecnt = io.iss_uops(w).v_split_ecnt
+      val (rsel, rmsk) = VRegSel(vstart, vsew, ecnt, eLenb, eLenSelSz)
+      if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := Cat(rs1_addr, rsel)
+      if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := Cat(rs2_addr, rsel)
+      if (numReadPorts > 2) io.rf_read_ports(idx+2).addr := Cat(rs3_addr, rsel)
+    } else {
+      if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := rs1_addr
+      if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := rs2_addr
+      if (numReadPorts > 2) io.rf_read_ports(idx+2).addr := rs3_addr
+    }
 
     if (enableSFBOpt) io.prf_read_ports(w).addr := pred_addr
 

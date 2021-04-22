@@ -870,7 +870,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     }
     val fp_stdata_fire = io.core.fp_stdata.fire() && (w == 0).B
     val v_stdata_fire = io.core.v_stdata.fire() && (w == 0).B
-    when (will_fire_std_incoming(w) || will_fire_stad_incoming(w) || fp_stdata_fire)
+    when (will_fire_std_incoming(w) || will_fire_stad_incoming(w) || fp_stdata_fire || v_stdata_fire)
     {
       val sidx = Mux(will_fire_std_incoming(w) || will_fire_stad_incoming(w), stq_incoming_idx(w),
                  Mux(io.core.fp_stdata.valid, io.core.fp_stdata.bits.uop.stq_idx,
@@ -1352,7 +1352,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         assert(send_iresp ^ send_fresp ^ send_vresp)
         dmem_resp_fired(w) := true.B
 
-        ldq(ldq_idx).bits.succeeded      := send_iresp
+        ldq(ldq_idx).bits.succeeded      := true.B
         ldq(ldq_idx).bits.debug_wb_data  := io.dmem.resp(w).bits.data
       }
         .elsewhen (io.dmem.resp(w).bits.uop.uses_stq)
