@@ -16,6 +16,7 @@ import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.VConfig
+import freechips.rocketchip.util.{ElaborationArtefacts}
 
 import boom.exu.FUConstants
 
@@ -843,5 +844,22 @@ object MicroOpcodes extends Enumeration {
   val uopVFSLIDE1UP     = uopVFSLIDE1UP_enum.id.U(UOPC_SZ.W)
   val uopVFSLIDE1DOWN_enum = Value
   val uopVFSLIDE1DOWN   = uopVFSLIDE1DOWN_enum.id.U(UOPC_SZ.W)
+  require(log2Ceil(maxId) <= UOPC_SZ)
+
+  def alias(v: Value): String = {
+    val enum = raw"uop(\w+)_enum".r
+    val op = enum.findFirstMatchIn(v.toString).get.group(1)
+    val ret = s"${op}\t\t${v.id}\t\tNULL"
+    ret
+  }
+
+  def gen_aliases(): String = {
+    val all = values.map(alias(_)).mkString("\n")
+    val ret = s"alias uopc\n$all\nendalias"
+    ret
+  }
+
+  // generate aliases of uop encodings for verdi
+  ElaborationArtefacts.add("uop.alias", gen_aliases)
 }
 
