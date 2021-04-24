@@ -524,7 +524,7 @@ class BoomCore(implicit p: Parameters) extends BoomModule
     decode_units(w).io.csr_decode      <> csr.io.decode(w)
     decode_units(w).io.interrupt       := csr.io.interrupt
     decode_units(w).io.interrupt_cause := csr.io.interrupt_cause
-    decode_units(w).io.vconfig         := csr.io.vector.get.vconfig
+    decode_units(w).io.csr_vconfig     := csr.io.vector.get.vconfig
 
     dec_uops(w) := decode_units(w).io.deq.uop
   }

@@ -67,7 +67,8 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
                          exe_units.numVrfWritePorts + memWidth,
                          eLen,
                          // No bypassing for any VEC units, + memWidth for ll_wb
-                         Seq.fill(exe_units.numVrfWritePorts + memWidth){ false }))
+                         Seq.fill(exe_units.numVrfWritePorts + memWidth){ false },
+                         vector = true))
   val vregister_read = Module(new RegisterRead(
                          vecWidth,
                          exe_units.withFilter(_.readsVrf).map(_.supportedFuncUnits),
@@ -180,7 +181,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   // Cut up critical path by delaying the write by a cycle.
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
-  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, fpregSz, eLen, RT_VEC, true, eLenb, eLenSelSz))
+  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vpregSz, eLen, RT_VEC, true, eLenb, eLenSelSz))
 
   assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
   when (io.from_int.valid) { assert (io.from_int.bits.uop.rf_wen && io.from_int.bits.uop.dst_rtype === RT_VEC) }
@@ -188,7 +189,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   var w_cnt = 1
   for (i <- 1 until memWidth) {
-    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), fpregSz, eLen, RT_VEC, true, eLenb, eLenSelSz))
+    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), vpregSz, eLen, RT_VEC, true, eLenb, eLenSelSz))
     w_cnt += 1
   }
   for (eu <- exe_units) {
@@ -205,8 +206,8 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       }
       val (rsel, rmsk) = VRegSel(vstart, vsew, ecnt, eLenb, eLenSelSz)
       vregfile.io.write_ports(w_cnt).bits.addr := Cat(eu_vresp_uop.pdst, rsel)
-//    vregfile.io.write_ports(w_cnt).bits.mask := rmsk
-      vregfile.io.write_ports(w_cnt).bits.data := eu_vresp.bits.data
+      vregfile.io.write_ports(w_cnt).bits.mask := rmsk
+      vregfile.io.write_ports(w_cnt).bits.data := VDataFill(eu_vresp.bits.data, vsew, eLen)
       eu.io.vresp.ready                        := true.B
       when (eu_vresp.valid && eu_vresp_uop.uopc != uopVSA) {
         //assert(eu.io.vresp.ready, "No backpressuring the Vec EUs")

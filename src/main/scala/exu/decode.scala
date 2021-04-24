@@ -509,9 +509,9 @@ class DecodeUnitIo(implicit p: Parameters) extends BoomBundle
   // from CSRFile
   val status = Input(new freechips.rocketchip.rocket.MStatus())
   val csr_decode = Flipped(new freechips.rocketchip.rocket.CSRDecodeIO)
+  val csr_vconfig = Input(new VConfig)
   val interrupt = Input(Bool())
   val interrupt_cause = Input(UInt(xLen.W))
-  val vconfig = Input(new VConfig)
 }
 
 /**
@@ -647,18 +647,18 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   // vector stuff
   //
   val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
-  val is_v_ls_stride = false.B // FIXME
-  val is_v_ls_index = false.B // FIXME
+  //val is_v_ls_stride = false.B
+  val is_v_ls_index = false.B
   val vstart = RegInit(0.U((vLenSz+1).W))
-  val vlmax = io.vconfig.vtype.vlMax
-  val vsew = io.vconfig.vtype.vsew
+  val vlmax = io.csr_vconfig.vtype.vlMax
+  val vsew = io.csr_vconfig.vtype.vsew
 
   //val vLen_ecnt = vLen.U >> (vsew+3.U)
-  val eLen_ecnt = eLen.U >> (vsew+3.U)
-  val vLen_ecnt = vLen.U >> (vsew+3.U)
-  val split_ecnt = Mux(is_v_ls_index | is_v_ls_stride, 1.U,
-                   Mux(is_v_ls, eLen_ecnt, vLen_ecnt))
-  val total_ecnt  = vlmax
+  //val eLen_ecnt = eLen.U >> (vsew+3.U)
+  //val vLen_ecnt = vLen.U >> (vsew+3.U)
+  val split_ecnt = 1.U //Mux(is_v_ls, 1.U, vLen_ecnt)
+  // for store, we can skip inactive locations; otherwise, we have to visit every element
+  val total_ecnt = Mux(cs.uses_stq, io.csr_vconfig.vl, vlmax)
   val split_last = vstart + split_ecnt === total_ecnt
 
   when (io.kill) {
@@ -672,13 +672,12 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.is_rvv      := cs.is_rvv
   uop.v_ls_ew     := Mux(is_v_ls_index, vsew, cs.v_ls_ew)
   when (usingVector.B && is_v_ls) { // update mem size
-    uop.mem_size  := Mux(is_v_ls_stride | is_v_ls_index, uop.v_ls_ew, log2Ceil(eLenb).U)
+    uop.mem_size  := uop.v_ls_ew
     uop.mem_signed:= false.B
   }
   uop.v_unmasked  := cs.use_vm  // TODO: exclude special cases
   uop.vxsat       := false.B
-  uop.vconfig.vl  := io.vconfig.vl
-  uop.vconfig.vtype := io.vconfig.vtype
+  uop.vconfig     := io.csr_vconfig
   uop.vstart      := vstart
   uop.v_is_split  := cs.can_be_split
   uop.v_split_ecnt:= split_ecnt
@@ -687,6 +686,15 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.v_is_last   := split_last
   val ren_mask = ~(Fill(vLenSz,1.U) << (7.U - vsew))
   uop.v_re_alloc  := (vstart & ren_mask(vLenSz,0)) === 0.U
+
+  // handle load tail: dispatch to vector pipe
+  when (cs.is_rvv && cs.uses_ldq && vstart >= io.csr_vconfig.vl) {
+    uop.iq_type := IQT_VEC
+    uop.fu_code := FU_VMX
+    uop.uses_ldq := false.B
+    uop.frs3_en := true.B
+    uop.lrs3 := inst(RD_MSB,RD_LSB)
+  }
 
   io.enq_stall := cs.can_be_split & ~uop.v_is_last
   io.deq.uop := uop

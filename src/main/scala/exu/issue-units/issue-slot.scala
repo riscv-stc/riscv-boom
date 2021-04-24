@@ -199,13 +199,13 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
   when (io.in_uop.valid) {
     if (usingVector) {
       if (vector) {
-        val in_vstart = io.in_uop.bits.vstart
-        val in_vsew = io.in_uop.bits.vconfig.vtype.vsew
-        val in_ecnt = io.in_uop.bits.v_split_ecnt
-        val (in_rsel, in_mask) = VRegSel(in_vstart, in_vsew, in_ecnt, eLenb, eLenSelSz)
-        p1 := ~io.in_uop.bits.prs1_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
-        p2 := ~io.in_uop.bits.prs2_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
-        p3 := ~io.in_uop.bits.prs3_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
+//      val in_vstart = io.in_uop.bits.vstart
+//      val in_vsew = io.in_uop.bits.vconfig.vtype.vsew
+//      val in_ecnt = io.in_uop.bits.v_split_ecnt
+//      val (in_rsel, in_mask) = VRegSel(in_vstart, in_vsew, in_ecnt, eLenb, eLenSelSz)
+//      p1 := ~io.in_uop.bits.prs1_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
+//      p2 := ~io.in_uop.bits.prs2_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
+//      p3 := ~io.in_uop.bits.prs3_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
       } else {
         p1 := !io.in_uop.bits.prs1_busy(0)
         p2 := !io.in_uop.bits.prs2_busy(0)
@@ -249,15 +249,28 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
       val nx_vsew = next_uop.vconfig.vtype.vsew
       val nx_ecnt = next_uop.v_split_ecnt
       val (nx_sel, nx_mask) = VRegSel(nx_vstart, nx_vsew, nx_ecnt, eLenb, eLenSelSz)
-      when (wk_valid && (wk_pdst === next_uop.prs1)) {
-        p1 := (p1 | (wk_mask << Cat(wk_sel, 0.U(3.W)))) & (nx_mask << Cat(nx_sel, 0.U(3.W)))
-      }
-      when (wk_valid && (wk_pdst === next_uop.prs2)) {
-        p2 := (p2 | (wk_mask << Cat(wk_sel, 0.U(3.W)))) & (nx_mask << Cat(nx_sel, 0.U(3.W)))
-      }
-      when (wk_valid && (wk_pdst === next_uop.prs3)) {
-        p3 := (p3 | (wk_mask << Cat(wk_sel, 0.U(3.W)))) & (nx_mask << Cat(nx_sel, 0.U(3.W)))
-      }
+      val in_vstart = io.in_uop.bits.vstart
+      val in_vsew = io.in_uop.bits.vconfig.vtype.vsew
+      val in_ecnt = io.in_uop.bits.v_split_ecnt
+      val (in_rsel, in_mask) = VRegSel(in_vstart, in_vsew, in_ecnt, eLenb, eLenSelSz)
+      val wk_rs1 = wk_valid && (wk_pdst === next_uop.prs1)
+      val wk_rs2 = wk_valid && (wk_pdst === next_uop.prs2)
+      val wk_rs3 = wk_valid && (wk_pdst === next_uop.prs3) && next_uop.frs3_en
+//    when (wk_valid && (wk_pdst === next_uop.prs1)) {
+        p1 := p1 |
+              ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rs1.asUInt)) |
+              (~io.in_uop.bits.prs1_busy & (in_mask << Cat(in_rsel, 0.U(3.W))) & Fill(vLenb, io.in_uop.valid.asUInt))
+//    }
+//    when (wk_valid && (wk_pdst === next_uop.prs2)) {
+        p2 := p2 |
+              ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rs2.asUInt)) |
+              (~io.in_uop.bits.prs1_busy & (in_mask << Cat(in_rsel, 0.U(3.W))) & Fill(vLenb, io.in_uop.valid.asUInt))
+//    }
+//    when (wk_valid && (wk_pdst === next_uop.prs3)) {
+        p3 := p3 |
+              ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rs3.asUInt)) |
+              (~io.in_uop.bits.prs1_busy & (in_mask << Cat(in_rsel, 0.U(3.W))) & Fill(vLenb, io.in_uop.valid.asUInt))
+//    }
     } else {
       when (wk_valid && (wk_pdst === next_uop.prs1)) {
         p1 := true.B
@@ -342,7 +355,8 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
   // micro-op will vacate due to grant.
   val may_vacate = io.grant && ((state === s_valid_1) || (state === s_valid_2) && ppred &&
                    pcheck(p1) && plast(p1) &&
-                   pcheck(p2) && plast(p2))
+                   pcheck(p2) && plast(p2) &&
+                   pcheck(p3) && plast(p3))
   val squash_grant = io.ldspec_miss && (p1_poisoned || p2_poisoned)
   io.will_be_valid := is_valid && !(may_vacate && !squash_grant)
 

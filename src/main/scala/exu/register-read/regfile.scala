@@ -39,10 +39,11 @@ class RegisterFileReadPortIO(val addrWidth: Int, val dataWidth: Int)(implicit p:
  * @param addrWidth size of register address in bits
  * @param dataWidth size of register in bits
  */
-class RegisterFileWritePort(val addrWidth: Int, val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
+class RegisterFileWritePort(val addrWidth: Int, val dataWidth: Int, val vector: Boolean = false)(implicit p: Parameters) extends BoomBundle
 {
   val addr = UInt(addrWidth.W)
   val data = UInt(dataWidth.W)
+  val mask = if (vector) UInt(eLenb.W) else null
 }
 
 /**
@@ -57,21 +58,23 @@ object WritePort
     rtype: UInt,
     vector: Boolean = false, eLenb: Int = 8, eLenSelSz: Int = 4)
     (implicit p: Parameters): Valid[RegisterFileWritePort] = {
-     val wport = Wire(Valid(new RegisterFileWritePort(addrWidth, dataWidth)))
+     val wport = Wire(Valid(new RegisterFileWritePort(addrWidth, dataWidth, vector)))
      val enq_uop = enq.bits.uop
 
-     wport.valid     := enq.valid && enq_uop.dst_rtype === rtype
-     wport.bits.addr := enq_uop.pdst
-     wport.bits.data := enq.bits.data
-     when (vector.B) {
+     wport.valid := enq.valid && enq_uop.dst_rtype === rtype
+     if (vector) {
        val vstart = enq_uop.vstart
        val vsew = enq_uop.vconfig.vtype.vsew
        val ecnt = enq_uop.v_split_ecnt
        val (rsel, rmsk) = VRegSel(vstart, vsew, ecnt, eLenb, eLenSelSz)
        wport.bits.addr := Cat(enq_uop.pdst, rsel)
-//     wport.bits.mask := rmsk
+       wport.bits.mask := rmsk
+       wport.bits.data := VDataFill(enq.bits.data, vsew, eLenb*8)
+     } else {
+       wport.bits.addr := enq_uop.pdst
+       wport.bits.data := enq.bits.data
      }
-     enq.ready       := true.B
+     enq.ready := true.B
      wport
   }
 }
@@ -90,12 +93,13 @@ abstract class RegisterFile(
   numReadPorts: Int,
   numWritePorts: Int,
   registerWidth: Int,
-  bypassableArray: Seq[Boolean]) // which write ports can be bypassed to the read ports?
+  bypassableArray: Seq[Boolean], // which write ports can be bypassed to the read ports?
+  vector: Boolean = false)
   (implicit p: Parameters) extends BoomModule
 {
   val io = IO(new BoomBundle {
     val read_ports = Vec(numReadPorts, new RegisterFileReadPortIO(maxPregSz, registerWidth))
-    val write_ports = Flipped(Vec(numWritePorts, Valid(new RegisterFileWritePort(maxPregSz, registerWidth))))
+    val write_ports = Flipped(Vec(numWritePorts, Valid(new RegisterFileWritePort(maxPregSz, registerWidth, vector))))
   })
 
   private val rf_cost = (numReadPorts + numWritePorts) * (numReadPorts + 2*numWritePorts)
@@ -122,9 +126,10 @@ class RegisterFileSynthesizable(
    numReadPorts: Int,
    numWritePorts: Int,
    registerWidth: Int,
-   bypassableArray: Seq[Boolean])
+   bypassableArray: Seq[Boolean],
+   vector: Boolean = false)
    (implicit p: Parameters)
-   extends RegisterFile(numRegisters, numReadPorts, numWritePorts, registerWidth, bypassableArray)
+   extends RegisterFile(numRegisters, numReadPorts, numWritePorts, registerWidth, bypassableArray, vector)
 {
   // --------------------------------------------------------------
 
@@ -174,7 +179,17 @@ class RegisterFileSynthesizable(
 
   for (wport <- io.write_ports) {
     when (wport.valid) {
-      regfile(wport.bits.addr) := wport.bits.data
+      if (vector) {
+        val old_data = regfile(wport.bits.addr)
+        val new_data = Wire(Vec(eLenb, UInt(8.W)))
+        require(registerWidth == eLen)
+        for (i <- 0 until eLenb) {
+          new_data(i) := Mux(wport.bits.mask(i), wport.bits.data(i*8+7,i*8), old_data(i*8+7,i*8))
+        }
+        regfile(wport.bits.addr) := Cat(new_data.reverse)
+      } else {
+        regfile(wport.bits.addr) := wport.bits.data
+      }
     }
   }
 

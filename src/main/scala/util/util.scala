@@ -699,13 +699,21 @@ object VRegSel {
   def apply(vstart: UInt, vsew: UInt, ecnt: UInt, elenb: Int, eLenSelSz: Int): (UInt, UInt) = {
     val rsel = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(eLenSelSz+2,3),vstart(eLenSelSz+1,2),vstart(eLenSelSz,1),vstart(eLenSelSz-1,0)))
     val emsk = VRegMask(vstart, vsew, ecnt, elenb)
-    val rmsh = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(2,0),vstart(1,0),vstart(0),0.U))
-    val rmsk = (emsk << rmsh)(elenb-1,0)
-    (rsel, rmsk)
+    (rsel, emsk)
   }
 
   def apply(uop: MicroOp, elenb: Int, eLenSelSz: Int): (UInt, UInt) = {
     val ret = apply(uop.vstart, uop.vconfig.vtype.vsew, uop.v_split_ecnt, elenb, eLenSelSz)
+    ret
+  }
+}
+
+object VDataFill {
+  def apply(data: UInt, vsew: UInt, elen: Int): UInt = {
+    val ret = Mux1H(UIntToOH(vsew(1,0)), Seq(Fill(8,data(elen/8-1,0)),
+                                             Fill(4,data(elen/4-1,0)),
+                                             Fill(2,data(elen/2-1,0)),
+                                             data(elen-1,0)))
     ret
   }
 }

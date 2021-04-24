@@ -414,12 +414,6 @@ class ALUExeUnit(
     }
     if (usingVector) {
       io.ll_vresp <> io.lsu_io.vresp
-//    io.ll_vresp.data := Mux1H(Seq(
-//      (io.lsu_io.vresp.v_ls_ew === 0.U, io.lsu_io.vresp.data),
-//      (io.lsu_io.vresp.v_ls_ew === 1.U, VDataSwap(io.lsu_io.vresp.data, 1, eLen)),
-//      (io.lsu_io.vresp.v_ls_ew === 2.U, VDataSwap(io.lsu_io.vresp.data, 2, eLen)),
-//      (io.lsu_io.vresp.v_ls_ew === 3.U, VDataSwap(io.lsu_io.vresp.data, 3, eLen))
-//    )
     }
   }
 

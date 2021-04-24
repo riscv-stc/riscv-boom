@@ -137,11 +137,19 @@ abstract class IssueUnit(
         }
       }
       dis_uops(w).prs3_busy := 0.U
-    } else if (iqType == IQT_FP.litValue || iqType == IQT_VEC.litValue) {
-      // FP/VEC "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
-      when (io.dis_uops(w).bits.uopc.isOneOf(uopSTA, uopVSA)) {
+    } else if (iqType == IQT_FP.litValue) {
+      // FP "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
+      when (io.dis_uops(w).bits.uopc.isOneOf(uopSTA)) {
         //dis_uops(w).lrs1_rtype := RT_FIX
         dis_uops(w).prs1_busy  := 0.U
+      }
+    } else if (iqType == IQT_VEC.litValue) {
+      // VEC "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
+      // VEC Load that arrives here are tail splits, prs3 holds stale register name, read in RRD
+      when (io.dis_uops(w).bits.uopc.isOneOf(uopVSA, uopVL)) {
+        //dis_uops(w).lrs1_rtype := RT_FIX
+        dis_uops(w).prs1_busy  := 0.U
+        dis_uops(w).prs2_busy  := 0.U
       }
     }
 
@@ -186,5 +194,6 @@ abstract class IssueUnit(
     if (iqType == IQT_INT.litValue) "int"
     else if (iqType == IQT_MEM.litValue) "mem"
     else if (iqType == IQT_FP.litValue) " fp"
+    else if (iqType == IQT_VEC.litValue) "vec"
     else "unknown"
 }
