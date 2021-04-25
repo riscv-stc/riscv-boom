@@ -177,31 +177,68 @@ class RegisterFileSynthesizable(
   // --------------------------------------------------------------
   // Write ports.
 
-  for (wport <- io.write_ports) {
-    when (wport.valid) {
-      if (vector) {
-        val old_data = regfile(wport.bits.addr)
+  if (vector) {
+    require(registerWidth == eLen)
+
+//  for (wport <- io.write_ports) {
+//    when (wport.valid) {
+//      val old_data = regfile(wport.bits.addr)
+//      val new_data = Wire(Vec(eLenb, UInt(8.W)))
+//      require(registerWidth == eLen)
+//      for (i <- 0 until eLenb) {
+//        new_data(i) := Mux(wport.bits.mask(i), wport.bits.data(i*8+7,i*8), old_data(i*8+7,i*8))
+//      }
+//      regfile(wport.bits.addr) := Cat(new_data.reverse)
+//    }
+//  }
+
+    // for vector you need merge write ports since they may access the same ELEN on different elements
+    for (r <- 0 until numRegisters) {
+      when (io.write_ports.map(w => w.valid && r.U === w.bits.addr).reduce(_|_)) {
+        val old_data = regfile(r)
         val new_data = Wire(Vec(eLenb, UInt(8.W)))
-        require(registerWidth == eLen)
-        for (i <- 0 until eLenb) {
-          new_data(i) := Mux(wport.bits.mask(i), wport.bits.data(i*8+7,i*8), old_data(i*8+7,i*8))
+        (0 until eLenb).map(x => new_data(x) := old_data(x*8+7, x*8))
+        for (wport <- io.write_ports) {
+          for (i <- 0 until eLenb) {
+            when (wport.valid && r.U === wport.bits.addr && wport.bits.mask(i)) {
+              new_data(i) := wport.bits.data(i*8+7,i*8)
+            }
+          }
         }
-        regfile(wport.bits.addr) := Cat(new_data.reverse)
-      } else {
+        regfile(r) := Cat(new_data.reverse)
+      }
+    }
+
+    // ensure there is only 1 writer per element (unless to preg0)
+    if (numWritePorts > 1) {
+      for (i <- 0 until (numWritePorts - 1)) {
+        for (j <- (i + 1) until numWritePorts) {
+          assert(!io.write_ports(i).valid ||
+                 !io.write_ports(j).valid ||
+                 (io.write_ports(i).bits.addr =/= io.write_ports(j).bits.addr) ||
+                 (io.write_ports(i).bits.addr === io.write_ports(j).bits.addr) && ((io.write_ports(i).bits.mask & io.write_ports(j).bits.mask) === 0.U) ||
+                 (io.write_ports(i).bits.addr === 0.U),
+            "[regfile] too many writers a register")
+        }
+      }
+    }
+  } else {
+    for (wport <- io.write_ports) {
+      when (wport.valid) {
         regfile(wport.bits.addr) := wport.bits.data
       }
     }
-  }
 
-  // ensure there is only 1 writer per register (unless to preg0)
-  if (numWritePorts > 1) {
-    for (i <- 0 until (numWritePorts - 1)) {
-      for (j <- (i + 1) until numWritePorts) {
-        assert(!io.write_ports(i).valid ||
-               !io.write_ports(j).valid ||
-               (io.write_ports(i).bits.addr =/= io.write_ports(j).bits.addr) ||
-               (io.write_ports(i).bits.addr === 0.U), // note: you only have to check one here
-          "[regfile] too many writers a register")
+    // ensure there is only 1 writer per register (unless to preg0)
+    if (numWritePorts > 1) {
+      for (i <- 0 until (numWritePorts - 1)) {
+        for (j <- (i + 1) until numWritePorts) {
+          assert(!io.write_ports(i).valid ||
+                 !io.write_ports(j).valid ||
+                 (io.write_ports(i).bits.addr =/= io.write_ports(j).bits.addr) ||
+                 (io.write_ports(i).bits.addr === 0.U), // note: you only have to check one here
+            "[regfile] too many writers a register")
+        }
       }
     }
   }
