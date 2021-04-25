@@ -346,7 +346,7 @@ class RenameStage(
   // Freelist outputs.
   for ((uop, w) <- ren2_uops.zipWithIndex) {
     val preg = freelist.io.alloc_pregs(w).bits
-    uop.pdst := Mux(uop.ldst =/= 0.U || float.B, preg, 0.U)
+    uop.pdst := Mux(uop.ldst =/= 0.U || float.B || vector.B, preg, 0.U)
 
     if (usingVector) {
       // record physical names of first split
