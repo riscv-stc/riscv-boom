@@ -190,7 +190,7 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(impl
   val numLlFrfWritePorts  = exe_units.count(_.writesLlFrf)
 
   val numVrfReaders       = exe_units.count(_.readsVrf)
-  val numVrfReadPorts     = exe_units.count(_.readsVrf) * 3
+  val numVrfReadPorts     = exe_units.count(_.readsVrf) * 4
   val numVrfWritePorts    = exe_units.count(_.writesVrf)
   val numLlVrfWritePorts  = exe_units.count(_.writesLlVrf)
 

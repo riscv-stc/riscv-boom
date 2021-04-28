@@ -136,6 +136,11 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   issue_unit.io.pred_wakeup_port.valid := false.B
   issue_unit.io.pred_wakeup_port.bits := DontCare
 
+  if (usingVector) {
+    issue_unit.io.vmupdate.map(_.valid := false.B)
+    issue_unit.io.vmupdate.map(_.bits := DontCare)
+  }
+
   //-------------------------------------------------------------
   // **** Register Read Stage ****
   //-------------------------------------------------------------

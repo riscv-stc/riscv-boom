@@ -78,7 +78,7 @@ class CtrlSigs extends Bundle
   val csr_cmd         = UInt(freechips.rocketchip.rocket.CSR.SZ.W)
   val is_rvv          = Bool()
   val can_be_split    = Bool()
-  val use_vm          = Bool()
+  val uses_vm         = Bool()
   val v_ls_ew         = UInt(2.W)
   val rocc            = Bool()
 
@@ -89,7 +89,7 @@ class CtrlSigs extends Bundle
           rs2_type, frs3_en, imm_sel, uses_ldq, uses_stq, is_amo,
           is_fence, is_fencei, mem_cmd, wakeup_delay, bypassable,
           is_br, is_sys_pc2epc, inst_unique, flush_on_commit, csr_cmd,
-          is_rvv, can_be_split, use_vm, v_ls_ew)
+          is_rvv, can_be_split, uses_vm, v_ls_ew)
       sigs zip decoder map {case(s,d) => s := d}
       rocc := false.B
       this
@@ -675,7 +675,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.mem_size  := uop.v_ls_ew
     uop.mem_signed:= false.B
   }
-  uop.v_unmasked  := cs.use_vm  // TODO: exclude special cases
+  uop.v_unmasked  := !cs.uses_vm || inst(VM_BIT)
   uop.vxsat       := false.B
   uop.vconfig     := io.csr_vconfig
   uop.vstart      := vstart
@@ -687,8 +687,18 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   val ren_mask = ~(Fill(vLenSz,1.U) << (7.U - vsew))
   uop.v_re_alloc  := (vstart & ren_mask(vLenSz,0)) === 0.U
 
+  when (usingVector.B && is_v_ls && !uop.v_unmasked) {
+    uop.iq_type := IQT_MVEC
+    uop.fu_code := FU_MEMV
+    when (uop.uses_ldq) {
+      uop.frs3_en := true.B
+      uop.lrs3 := inst(RD_MSB,RD_LSB)
+    }
+  }
+
   // handle load tail: dispatch to vector pipe
-  when (cs.is_rvv && cs.uses_ldq && vstart >= io.csr_vconfig.vl) {
+  // masked load / store, send to vec pipe
+  when (usingVector.B && cs.is_rvv && cs.uses_ldq && vstart >= io.csr_vconfig.vl) {
     uop.iq_type := IQT_VEC
     uop.fu_code := FU_VMX
     uop.uses_ldq := false.B

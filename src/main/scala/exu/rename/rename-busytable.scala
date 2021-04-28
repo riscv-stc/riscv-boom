@@ -28,6 +28,7 @@ class VecBusyResp(val nBits: Int) extends Bundle {
   val prs1_busy = UInt(nBits.W)
   val prs2_busy = UInt(nBits.W)
   val prs3_busy = UInt(nBits.W)
+  val prvm_busy = UInt(nBits.W)
 }
 
 class RenameBusyTable(
@@ -74,11 +75,13 @@ class RenameBusyTable(
         io.ren_uops(i).lrs2 === io.ren_uops(j).ldst && io.rebusy_reqs(j)).foldLeft(false.B)(_||_)
       val prs3_was_bypassed = (0 until i).map(j =>
         io.ren_uops(i).lrs3 === io.ren_uops(j).ldst && io.rebusy_reqs(j)).foldLeft(false.B)(_||_)
+      val prvm_was_bypassed = (0 until i).map(j =>
+        0.U === io.ren_uops(j).ldst && io.rebusy_reqs(j)).foldLeft(false.B)(_||_)
 
       io.vbusy_resps(i).prs1_busy := busy_table(io.ren_uops(i).prs1) | Fill(vLenb, (prs1_was_bypassed && bypass.B).asUInt)
       io.vbusy_resps(i).prs2_busy := busy_table(io.ren_uops(i).prs2) | Fill(vLenb, (prs2_was_bypassed && bypass.B).asUInt)
       io.vbusy_resps(i).prs3_busy := busy_table(io.ren_uops(i).prs3) | Fill(vLenb, (prs3_was_bypassed && bypass.B).asUInt)
-      if (!float && !vector) io.vbusy_resps(i).prs3_busy := false.B
+      io.vbusy_resps(i).prvm_busy := busy_table(io.ren_uops(i).prvm) | Fill(vLenb, (prvm_was_bypassed && bypass.B).asUInt)
     }
 
     busy_table := busy_table_next

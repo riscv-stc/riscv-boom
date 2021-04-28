@@ -47,6 +47,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val to_sdq           = Decoupled(new ExeUnitResp(eLen))
     val to_int           = Decoupled(new ExeUnitResp(eLen))
     val to_fp            = Decoupled(new ExeUnitResp(eLen))
+    val vmupdate         = Output(Vec(vecWidth, Valid(new MicroOp)))
 
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(eLen))) // wakeup issue_units for mem, int and fp
 
@@ -73,7 +74,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
                          vecWidth,
                          exe_units.withFilter(_.readsVrf).map(_.supportedFuncUnits),
                          exe_units.numVrfReadPorts,
-                         exe_units.withFilter(_.readsVrf).map(x => 3),
+                         exe_units.withFilter(_.readsVrf).map(x => 4),
                          0, // No bypass for VEC
                          0,
                          eLen, vector = true))
@@ -151,6 +152,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   vregister_read.io.brupdate := io.brupdate
   vregister_read.io.kill := io.flush_pipeline
+  io.vmupdate := vregister_read.io.vmupdate
 
   //-------------------------------------------------------------
   // **** Execute Stage ****
@@ -200,7 +202,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val ecnt = eu_vresp_uop.v_split_ecnt
     if (eu.writesVrf) {
       if (eu.hasVMX) {
-        vregfile.io.write_ports(w_cnt).valid     := eu_vresp.valid && eu_vresp_uop.rf_wen && eu_vresp_uop.uopc != uopVSA
+        vregfile.io.write_ports(w_cnt).valid     := eu_vresp.valid && eu_vresp_uop.rf_wen && eu_vresp_uop.uopc =/= uopVSA
       } else {
         vregfile.io.write_ports(w_cnt).valid     := eu_vresp.valid && eu_vresp_uop.rf_wen
       }
@@ -209,7 +211,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       vregfile.io.write_ports(w_cnt).bits.mask := rmsk
       vregfile.io.write_ports(w_cnt).bits.data := VDataFill(eu_vresp.bits.data, vsew, eLen)
       eu.io.vresp.ready                        := true.B
-      when (eu_vresp.valid && eu_vresp_uop.uopc != uopVSA) {
+      when (eu_vresp.valid && eu_vresp_uop.uopc =/= uopVSA) {
         //assert(eu.io.vresp.ready, "No backpressuring the Vec EUs")
         assert(eu.io.vresp.bits.uop.rf_wen, "rf_wen must be high here")
         assert(eu.io.vresp.bits.uop.dst_rtype === RT_VEC, "wb type must be FLT for fpu")

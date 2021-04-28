@@ -138,27 +138,20 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val bp_xcpt_if       = Bool()             // Breakpoint
 
   // vector extension
-  val is_rvv           = Bool()             // is vector instruction
-  val v_ls_ew          = UInt(2.W)          // EEW encoded in load/store instruction
-  val v_unmasked       = Bool()
-  val vstart           = UInt(vLenSz.W)
-  val v_is_split       = Bool()             // is a split of a vector instruction
-  val v_split_ecnt     = UInt((log2Ceil(vLenb)+1).W)
-  val v_is_first       = Bool()
-  val v_is_last        = Bool()
-  val v_re_alloc       = Bool()             // do rename allocation on first split for every vreg
-  val vxsat            = Bool()             // saturating flag
-  val vconfig          = new VConfig        // TODO: tag since DECODE
-//val pvm              = UInt(maxPregSz.W)  // FIXME:vm0 phiscal name for masked
-//val pvm_busy         = Bool()
-//val pvd_grpnum       = UInt(3.W)          // store mappings in ROB for rollback
-//val pvs1_grpnum      = UInt(3.W)
-//val pvs2_grpnum      = UInt(3.W)
-//val pvs3_grpnum      = UInt(3.W)
-//val pvd_grpmap       = Vec(7,UInt(maxPregSz.W))
-//val pvs1_grpmap      = Vec(7,UInt(maxPregSz.W))
-//val pvs2_grpmap      = Vec(7,UInt(maxPregSz.W))
-//val pvs3_grpmap      = Vec(7,UInt(maxPregSz.W))
+  val is_rvv           = if (usingVector) Bool() else null            // is vector instruction
+  val prvm             = if (usingVector) UInt(maxPregSz.W) else null
+  val prvm_busy        = if (usingVector) UInt(vLenb.W) else null
+  val v_active         = if (usingVector) Bool() else null
+  val v_ls_ew          = if (usingVector) UInt(2.W) else null         // EEW encoded in load/store instruction
+  val v_unmasked       = if (usingVector) Bool() else null
+  val vstart           = if (usingVector) UInt(vLenSz.W) else null
+  val v_is_split       = if (usingVector) Bool() else null            // is a split of a vector instruction
+  val v_split_ecnt     = if (usingVector) UInt((log2Ceil(vLenb)+1).W) else null
+  val v_is_first       = if (usingVector) Bool() else null
+  val v_is_last        = if (usingVector) Bool() else null
+  val v_re_alloc       = if (usingVector) Bool() else null            // do rename allocation on first split for every vreg
+  val vxsat            = if (usingVector) Bool() else null            // saturating flag
+  val vconfig          = if (usingVector) new VConfig else null       // TODO: tag since DECODE
 
     // purely debug information
   val debug_wdata      = UInt(xLen.W)

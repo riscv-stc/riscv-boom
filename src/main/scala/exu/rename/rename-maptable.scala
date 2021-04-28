@@ -25,12 +25,13 @@ class MapReq(val lregSz: Int) extends Bundle
   val ldst = UInt(lregSz.W)
 }
 
-class MapResp(val pregSz: Int) extends Bundle
+class MapResp(val pregSz: Int, val vector: Boolean = false) extends Bundle
 {
   val prs1 = UInt(pregSz.W)
   val prs2 = UInt(pregSz.W)
   val prs3 = UInt(pregSz.W)
   val stale_pdst = UInt(pregSz.W)
+  val prvm = if (vector) UInt(pregSz.W) else null
 }
 
 class RemapReq(val lregSz: Int, val pregSz: Int) extends Bundle
@@ -45,7 +46,8 @@ class RenameMapTable(
   val numLregs: Int,
   val numPregs: Int,
   val bypass: Boolean,
-  val float: Boolean)
+  val float: Boolean,
+  val vector: Boolean = false)
   (implicit p: Parameters) extends BoomModule
 {
   val pregSz = log2Ceil(numPregs)
@@ -53,7 +55,7 @@ class RenameMapTable(
   val io = IO(new BoomBundle()(p) {
     // Logical sources -> physical sources.
     val map_reqs    = Input(Vec(plWidth, new MapReq(lregSz)))
-    val map_resps   = Output(Vec(plWidth, new MapResp(pregSz)))
+    val map_resps   = Output(Vec(plWidth, new MapResp(pregSz, vector)))
 
     // Remapping an ldst to a newly allocated pdst?
     val remap_reqs  = Input(Vec(plWidth, new RemapReq(lregSz, pregSz)))
@@ -79,7 +81,7 @@ class RenameMapTable(
 
   // Figure out the new mappings seen by each pipeline slot.
   for (i <- 0 until numLregs) {
-    if (i == 0 && !float) {
+    if (i == 0 && !(float || vector)) {
       for (j <- 0 until plWidth+1) {
         remap_table(j)(i) := 0.U
       }
@@ -119,7 +121,11 @@ class RenameMapTable(
     io.map_resps(i).stale_pdst := (0 until i).foldLeft(map_table(io.map_reqs(i).ldst)) ((p,k) =>
       Mux(bypass.B && io.remap_reqs(k).valid && io.remap_reqs(k).ldst === io.map_reqs(i).ldst, io.remap_reqs(k).pdst, p))
 
-    if (!float) io.map_resps(i).prs3 := DontCare
+    if (vector) {
+      io.map_resps(i).prvm     := (0 until i).foldLeft(map_table(0.U)) ((p,k) =>
+        Mux(bypass.B && io.remap_reqs(k).valid && io.remap_reqs(k).ldst === 0.U, io.remap_reqs(k).pdst, p))
+    }
+    if (!(float || vector)) io.map_resps(i).prs3 := DontCare
   }
 
   // Don't flag the creation of duplicate 'p0' mappings during rollback.

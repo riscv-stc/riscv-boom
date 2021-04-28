@@ -84,9 +84,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   var v_pipeline: VecPipeline = null
+  val vmupdate = Wire(Vec(vecWidth, Valid(new MicroOp)))
+  vmupdate.map(_.valid := false.B)
+  vmupdate.map(_.bits := DontCare)
   if (usingVector) {
     v_pipeline = Module(new VecPipeline)
     v_pipeline.io.ll_wports := DontCare
+    vmupdate := v_pipeline.io.vmupdate
   }
 
   val numIrfWritePorts        = exe_units.numIrfWritePorts + memWidth
@@ -800,6 +804,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dis_uops(w).prs3_busy := Mux1H(Seq((dis_uops(w).frs3_en && dis_uops(w).is_rvv,  v_uop.prs3_busy),
                                          (dis_uops(w).frs3_en && !dis_uops(w).is_rvv, f_uop.prs3_busy),
                                          (!dis_uops(w).frs3_en,                       0.U)))
+      dis_uops(w).prvm      := v_uop.prvm
+      dis_uops(w).prvm_busy := Mux(dis_uops(w).is_rvv && !dis_uops(w).v_unmasked, v_uop.prvm_busy, 0.U)
     } else {
       dis_uops(w).prs1_busy := i_uop.prs1_busy & (dis_uops(w).lrs1_rtype === RT_FIX) |
                                f_uop.prs1_busy & (dis_uops(w).lrs1_rtype === RT_FLT)
@@ -1094,6 +1100,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   issue_units.map(_.io.tsc_reg := debug_tsc_reg)
   issue_units.map(_.io.brupdate := brupdate)
   issue_units.map(_.io.flush_pipeline := RegNext(rob.io.flush.valid))
+  if (usingVector) {
+    mem_iss_unit.io.vmupdate := vmupdate
+    int_iss_unit.io.vmupdate.map(_.valid := false.B)
+    int_iss_unit.io.vmupdate.map(_.bits := DontCare)
+  }
 
   // Load-hit Misspeculations
   require (mem_iss_unit.issueWidth <= 2)
@@ -1281,6 +1292,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   // Handle Branch Mispeculations
   io.lsu.brupdate := brupdate
+  io.lsu.vmupdate := vmupdate
   io.lsu.rob_head_idx := rob.io.rob_head_idx
   io.lsu.rob_pnr_idx  := rob.io.rob_pnr_idx
 
@@ -1471,6 +1483,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   // branch resolution
   rob.io.brupdate <> brupdate
+  rob.io.vmupdate <> vmupdate
 
   exe_units.map(u => u.io.status := csr.io.status)
   if (usingFPU)

@@ -163,19 +163,24 @@ class RenameBypass(
   val uop = io.i_uop
   bypassed_uop := uop
 
+  if (vector) require(usingVector)
+
   val bypass_hits_rs1 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.lrs1 }
   val bypass_hits_rs2 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.lrs2 }
   val bypass_hits_rs3 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.lrs3 }
+  val bypass_hits_vs0 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === 0.U && vector.B }
   val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.ldst }
 
   val bypass_sel_rs1 = PriorityEncoderOH(bypass_hits_rs1.reverse).reverse
   val bypass_sel_rs2 = PriorityEncoderOH(bypass_hits_rs2.reverse).reverse
   val bypass_sel_rs3 = PriorityEncoderOH(bypass_hits_rs3.reverse).reverse
+  val bypass_sel_vs0 = PriorityEncoderOH(bypass_hits_vs0.reverse).reverse
   val bypass_sel_dst = PriorityEncoderOH(bypass_hits_dst.reverse).reverse
 
   val do_bypass_rs1 = bypass_hits_rs1.reduce(_||_)
   val do_bypass_rs2 = bypass_hits_rs2.reduce(_||_)
   val do_bypass_rs3 = bypass_hits_rs3.reduce(_||_)
+  val do_bypass_vs0 = bypass_hits_vs0.reduce(_||_)
   val do_bypass_dst = bypass_hits_dst.reduce(_||_)
 
   val bypass_pdsts = older_uops.map(_.pdst)
@@ -190,10 +195,13 @@ class RenameBypass(
       bypassed_uop.prs1_busy := uop.prs1_busy | Fill(vLenb, do_bypass_rs1.asUInt)
       bypassed_uop.prs2_busy := uop.prs2_busy | Fill(vLenb, do_bypass_rs2.asUInt)
       bypassed_uop.prs3_busy := uop.prs3_busy | Fill(vLenb, do_bypass_rs3.asUInt)
+      when (do_bypass_vs0) { bypassed_uop.prvm := Mux1H(bypass_sel_vs0, bypass_pdsts) }
+      bypassed_uop.prvm_busy := uop.prvm_busy | Fill(vLenb, do_bypass_vs0.asUInt)
     } else {
       bypassed_uop.prs1_busy := Cat(0.U, (uop.prs1_busy(0) || do_bypass_rs1).asUInt)
       bypassed_uop.prs2_busy := Cat(0.U, (uop.prs2_busy(0) || do_bypass_rs2).asUInt)
       bypassed_uop.prs3_busy := Cat(0.U, (uop.prs3_busy(0) || do_bypass_rs3).asUInt)
+      bypassed_uop.prvm_busy := 0.U
     }
   } else {
     bypassed_uop.prs1_busy := uop.prs1_busy | do_bypass_rs1
@@ -250,7 +258,7 @@ class RenameStage(
     32,
     numPhysRegs,
     false,
-    float | vector))
+    float, vector))
   val freelist = Module(new RenameFreeList(
     plWidth,
     numPhysRegs,
@@ -260,7 +268,7 @@ class RenameStage(
     numPhysRegs,
     numWbPorts,
     false,
-    float, usingVector & vector))
+    float, vector))
 
 
 
@@ -322,6 +330,7 @@ class RenameStage(
     uop.prs2       := mappings.prs2
     uop.prs3       := mappings.prs3 // scalar integer will not use rs3
     uop.stale_pdst := mappings.stale_pdst
+    if (vector) uop.prvm := mappings.prvm
   }
 
 
@@ -342,7 +351,7 @@ class RenameStage(
   assert (ren2_alloc_reqs zip freelist.io.alloc_pregs map {case (r,p) => !r || p.bits =/= 0.U} reduce (_&&_),
            "[rename-stage] A uop is trying to allocate the zero physical register.")
 
-  val prs1, prs2, prs3, stale_pdst, pdst = Reg(Vec(plWidth, UInt(maxPregSz.W)))
+  val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(plWidth, UInt(maxPregSz.W)))
   // Freelist outputs.
   for ((uop, w) <- ren2_uops.zipWithIndex) {
     val preg = freelist.io.alloc_pregs(w).bits
@@ -356,6 +365,7 @@ class RenameStage(
         when(uop.frs3_en && (float.B || vector.B)) { prs3(w) := uop.prs3 }
         when(uop.ldst_val && uop.dst_rtype === rtype) { stale_pdst(w) := uop.stale_pdst }
         when(uop.ldst_val && uop.dst_rtype === rtype) { pdst(w) := uop.pdst }
+        when(~uop.v_unmasked) { prvm(w) := uop.prvm }
       }
 
       // recover physical names for splits other than the first
@@ -365,6 +375,7 @@ class RenameStage(
         when(uop.frs3_en && (float.B || vector.B)) { uop.prs3 := prs3(w) }
         when(uop.ldst_val && uop.dst_rtype === rtype) { uop.stale_pdst := stale_pdst(w) }
         when(uop.ldst_val && uop.dst_rtype === rtype) { uop.pdst := pdst(w) }
+        when(~uop.v_unmasked) { uop.prvm := prvm(w) }
       }
     }
   }
@@ -376,7 +387,7 @@ class RenameStage(
   busytable.io.rebusy_reqs := ren2_alloc_reqs
   busytable.io.wb_valids := io.wakeups.map(_.valid)
   busytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
-  if (usingVector && vector) {
+  if (vector) {
     for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) {
       val (rsel, rmsk) = VRegSel(wk.bits.uop, eLenb, eLenSelSz)
       bs := rmsk << Cat(rsel, 0.U(3.W))
@@ -394,6 +405,7 @@ class RenameStage(
         uop.prs1_busy := vbusy.prs1_busy & Fill(vLenb, (uop.lrs1_rtype === rtype).asUInt) & (rmsk << Cat(rsel, 0.U(3.W)))
         uop.prs2_busy := vbusy.prs2_busy & Fill(vLenb, (uop.lrs2_rtype === rtype).asUInt) & (rmsk << Cat(rsel, 0.U(3.W)))
         uop.prs3_busy := vbusy.prs3_busy & Fill(vLenb, uop.frs3_en.asUInt) & (rmsk << Cat(rsel, 0.U(3.W)))
+        uop.prvm_busy := vbusy.prvm_busy & Fill(vLenb, (!uop.is_rvv || !uop.v_unmasked).asUInt)
       } else {
         val busy = busytable.io.busy_resps(w)
         uop.prs1_busy := Cat(0.U, (uop.lrs1_rtype === rtype && busy.prs1_busy).asUInt)
