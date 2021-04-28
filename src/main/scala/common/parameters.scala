@@ -95,6 +95,13 @@ case class BoomCoreParams(
   mcontextWidth: Int = 0,
   scontextWidth: Int = 0,
 
+  /* vector extension */
+  useVector: Boolean = false,
+  override val vLen: Int = 0,
+  override val eLen: Int = 0,
+  override val vMemDataBits: Int = 0,
+  numVecPhysRegisters: Int = 0,
+
   /* debug stuff */
   enableCommitLogPrintf: Boolean = true,
   enableBranchPrintf: Boolean = true,
@@ -249,6 +256,19 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val enableBTBFastRepair = boomParams.enableBTBFastRepair
 
   //************************************
+  // vector stuff
+  require (issueParams.count(_.iqType == IQT_VEC.litValue) == 1 || !usingVector)
+  val vecIssueParam = if (usingVector) issueParams.find(_.iqType == IQT_VEC.litValue).get else null
+  val vecWidth = if (usingVector) vecIssueParam.issueWidth else 0
+  val numVecPhysRegs = boomParams.numVecPhysRegisters
+  def numELENinVLEN = vLen/eLen
+  def numVecPhysElens= boomParams.numVecPhysRegisters * numELENinVLEN
+  def vLenb = vLen/8
+  def vLenSz = log2Ceil(vLen)
+  def eLenSelSz = log2Ceil(numELENinVLEN)
+  def eLenb = eLen/8
+
+  //************************************
   // Implicitly calculated constants
   val numRobRows      = numRobEntries/coreWidth
   val robAddrSz       = log2Ceil(numRobRows) + log2Ceil(coreWidth)
@@ -257,7 +277,8 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val lregSz          = log2Ceil(logicalRegCount)
   val ipregSz         = log2Ceil(numIntPhysRegs)
   val fpregSz         = log2Ceil(numFpPhysRegs)
-  val maxPregSz       = ipregSz max fpregSz
+  val vpregSz         = log2Ceil(numVecPhysElens)
+  val maxPregSz       = ipregSz max fpregSz max vpregSz
   val ldqAddrSz       = log2Ceil(numLdqEntries)
   val stqAddrSz       = log2Ceil(numStqEntries)
   val lsuAddrSz       = ldqAddrSz max stqAddrSz

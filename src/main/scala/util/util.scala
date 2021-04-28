@@ -656,3 +656,64 @@ object BoomCoreStringPrefix
     strs.map(str => prefix + str + "\n").mkString("")
   }
 }
+
+object VDataSwap {
+  def apply(d: UInt, sew: Int, elen: Int): UInt = {
+    val ret = Wire(UInt(elen.W))
+    val e_cnt = elen >> (3+sew)
+    for (e <- 0 until e_cnt) {
+      val e_lsb = e << (3+sew)
+      val e_bcnt = 1 << sew
+      for (b <- 0 until e_bcnt) {
+        val b_lsb = e_lsb + b * 8
+        val d_lsb = e_lsb + (e_bcnt-1-b)*8
+        ret(b_lsb+7, b_lsb) := d(d_lsb+7, d_lsb)
+      }
+    }
+    ret
+  }
+}
+
+object MaskGen {
+  def apply(lsb: UInt, len: UInt, width: Int): UInt = {
+    val ret = Wire(UInt(width.W))
+    val full = Fill(width, 1.U(1.W))
+    ret := (full << lsb) & (full >> (width.U-lsb-len))
+    ret
+  }
+}
+
+object VRegMask {
+  def apply(vstart: UInt, vsew: UInt, ecnt: UInt, elenb: Int): UInt = {
+    val lsb = (vstart << vsew)(2, 0)
+    val len = ecnt << vsew
+    val ret = MaskGen(lsb, len, elenb)
+    ret
+  }
+}
+
+object VRegSel {
+  /**
+   * Get an eLen piece selector of a vLen register
+   */
+  def apply(vstart: UInt, vsew: UInt, ecnt: UInt, elenb: Int, eLenSelSz: Int): (UInt, UInt) = {
+    val rsel = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(eLenSelSz+2,3),vstart(eLenSelSz+1,2),vstart(eLenSelSz,1),vstart(eLenSelSz-1,0)))
+    val emsk = VRegMask(vstart, vsew, ecnt, elenb)
+    (rsel, emsk)
+  }
+
+  def apply(uop: MicroOp, elenb: Int, eLenSelSz: Int): (UInt, UInt) = {
+    val ret = apply(uop.vstart, uop.vconfig.vtype.vsew, uop.v_split_ecnt, elenb, eLenSelSz)
+    ret
+  }
+}
+
+object VDataFill {
+  def apply(data: UInt, vsew: UInt, elen: Int): UInt = {
+    val ret = Mux1H(UIntToOH(vsew(1,0)), Seq(Fill(8,data(elen/8-1,0)),
+                                             Fill(4,data(elen/4-1,0)),
+                                             Fill(2,data(elen/2-1,0)),
+                                             data(elen-1,0)))
+    ret
+  }
+}

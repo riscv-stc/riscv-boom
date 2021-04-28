@@ -24,9 +24,10 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.ALU._
 import freechips.rocketchip.util._
 import freechips.rocketchip.tile
-import freechips.rocketchip.rocket.{PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR}
+import freechips.rocketchip.rocket.{PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR,VConfig,VType}
 
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.ifu._
 import boom.util._
 
@@ -36,21 +37,35 @@ import boom.util._
 object FUConstants
 {
   // bit mask, since a given execution pipeline may support multiple functional units
-  val FUC_SZ = 10
   val FU_X   = BitPat.dontCare(FUC_SZ)
-  val FU_ALU =   1.U(FUC_SZ.W)
-  val FU_JMP =   2.U(FUC_SZ.W)
-  val FU_MEM =   4.U(FUC_SZ.W)
-  val FU_MUL =   8.U(FUC_SZ.W)
-  val FU_DIV =  16.U(FUC_SZ.W)
-  val FU_CSR =  32.U(FUC_SZ.W)
-  val FU_FPU =  64.U(FUC_SZ.W)
-  val FU_FDV = 128.U(FUC_SZ.W)
-  val FU_I2F = 256.U(FUC_SZ.W)
-  val FU_F2I = 512.U(FUC_SZ.W)
+  val FU_ALU_ID = 0
+  val FU_JMP_ID = 1
+  val FU_MEM_ID = 2
+  val FU_MUL_ID = 3
+  val FU_DIV_ID = 4
+  val FU_CSR_ID = 5
+  val FU_FPU_ID = 6
+  val FU_FDV_ID = 7
+  val FU_I2F_ID = 8
+  val FU_F2I_ID = 9
+  val FU_VMX_ID = 10 // vec load /store index vec store data
+  val FUC_SZ = 11
+  val FU_ALU = (1<<FU_ALU_ID).U(FUC_SZ.W)
+  val FU_JMP = (1<<FU_JMP_ID).U(FUC_SZ.W)
+  val FU_MEM = (1<<FU_MEM_ID).U(FUC_SZ.W)
+  val FU_MUL = (1<<FU_MUL_ID).U(FUC_SZ.W)
+  val FU_DIV = (1<<FU_DIV_ID).U(FUC_SZ.W)
+  val FU_CSR = (1<<FU_CSR_ID).U(FUC_SZ.W)
+  val FU_FPU = (1<<FU_FPU_ID).U(FUC_SZ.W)
+  val FU_FDV = (1<<FU_FDV_ID).U(FUC_SZ.W)
+  val FU_I2F = (1<<FU_I2F_ID).U(FUC_SZ.W)
+  val FU_F2I = (1<<FU_F2I_ID).U(FUC_SZ.W)
+  val FU_VMX = (1<<FU_VMX_ID).U(FUC_SZ.W)
 
   // FP stores generate data through FP F2I, and generate address through MemAddrCalc
-  val FU_F2IMEM = 516.U(FUC_SZ.W)
+  def FU_F2IMEM = ((1 << FU_MEM_ID) | (1 << FU_F2I_ID)).U(FUC_SZ.W)
+  // VEC load / store, vs3 read by ALU of Vec Exe Unit
+  def FU_MEMV =   ((1 << FU_MEM_ID) | (1 << FU_VMX_ID)).U(FUC_SZ.W)
 }
 import FUConstants._
 
@@ -162,6 +177,7 @@ abstract class FunctionalUnit(
   val dataWidth: Int,
   val isJmpUnit: Boolean = false,
   val isAluUnit: Boolean = false,
+  val isCsrUnit: Boolean = false,
   val isMemAddrCalcUnit: Boolean = false,
   val needsFcsr: Boolean = false)
   (implicit p: Parameters) extends BoomModule
@@ -176,6 +192,7 @@ abstract class FunctionalUnit(
 
     // only used by the fpu unit
     val fcsr_rm = if (needsFcsr) Input(UInt(tile.FPConstants.RM_SZ.W)) else null
+    val vconfig = if (usingVector & isCsrUnit) Input(new VConfig) else null
 
     // only used by branch unit
     val brinfo     = if (isAluUnit) Output(new BrResolutionInfo()) else null
@@ -209,6 +226,7 @@ abstract class PipelinedFunctionalUnit(
   dataWidth: Int,
   isJmpUnit: Boolean = false,
   isAluUnit: Boolean = false,
+  isCsrUnit: Boolean = false,
   isMemAddrCalcUnit: Boolean = false,
   needsFcsr: Boolean = false
   )(implicit p: Parameters) extends FunctionalUnit(
@@ -218,6 +236,7 @@ abstract class PipelinedFunctionalUnit(
     dataWidth = dataWidth,
     isJmpUnit = isJmpUnit,
     isAluUnit = isAluUnit,
+    isCsrUnit = isCsrUnit,
     isMemAddrCalcUnit = isMemAddrCalcUnit,
     needsFcsr = needsFcsr)
 {
@@ -280,13 +299,21 @@ abstract class PipelinedFunctionalUnit(
  * @param dataWidth width of the data being operated on in the functional unit
  */
 @chiselName
-class ALUUnit(isJmpUnit: Boolean = false, numStages: Int = 1, dataWidth: Int)(implicit p: Parameters)
+class ALUUnit(
+  isJmpUnit: Boolean = false,
+  isCsrUnit: Boolean = false,
+  numStages: Int = 1,
+  dataWidth: Int,
+  hasVMX: Boolean = false
+  )
+(implicit p: Parameters)
   extends PipelinedFunctionalUnit(
     numStages = numStages,
     numBypassStages = numStages,
     isAluUnit = true,
     earliestBypassStage = 0,
     dataWidth = dataWidth,
+    isCsrUnit = isCsrUnit,
     isJmpUnit = isJmpUnit)
   with boom.ifu.HasBoomFrontendParameters
 {
@@ -294,6 +321,8 @@ class ALUUnit(isJmpUnit: Boolean = false, numStages: Int = 1, dataWidth: Int)(im
 
   // immediate generation
   val imm_xprlen = ImmGen(uop.imm_packed, uop.ctrl.imm_sel)
+  val rs1 = io.req.bits.rs1_data
+  val rs2 = io.req.bits.rs2_data
 
   // operand 1 select
   var op1_data: UInt = null
@@ -311,11 +340,33 @@ class ALUUnit(isJmpUnit: Boolean = false, numStages: Int = 1, dataWidth: Int)(im
   }
 
   // operand 2 select
-  val op2_data = Mux(uop.ctrl.op2_sel === OP2_IMM,  Sext(imm_xprlen.asUInt, xLen),
-                 Mux(uop.ctrl.op2_sel === OP2_IMMC, io.req.bits.uop.prs1(4,0),
-                 Mux(uop.ctrl.op2_sel === OP2_RS2 , io.req.bits.rs2_data,
-                 Mux(uop.ctrl.op2_sel === OP2_NEXT, Mux(uop.is_rvc, 2.U, 4.U),
-                                                    0.U))))
+  val op2_data = WireInit(0.U(xLen.W))
+  if (usingVector & isCsrUnit) {
+    val vsetvl    = (uop.uopc === uopVSETVL)
+    val vsetvli   = (uop.uopc === uopVSETVLI)
+    val vsetivli  = (uop.uopc === uopVSETIVLI)
+    val vtypei    = Mux(vsetvl, rs2(7,0), uop.imm_packed(15,8))
+    val useCurrentVL = (vsetvli | vsetvl) & (uop.ldst === 0.U) & (uop.lrs1 === 0.U)
+    val useMaxVL     = (vsetvli | vsetvl) & (uop.ldst =/= 0.U) & (uop.lrs1 === 0.U)
+    val avl       = Mux(vsetivli, uop.lrs1, rs1)
+    val new_vl    = VType.computeVL(avl, vtypei, io.vconfig.vl, useCurrentVL, useMaxVL, false.B)
+
+    op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,  Sext(imm_xprlen.asUInt, xLen),
+               Mux(uop.ctrl.op2_sel === OP2_IMMC, io.req.bits.uop.prs1(4,0),
+               Mux(uop.ctrl.op2_sel === OP2_RS2 , io.req.bits.rs2_data,
+               Mux(uop.ctrl.op2_sel === OP2_NEXT, Mux(uop.is_rvc, 2.U, 4.U),
+               Mux(uop.ctrl.op2_sel === OP2_VL,   new_vl, 0.U)))))
+
+    val set_vconfig = vsetvl | vsetvli | vsetivli
+    io.resp.bits.uop.vconfig.vl := RegEnable(new_vl, set_vconfig)
+    io.resp.bits.uop.vconfig.vtype := RegEnable(VType.fromUInt(vtypei), set_vconfig)
+  } else {
+    op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,  Sext(imm_xprlen.asUInt, xLen),
+               Mux(uop.ctrl.op2_sel === OP2_IMMC, io.req.bits.uop.prs1(4,0),
+               Mux(uop.ctrl.op2_sel === OP2_RS2 , io.req.bits.rs2_data,
+               Mux(uop.ctrl.op2_sel === OP2_NEXT, Mux(uop.is_rvc, 2.U, 4.U),
+                                                  0.U))))
+  }
 
   val alu = Module(new freechips.rocketchip.rocket.ALU())
 
@@ -332,8 +383,6 @@ class ALUUnit(isJmpUnit: Boolean = false, numStages: Int = 1, dataWidth: Int)(im
     killed := true.B
   }
 
-  val rs1 = io.req.bits.rs1_data
-  val rs2 = io.req.bits.rs2_data
   val br_eq  = (rs1 === rs2)
   val br_ltu = (rs1.asUInt < rs2.asUInt)
   val br_lt  = (~(rs1(xLen-1) ^ rs2(xLen-1)) & br_ltu |
@@ -441,7 +490,8 @@ class ALUUnit(isJmpUnit: Boolean = false, numStages: Int = 1, dataWidth: Int)(im
   val r_pred = Reg(Vec(numStages, Bool()))
   val alu_out = Mux(io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data,
     Mux(io.req.bits.uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
-    Mux(io.req.bits.uop.uopc === uopMOV, io.req.bits.rs2_data, alu.io.out))
+    Mux(io.req.bits.uop.uopc === uopMOV, io.req.bits.rs2_data,
+        Mux(io.req.bits.uop.uopc.isOneOf(uopVSA, uopVL), io.req.bits.rs3_data, alu.io.out)))
   r_val (0) := io.req.valid
   r_data(0) := Mux(io.req.bits.uop.is_sfb_br, pc_sel === PC_BRJMP, alu_out)
   r_pred(0) := io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data
@@ -482,8 +532,20 @@ class MemAddrCalcUnit(implicit p: Parameters)
   with freechips.rocketchip.rocket.constants.MemoryOpConstants
   with freechips.rocketchip.rocket.constants.ScalarOpConstants
 {
+  val uop = io.req.bits.uop
+  // unit stride
+  val vsew = Mux(usingVector.B & uop.is_rvv, uop.vconfig.vtype.vsew, 0.U)
+  // unit stride load/store
+  val vec_us_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVL, uopVSA) // or uopVLFF
+  // FIXME: constant stride load/store
+  //val vec_cs_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLS, uopVSSA)
+  // FIXME: indexed load/store
+  //val vec_idx_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+  val op1 = io.req.bits.rs1_data.asSInt
+  val op2 = Mux(vec_us_ls, (uop.vstart << vsew).asSInt, uop.imm_packed(19,8).asSInt)
+
   // perform address calculation
-  val sum = (io.req.bits.rs1_data.asSInt + io.req.bits.uop.imm_packed(19,8).asSInt).asUInt
+  val sum = (op1 + op2).asUInt
   val ea_sign = Mux(sum(vaddrBits-1), ~sum(63,vaddrBits) === 0.U,
                                        sum(63,vaddrBits) =/= 0.U)
   val effective_address = Cat(ea_sign, sum(vaddrBits-1,0)).asUInt
@@ -494,19 +556,19 @@ class MemAddrCalcUnit(implicit p: Parameters)
   io.resp.bits.data := store_data
 
   if (dataWidth > 63) {
-    assert (!(io.req.valid && io.req.bits.uop.ctrl.is_std &&
+    assert (!(io.req.valid && uop.ctrl.is_std &&
       io.resp.bits.data(64).asBool === true.B), "65th bit set in MemAddrCalcUnit.")
 
-    assert (!(io.req.valid && io.req.bits.uop.ctrl.is_std && io.req.bits.uop.fp_val),
+    assert (!(io.req.valid && uop.ctrl.is_std && uop.fp_val),
       "FP store-data should now be going through a different unit.")
   }
 
-  assert (!(io.req.bits.uop.fp_val && io.req.valid && io.req.bits.uop.uopc =/=
-          uopLD && io.req.bits.uop.uopc =/= uopSTA),
+  assert (!(uop.fp_val && io.req.valid && uop.uopc =/= uopLD && uop.uopc =/= uopSTA) &&
+          !(uop.is_rvv && io.req.valid && uop.uopc =/= uopVL && uop.uopc =/= uopVSA),
           "[maddrcalc] assert we never get store data in here.")
 
   // Handle misaligned exceptions
-  val size = io.req.bits.uop.mem_size
+  val size = uop.mem_size
   val misaligned =
     (size === 1.U && (effective_address(0) =/= 0.U)) ||
     (size === 2.U && (effective_address(1,0) =/= 0.U)) ||
@@ -520,12 +582,22 @@ class MemAddrCalcUnit(implicit p: Parameters)
   bkptu.io.mcontext := io.mcontext
   bkptu.io.scontext := io.scontext
 
-  val ma_ld  = io.req.valid && io.req.bits.uop.uopc === uopLD && misaligned
-  val ma_st  = io.req.valid && (io.req.bits.uop.uopc === uopSTA || io.req.bits.uop.uopc === uopAMO_AG) && misaligned
-  val dbg_bp = io.req.valid && ((io.req.bits.uop.uopc === uopLD  && bkptu.io.debug_ld) ||
-                                (io.req.bits.uop.uopc === uopSTA && bkptu.io.debug_st))
-  val bp     = io.req.valid && ((io.req.bits.uop.uopc === uopLD  && bkptu.io.xcpt_ld) ||
-                                (io.req.bits.uop.uopc === uopSTA && bkptu.io.xcpt_st))
+  val ma_ld, ma_st, dbg_bp, bp = Wire(Bool())
+  if (usingVector) {
+    ma_ld  := io.req.valid && uop.uopc.isOneOf(uopLD, uopVL) && misaligned
+    ma_st  := io.req.valid && uop.uopc.isOneOf(uopSTA, uopVSA, uopAMO_AG) && misaligned
+    dbg_bp := io.req.valid && ((uop.uopc.isOneOf(uopLD, uopVL)   && bkptu.io.debug_ld) ||
+                               (uop.uopc.isOneOf(uopSTA, uopVSA) && bkptu.io.debug_st))
+    bp     := io.req.valid && ((uop.uopc.isOneOf(uopLD, uopVL)   && bkptu.io.xcpt_ld) ||
+                               (uop.uopc.isOneOf(uopSTA, uopVSA) && bkptu.io.xcpt_st))
+  } else {
+    ma_ld  := io.req.valid && uop.uopc === uopLD && misaligned
+    ma_st  := io.req.valid && (uop.uopc === uopSTA || uop.uopc === uopAMO_AG) && misaligned
+    dbg_bp := io.req.valid && ((uop.uopc === uopLD  && bkptu.io.debug_ld) ||
+                               (uop.uopc === uopSTA && bkptu.io.debug_st))
+    bp     := io.req.valid && ((uop.uopc === uopLD  && bkptu.io.xcpt_ld) ||
+                               (uop.uopc === uopSTA && bkptu.io.xcpt_st))
+  }
 
   def checkExceptions(x: Seq[(Bool, UInt)]) =
     (x.map(_._1).reduce(_||_), PriorityMux(x))
@@ -539,9 +611,9 @@ class MemAddrCalcUnit(implicit p: Parameters)
   io.resp.bits.mxcpt.bits  := xcpt_cause
   assert (!(ma_ld && ma_st), "Mutually-exclusive exceptions are firing.")
 
-  io.resp.bits.sfence.valid := io.req.valid && io.req.bits.uop.mem_cmd === M_SFENCE
-  io.resp.bits.sfence.bits.rs1 := io.req.bits.uop.mem_size(0)
-  io.resp.bits.sfence.bits.rs2 := io.req.bits.uop.mem_size(1)
+  io.resp.bits.sfence.valid := io.req.valid && uop.mem_cmd === M_SFENCE
+  io.resp.bits.sfence.bits.rs1 := uop.mem_size(0)
+  io.resp.bits.sfence.bits.rs2 := uop.mem_size(1)
   io.resp.bits.sfence.bits.addr := io.req.bits.rs1_data
   io.resp.bits.sfence.bits.asid := io.req.bits.rs2_data
 }

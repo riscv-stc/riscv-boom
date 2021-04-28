@@ -60,8 +60,9 @@ class LSUExeIO(implicit p: Parameters) extends BoomBundle()(p)
   // The "resp" of the maddrcalc is really a "req" to the LSU
   val req       = Flipped(new ValidIO(new FuncUnitResp(xLen)))
   // Send load data to regfiles
-  val iresp    = new DecoupledIO(new boom.exu.ExeUnitResp(xLen))
-  val fresp    = new DecoupledIO(new boom.exu.ExeUnitResp(xLen+1)) // TODO: Should this be fLen?
+  val iresp    = new DecoupledIO(new ExeUnitResp(xLen))
+  val fresp    = new DecoupledIO(new ExeUnitResp(xLen+1)) // TODO: Should this be fLen?
+  val vresp    = if (usingVector) new DecoupledIO(new ExeUnitResp(eLen)) else null
 }
 
 class BoomDCacheReq(implicit p: Parameters) extends BoomBundle()(p)
@@ -120,7 +121,8 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
   val ldq_full    = Output(Vec(coreWidth, Bool()))
   val stq_full    = Output(Vec(coreWidth, Bool()))
 
-  val fp_stdata   = Flipped(Decoupled(new ExeUnitResp(fLen)))
+  val fp_stdata   = if (usingFPU) Flipped(Decoupled(new ExeUnitResp(fLen))) else null
+  val v_stdata = if (usingVector) Flipped(Decoupled(new ExeUnitResp(eLen))) else null // TODO, increase width
 
   val commit      = Input(new CommitSignals)
   val commit_load_at_rob_head = Input(Bool())
@@ -862,23 +864,27 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
     //-------------------------------------------------------------
     // Write data into the STQ
-    if (w == 0)
+    if (w == 0) {
       io.core.fp_stdata.ready := !will_fire_std_incoming(w) && !will_fire_stad_incoming(w)
+      io.core.v_stdata.ready := !will_fire_std_incoming(w) && !will_fire_stad_incoming(w) && !io.core.fp_stdata.valid
+    }
     val fp_stdata_fire = io.core.fp_stdata.fire() && (w == 0).B
-    when (will_fire_std_incoming(w) || will_fire_stad_incoming(w) || fp_stdata_fire)
+    val v_stdata_fire = io.core.v_stdata.fire() && (w == 0).B
+    when (will_fire_std_incoming(w) || will_fire_stad_incoming(w) || fp_stdata_fire || v_stdata_fire)
     {
-      val sidx = Mux(will_fire_std_incoming(w) || will_fire_stad_incoming(w),
-        stq_incoming_idx(w),
-        io.core.fp_stdata.bits.uop.stq_idx)
+      val sidx = Mux(will_fire_std_incoming(w) || will_fire_stad_incoming(w), stq_incoming_idx(w),
+                 Mux(io.core.fp_stdata.valid, io.core.fp_stdata.bits.uop.stq_idx,
+                     io.core.v_stdata.bits.uop.stq_idx))
       stq(sidx).bits.data.valid := true.B
-      stq(sidx).bits.data.bits  := Mux(will_fire_std_incoming(w) || will_fire_stad_incoming(w),
-        exe_req(w).bits.data,
-        io.core.fp_stdata.bits.data)
+      stq(sidx).bits.data.bits  := Mux(will_fire_std_incoming(w) || will_fire_stad_incoming(w), exe_req(w).bits.data,
+                                   Mux(io.core.fp_stdata.valid, io.core.fp_stdata.bits.data,
+                                       io.core.v_stdata.bits.data))
       assert(!(stq(sidx).bits.data.valid),
         "[lsu] Incoming store is overwriting a valid data entry")
     }
   }
   val will_fire_stdf_incoming = io.core.fp_stdata.fire()
+  val will_fire_stdv_incoming = io.core.v_stdata.fire()
   require (xLen >= fLen) // for correct SDQ size
 
   //-------------------------------------------------------------
@@ -890,12 +896,14 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   val exe_req_killed = widthMap(w => IsKilledByBranch(io.core.brupdate, exe_req(w).bits.uop))
   val stdf_killed = IsKilledByBranch(io.core.brupdate, io.core.fp_stdata.bits.uop)
+  val stdv_killed = IsKilledByBranch(io.core.brupdate, io.core.v_stdata.bits.uop)
 
   val fired_load_incoming  = widthMap(w => RegNext(will_fire_load_incoming(w) && !exe_req_killed(w)))
   val fired_stad_incoming  = widthMap(w => RegNext(will_fire_stad_incoming(w) && !exe_req_killed(w)))
   val fired_sta_incoming   = widthMap(w => RegNext(will_fire_sta_incoming (w) && !exe_req_killed(w)))
   val fired_std_incoming   = widthMap(w => RegNext(will_fire_std_incoming (w) && !exe_req_killed(w)))
   val fired_stdf_incoming  = RegNext(will_fire_stdf_incoming && !stdf_killed)
+  val fired_stdv_incoming  = RegNext(will_fire_stdv_incoming && !stdv_killed)
   val fired_sfence         = RegNext(will_fire_sfence)
   val fired_release        = RegNext(will_fire_release)
   val fired_load_retry     = widthMap(w => RegNext(will_fire_load_retry   (w) && !IsKilledByBranch(io.core.brupdate, ldq_retry_e.bits.uop)))
@@ -920,6 +928,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                  fired_sta_incoming (w), mem_stq_incoming_e(w),
                              Mux(fired_sta_retry    (w), mem_stq_retry_e, (0.U).asTypeOf(Valid(new STQEntry)))))
   val mem_stdf_uop         = RegNext(UpdateBrMask(io.core.brupdate, io.core.fp_stdata.bits.uop))
+  val mem_stdv_uop         = RegNext(UpdateBrMask(io.core.brupdate, io.core.v_stdata.bits.uop))
 
 
   val mem_tlb_miss             = RegNext(exe_tlb_miss)
@@ -997,14 +1006,29 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     stdf_clr_bsy_brmask  := GetNewBrMask(io.core.brupdate, mem_stdf_uop)
   }
 
+  val stdv_clr_bsy_valid   = RegInit(false.B)
+  val stdv_clr_bsy_rob_idx = Reg(UInt(robAddrSz.W))
+  val stdv_clr_bsy_brmask  = Reg(UInt(maxBrCount.W))
+  stdv_clr_bsy_valid   := false.B
+  stdv_clr_bsy_rob_idx := 0.U
+  stdv_clr_bsy_brmask  := 0.U
+  when (fired_stdv_incoming) {
+    val s_idx = mem_stdv_uop.stq_idx
+    stdv_clr_bsy_valid   := stq(s_idx).valid                 &&
+                            stq(s_idx).bits.addr.valid       &&
+                            !stq(s_idx).bits.addr_is_virtual &&
+                            !stq(s_idx).bits.uop.is_amo      &&
+                            !IsKilledByBranch(io.core.brupdate, mem_stdv_uop)
+    stdv_clr_bsy_rob_idx := mem_stdv_uop.rob_idx
+    stdv_clr_bsy_brmask  := GetNewBrMask(io.core.brupdate, mem_stdv_uop)
+  }
 
+  io.core.clr_bsy(memWidth).valid := ((stdf_clr_bsy_valid && !IsKilledByBranch(io.core.brupdate, stdf_clr_bsy_brmask)) ||
+                                      (stdv_clr_bsy_valid && !IsKilledByBranch(io.core.brupdate, stdv_clr_bsy_brmask))) &&
+                                     !io.core.exception && !RegNext(io.core.exception) && !RegNext(RegNext(io.core.exception))
+  io.core.clr_bsy(memWidth).bits  := Mux(stdf_clr_bsy_valid, stdf_clr_bsy_rob_idx, stdv_clr_bsy_rob_idx)
 
-  io.core.clr_bsy(memWidth).valid := stdf_clr_bsy_valid &&
-                                    !IsKilledByBranch(io.core.brupdate, stdf_clr_bsy_brmask) &&
-                                    !io.core.exception && !RegNext(io.core.exception) && !RegNext(RegNext(io.core.exception))
-  io.core.clr_bsy(memWidth).bits  := stdf_clr_bsy_rob_idx
-
-
+  assert(!(stdf_clr_bsy_valid && stdv_clr_bsy_valid), "FP and Vec compete for clr_bsy")
 
   // Task 2: Do LD-LD. ST-LD searches for ordering failures
   //         Do LD-ST search for forwarding opportunities
@@ -1274,6 +1298,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   for (w <- 0 until memWidth) {
     io.core.exe(w).iresp.valid := false.B
     io.core.exe(w).fresp.valid := false.B
+    if (usingVector) io.core.exe(w).vresp.valid := false.B
   }
 
   val dmem_resp_fired = WireInit(widthMap(w => false.B))
@@ -1310,6 +1335,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         val ldq_idx = io.dmem.resp(w).bits.uop.ldq_idx
         val send_iresp = ldq(ldq_idx).bits.uop.dst_rtype === RT_FIX
         val send_fresp = ldq(ldq_idx).bits.uop.dst_rtype === RT_FLT
+        val send_vresp = ldq(ldq_idx).bits.uop.dst_rtype === RT_VEC
 
         io.core.exe(w).iresp.bits.uop  := ldq(ldq_idx).bits.uop
         io.core.exe(w).fresp.bits.uop  := ldq(ldq_idx).bits.uop
@@ -1317,11 +1343,16 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         io.core.exe(w).iresp.bits.data := io.dmem.resp(w).bits.data
         io.core.exe(w).fresp.valid     := send_fresp
         io.core.exe(w).fresp.bits.data := io.dmem.resp(w).bits.data
+        if (usingVector) {
+          io.core.exe(w).vresp.valid     := send_vresp
+          io.core.exe(w).vresp.bits.uop  := ldq(ldq_idx).bits.uop
+          io.core.exe(w).vresp.bits.data := io.dmem.resp(w).bits.data
+        }
 
-        assert(send_iresp ^ send_fresp)
+        assert(send_iresp ^ send_fresp ^ send_vresp)
         dmem_resp_fired(w) := true.B
 
-        ldq(ldq_idx).bits.succeeded      := io.core.exe(w).iresp.valid || io.core.exe(w).fresp.valid
+        ldq(ldq_idx).bits.succeeded      := true.B
         ldq(ldq_idx).bits.debug_wb_data  := io.dmem.resp(w).bits.data
       }
         .elsewhen (io.dmem.resp(w).bits.uop.uses_stq)
@@ -1365,6 +1396,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       io.core.exe(w).fresp.bits.uop  := forward_uop
       io.core.exe(w).iresp.bits.data := loadgen.data
       io.core.exe(w).fresp.bits.data := loadgen.data
+      if (usingVector) {
+        io.core.exe(w).vresp.valid := (forward_uop.dst_rtype === RT_VEC) && data_ready && live
+        io.core.exe(w).vresp.bits.uop  := forward_uop
+        io.core.exe(w).vresp.bits.data := loadgen.data
+      }
 
       when (data_ready && live) {
         ldq(f_idx).bits.succeeded := data_ready

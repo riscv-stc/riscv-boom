@@ -20,6 +20,7 @@ import freechips.rocketchip.tile
 
 import boom.exu.FUConstants._
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.util.{BoomCoreStringPrefix}
 
 /**
@@ -48,8 +49,6 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
     val to_int           = Decoupled(new ExeUnitResp(xLen))           // to integer RF
 
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(fLen+1)))
-    val wb_valids        = Input(Vec(numWakeupPorts, Bool()))
-    val wb_pdsts         = Input(Vec(numWakeupPorts, UInt(width=fpPregSz.W)))
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
     val debug_wb_wdata   = Output(Vec(numWakeupPorts, UInt((fLen+1).W)))

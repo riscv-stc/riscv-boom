@@ -18,10 +18,11 @@ import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.ALU._
-import freechips.rocketchip.util.uintToBitPat
+import freechips.rocketchip.util._
 import freechips.rocketchip.rocket.CSR
 
 import boom.common._
+import boom.common.MicroOpcodes._
 
 /**
  * Control signal bundle for register renaming
@@ -171,8 +172,10 @@ object MemRRdDecode extends RRdDecodeConstants
                                // |      |  |  use mem pipe        |         |         |     rf wen |
                                // |      |  |  |  alu fcn  wd/word?|         |         |     |      |
                                // |      |  |  |  |        |       |         |         |     |      |
-         BitPat(uopLD)    -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_IMM , IS_I, REN_0, CSR.N),
-         BitPat(uopSTA)   -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_IMM , IS_S, REN_0, CSR.N),
+         BitPat(uopVL)    -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_X, REN_0, CSR.N),
+         BitPat(uopVSA)   -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_X, REN_0, CSR.N),
+         BitPat(uopLD)    -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_I, REN_0, CSR.N),
+         BitPat(uopSTA)   -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_S, REN_0, CSR.N),
          BitPat(uopSTD)   -> List(BR_N , N, N, Y, FN_X   , DW_X  , OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
          BitPat(uopSFENCE)-> List(BR_N , N, N, Y, FN_X   , DW_X  , OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
 
@@ -186,22 +189,26 @@ object CsrRRdDecode extends RRdDecodeConstants
 {
   val table: Array[(BitPat, List[BitPat])] =
              Array[(BitPat, List[BitPat])](
-                               // br type
-                               // |      use alu pipe              op1 sel   op2 sel
-                               // |      |  use muldiv pipe        |         |         immsel       csr_cmd
-                               // |      |  |  use mem pipe        |         |         |     rf wen |
-                               // |      |  |  |  alu fcn  wd/word?|         |         |     |      |
-                               // |      |  |  |  |        |       |         |         |     |      |
-         BitPat(uopCSRRW) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.W),
-         BitPat(uopCSRRS) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.S),
-         BitPat(uopCSRRC) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.C),
+                                 // br type
+                                 // |      use alu pipe              op1 sel   op2 sel
+                                 // |      |  use muldiv pipe        |         |         immsel       csr_cmd
+                                 // |      |  |  use mem pipe        |         |         |     rf wen |
+                                 // |      |  |  |  alu fcn  wd/word?|         |         |     |      |
+                                 // |      |  |  |  |        |       |         |         |     |      |
+         BitPat(uopVSETVLI) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_VL  , IS_I, REN_1, CSR.N),
+         BitPat(uopVSETIVLI)-> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_VL  , IS_I, REN_1, CSR.N),
+         BitPat(uopVSETVL)  -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_VL  , IS_X, REN_1, CSR.N),
 
-         BitPat(uopCSRRWI)-> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_IMMC, IS_I, REN_1, CSR.W),
-         BitPat(uopCSRRSI)-> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_IMMC, IS_I, REN_1, CSR.S),
-         BitPat(uopCSRRCI)-> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_IMMC, IS_I, REN_1, CSR.C),
+         BitPat(uopCSRRW)   -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.W),
+         BitPat(uopCSRRS)   -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.S),
+         BitPat(uopCSRRC)   -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.C),
 
-         BitPat(uopWFI)   -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_IMMC, IS_I, REN_0, CSR.I),
-         BitPat(uopERET)  -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_IMMC, IS_I, REN_0, CSR.I))
+         BitPat(uopCSRRWI)  -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_IMMC, IS_I, REN_1, CSR.W),
+         BitPat(uopCSRRSI)  -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_IMMC, IS_I, REN_1, CSR.S),
+         BitPat(uopCSRRCI)  -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_IMMC, IS_I, REN_1, CSR.C),
+
+         BitPat(uopWFI)     -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_IMMC, IS_I, REN_0, CSR.I),
+         BitPat(uopERET)    -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_IMMC, IS_I, REN_0, CSR.I))
 }
 
 /**
@@ -336,8 +343,8 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
   io.rrd_uop.ctrl.imm_sel := rrd_cs.imm_sel
   io.rrd_uop.ctrl.op_fcn  := rrd_cs.op_fcn.asUInt
   io.rrd_uop.ctrl.fcn_dw  := rrd_cs.fcn_dw.asBool
-  io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc === uopLD
-  io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc === uopSTA || io.rrd_uop.uopc === uopAMO_AG
+  io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD, uopVL)
+  io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopVSA, uopAMO_AG)
   io.rrd_uop.ctrl.is_std  := io.rrd_uop.uopc === uopSTD || (io.rrd_uop.ctrl.is_sta && io.rrd_uop.lrs2_rtype === RT_FIX)
 
   when (io.rrd_uop.uopc === uopAMO_AG || (io.rrd_uop.uopc === uopLD && io.rrd_uop.mem_cmd === M_XLR)) {

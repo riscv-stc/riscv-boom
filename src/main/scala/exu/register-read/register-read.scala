@@ -41,7 +41,8 @@ class RegisterRead(
                         // numTotalReadPorts)
   numTotalBypassPorts: Int,
   numTotalPredBypassPorts: Int,
-  registerWidth: Int
+  registerWidth: Int,
+  vector: Boolean = false
 )(implicit p: Parameters) extends BoomModule
 {
   val io = IO(new Bundle {
@@ -115,17 +116,34 @@ class RegisterRead(
     val rs3_addr = io.iss_uops(w).prs3
     val pred_addr = io.iss_uops(w).ppred
 
-    if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := rs1_addr
-    if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := rs2_addr
-    if (numReadPorts > 2) io.rf_read_ports(idx+2).addr := rs3_addr
+    if (vector) {
+      val vstart = io.iss_uops(w).vstart
+      val vsew = io.iss_uops(w).vconfig.vtype.vsew
+      val ecnt = io.iss_uops(w).v_split_ecnt
+      val rd_sh = Mux1H(UIntToOH(vsew(1,0)), Seq(Cat(vstart(2,0),0.U(3.W)),
+                                                 Cat(vstart(1,0),0.U(4.W)),
+                                                 Cat(vstart(0),0.U(5.W)),
+                                                 0.U(6.W)))
+      val (rsel, rmsk) = VRegSel(vstart, vsew, ecnt, eLenb, eLenSelSz)
+      if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := Cat(rs1_addr, rsel)
+      if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := Cat(rs2_addr, rsel)
+      if (numReadPorts > 2) io.rf_read_ports(idx+2).addr := Cat(rs3_addr, rsel)
+      if (numReadPorts > 0) rrd_rs1_data(w) := Mux(RegNext(rs1_addr === 0.U), 0.U, io.rf_read_ports(idx+0).data >> RegNext(rd_sh))
+      if (numReadPorts > 1) rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, io.rf_read_ports(idx+1).data >> RegNext(rd_sh))
+      if (numReadPorts > 2) rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, io.rf_read_ports(idx+2).data >> RegNext(rd_sh))
+    } else {
+      if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := rs1_addr
+      if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := rs2_addr
+      if (numReadPorts > 2) io.rf_read_ports(idx+2).addr := rs3_addr
+      if (numReadPorts > 0) rrd_rs1_data(w) := Mux(RegNext(rs1_addr === 0.U), 0.U, io.rf_read_ports(idx+0).data)
+      if (numReadPorts > 1) rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, io.rf_read_ports(idx+1).data)
+      if (numReadPorts > 2) rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, io.rf_read_ports(idx+2).data)
+    }
 
-    if (enableSFBOpt) io.prf_read_ports(w).addr := pred_addr
-
-    if (numReadPorts > 0) rrd_rs1_data(w) := Mux(RegNext(rs1_addr === 0.U), 0.U, io.rf_read_ports(idx+0).data)
-    if (numReadPorts > 1) rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, io.rf_read_ports(idx+1).data)
-    if (numReadPorts > 2) rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, io.rf_read_ports(idx+2).data)
-
-    if (enableSFBOpt) rrd_pred_data(w) := Mux(RegNext(io.iss_uops(w).is_sfb_shadow), io.prf_read_ports(w).data, false.B)
+    if (enableSFBOpt) {
+      io.prf_read_ports(w).addr := pred_addr
+      rrd_pred_data(w) := Mux(RegNext(io.iss_uops(w).is_sfb_shadow), io.prf_read_ports(w).data, false.B)
+    }
 
     val rrd_kill = io.kill || IsKilledByBranch(io.brupdate, rrd_uops(w))
 
