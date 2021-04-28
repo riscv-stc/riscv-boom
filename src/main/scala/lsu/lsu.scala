@@ -53,7 +53,7 @@ import freechips.rocketchip.util.Str
 
 import boom.common._
 import boom.exu.{BrUpdateInfo, Exception, FuncUnitResp, CommitSignals, ExeUnitResp}
-import boom.util.{BoolToChar, AgePriorityEncoder, IsKilledByBranch, GetNewBrMask, WrapInc, IsOlder, UpdateBrMask}
+import boom.util._
 
 class LSUExeIO(implicit p: Parameters) extends BoomBundle()(p)
 {
@@ -143,6 +143,7 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
   val ld_miss      = Output(Bool())
 
   val brupdate       = Input(new BrUpdateInfo)
+  val vmupdate       = Input(Vec(vecWidth, Valid(new MicroOp)))
   val rob_pnr_idx  = Input(UInt(robAddrSz.W))
   val rob_head_idx = Input(UInt(robAddrSz.W))
   val exception    = Input(Bool())
@@ -177,6 +178,7 @@ class LDQEntry(implicit p: Parameters) extends BoomBundle()(p)
   val addr_is_uncacheable = Bool() // Uncacheable, wait until head of ROB to execute
 
   val executed            = Bool() // load sent to memory, reset by NACKs
+  val vmkilled            = Bool() // killed by inactive vmask
   val succeeded           = Bool()
   val order_fail          = Bool()
   val observed            = Bool()
@@ -199,6 +201,7 @@ class STQEntry(implicit p: Parameters) extends BoomBundle()(p)
 
   val committed           = Bool() // committed by ROB
   val succeeded           = Bool() // D$ has ack'd this, we don't need to maintain this anymore
+  val vmkilled            = Bool() // killed by inactive vmask
 
   val debug_wb_data       = UInt(xLen.W)
 }
@@ -311,6 +314,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
       ldq(ld_enq_idx).bits.addr.valid      := false.B
       ldq(ld_enq_idx).bits.executed        := false.B
+      ldq(ld_enq_idx).bits.vmkilled        := false.B
       ldq(ld_enq_idx).bits.succeeded       := false.B
       ldq(ld_enq_idx).bits.order_fail      := false.B
       ldq(ld_enq_idx).bits.observed        := false.B
@@ -327,6 +331,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq(st_enq_idx).bits.data.valid := false.B
       stq(st_enq_idx).bits.committed  := false.B
       stq(st_enq_idx).bits.succeeded  := false.B
+      stq(st_enq_idx).bits.vmkilled   := false.B
 
       assert (st_enq_idx === io.core.dis_uops(w).bits.stq_idx, "[lsu] mismatch enq store tag.")
       assert (!stq(st_enq_idx).valid, "[lsu] Enqueuing uop is overwriting stq entries")
@@ -381,6 +386,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val will_fire_load_retry     = Wire(Vec(memWidth, Bool()))
   val will_fire_sta_retry      = Wire(Vec(memWidth, Bool()))
   val will_fire_store_commit   = Wire(Vec(memWidth, Bool()))
+  val will_fire_vmkill_commit  = Wire(Vec(memWidth, Bool()))
   val will_fire_load_wakeup    = Wire(Vec(memWidth, Bool()))
 
   val exe_req = WireInit(VecInit(io.core.exe.map(_.req)))
@@ -489,6 +495,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   // Can we commit a store
   val can_fire_store_commit  = widthMap(w =>
                                ( stq_commit_e.valid                           &&
+                                !stq_commit_e.bits.vmkilled                   &&
                                 !stq_commit_e.bits.uop.is_fence               &&
                                 !mem_xcpt_valid                               &&
                                 !stq_commit_e.bits.uop.exception              &&
@@ -497,6 +504,12 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                                                   stq_commit_e.bits.addr.valid      &&
                                                                  !stq_commit_e.bits.addr_is_virtual &&
                                                                   stq_commit_e.bits.data.valid))))
+  // Can we advance stq_execute_head on a vmkilled entry
+  val can_fire_vmkill_commit = widthMap(w =>
+                               ( stq_commit_e.valid                           &&
+                                 stq_commit_e.bits.vmkilled                   &&
+                                (w == 0).B                                    &&
+                                 stq_commit_e.bits.committed))
 
   // Can we wakeup a load that was nack'd
   val block_load_wakeup = WireInit(false.B)
@@ -564,6 +577,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     will_fire_sta_retry     (w) := lsu_sched(can_fire_sta_retry     (w) , true , false, true , true)  // TLB ,    , LCAM , ROB // TODO: This should be higher priority
     will_fire_load_wakeup   (w) := lsu_sched(can_fire_load_wakeup   (w) , false, true , true , false) //     , DC , LCAM1
     will_fire_store_commit  (w) := lsu_sched(can_fire_store_commit  (w) , false, true , false, false) //     , DC
+    will_fire_vmkill_commit (w) := lsu_sched(can_fire_vmkill_commit (w) , false, false, false, false) // nothing
 
 
     assert(!(exe_req(w).valid && !(will_fire_load_incoming(w) || will_fire_stad_incoming(w) || will_fire_sta_incoming(w) || will_fire_std_incoming(w) || will_fire_sfence(w))))
@@ -584,6 +598,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
      !will_fire_load_retry.reduce(_&&_)     &&
      !will_fire_sta_retry.reduce(_&&_)      &&
      !will_fire_store_commit.reduce(_&&_)   &&
+     !will_fire_vmkill_commit.reduce(_&&_)  &&
      !will_fire_load_wakeup.reduce(_&&_)),
     "Some operations is proceeding down multiple pipes")
 
@@ -793,6 +808,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                                 stq_execute_head)
 
       stq(stq_execute_head).bits.succeeded := false.B
+    } .elsewhen (will_fire_vmkill_commit(w)) {
+      stq_execute_head := WrapInc(stq_execute_head, numStqEntries)
+      stq(stq_execute_head).bits.succeeded := true.B
     } .elsewhen (will_fire_load_wakeup(w)) {
       dmem_req(w).valid      := true.B
       dmem_req(w).bits.addr  := ldq_wakeup_e.bits.addr.bits
@@ -1282,6 +1300,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     io.core.spec_ld_wakeup(w).valid := enableFastLoadUse.B          &&
                                        fired_load_incoming(w)       &&
                                        !mem_incoming_uop(w).fp_val  &&
+                                       !mem_incoming_uop(w).is_rvv  &&
                                        mem_incoming_uop(w).pdst =/= 0.U
     io.core.spec_ld_wakeup(w).bits  := mem_incoming_uop(w).pdst
   }
@@ -1447,6 +1466,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         stq(i).bits.data.valid := false.B
         st_brkilled_mask(i)    := true.B
       }
+
+      when (IsKilledByVM(io.core.vmupdate, stq(i).bits.uop)) {
+        stq(i).bits.vmkilled   := true.B
+      }
     }
 
     assert (!(IsKilledByBranch(io.core.brupdate, stq(i).bits.uop) && stq(i).valid && stq(i).bits.committed),
@@ -1463,6 +1486,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       {
         ldq(i).valid           := false.B
         ldq(i).bits.addr.valid := false.B
+      }
+
+      when (IsKilledByVM(io.core.vmupdate, ldq(i).bits.uop)) {
+        ldq(i).bits.vmkilled   := true.B
       }
     }
   }
@@ -1492,7 +1519,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq(idx).bits.committed := true.B
     } .elsewhen (commit_load) {
       assert (ldq(idx).valid, "[lsu] trying to commit an un-allocated load entry.")
-      assert ((ldq(idx).bits.executed || ldq(idx).bits.forward_std_val) && ldq(idx).bits.succeeded ,
+      assert (ldq(idx).bits.vmkilled || ((ldq(idx).bits.executed || ldq(idx).bits.forward_std_val) && ldq(idx).bits.succeeded),
         "[lsu] trying to commit an un-executed load entry.")
 
       ldq(idx).valid                 := false.B

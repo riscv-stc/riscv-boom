@@ -87,6 +87,7 @@ class IssueUnitIO(
   val fu_types         = Input(Vec(issueWidth, Bits(width=FUC_SZ.W)))
 
   val brupdate         = Input(new BrUpdateInfo())
+  val vmupdate         = if (usingVector && !vector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
   val flush_pipeline   = Input(Bool())
   val ld_miss          = Input(Bool())
 
@@ -137,12 +138,19 @@ abstract class IssueUnit(
         }
       }
       dis_uops(w).prs3_busy := 0.U
+      if (usingVector && iqType == IQT_MEM.litValue) {
+//      dis_uops(w).prvm_busy := Mux(dis_uops(w).uopc.is_rvv, io.dis_uops(w).bits.prvm_busy, 0.U)
+//      already assigned in rename stage
+      } else {
+        dis_uops(w).prvm_busy := 0.U
+      }
     } else if (iqType == IQT_FP.litValue) {
       // FP "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
       when (io.dis_uops(w).bits.uopc.isOneOf(uopSTA)) {
         //dis_uops(w).lrs1_rtype := RT_FIX
         dis_uops(w).prs1_busy  := 0.U
       }
+      if (usingVector) dis_uops(w).prvm_busy := 0.U
     } else if (iqType == IQT_VEC.litValue) {
       // VEC "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
       // VEC Load that arrives here are tail splits, prs3 holds stale register name, read in RRD
@@ -163,7 +171,7 @@ abstract class IssueUnit(
   // Issue Table
 
   val slots = for (i <- 0 until numIssueSlots) yield {
-    val slot = Module(new IssueSlot(numWakeupPorts, vector));
+    val slot = Module(new IssueSlot(numWakeupPorts, iqType, vector));
     slot
   }
   val issue_slots = VecInit(slots.map(_.io))
@@ -175,6 +183,9 @@ abstract class IssueUnit(
     issue_slots(i).ldspec_miss      := io.ld_miss
     issue_slots(i).brupdate         := io.brupdate
     issue_slots(i).kill             := io.flush_pipeline
+    if (usingVector && !vector) {
+      issue_slots(i).vmupdate       := io.vmupdate
+    }
   }
 
   io.event_empty := !(issue_slots.map(s => s.valid).reduce(_|_))

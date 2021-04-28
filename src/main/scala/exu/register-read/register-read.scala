@@ -17,6 +17,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.util._
 
 /**
@@ -59,6 +60,7 @@ class RegisterRead(
 
     // send micro-ops to the execution pipelines
     val exe_reqs = Vec(issueWidth, (new DecoupledIO(new FuncUnitReq(registerWidth))))
+    val vmupdate = if (vector) Output(Vec(issueWidth, Valid(new MicroOp))) else null
 
     val kill   = Input(Bool())
     val brupdate = Input(new BrUpdateInfo())
@@ -72,6 +74,7 @@ class RegisterRead(
   val exe_reg_rs1_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
   val exe_reg_rs2_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
   val exe_reg_rs3_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
+  val exe_reg_rvm_data = if (vector) Reg(Vec(issueWidth, Bool())) else null
   val exe_reg_pred_data = Reg(Vec(issueWidth, Bool()))
 
   //-------------------------------------------------------------
@@ -95,10 +98,12 @@ class RegisterRead(
   val rrd_rs1_data   = Wire(Vec(issueWidth, Bits(registerWidth.W)))
   val rrd_rs2_data   = Wire(Vec(issueWidth, Bits(registerWidth.W)))
   val rrd_rs3_data   = Wire(Vec(issueWidth, Bits(registerWidth.W)))
+  val rrd_rvm_data   = Wire(Vec(issueWidth, Bool()))
   val rrd_pred_data  = Wire(Vec(issueWidth, Bool()))
   rrd_rs1_data := DontCare
   rrd_rs2_data := DontCare
   rrd_rs3_data := DontCare
+  rrd_rvm_data := DontCare
   rrd_pred_data := DontCare
 
   io.prf_read_ports := DontCare
@@ -117,6 +122,7 @@ class RegisterRead(
     val pred_addr = io.iss_uops(w).ppred
 
     if (vector) {
+      val rvm_addr = io.iss_uops(w).prvm
       val vstart = io.iss_uops(w).vstart
       val vsew = io.iss_uops(w).vconfig.vtype.vsew
       val ecnt = io.iss_uops(w).v_split_ecnt
@@ -128,9 +134,15 @@ class RegisterRead(
       if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := Cat(rs1_addr, rsel)
       if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := Cat(rs2_addr, rsel)
       if (numReadPorts > 2) io.rf_read_ports(idx+2).addr := Cat(rs3_addr, rsel)
+      if (numReadPorts > 3) io.rf_read_ports(idx+3).addr := Cat(rvm_addr, vstart >> log2Ceil(eLen))
       if (numReadPorts > 0) rrd_rs1_data(w) := Mux(RegNext(rs1_addr === 0.U), 0.U, io.rf_read_ports(idx+0).data >> RegNext(rd_sh))
       if (numReadPorts > 1) rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, io.rf_read_ports(idx+1).data >> RegNext(rd_sh))
       if (numReadPorts > 2) rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, io.rf_read_ports(idx+2).data >> RegNext(rd_sh))
+      if (numReadPorts > 3) {
+        rrd_rvm_data(w) := Mux(RegNext(io.iss_uops(w).v_unmasked), 1.U, io.rf_read_ports(idx+3).data(RegNext(vstart(eLenSelSz-1,0))))
+        assert(!(io.iss_valids(w) && io.iss_uops(w).uopc === uopVL && io.iss_uops(w).v_unmasked &&
+               io.iss_uops(w).vstart < io.iss_uops(w).vconfig.vl), "unmasked body load should not come here.")
+      }
     } else {
       if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := rs1_addr
       if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := rs2_addr
@@ -216,6 +228,7 @@ class RegisterRead(
     if (numReadPorts > 0) exe_reg_rs1_data(w) := bypassed_rs1_data(w)
     if (numReadPorts > 1) exe_reg_rs2_data(w) := bypassed_rs2_data(w)
     if (numReadPorts > 2) exe_reg_rs3_data(w) := rrd_rs3_data(w)
+    if (numReadPorts > 3 && vector) exe_reg_rvm_data(w) := rrd_rvm_data(w)
     if (enableSFBOpt)     exe_reg_pred_data(w) := bypassed_pred_data(w)
     // ASSUMPTION: rs3 is FPU which is NOT bypassed
   }
@@ -232,6 +245,18 @@ class RegisterRead(
     if (numReadPorts > 0) io.exe_reqs(w).bits.rs1_data := exe_reg_rs1_data(w)
     if (numReadPorts > 1) io.exe_reqs(w).bits.rs2_data := exe_reg_rs2_data(w)
     if (numReadPorts > 2) io.exe_reqs(w).bits.rs3_data := exe_reg_rs3_data(w)
+    if (numReadPorts > 3 && vector) io.exe_reqs(w).bits.uop.v_active := exe_reg_rvm_data(w)
     if (enableSFBOpt)     io.exe_reqs(w).bits.pred_data := exe_reg_pred_data(w)
+
+    if (vector) {
+      val is_v_load  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_ldq
+      val is_v_store = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_stq
+      val is_masked  = !exe_reg_uops(w).v_unmasked
+      val is_active  = exe_reg_rvm_data(w)
+      io.exe_reqs(w).valid    := exe_reg_valids(w) && (!is_v_load || !is_active)
+      io.vmupdate(w).valid    := exe_reg_valids(w) && (is_v_store || is_v_load) && is_masked
+      io.vmupdate(w).bits     := exe_reg_uops(w)
+      if (numReadPorts > 3) io.vmupdate(w).bits.v_active := is_active
+    }
   }
 }

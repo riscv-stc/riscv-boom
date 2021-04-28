@@ -63,6 +63,7 @@ class RobIo(
 
   // Handle Branch Misspeculations
   val brupdate = Input(new BrUpdateInfo())
+  val vmupdate = Input(Vec(vecWidth, Valid(new MicroOp)))
 
   // Write-back Stage
   // (Update of ROB)
@@ -460,6 +461,17 @@ class Rob(
         // clear speculation bit even on correct speculation
         rob_uop(i).br_mask := GetNewBrMask(io.brupdate, br_mask)
       }
+
+      when (IsKilledByVM(io.vmupdate, rob_uop(i))) {
+        assert(rob_val(i), "Vmask Kill invalide entry")
+        assert(rob_uop(i).is_rvv, "Vmask Kill invalide entry")
+        assert(rob_uop(i).uses_ldq || rob_uop(i).uses_stq, "Vmask Kill non-lsu entry")
+        rob_unsafe(i) := false.B
+        rob_exception(i) := false.B
+        when (rob_uop(i).uses_stq) {
+          rob_bsy(i) := false.B
+        }
+      }
     }
 
 
@@ -652,7 +664,7 @@ class Rob(
 
   r_xcpt_uop         := next_xcpt_uop
   r_xcpt_uop.br_mask := GetNewBrMask(io.brupdate, next_xcpt_uop)
-  when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop)) {
+  when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop) || IsKilledByVM(io.vmupdate, next_xcpt_uop)) {
     r_xcpt_val := false.B
   }
 

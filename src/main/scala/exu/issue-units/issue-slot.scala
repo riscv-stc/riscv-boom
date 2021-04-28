@@ -49,6 +49,7 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false)
   val in_uop        = Flipped(Valid(new MicroOp())) // if valid, this WILL overwrite an entry!
   val out_uop   = Output(new MicroOp()) // the updated slot uop; will be shifted upwards in a collasping queue.
   val uop           = Output(new MicroOp()) // the current Slot's uop. Sent down the pipeline when issued.
+  val vmupdate      = if (usingVector && !vector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
 
   val debug = {
     val result = new Bundle {
@@ -67,7 +68,11 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false)
  *
  * @param numWakeupPorts number of wakeup ports
  */
-class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p: Parameters)
+class IssueSlot(
+  val numWakeupPorts: Int,
+  val iqType: BigInt = IQT_INT.litValue,
+  val vector: Boolean = false
+)(implicit p: Parameters)
   extends BoomModule
   with IssueUnitConstants
 {
@@ -88,6 +93,7 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
   val p1    = if(vector) RegInit(0.U(vLenb.W)) else RegInit(false.B)
   val p2    = if(vector) RegInit(0.U(vLenb.W)) else RegInit(false.B)
   val p3    = if(vector) RegInit(0.U(vLenb.W)) else RegInit(false.B)
+  val pm    = if(vector) RegInit(0.U(vLenb.W)) else if (usingVector && iqType == IQT_MEM.litValue) RegInit(false.B) else null
   val ppred = RegInit(false.B)
 
   // Poison if woken up by speculative load.
@@ -129,6 +135,22 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
       ret := mask === (mask & p)
     } else {
       ret := p(0)
+    }
+    ret
+  }
+
+  def vmcheck(p: UInt): Bool = {
+    val ret = Wire(Bool())
+    val uop = slot_uop
+    if (vector) {
+      val vstart = uop.vstart
+      ret := uop.v_unmasked || p(vstart >> 3.U)
+    } else {
+      if (usingVector && iqType == IQT_MEM.litValue) {
+        ret := !uop.is_rvv || uop.v_unmasked || p(0)
+      } else {
+        ret := true.B
+      }
     }
     ret
   }
@@ -194,45 +216,56 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
   val next_p1 = WireInit(p1)
   val next_p2 = WireInit(p2)
   val next_p3 = WireInit(p3)
+  val next_pm = if (vector || usingVector && iqType == IQT_MEM.litValue) WireInit(pm) else null
+  val in_p1 = if (vector) WireInit(p1) else null
+  val in_p2 = if (vector) WireInit(p2) else null
+  val in_p3 = if (vector) WireInit(p3) else null
+  val in_pm = if (vector) WireInit(pm) else null
+  val wake_p1 = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
+  val wake_p2 = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
+  val wake_p3 = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
+  val wake_pm = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
   val next_ppred = WireInit(ppred)
 
   when (io.in_uop.valid) {
     if (usingVector) {
       if (vector) {
-//      val in_vstart = io.in_uop.bits.vstart
-//      val in_vsew = io.in_uop.bits.vconfig.vtype.vsew
-//      val in_ecnt = io.in_uop.bits.v_split_ecnt
-//      val (in_rsel, in_mask) = VRegSel(in_vstart, in_vsew, in_ecnt, eLenb, eLenSelSz)
-//      p1 := ~io.in_uop.bits.prs1_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
-//      p2 := ~io.in_uop.bits.prs2_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
-//      p3 := ~io.in_uop.bits.prs3_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
+        val in_vstart = io.in_uop.bits.vstart
+        val in_vsew = io.in_uop.bits.vconfig.vtype.vsew
+        val in_ecnt = io.in_uop.bits.v_split_ecnt
+        val (in_rsel, in_mask) = VRegSel(in_vstart, in_vsew, in_ecnt, eLenb, eLenSelSz)
+        in_p1 := ~io.in_uop.bits.prs1_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
+        in_p2 := ~io.in_uop.bits.prs2_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
+        in_p3 := ~io.in_uop.bits.prs3_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
+        in_pm := ~io.in_uop.bits.prvm_busy
       } else {
-        p1 := !io.in_uop.bits.prs1_busy(0)
-        p2 := !io.in_uop.bits.prs2_busy(0)
-        p3 := !io.in_uop.bits.prs3_busy(0)
+        next_p1 := !io.in_uop.bits.prs1_busy(0)
+        next_p2 := !io.in_uop.bits.prs2_busy(0)
+        next_p3 := !io.in_uop.bits.prs3_busy(0)
+        if (iqType == IQT_MEM.litValue) next_pm := io.in_uop.bits.v_unmasked
       }
     } else {
-      p1 := !io.in_uop.bits.prs1_busy
-      p2 := !io.in_uop.bits.prs2_busy
-      p3 := !io.in_uop.bits.prs3_busy
+      next_p1 := !io.in_uop.bits.prs1_busy
+      next_p2 := !io.in_uop.bits.prs2_busy
+      next_p3 := !io.in_uop.bits.prs3_busy
     }
-    ppred := !(io.in_uop.bits.ppred_busy)
+    next_ppred := !(io.in_uop.bits.ppred_busy)
   }
 
   when (io.ldspec_miss && next_p1_poisoned) {
     assert(next_uop.prs1 =/= 0.U, "Poison bit can't be set for prs1=x0!")
     if (vector) {
-      p1 := 0.U
+      next_p1 := 0.U
     } else {
-      p1 := false.B
+      next_p1 := false.B
     }
   }
   when (io.ldspec_miss && next_p2_poisoned) {
     assert(next_uop.prs2 =/= 0.U, "Poison bit can't be set for prs2=x0!")
     if (vector) {
-      p2 := 0.U
+      next_p2 := 0.U
     } else {
-      p2 := false.B
+      next_p2 := false.B
     }
   }
 
@@ -256,35 +289,25 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
       val wk_rs1 = wk_valid && (wk_pdst === next_uop.prs1)
       val wk_rs2 = wk_valid && (wk_pdst === next_uop.prs2)
       val wk_rs3 = wk_valid && (wk_pdst === next_uop.prs3) && next_uop.frs3_en
-//    when (wk_valid && (wk_pdst === next_uop.prs1)) {
-        p1 := p1 |
-              ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rs1.asUInt)) |
-              (~io.in_uop.bits.prs1_busy & (in_mask << Cat(in_rsel, 0.U(3.W))) & Fill(vLenb, io.in_uop.valid.asUInt))
-//    }
-//    when (wk_valid && (wk_pdst === next_uop.prs2)) {
-        p2 := p2 |
-              ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rs2.asUInt)) |
-              (~io.in_uop.bits.prs1_busy & (in_mask << Cat(in_rsel, 0.U(3.W))) & Fill(vLenb, io.in_uop.valid.asUInt))
-//    }
-//    when (wk_valid && (wk_pdst === next_uop.prs3)) {
-        p3 := p3 |
-              ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rs3.asUInt)) |
-              (~io.in_uop.bits.prs1_busy & (in_mask << Cat(in_rsel, 0.U(3.W))) & Fill(vLenb, io.in_uop.valid.asUInt))
-//    }
+      val wk_rvm = wk_valid && (wk_pdst === next_uop.prvm) && !next_uop.v_unmasked
+      wake_p1(i) := ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rs1.asUInt))
+      wake_p2(i) := ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rs2.asUInt))
+      wake_p3(i) := ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rs3.asUInt))
+      wake_pm(i) := ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rvm.asUInt))
     } else {
       when (wk_valid && (wk_pdst === next_uop.prs1)) {
-        p1 := true.B
+        next_p1 := true.B
       }
       when (wk_valid && (wk_pdst === next_uop.prs2)) {
-        p2 := true.B
+        next_p2 := true.B
       }
       when (wk_valid && (wk_pdst === next_uop.prs3)) {
-        p3 := true.B
+        next_p3 := true.B
       }
     }
   }
   when (io.pred_wakeup_port.valid && io.pred_wakeup_port.bits === next_uop.ppred) {
-    ppred := true.B
+    next_ppred := true.B
   }
 
   for (w <- 0 until memWidth) {
@@ -298,9 +321,9 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
       io.spec_ld_wakeup(w).bits === next_uop.prs1 &&
       next_uop.lrs1_rtype === RT_FIX) {
       if (vector) {
-        p1 := 0.U
+        next_p1 := 0.U
       } else {
-        p1 := true.B
+        next_p1 := true.B
       }
       p1_poisoned := true.B
       assert (!is_valid || !next_p1_poisoned)
@@ -309,9 +332,9 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
       io.spec_ld_wakeup(w).bits === next_uop.prs2 &&
       next_uop.lrs2_rtype === RT_FIX) {
       if (vector) {
-        p2 := 0.U
+        next_p2 := 0.U
       } else {
-        p2 := true.B
+        next_p2 := true.B
       }
       p2_poisoned := true.B
       assert (!is_valid || !next_p2_poisoned)
@@ -328,18 +351,27 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
     next_state := s_invalid
   }
 
+  if (usingVector && !vector && iqType == IQT_MEM.litValue) {
+    when (io.vmupdate.map(_.valid).reduce(_||_)) {
+      next_pm := io.vmupdate.map(v => v.valid && v.bits.rob_idx === next_uop.rob_idx).reduce(_||_)
+    }
+    when (IsKilledByVM(io.vmupdate, slot_uop)) {
+      next_state := s_invalid
+    }
+  }
+
   when (!io.in_uop.valid) {
     slot_uop.br_mask := next_br_mask
   }
 
   //-------------------------------------------------------------
   // Request Logic
-  io.request := is_valid && pcheck(p1) && pcheck(p2) && pcheck(p3) && ppred && !io.kill
+  io.request := is_valid && pcheck(p1) && pcheck(p2) && pcheck(p3) && vmcheck(pm) && ppred && !io.kill
   val high_priority = slot_uop.is_br || slot_uop.is_jal || slot_uop.is_jalr
   io.request_hp := io.request && high_priority
 
   when (state === s_valid_1) {
-    io.request := pcheck(p1) && pcheck(p2) && pcheck(p3) && ppred && !io.kill
+    io.request := pcheck(p1) && pcheck(p2) && pcheck(p3) && vmcheck(pm) && ppred && !io.kill
   } .elsewhen (state === s_valid_2) {
     io.request := (pcheck(p1) || pcheck(p2)) && ppred && !io.kill
   } .otherwise {
@@ -353,7 +385,7 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
   io.uop.iw_p2_poisoned := p2_poisoned
 
   // micro-op will vacate due to grant.
-  val may_vacate = io.grant && ((state === s_valid_1) || (state === s_valid_2) && ppred &&
+  val may_vacate = io.grant && ((state === s_valid_1) || (state === s_valid_2) && ppred && vmcheck(pm) &&
                    pcheck(p1) && plast(p1) &&
                    pcheck(p2) && plast(p2) &&
                    pcheck(p3) && plast(p3))
@@ -375,10 +407,13 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
       io.out_uop.prs1_busy  := ~p1 & (slot_mask << Cat(slot_rsel, 0.U(3.W)))
       io.out_uop.prs2_busy  := ~p2 & (slot_mask << Cat(slot_rsel, 0.U(3.W)))
       io.out_uop.prs3_busy  := ~p3 & (slot_mask << Cat(slot_rsel, 0.U(3.W)))
+      io.out_uop.prvm_busy  := ~pm
     } else {
       io.out_uop.prs1_busy  := Cat(0.U, !p1)
       io.out_uop.prs2_busy  := Cat(0.U, !p2)
       io.out_uop.prs3_busy  := Cat(0.U, !p3)
+      if (iqType == IQT_MEM.litValue) io.out_uop.prvm_busy := Cat(0.U, !pm)
+      else                            io.out_uop.prvm_busy := 0.U
     }
   } else {
     io.out_uop.prs1_busy  := !p1
@@ -399,6 +434,21 @@ class IssueSlot(val numWakeupPorts: Int, val vector: Boolean = false)(implicit p
       io.uop.uopc := uopSTD
       io.uop.lrs1_rtype := RT_X
     }
+  }
+
+  if (vector) {
+    next_p1 := p1 | in_p1 | wake_p1.reduce(_|_)
+    next_p2 := p2 | in_p2 | wake_p2.reduce(_|_)
+    next_p3 := p3 | in_p3 | wake_p3.reduce(_|_)
+    next_pm := pm | in_pm | wake_pm.reduce(_|_)
+  }
+
+  p1 := next_p1
+  p2 := next_p2
+  p3 := next_p3
+  ppred := next_ppred
+  if (vector || usingVector && iqType == IQT_MEM.litValue) {
+    pm := next_pm
   }
 
   // debug outputs
