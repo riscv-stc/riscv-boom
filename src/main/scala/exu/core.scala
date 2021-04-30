@@ -108,8 +108,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val pred_rename_stage = Module(new PredRenameStage(coreWidth, ftqSz, 1))
   val v_rename_stage   = if (usingVector) Module(new RenameStage(coreWidth, numVecPhysRegs, numVecWakeupPorts, false, true)) else null
 
-  val rename_stages    = if (usingFPU) Seq(rename_stage, fp_rename_stage, pred_rename_stage) else Seq(rename_stage, pred_rename_stage)
-  if (usingVector) rename_stages ++= v_rename_stage
+  val rename_stages    = if (usingFPU && usingVector)
+      Seq(rename_stage, fp_rename_stage, v_rename_stage, pred_rename_stage)
+    else if (usingFPU)
+      Seq(rename_stage, fp_rename_stage, pred_rename_stage)
+    else if (usingVector)
+      Seq(rename_stage, v_rename_stage, pred_rename_stage)
+    else
+      Seq(rename_stage, pred_rename_stage)
 
   rename_stage.suggestName("i_rename_stage")
   if (usingFPU) fp_rename_stage.suggestName("fp_rename_stage")

@@ -96,7 +96,7 @@ case class BoomCoreParams(
   scontextWidth: Int = 0,
 
   /* vector extension */
-  useVector: Boolean = false,
+  override val useVector: Boolean = false,
   override val vLen: Int = 0,
   override val eLen: Int = 0,
   override val vMemDataBits: Int = 0,

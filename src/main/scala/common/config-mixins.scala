@@ -527,42 +527,60 @@ class WithSWBPD extends Config((site, here, up) => {
   }
 })
 
+
+
 // DOC include start: StcBoomConfig
 /**
  * Based on LargeBoomConfig with RVV extension
  */
-class WithStcBooms extends Config((site, here, up) => {
-  case BoomTilesKey => up(BoomTilesKey, site) map { b => b.copy(
-    core = b.core.copy(
-      fetchWidth = 8,
-      decodeWidth = 2,
-      numRobEntries = 64,
-      issueParams = Seq(
-        IssueParams(issueWidth=1, numEntries=32, iqType=IQT_MEM.litValue, dispatchWidth=2),
-        IssueParams(issueWidth=2, numEntries=32, iqType=IQT_INT.litValue, dispatchWidth=2),
-        IssueParams(issueWidth=1, numEntries=16, iqType=IQT_FP.litValue , dispatchWidth=2),
-        IssueParams(issueWidth=1, numEntries=32, iqType=IQT_VEC.litValue, dispatchWidth=2)),
-      numIntPhysRegisters = 80,
-      numFpPhysRegisters = 64,
-      numLdqEntries = 32,
-      numStqEntries = 32,
-      maxBrCount = 12,
-      numFetchBufferEntries = 16,
-      ftq = FtqParameters(nEntries=32),
-      fpu = Some(freechips.rocketchip.tile.FPUParams(sfmaLatency=4, dfmaLatency=4, divSqrt=true)),
-      useVector = true,
-      vLen = 1024,
-      eLen = 64,
-      vMemDataBits = 64,
-      numVecPhysRegisters = 64
-    ),
-    dcache = Some(DCacheParams(rowBits = site(SystemBusKey).beatBytes*8,
-                               nSets=64, nWays=8, nMSHRs=4, nTLBEntries=16)),
-    icache = Some(ICacheParams(fetchBytes = 4*4, rowBits = site(SystemBusKey).beatBytes*8, nSets=64, nWays=8))
-  )}
-  case SystemBusKey => up(SystemBusKey, site).copy(beatBytes = 16)
-  case XLen => 64
-  case MaxHartIdBits => log2Up(site(BoomTilesKey).size)
-})
-// DOC include end: LargeBoomConfig
+class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Config(
+  new WithTAGELBPD ++ // Default to TAGE-L BPD
+  new Config((site, here, up) => {
+    case TilesLocated(InSubsystem) => {
+      val prev = up(TilesLocated(InSubsystem), site)
+      val idOffset = overrideIdOffset.getOrElse(prev.size)
+      (0 until n).map { i =>
+        BoomTileAttachParams(
+          tileParams = BoomTileParams(
+            core = BoomCoreParams(
+              fetchWidth = 8,
+              decodeWidth = 2,
+              numRobEntries = 64,
+              issueParams = Seq(
+                IssueParams(issueWidth=1, numEntries=32, iqType=IQT_MEM.litValue, dispatchWidth=2),
+                IssueParams(issueWidth=2, numEntries=32, iqType=IQT_INT.litValue, dispatchWidth=2),
+                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_FP.litValue , dispatchWidth=2),
+                IssueParams(issueWidth=1, numEntries=32, iqType=IQT_VEC.litValue, dispatchWidth=2)),
+              numIntPhysRegisters = 80,
+              numFpPhysRegisters = 64,
+              numLdqEntries = 32,
+              numStqEntries = 32,
+              maxBrCount = 12,
+              numFetchBufferEntries = 16,
+              ftq = FtqParameters(nEntries=32),
+              nPerfCounters = 29,
+              fpu = Some(freechips.rocketchip.tile.FPUParams(sfmaLatency=4, dfmaLatency=4, divSqrt=true)),
+              useVector = true,
+              vLen = 1024,
+              eLen = 64,
+              vMemDataBits = 64,
+              numVecPhysRegisters = 64
+            ),
+            dcache = Some(
+              DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4, nTLBWays=16)
+            ),
+            icache = Some(
+              ICacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, fetchBytes=4*4)
+            ),
+            hartId = i + idOffset
+          ),
+          crossingParams = RocketCrossingParams()
+        )
+      } ++ prev
+    }
+    case SystemBusKey => up(SystemBusKey, site).copy(beatBytes = 16)
+    case XLen => 64
+  })
+)
+// DOC include end: StcBoomConfig
 
