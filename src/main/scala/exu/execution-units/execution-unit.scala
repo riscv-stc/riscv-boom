@@ -698,5 +698,11 @@ class VecExeUnit(
   assert ((PopCount(vresp_fu_units.map(_.io.resp.valid)) <= 1.U && !div_resp_val) ||
           (PopCount(vresp_fu_units.map(_.io.resp.valid)) <= 2.U && (div_resp_val)),
           "Multiple functional units are fighting over the write port.")
+
+  override def supportedFuncUnits = {
+    new SupportedFuncUnits(
+      vector = true
+    )
+  }
 }
 

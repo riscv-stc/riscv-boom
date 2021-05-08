@@ -30,7 +30,7 @@ import chisel3.util._
 import chisel3.experimental.chiselName
 
 import freechips.rocketchip.config.Parameters
-import freechips.rocketchip.util.Str
+import freechips.rocketchip.util.{Str, UIntIsOneOf}
 
 import boom.common._
 import boom.common.MicroOpcodes._
@@ -345,14 +345,28 @@ class Rob(
       val wb_resp = io.wb_resps(i)
       val wb_uop = wb_resp.bits.uop
       val row_idx = GetRowIdx(wb_uop.rob_idx)
-      when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
-        rob_bsy(row_idx)      := false.B
-        rob_unsafe(row_idx)   := false.B
-        rob_predicated(row_idx)  := wb_resp.bits.predicated
-        if (O3PIPEVIEW_PRINTF) {
-          printf("%d; O3PipeView:complete:%d\n",
-            rob_uop(row_idx).debug_events.fetch_seq,
-            io.debug_tsc)
+      if (usingVector) {
+        when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
+          val wb_v_ls = wb_uop.uopc.isOneOf(uopVL, uopVSA)
+          rob_bsy(row_idx)      := Mux(wb_v_ls, false.B, wb_uop.v_is_split && !wb_uop.v_is_last)
+          rob_unsafe(row_idx)   := false.B
+          rob_predicated(row_idx)  := wb_resp.bits.predicated
+          if (O3PIPEVIEW_PRINTF) {
+            printf("%d; O3PipeView:complete:%d\n",
+              rob_uop(row_idx).debug_events.fetch_seq,
+              io.debug_tsc)
+          }
+        }
+      } else {
+        when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
+          rob_bsy(row_idx)      := false.B
+          rob_unsafe(row_idx)   := false.B
+          rob_predicated(row_idx)  := wb_resp.bits.predicated
+          if (O3PIPEVIEW_PRINTF) {
+            printf("%d; O3PipeView:complete:%d\n",
+              rob_uop(row_idx).debug_events.fetch_seq,
+              io.debug_tsc)
+          }
         }
       }
       // TODO check that fflags aren't overwritten

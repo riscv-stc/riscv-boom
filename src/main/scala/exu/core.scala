@@ -91,6 +91,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     v_pipeline = Module(new VecPipeline)
     v_pipeline.io.ll_wports := DontCare
     vmupdate := v_pipeline.io.vmupdate
+    v_pipeline.io.intupdate := DontCare
+    v_pipeline.io.fpupdate := DontCare
   }
 
   val numIrfWritePorts        = exe_units.numIrfWritePorts + memWidth
@@ -630,6 +632,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     decode_units(w).io.interrupt       := csr.io.interrupt
     decode_units(w).io.interrupt_cause := csr.io.interrupt_cause
     decode_units(w).io.csr_vconfig     := csr.io.vector.get.vconfig
+    decode_units(w).io.csr_vconfig.vtype.reserved := DontCare
 
     dec_uops(w) := decode_units(w).io.deq.uop
   }
@@ -1104,6 +1107,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     mem_iss_unit.io.vmupdate := vmupdate
     int_iss_unit.io.vmupdate.map(_.valid := false.B)
     int_iss_unit.io.vmupdate.map(_.bits := DontCare)
+    v_pipeline.io.intupdate := iregister_read.io.intupdate
+    v_pipeline.io.fpupdate := fp_pipeline.io.fpupdate
   }
 
   // Load-hit Misspeculations
@@ -1229,6 +1234,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     csr.io.vector.get.set_vs_dirty := csr_vld & vsetvl
     csr.io.vector.get.set_vconfig.valid := csr_vld & vsetvl
     csr.io.vector.get.set_vconfig.bits := csr_uop.vconfig
+    csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
     csr.io.vector.get.set_vstart.valid := false.B
     csr.io.vector.get.set_vstart.bits := csr_uop.vstart
     csr.io.vector.get.set_vxsat := false.B

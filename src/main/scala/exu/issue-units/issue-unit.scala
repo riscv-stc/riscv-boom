@@ -88,6 +88,8 @@ class IssueUnitIO(
 
   val brupdate         = Input(new BrUpdateInfo())
   val vmupdate         = if (usingVector && !vector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
+  val intupdate        = if (usingVector && vector) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val fpupdate         = if (usingVector && vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   val flush_pipeline   = Input(Bool())
   val ld_miss          = Input(Bool())
 
@@ -144,13 +146,21 @@ abstract class IssueUnit(
       } else {
         dis_uops(w).prvm_busy := 0.U
       }
+      if (usingVector && iqType == IQT_INT.litValue) {
+        when (dis_uops(w).lrs2_rtype === RT_VEC) { dis_uops(w).prs2_busy := 0.U }
+        when (dis_uops(w).frs3_en )              { dis_uops(w).prs3_busy := 0.U }
+      }
     } else if (iqType == IQT_FP.litValue) {
       // FP "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
       when (io.dis_uops(w).bits.uopc.isOneOf(uopSTA)) {
         //dis_uops(w).lrs1_rtype := RT_FIX
         dis_uops(w).prs1_busy  := 0.U
       }
-      if (usingVector) dis_uops(w).prvm_busy := 0.U
+      if (usingVector) {
+        dis_uops(w).prvm_busy := 0.U
+        when (dis_uops(w).lrs2_rtype === RT_VEC) { dis_uops(w).prs2_busy := 0.U }
+        when (dis_uops(w).is_rvv )               { dis_uops(w).prs3_busy := 0.U }
+      }
     } else if (iqType == IQT_VEC.litValue) {
       // VEC "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
       // VEC Load that arrives here are tail splits, prs3 holds stale register name, read in RRD
@@ -183,8 +193,13 @@ abstract class IssueUnit(
     issue_slots(i).ldspec_miss      := io.ld_miss
     issue_slots(i).brupdate         := io.brupdate
     issue_slots(i).kill             := io.flush_pipeline
-    if (usingVector && !vector) {
-      issue_slots(i).vmupdate       := io.vmupdate
+    if (usingVector) {
+      if (vector) {
+        issue_slots(i).intupdate      := io.intupdate
+        issue_slots(i).fpupdate       := io.fpupdate
+      } else {
+        issue_slots(i).vmupdate       := io.vmupdate
+      }
     }
   }
 

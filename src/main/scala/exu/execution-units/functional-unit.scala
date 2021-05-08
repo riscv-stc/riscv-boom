@@ -89,7 +89,8 @@ class SupportedFuncUnits(
   val fpu: Boolean  = false,
   val csr: Boolean  = false,
   val fdiv: Boolean = false,
-  val ifpu: Boolean = false)
+  val ifpu: Boolean = false,
+  val vector: Boolean = false)
 {
 }
 
@@ -488,10 +489,12 @@ class ALUUnit(
   val r_val  = RegInit(VecInit(Seq.fill(numStages) { false.B }))
   val r_data = Reg(Vec(numStages, UInt(xLen.W)))
   val r_pred = Reg(Vec(numStages, Bool()))
+  val v_inactive = io.req.bits.uop.is_rvv && ((io.req.bits.uop.vstart >= io.req.bits.uop.vconfig.vl) || !io.req.bits.uop.v_active)
   val alu_out = Mux(io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data,
     Mux(io.req.bits.uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
     Mux(io.req.bits.uop.uopc === uopMOV, io.req.bits.rs2_data,
-        Mux(io.req.bits.uop.uopc.isOneOf(uopVSA, uopVL), io.req.bits.rs3_data, alu.io.out)))
+        Mux(io.req.bits.uop.uopc.isOneOf(uopVSA, uopVL) || v_inactive, io.req.bits.rs3_data,
+            alu.io.out)))
   r_val (0) := io.req.valid
   r_data(0) := Mux(io.req.bits.uop.is_sfb_br, pc_sel === PC_BRJMP, alu_out)
   r_pred(0) := io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data

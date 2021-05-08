@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.util.{UIntIsOneOf}
 
 import boom.common._
 import boom.common.MicroOpcodes._
@@ -50,6 +51,8 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false)
   val out_uop   = Output(new MicroOp()) // the updated slot uop; will be shifted upwards in a collasping queue.
   val uop           = Output(new MicroOp()) // the current Slot's uop. Sent down the pipeline when issued.
   val vmupdate      = if (usingVector && !vector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
+  val intupdate     = if (usingVector && vector) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val fpupdate      = if (usingVector && vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
 
   val debug = {
     val result = new Bundle {
@@ -94,6 +97,8 @@ class IssueSlot(
   val p2    = if(vector) RegInit(0.U(vLenb.W)) else RegInit(false.B)
   val p3    = if(vector) RegInit(0.U(vLenb.W)) else RegInit(false.B)
   val pm    = if(vector) RegInit(0.U(vLenb.W)) else if (usingVector && iqType == IQT_MEM.litValue) RegInit(false.B) else null
+  val ps    = if(vector) RegInit(false.B) else null
+  val sdata = if(vector) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
 
   // Poison if woken up by speculative load.
@@ -107,19 +112,14 @@ class IssueSlot(
   val next_p2_poisoned = Mux(io.in_uop.valid, io.in_uop.bits.iw_p2_poisoned, p2_poisoned)
 
   val slot_uop = RegInit(NullMicroOp)
-  val next_uop = Mux(io.in_uop.valid, io.in_uop.bits, slot_uop)
+  val next_uop = WireInit(Mux(io.in_uop.valid, io.in_uop.bits, slot_uop))
 
-  def plast(p: UInt): Bool = {
+  def last_check: Bool = {
     val ret = Wire(Bool())
-    val uop = slot_uop
     if (vector) {
-      val vstart = uop.vstart
-      val vsew = uop.vconfig.vtype.vsew
-      val ecnt = uop.v_split_ecnt
-      val mask = MaskGen(vstart<<vsew, ecnt, vLenb)
-      ret := mask === p
+      ret := io.uop.v_is_last || io.uop.uopc.isOneOf(uopVL, uopVSA)
     } else {
-      ret := p(0)
+      ret := true.B
     }
     ret
   }
@@ -155,6 +155,17 @@ class IssueSlot(
     ret
   }
 
+  def scalar_check(p: Bool): Bool = {
+    val ret = Wire(Bool())
+    val uop = slot_uop
+    if (vector) {
+      ret := Mux(uop.uses_scalar, p, true.B)
+    } else {
+      ret := true.B
+    }
+    ret
+  }
+
   //-----------------------------------------------------------------------------
   // next slot state computation
   // compute the next state for THIS entry slot (in a collasping queue, the
@@ -185,9 +196,17 @@ class IssueSlot(
     next_state := s_invalid
   } .elsewhen ((io.grant && (state === s_valid_1)) ||
     (io.grant && (state === s_valid_2) && pcheck(p1) && pcheck(p2) && ppred)) {
-    // try to issue this uop.
-    when (!(io.ldspec_miss && (p1_poisoned || p2_poisoned))) {
-      next_state := s_invalid
+    if (vector) {
+      when (state === s_valid_1) {
+        when(last_check) {
+          next_state := s_invalid
+        }
+      }
+    } else {
+      // try to issue this uop.
+      when (!(io.ldspec_miss && (p1_poisoned || p2_poisoned))) {
+        next_state := s_invalid
+      }
     }
   } .elsewhen (io.grant && (state === s_valid_2)) {
     when (!(io.ldspec_miss && (p1_poisoned || p2_poisoned))) {
@@ -202,11 +221,6 @@ class IssueSlot(
         next_lrs2_rtype := RT_X
       }
     }
-  }
-
-  when (io.in_uop.valid) {
-    slot_uop := io.in_uop.bits
-    assert (is_invalid || io.clear || io.kill, "trying to overwrite a valid issue slot.")
   }
 
   // Wakeup Compare Logic
@@ -230,14 +244,16 @@ class IssueSlot(
   when (io.in_uop.valid) {
     if (usingVector) {
       if (vector) {
-        val in_vstart = io.in_uop.bits.vstart
-        val in_vsew = io.in_uop.bits.vconfig.vtype.vsew
-        val in_ecnt = io.in_uop.bits.v_split_ecnt
-        val (in_rsel, in_mask) = VRegSel(in_vstart, in_vsew, in_ecnt, eLenb, eLenSelSz)
-        in_p1 := ~io.in_uop.bits.prs1_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
-        in_p2 := ~io.in_uop.bits.prs2_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
-        in_p3 := ~io.in_uop.bits.prs3_busy & (in_mask << Cat(in_rsel, 0.U(3.W)))
+        //val in_vstart = io.in_uop.bits.vstart
+        //val in_vsew = io.in_uop.bits.vconfig.vtype.vsew
+        //val in_ecnt = io.in_uop.bits.v_split_ecnt
+        //val (in_rsel, in_mask) = VRegSel(in_vstart, in_vsew, in_ecnt, eLenb, eLenSelSz)
+        in_p1 := ~io.in_uop.bits.prs1_busy //& (in_mask << Cat(in_rsel, 0.U(3.W)))
+        in_p2 := ~io.in_uop.bits.prs2_busy //& (in_mask << Cat(in_rsel, 0.U(3.W)))
+        in_p3 := ~io.in_uop.bits.prs3_busy //& (in_mask << Cat(in_rsel, 0.U(3.W)))
         in_pm := ~io.in_uop.bits.prvm_busy
+        ps    := ~io.in_uop.bits.v_scalar_busy
+        sdata := io.in_uop.bits.v_scalar_data
       } else {
         next_p1 := !io.in_uop.bits.prs1_busy(0)
         next_p2 := !io.in_uop.bits.prs2_busy(0)
@@ -278,22 +294,18 @@ class IssueSlot(
       val wk_vsew = wk_uop.vconfig.vtype.vsew
       val wk_ecnt = wk_uop.v_split_ecnt
       val (wk_sel, wk_mask) = VRegSel(wk_vstart, wk_vsew, wk_ecnt, eLenb, eLenSelSz)
-      val nx_vstart = next_uop.vstart
-      val nx_vsew = next_uop.vconfig.vtype.vsew
-      val nx_ecnt = next_uop.v_split_ecnt
-      val (nx_sel, nx_mask) = VRegSel(nx_vstart, nx_vsew, nx_ecnt, eLenb, eLenSelSz)
-      val in_vstart = io.in_uop.bits.vstart
-      val in_vsew = io.in_uop.bits.vconfig.vtype.vsew
-      val in_ecnt = io.in_uop.bits.v_split_ecnt
-      val (in_rsel, in_mask) = VRegSel(in_vstart, in_vsew, in_ecnt, eLenb, eLenSelSz)
+    //val nx_vstart = next_uop.vstart
+    //val nx_vsew = next_uop.vconfig.vtype.vsew
+    //val nx_ecnt = next_uop.v_split_ecnt
+    //val (nx_sel, nx_mask) = VRegSel(nx_vstart, nx_vsew, nx_ecnt, eLenb, eLenSelSz)
       val wk_rs1 = wk_valid && (wk_pdst === next_uop.prs1)
       val wk_rs2 = wk_valid && (wk_pdst === next_uop.prs2)
       val wk_rs3 = wk_valid && (wk_pdst === next_uop.prs3) && next_uop.frs3_en
       val wk_rvm = wk_valid && (wk_pdst === next_uop.prvm) && !next_uop.v_unmasked
-      wake_p1(i) := ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rs1.asUInt))
-      wake_p2(i) := ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rs2.asUInt))
-      wake_p3(i) := ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rs3.asUInt))
-      wake_pm(i) := ((wk_mask << Cat(wk_sel, 0.U(3.W))) & (nx_mask << Cat(nx_sel, 0.U(3.W))) & Fill(vLenb, wk_rvm.asUInt))
+      wake_p1(i) := (wk_mask << Cat(wk_sel, 0.U(3.W))) & Fill(vLenb, wk_rs1.asUInt) //& (nx_mask << Cat(nx_sel, 0.U(3.W)))
+      wake_p2(i) := (wk_mask << Cat(wk_sel, 0.U(3.W))) & Fill(vLenb, wk_rs2.asUInt) //& (nx_mask << Cat(nx_sel, 0.U(3.W)))
+      wake_p3(i) := (wk_mask << Cat(wk_sel, 0.U(3.W))) & Fill(vLenb, wk_rs3.asUInt) //& (nx_mask << Cat(nx_sel, 0.U(3.W)))
+      wake_pm(i) := (wk_mask << Cat(wk_sel, 0.U(3.W))) & Fill(vLenb, wk_rvm.asUInt) //& (nx_mask << Cat(nx_sel, 0.U(3.W)))
     } else {
       when (wk_valid && (wk_pdst === next_uop.prs1)) {
         next_p1 := true.B
@@ -364,19 +376,32 @@ class IssueSlot(
     slot_uop.br_mask := next_br_mask
   }
 
+  if (vector) {
+    when (io.intupdate.map(_.valid).reduce(_||_) || io.fpupdate.map(_.valid).reduce(_||_)) {
+      val int_sel  = io.intupdate.map(u => u.valid && u.bits.uop.prs1 === next_uop.prs1 && next_uop.lrs1_rtype === RT_FIX)
+      val int_data = io.intupdate.map(_.bits.data)
+      val fp_sel   = io.fpupdate.map(u => u.valid && u.bits.uop.prs1 === next_uop.prs1 && next_uop.lrs1_rtype === RT_FLT)
+      val fp_data  = io.fpupdate.map(_.bits.data)
+      ps := int_sel.reduce(_||_) || fp_sel.reduce(_||_)
+      sdata := Mux1H(int_sel++fp_sel, int_data++fp_data)
+      assert(PopCount(int_sel++fp_sel) <= 1.U, "Multiple drivers")
+    }
+  }
+
   //-------------------------------------------------------------
   // Request Logic
-  io.request := is_valid && pcheck(p1) && pcheck(p2) && pcheck(p3) && vmcheck(pm) && ppred && !io.kill
-  val high_priority = slot_uop.is_br || slot_uop.is_jal || slot_uop.is_jalr
-  io.request_hp := io.request && high_priority
-
+//io.request := is_valid && pcheck(p1) && pcheck(p2) && pcheck(p3) &&
+//              scalar_check && vmcheck(pm) && ppred && !io.kill
   when (state === s_valid_1) {
-    io.request := pcheck(p1) && pcheck(p2) && pcheck(p3) && vmcheck(pm) && ppred && !io.kill
+    io.request := ppred && pcheck(p1) && pcheck(p2) && pcheck(p3) && vmcheck(pm) && scalar_check(ps) && !io.kill
   } .elsewhen (state === s_valid_2) {
     io.request := (pcheck(p1) || pcheck(p2)) && ppred && !io.kill
   } .otherwise {
     io.request := false.B
   }
+
+  val high_priority = slot_uop.is_br || slot_uop.is_jal || slot_uop.is_jalr
+  io.request_hp := io.request && high_priority
 
   //assign outputs
   io.valid := is_valid
@@ -385,10 +410,9 @@ class IssueSlot(
   io.uop.iw_p2_poisoned := p2_poisoned
 
   // micro-op will vacate due to grant.
-  val may_vacate = io.grant && ((state === s_valid_1) || (state === s_valid_2) && ppred && vmcheck(pm) &&
-                   pcheck(p1) && plast(p1) &&
-                   pcheck(p2) && plast(p2) &&
-                   pcheck(p3) && plast(p3))
+  val may_vacate = io.grant && ((state === s_valid_1) || (state === s_valid_2)) &&
+                   ppred && pcheck(p1) && pcheck(p2) && pcheck(p3) &&
+                   vmcheck(pm) && scalar_check(ps) && last_check
   val squash_grant = io.ldspec_miss && (p1_poisoned || p2_poisoned)
   io.will_be_valid := is_valid && !(may_vacate && !squash_grant)
 
@@ -400,14 +424,35 @@ class IssueSlot(
   io.out_uop.br_mask    := next_br_mask
   if (usingVector) {
     if (vector) {
-      val slot_vstart = slot_uop.vstart
-      val slot_vsew = slot_uop.vconfig.vtype.vsew
-      val slot_ecnt = slot_uop.v_split_ecnt
-      val (slot_rsel, slot_mask) = VRegSel(slot_vstart, slot_vsew, slot_ecnt, eLenb, eLenSelSz)
-      io.out_uop.prs1_busy  := ~p1 & (slot_mask << Cat(slot_rsel, 0.U(3.W)))
-      io.out_uop.prs2_busy  := ~p2 & (slot_mask << Cat(slot_rsel, 0.U(3.W)))
-      io.out_uop.prs3_busy  := ~p3 & (slot_mask << Cat(slot_rsel, 0.U(3.W)))
+//    val slot_vstart = slot_uop.vstart
+//    val slot_vsew = slot_uop.vconfig.vtype.vsew
+//    val slot_ecnt = slot_uop.v_split_ecnt
+//    val (slot_rsel, slot_mask) = VRegSel(slot_vstart, slot_vsew, slot_ecnt, eLenb, eLenSelSz)
+// value to next slot should be current latched version
+// ignore element busy masking, we keep busy status for entire v-register (i.e. p1,p2,p3,pm)
+      io.out_uop.prs1_busy  := ~p1 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
+      io.out_uop.prs2_busy  := ~p2 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
+      io.out_uop.prs3_busy  := ~p3 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
       io.out_uop.prvm_busy  := ~pm
+//    io.out_uop.vstart        := next_uop.vstart
+      io.out_uop.v_scalar_busy := ~ps
+      io.out_uop.v_scalar_data := sdata
+      when (io.request && io.grant && !io.uop.uopc.isOneOf(uopVL, uopVSA)) {
+        val vsew = slot_uop.vconfig.vtype.vsew(1,0)
+        //val eLen_ecnt = eLen.U >> (vsew+3.U)
+        val ren_mask = ~(Fill(vLenSz,1.U) << (7.U-vsew))
+        io.uop.v_split_ecnt := 1.U //eLen_ecnt, TODO consider masking
+        io.uop.v_is_first := (slot_uop.vstart & ren_mask(vLenSz,0)) === 0.U
+        io.uop.v_is_last  := slot_uop.vstart + 1.U === slot_uop.v_split_ecnt
+        next_uop.vstart   := slot_uop.vstart + io.uop.v_split_ecnt
+        io.out_uop.vstart := next_uop.vstart
+        slot_uop.vstart   := next_uop.vstart
+      }
+      // merge input busy status and wake-up status
+      next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_)
+      next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_)
+      next_p3 := Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_)
+      next_pm := Mux(io.in_uop.valid, in_pm, pm) | wake_pm.reduce(_|_)
     } else {
       io.out_uop.prs1_busy  := Cat(0.U, !p1)
       io.out_uop.prs2_busy  := Cat(0.U, !p2)
@@ -424,6 +469,11 @@ class IssueSlot(
   io.out_uop.iw_p1_poisoned := p1_poisoned
   io.out_uop.iw_p2_poisoned := p2_poisoned
 
+  when (io.in_uop.valid) {
+    slot_uop := io.in_uop.bits
+    assert (is_invalid || io.clear || io.kill, "trying to overwrite a valid issue slot.")
+  }
+
   when (state === s_valid_2) {
     when (pcheck(p1) && pcheck(p2) && ppred) {
       ; // send out the entire instruction as one uop
@@ -434,13 +484,6 @@ class IssueSlot(
       io.uop.uopc := uopSTD
       io.uop.lrs1_rtype := RT_X
     }
-  }
-
-  if (vector) {
-    next_p1 := p1 | in_p1 | wake_p1.reduce(_|_)
-    next_p2 := p2 | in_p2 | wake_p2.reduce(_|_)
-    next_p3 := p3 | in_p3 | wake_p3.reduce(_|_)
-    next_pm := pm | in_pm | wake_pm.reduce(_|_)
   }
 
   p1 := next_p1
