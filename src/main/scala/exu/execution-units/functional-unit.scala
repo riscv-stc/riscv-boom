@@ -335,7 +335,8 @@ class ALUUnit(
                                                          0.U))
   } else {
     op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data,
-                                                         0.U)
+               Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , io.req.bits.rs2_data,
+                                                         0.U))
   }
 
   // operand 2 select
@@ -364,7 +365,8 @@ class ALUUnit(
                Mux(uop.ctrl.op2_sel === OP2_IMMC, io.req.bits.uop.prs1(4,0),
                Mux(uop.ctrl.op2_sel === OP2_RS2 , io.req.bits.rs2_data,
                Mux(uop.ctrl.op2_sel === OP2_NEXT, Mux(uop.is_rvc, 2.U, 4.U),
-                                                  0.U))))
+               Mux(uop.ctrl.op2_sel === OP2_VS1,  io.req.bits.rs1_data,
+                                                  0.U)))))
   }
 
   val alu = Module(new freechips.rocketchip.rocket.ALU())

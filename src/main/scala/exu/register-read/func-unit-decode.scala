@@ -125,8 +125,10 @@ object VecRRdDecode extends RRdDecodeConstants
                                // |      |  |  use mem pipe        |         |         |     rf wen |
                                // |      |  |  |  alu fcn  wd/word?|         |         |     |      |
                                // |      |  |  |  |        |       |         |         |     |      |
-         BitPat(uopVADD)  -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_1, CSR.N),
-         BitPat(uopVSUB)  -> List(BR_N , Y, N, N, FN_SUB , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_1, CSR.N))
+         BitPat(uopVADD)  -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_VS2 , OP2_VS1 , IS_X, REN_1, CSR.N)
+        ,BitPat(uopVSUB)  -> List(BR_N , Y, N, N, FN_SUB , DW_XPR, OP1_VS2 , OP2_VS1 , IS_X, REN_1, CSR.N)
+        ,BitPat(uopVRSUB) -> List(BR_N , Y, N, N, FN_SUB , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_1, CSR.N)
+       )
 }
 
 object JmpRRdDecode extends RRdDecodeConstants
