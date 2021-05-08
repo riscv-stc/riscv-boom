@@ -31,6 +31,7 @@ trait IQType
 
   val IQT_MFP = 6.U(IQT_SZ.W)
   val IQT_MVEC= 0xA.U(IQT_SZ.W)
+  val IQT_IVEC= 0x9.U(IQT_SZ.W)
   val IQT_VFP = 0xC.U(IQT_SZ.W)
 }
 

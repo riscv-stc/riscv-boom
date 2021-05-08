@@ -206,9 +206,13 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
 
   val intIssueParam = issueParams.find(_.iqType == IQT_INT.litValue).get
   val memIssueParam = issueParams.find(_.iqType == IQT_MEM.litValue).get
+  val fpIssueParam  = issueParams.find(_.iqType == IQT_FP.litValue).get
+  val vecIssueParam = if (usingVector) issueParams.find(_.iqType == IQT_VEC.litValue).get else null
 
   val intWidth = intIssueParam.issueWidth
   val memWidth = memIssueParam.issueWidth
+  val fpWidth  = fpIssueParam.issueWidth
+  val vecWidth = if (usingVector) vecIssueParam.issueWidth else 0
 
   issueParams.map(x => require(x.dispatchWidth <= coreWidth && x.dispatchWidth > 0))
 
@@ -255,8 +259,6 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   //************************************
   // vector stuff
   require (issueParams.count(_.iqType == IQT_VEC.litValue) == 1 || !usingVector)
-  val vecIssueParam = if (usingVector) issueParams.find(_.iqType == IQT_VEC.litValue).get else null
-  val vecWidth = if (usingVector) vecIssueParam.issueWidth else 0
   val numVecPhysRegs = boomParams.numVecPhysRegisters
   def numELENinVLEN = vLen/eLen
   def numVecPhysElens= boomParams.numVecPhysRegisters * numELENinVLEN
@@ -274,7 +276,8 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val lregSz          = log2Ceil(logicalRegCount)
   val ipregSz         = log2Ceil(numIntPhysRegs)
   val fpregSz         = log2Ceil(numFpPhysRegs)
-  val vpregSz         = log2Ceil(numVecPhysElens)
+  val vpregSz         = log2Ceil(numVecPhysRegs)
+  val vElenSz         = log2Ceil(numVecPhysElens)
   val maxPregSz       = ipregSz max fpregSz max vpregSz
   val ldqAddrSz       = log2Ceil(numLdqEntries)
   val stqAddrSz       = log2Ceil(numStqEntries)

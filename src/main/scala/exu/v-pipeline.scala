@@ -48,6 +48,8 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val to_int           = Decoupled(new ExeUnitResp(eLen))
     val to_fp            = Decoupled(new ExeUnitResp(eLen))
     val vmupdate         = Output(Vec(vecWidth, Valid(new MicroOp)))
+    val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
+    val fpupdate         = Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen))))
 
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(eLen))) // wakeup issue_units for mem, int and fp
 
@@ -92,6 +94,8 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   issue_unit.io.tsc_reg := io.debug_tsc_reg
   issue_unit.io.brupdate := io.brupdate
   issue_unit.io.flush_pipeline := io.flush_pipeline
+  issue_unit.io.intupdate := io.intupdate
+  issue_unit.io.fpupdate  := io.fpupdate
   // Don't support ld-hit speculation to VEC window.
   for (w <- 0 until memWidth) {
     issue_unit.io.spec_ld_wakeup(w).valid := false.B
@@ -183,7 +187,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   // Cut up critical path by delaying the write by a cycle.
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
-  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vpregSz, eLen, RT_VEC, true, eLenb, eLenSelSz))
+  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vElenSz, eLen, RT_VEC, true, eLenb, eLenSelSz))
 
   assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
   when (io.from_int.valid) { assert (io.from_int.bits.uop.rf_wen && io.from_int.bits.uop.dst_rtype === RT_VEC) }
@@ -191,7 +195,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   var w_cnt = 1
   for (i <- 1 until memWidth) {
-    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), vpregSz, eLen, RT_VEC, true, eLenb, eLenSelSz))
+    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), vElenSz, eLen, RT_VEC, true, eLenb, eLenSelSz))
     w_cnt += 1
   }
   for (eu <- exe_units) {

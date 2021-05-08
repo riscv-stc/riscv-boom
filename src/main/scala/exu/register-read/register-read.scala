@@ -15,6 +15,7 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.util._
 
 import boom.common._
 import boom.common.MicroOpcodes._
@@ -43,6 +44,7 @@ class RegisterRead(
   numTotalBypassPorts: Int,
   numTotalPredBypassPorts: Int,
   registerWidth: Int,
+  float: Boolean = false,
   vector: Boolean = false
 )(implicit p: Parameters) extends BoomModule
 {
@@ -61,6 +63,9 @@ class RegisterRead(
     // send micro-ops to the execution pipelines
     val exe_reqs = Vec(issueWidth, (new DecoupledIO(new FuncUnitReq(registerWidth))))
     val vmupdate = if (vector) Output(Vec(issueWidth, Valid(new MicroOp))) else null
+    val intupdate= if (usingVector && !vector && !float) Output(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
+    val fpupdate = if (usingVector && float) Output(Vec(issueWidth, Valid(new ExeUnitResp(eLen)))) else null
+    require(!(float && vector))
 
     val kill   = Input(Bool())
     val brupdate = Input(new BrUpdateInfo())
@@ -131,15 +136,23 @@ class RegisterRead(
                                                  Cat(vstart(0),0.U(5.W)),
                                                  0.U(6.W)))
       val (rsel, rmsk) = VRegSel(vstart, vsew, ecnt, eLenb, eLenSelSz)
-      if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := Cat(rs1_addr, rsel)
-      if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := Cat(rs2_addr, rsel)
-      if (numReadPorts > 2) io.rf_read_ports(idx+2).addr := Cat(rs3_addr, rsel)
-      if (numReadPorts > 3) io.rf_read_ports(idx+3).addr := Cat(rvm_addr, vstart >> log2Ceil(eLen))
-      if (numReadPorts > 0) rrd_rs1_data(w) := Mux(RegNext(rs1_addr === 0.U), 0.U, io.rf_read_ports(idx+0).data >> RegNext(rd_sh))
-      if (numReadPorts > 1) rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, io.rf_read_ports(idx+1).data >> RegNext(rd_sh))
-      if (numReadPorts > 2) rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, io.rf_read_ports(idx+2).data >> RegNext(rd_sh))
-      if (numReadPorts > 3) {
-        rrd_rvm_data(w) := Mux(RegNext(io.iss_uops(w).v_unmasked), 1.U, io.rf_read_ports(idx+3).data(RegNext(vstart(eLenSelSz-1,0))))
+      if (numReadPorts > 0) {
+        io.rf_read_ports(idx+0).addr := Cat(rs1_addr, rsel)
+        rrd_rs1_data(w) := Mux(io.iss_uops(w).uses_scalar, io.iss_uops(w).v_scalar_data,
+                           Mux(RegNext(rs1_addr === 0.U), 0.U, io.rf_read_ports(idx+0).data >> RegNext(rd_sh)))
+      }
+      if (numReadPorts > 1) {
+        io.rf_read_ports(idx+1).addr := Cat(rs2_addr, rsel)
+        rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, io.rf_read_ports(idx+1).data >> RegNext(rd_sh))
+      }
+      if (numReadPorts > 2) {
+        io.rf_read_ports(idx+2).addr := Cat(rs3_addr, rsel)
+        rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, io.rf_read_ports(idx+2).data >> RegNext(rd_sh))
+      }
+      if (numReadPorts > 3) { // handle vector mask
+        io.rf_read_ports(idx+3).addr := Cat(rvm_addr, vstart >> log2Ceil(eLen))
+        rrd_rvm_data(w) := Mux(RegNext(io.iss_uops(w).v_unmasked), 1.U,
+                               io.rf_read_ports(idx+3).data(RegNext(vstart(eLenSelSz-1,0))))
         assert(!(io.iss_valids(w) && io.iss_uops(w).uopc === uopVL && io.iss_uops(w).v_unmasked &&
                io.iss_uops(w).vstart < io.iss_uops(w).vconfig.vl), "unmasked body load should not come here.")
       }
@@ -248,15 +261,32 @@ class RegisterRead(
     if (numReadPorts > 3 && vector) io.exe_reqs(w).bits.uop.v_active := exe_reg_rvm_data(w)
     if (enableSFBOpt)     io.exe_reqs(w).bits.pred_data := exe_reg_pred_data(w)
 
-    if (vector) {
-      val is_v_load  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_ldq
-      val is_v_store = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_stq
-      val is_masked  = !exe_reg_uops(w).v_unmasked
-      val is_active  = exe_reg_rvm_data(w)
-      io.exe_reqs(w).valid    := exe_reg_valids(w) && (!is_v_load || !is_active)
-      io.vmupdate(w).valid    := exe_reg_valids(w) && (is_v_store || is_v_load) && is_masked
-      io.vmupdate(w).bits     := exe_reg_uops(w)
-      if (numReadPorts > 3) io.vmupdate(w).bits.v_active := is_active
+    if (usingVector) {
+      if (!vector && !float) {
+        // avoid mem pipes (lower indexed)
+        if (w >= memWidth && w < memWidth+intWidth) {
+          val is_setvl = exe_reg_uops(w).uopc.isOneOf(uopVSETVLI, uopVSETIVLI, uopVSETVL)
+          io.exe_reqs(w).valid := exe_reg_valids(w) && (is_setvl || !exe_reg_uops(w).is_rvv)
+          io.intupdate(w-memWidth).valid := exe_reg_valids(w) && exe_reg_uops(w).is_rvv && !is_setvl
+          io.intupdate(w-memWidth).bits.uop := exe_reg_uops(w)
+          io.intupdate(w-memWidth).bits.data := exe_reg_rs1_data(w)
+        }
+      } else if (float) {
+        io.exe_reqs(w).valid := exe_reg_valids(w) && !exe_reg_uops(w).is_rvv
+        io.fpupdate(w).valid := exe_reg_valids(w) && exe_reg_uops(w).is_rvv
+        io.fpupdate(w).bits.uop := exe_reg_uops(w)
+        io.fpupdate(w).bits.data := exe_reg_rs1_data(w)
+      } else if (vector) {
+        val is_v_load  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_ldq
+        val is_v_store = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_stq
+        val is_masked  = !exe_reg_uops(w).v_unmasked
+        val is_active  = exe_reg_rvm_data(w)
+        io.exe_reqs(w).valid    := exe_reg_valids(w) && (!is_v_load || !is_active)
+        io.vmupdate(w).valid    := exe_reg_valids(w) && (is_v_store || is_v_load) && is_masked
+        io.vmupdate(w).bits     := exe_reg_uops(w)
+        if (numReadPorts > 3) io.vmupdate(w).bits.v_active := is_active
+      }
+
     }
   }
 }

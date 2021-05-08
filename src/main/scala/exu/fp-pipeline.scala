@@ -47,6 +47,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
     val from_int         = Flipped(Decoupled(new ExeUnitResp(fLen+1)))// from integer RF
     val to_sdq           = Decoupled(new ExeUnitResp(fLen))           // to Load/Store Unit
     val to_int           = Decoupled(new ExeUnitResp(xLen))           // to integer RF
+    val fpupdate         = if (usingVector) Output(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
 
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(fLen+1)))
 
@@ -76,7 +77,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
                          exe_units.withFilter(_.readsFrf).map(x => 3),
                          0, // No bypass for FP
                          0,
-                         fLen+1))
+                         fLen+1, float = true))
 
   require (exe_units.count(_.readsFrf) == issue_unit.issueWidth)
   require (exe_units.numFrfWritePorts + numLlPorts == numWakeupPorts)
@@ -139,6 +140,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   if (usingVector) {
     issue_unit.io.vmupdate.map(_.valid := false.B)
     issue_unit.io.vmupdate.map(_.bits := DontCare)
+    io.fpupdate := fregister_read.io.fpupdate
   }
 
   //-------------------------------------------------------------

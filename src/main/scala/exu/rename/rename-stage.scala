@@ -362,7 +362,11 @@ class RenameStage(
       when (uop.v_is_split & uop.v_is_first) {
         when(uop.lrs1_rtype === rtype) { prs1(w) := uop.prs1 }
         when(uop.lrs2_rtype === rtype) { prs2(w) := uop.prs2 }
-        when(uop.frs3_en && (float.B || vector.B)) { prs3(w) := uop.prs3 }
+        when(uop.is_rvv && uop.uses_ldq) {
+          prs3(w) := uop.stale_pdst
+        } .elsewhen(uop.frs3_en && (float.B || vector.B)) {
+          prs3(w) := uop.prs3
+        }
         when(uop.ldst_val && uop.dst_rtype === rtype) { stale_pdst(w) := uop.stale_pdst }
         when(uop.ldst_val && uop.dst_rtype === rtype) { pdst(w) := uop.pdst }
         when(~uop.v_unmasked) { prvm(w) := uop.prvm }

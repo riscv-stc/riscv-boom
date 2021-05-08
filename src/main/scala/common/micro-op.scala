@@ -141,6 +141,8 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val is_rvv           = if (usingVector) Bool() else null            // is vector instruction
   val prvm             = if (usingVector) UInt(maxPregSz.W) else null
   val prvm_busy        = if (usingVector) UInt(vLenb.W) else null
+  val v_scalar_busy    = if (usingVector) Bool() else null
+  val v_scalar_data    = if (usingVector) UInt(eLen.W) else null
   val v_active         = if (usingVector) Bool() else null
   val v_ls_ew          = if (usingVector) UInt(2.W) else null         // EEW encoded in load/store instruction
   val v_unmasked       = if (usingVector) Bool() else null
@@ -169,6 +171,9 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   def unsafe           = uses_ldq || (uses_stq && !is_fence) || is_br || is_jalr
 
   def fu_code_is(_fu: UInt) = (fu_code & _fu) =/= 0.U
+
+  def uses_scalar      = (iq_type & (IQT_INT | IQT_FP)) =/= 0.U
+//def is_v_ls          = is_rvv && (uses_ldq || uses_stq)
 }
 
 /**

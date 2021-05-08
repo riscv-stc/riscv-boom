@@ -440,6 +440,8 @@ object VectorDecode extends DecodeConstants
  ,VSSE16_V  ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
  ,VSSE32_V  ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
  ,VSSE64_V  ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
+ ,VSUB_VV   ->List(Y, N, X, uopVSUB,        IQT_VEC ,FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VSUB_VX   ->List(Y, N, X, uopVSUB,        IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
   )
 }
 //scalastyle:on
@@ -655,8 +657,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
   //val vLen_ecnt = vLen.U >> (vsew+3.U)
   //val eLen_ecnt = eLen.U >> (vsew+3.U)
-  //val vLen_ecnt = vLen.U >> (vsew+3.U)
-  val split_ecnt = 1.U //Mux(is_v_ls, 1.U, vLen_ecnt)
+  val vLen_ecnt = vLen.U >> (vsew+3.U)
+  val split_ecnt = Mux(is_v_ls, 1.U, vLen_ecnt)
   // for store, we can skip inactive locations; otherwise, we have to visit every element
   val total_ecnt = Mux(cs.uses_stq, io.csr_vconfig.vl, vlmax)
   val split_last = vstart + split_ecnt === total_ecnt
@@ -678,6 +680,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.v_unmasked  := !cs.uses_vm || inst(VM_BIT)
   uop.vxsat       := false.B
   uop.vconfig     := io.csr_vconfig
+  uop.vconfig.vtype.reserved := DontCare
   uop.vstart      := vstart
   uop.v_is_split  := cs.can_be_split
   uop.v_split_ecnt:= split_ecnt
