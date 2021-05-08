@@ -116,6 +116,7 @@ trait ScalarOpConstants
   val OP1_RS1 = 0.U(2.W) // Register Source #1
   val OP1_ZERO= 1.U(2.W)
   val OP1_PC  = 2.U(2.W)
+  val OP1_VS2 = 3.U(2.W) // for vector
   val OP1_X   = BitPat("b??")
 
   // RS2 Operand Select Signal
@@ -125,6 +126,7 @@ trait ScalarOpConstants
   val OP2_NEXT= 3.U(3.W) // constant 2/4 (for PC+2/4)
   val OP2_IMMC= 4.U(3.W) // for CSR imm found in RS1
   val OP2_VL  = 5.U(3.W) // for vset{i}vl{i}
+  val OP2_VS1 = 6.U(3.W) // for vector
   val OP2_X   = BitPat("b???")
 
   // Register File Write Enable Signal
