@@ -58,9 +58,9 @@ class CtrlSigs extends Bundle
   val uopc            = UInt(UOPC_SZ.W)
   val iq_type         = UInt(IQT_SZ.W)
   val fu_code         = UInt(FUC_SZ.W)
-  val dst_type        = UInt(2.W)
-  val rs1_type        = UInt(2.W)
-  val rs2_type        = UInt(2.W)
+  val dst_type        = UInt(RT_X.getWidth.W)
+  val rs1_type        = UInt(RT_X.getWidth.W)
+  val rs2_type        = UInt(RT_X.getWidth.W)
   val frs3_en         = Bool()
   val imm_sel         = UInt(IS_X.getWidth.W)
   val uses_ldq        = Bool()
@@ -442,6 +442,8 @@ object VectorDecode extends DecodeConstants
  ,VSSE64_V  ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
  ,VSUB_VV   ->List(Y, N, X, uopVSUB,        IQT_VEC ,FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VSUB_VX   ->List(Y, N, X, uopVSUB,        IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VRSUB_VX  ->List(Y, N, X, uopVRSUB,       IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VRSUB_VI  ->List(Y, N, X, uopVRSUB,       IQT_VEC ,FU_ALU ,RT_VEC, RT_VI , RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
   )
 }
 //scalastyle:on

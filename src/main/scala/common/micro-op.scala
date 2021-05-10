@@ -120,9 +120,9 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val lrs3             = UInt(lregSz.W)
 
   val ldst_val         = Bool()              // is there a destination? invalid for stores, rd==x0, etc.
-  val dst_rtype        = UInt(2.W)
-  val lrs1_rtype       = UInt(2.W)
-  val lrs2_rtype       = UInt(2.W)
+  val dst_rtype        = UInt(RT_X.getWidth.W)
+  val lrs1_rtype       = UInt(RT_X.getWidth.W)
+  val lrs2_rtype       = UInt(RT_X.getWidth.W)
   val frs3_en          = Bool()
 
   // floating point information
@@ -172,7 +172,8 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
 
   def fu_code_is(_fu: UInt) = (fu_code & _fu) =/= 0.U
 
-  def uses_scalar      = (iq_type & (IQT_INT | IQT_FP)) =/= 0.U
+  def uses_scalar      = is_rvv && (iq_type & (IQT_INT | IQT_FP)) =/= 0.U
+  def uses_v_simm5     = is_rvv && lrs1_rtype === RT_VI
 //def is_v_ls          = is_rvv && (uses_ldq || uses_stq)
 }
 
