@@ -809,6 +809,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
                                          (!dis_uops(w).frs3_en,                       0.U)))
       dis_uops(w).prvm      := v_uop.prvm
       dis_uops(w).prvm_busy := Mux(dis_uops(w).is_rvv && !dis_uops(w).v_unmasked, v_uop.prvm_busy, 0.U)
+      dis_uops(w).v_scalar_busy := dis_uops(w).is_rvv && dis_uops(w).uses_scalar
     } else {
       dis_uops(w).prs1_busy := i_uop.prs1_busy & (dis_uops(w).lrs1_rtype === RT_FIX) |
                                f_uop.prs1_busy & (dis_uops(w).lrs1_rtype === RT_FLT)

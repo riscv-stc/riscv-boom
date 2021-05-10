@@ -322,8 +322,8 @@ class ALUUnit(
 
   // immediate generation
   val imm_xprlen = ImmGen(uop.imm_packed, uop.ctrl.imm_sel)
-  val rs1 = io.req.bits.rs1_data
-  val rs2 = io.req.bits.rs2_data
+  val rs1_data = io.req.bits.rs1_data
+  val rs2_data = io.req.bits.rs2_data
 
   // operand 1 select
   var op1_data: UInt = null
@@ -347,10 +347,11 @@ class ALUUnit(
     val vsetvl    = (uop.uopc === uopVSETVL)
     val vsetvli   = (uop.uopc === uopVSETVLI)
     val vsetivli  = (uop.uopc === uopVSETIVLI)
-    val vtypei    = Mux(vsetvl, rs2(7,0), uop.imm_packed(15,8))
-    val useCurrentVL = (vsetvli | vsetvl) & (uop.ldst === 0.U) & (uop.lrs1 === 0.U)
-    val useMaxVL     = (vsetvli | vsetvl) & (uop.ldst =/= 0.U) & (uop.lrs1 === 0.U)
-    val avl       = Mux(vsetivli, uop.lrs1, rs1)
+    val vtypei    = Mux(vsetvl, rs2_data(7,0), uop.imm_packed(15,8))
+    // prs1 takes the value of lrs1 when lrs1 is INT x0, or lrs1 is not INT/FP/VEC
+    val useCurrentVL = (vsetvli | vsetvl) & (uop.ldst === 0.U) & (uop.prs1 === 0.U)
+    val useMaxVL     = (vsetvli | vsetvl) & (uop.ldst =/= 0.U) & (uop.prs1 === 0.U)
+    val avl       = Mux(vsetivli, uop.prs1, rs1_data)
     val new_vl    = VType.computeVL(avl, vtypei, io.vconfig.vl, useCurrentVL, useMaxVL, false.B)
 
     op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,  Sext(imm_xprlen.asUInt, xLen),
@@ -386,10 +387,10 @@ class ALUUnit(
     killed := true.B
   }
 
-  val br_eq  = (rs1 === rs2)
-  val br_ltu = (rs1.asUInt < rs2.asUInt)
-  val br_lt  = (~(rs1(xLen-1) ^ rs2(xLen-1)) & br_ltu |
-                rs1(xLen-1) & ~rs2(xLen-1)).asBool
+  val br_eq  = (rs1_data === rs2_data)
+  val br_ltu = (rs1_data.asUInt < rs2_data.asUInt)
+  val br_lt  = (~(rs1_data(xLen-1) ^ rs2_data(xLen-1)) & br_ltu |
+                rs1_data(xLen-1) & ~rs2_data(xLen-1)).asBool
 
   val pc_sel = MuxLookup(uop.ctrl.br_type, PC_PLUS4,
                  Seq(   BR_N   -> PC_PLUS4,

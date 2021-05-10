@@ -437,6 +437,9 @@ class IssueSlot(
 //    io.out_uop.vstart        := next_uop.vstart
       io.out_uop.v_scalar_busy := ~ps
       io.out_uop.v_scalar_data := sdata
+      // handle VOP_VI, prs1 records the value of lrs1, and is used as simm5
+      io.uop.v_scalar_data  := Mux(io.uop.lrs1_rtype =/= RT_VI, sdata,
+                                   Cat(Fill(eLen-5, io.uop.prs1(4).asUInt), io.uop.prs1(4,0)))
       when (io.request && io.grant && !io.uop.uopc.isOneOf(uopVL, uopVSA)) {
         val vsew = slot_uop.vconfig.vtype.vsew(1,0)
         //val eLen_ecnt = eLen.U >> (vsew+3.U)

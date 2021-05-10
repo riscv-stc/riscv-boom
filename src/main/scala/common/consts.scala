@@ -154,10 +154,11 @@ trait ScalarOpConstants
   val IS_X   = BitPat("b???")
 
   // Decode Stage Control Signals
-  val RT_FIX   = 0.U(2.W)
-  val RT_FLT   = 1.U(2.W)
-  val RT_VEC   = 3.U(2.W) // pass-through (prs1 := lrs1, etc)
-  val RT_X     = 2.U(2.W) // not-a-register (but shouldn't get a busy-bit, etc.)
+  val RT_FIX   = 0.U(3.W)
+  val RT_FLT   = 1.U(3.W)
+  val RT_VEC   = 3.U(3.W) // pass-through (prs1 := lrs1, etc)
+  val RT_VI    = 4.U(3.W) // RS1 as simm5 (vop.vi)
+  val RT_X     = 7.U(3.W) // not-a-register (but shouldn't get a busy-bit, etc.)
                              // TODO rename RT_NAR
 
   val uopX    = BitPat.dontCare(boom.common.MicroOpcodes.UOPC_SZ)

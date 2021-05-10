@@ -138,7 +138,7 @@ class RegisterRead(
       val (rsel, rmsk) = VRegSel(vstart, vsew, ecnt, eLenb, eLenSelSz)
       if (numReadPorts > 0) {
         io.rf_read_ports(idx+0).addr := Cat(rs1_addr, rsel)
-        rrd_rs1_data(w) := Mux(io.iss_uops(w).uses_scalar, io.iss_uops(w).v_scalar_data,
+        rrd_rs1_data(w) := Mux(RegNext(io.iss_uops(w).uses_scalar || io.iss_uops(w).uses_v_simm5), RegNext(io.iss_uops(w).v_scalar_data),
                            Mux(RegNext(rs1_addr === 0.U), 0.U, io.rf_read_ports(idx+0).data >> RegNext(rd_sh)))
       }
       if (numReadPorts > 1) {
