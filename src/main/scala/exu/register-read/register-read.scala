@@ -136,23 +136,24 @@ class RegisterRead(
                                                  Cat(vstart(0),0.U(5.W)),
                                                  0.U(6.W)))
       val (rsel, rmsk) = VRegSel(vstart, vsew, ecnt, eLenb, eLenSelSz)
+      val r_bit_mask = Cat((0 until eLenb).map(i => Fill(8, rmsk(i).asUInt)).reverse)
       if (numReadPorts > 0) {
         io.rf_read_ports(idx+0).addr := Cat(rs1_addr, rsel)
         rrd_rs1_data(w) := Mux(RegNext(io.iss_uops(w).uses_scalar || io.iss_uops(w).uses_v_simm5), RegNext(io.iss_uops(w).v_scalar_data),
-                           Mux(RegNext(rs1_addr === 0.U), 0.U, io.rf_read_ports(idx+0).data >> RegNext(rd_sh)))
+                           Mux(RegNext(rs1_addr === 0.U), 0.U, (io.rf_read_ports(idx+0).data & RegNext(r_bit_mask)) >> RegNext(rd_sh)))
       }
       if (numReadPorts > 1) {
         io.rf_read_ports(idx+1).addr := Cat(rs2_addr, rsel)
-        rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, io.rf_read_ports(idx+1).data >> RegNext(rd_sh))
+        rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, (io.rf_read_ports(idx+1).data & RegNext(r_bit_mask)) >> RegNext(rd_sh))
       }
       if (numReadPorts > 2) {
         io.rf_read_ports(idx+2).addr := Cat(rs3_addr, rsel)
-        rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, io.rf_read_ports(idx+2).data >> RegNext(rd_sh))
+        rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, (io.rf_read_ports(idx+2).data & RegNext(r_bit_mask)) >> RegNext(rd_sh))
       }
       if (numReadPorts > 3) { // handle vector mask
         io.rf_read_ports(idx+3).addr := Cat(rvm_addr, vstart >> log2Ceil(eLen))
         rrd_rvm_data(w) := Mux(RegNext(io.iss_uops(w).v_unmasked), 1.U,
-                               io.rf_read_ports(idx+3).data(RegNext(vstart(eLenSelSz-1,0))))
+                               io.rf_read_ports(idx+3).data(RegNext(vstart(log2Ceil(eLen)-1,0))))
         assert(!(io.iss_valids(w) && io.iss_uops(w).uopc === uopVL && io.iss_uops(w).v_unmasked &&
                io.iss_uops(w).vstart < io.iss_uops(w).vconfig.vl), "unmasked body load should not come here.")
       }

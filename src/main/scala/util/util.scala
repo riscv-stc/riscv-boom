@@ -694,7 +694,7 @@ object VRegMask {
 
 object VRegSel {
   /**
-   * Get an eLen piece selector of a vLen register
+   * Get an eLen piece selector of a vLen register, not suitable for split whose ecnt size > eLen
    */
   def apply(vstart: UInt, vsew: UInt, ecnt: UInt, elenb: Int, eLenSelSz: Int): (UInt, UInt) = {
     val rsel = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(eLenSelSz+2,3),vstart(eLenSelSz+1,2),vstart(eLenSelSz,1),vstart(eLenSelSz-1,0)))

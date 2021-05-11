@@ -405,10 +405,10 @@ class RenameStage(
     if (usingVector) {
       if (vector) {
         val vbusy = busytable.io.vbusy_resps(w)
-        val (rsel, rmsk) = VRegSel(uop, eLenb, eLenSelSz)
-        uop.prs1_busy := vbusy.prs1_busy & Fill(vLenb, (uop.lrs1_rtype === rtype).asUInt) & (rmsk << Cat(rsel, 0.U(3.W)))
-        uop.prs2_busy := vbusy.prs2_busy & Fill(vLenb, (uop.lrs2_rtype === rtype).asUInt) & (rmsk << Cat(rsel, 0.U(3.W)))
-        uop.prs3_busy := vbusy.prs3_busy & Fill(vLenb, uop.frs3_en.asUInt) & (rmsk << Cat(rsel, 0.U(3.W)))
+        //val (rsel, rmsk) = VRegSel(uop, eLenb, eLenSelSz)
+        uop.prs1_busy := vbusy.prs1_busy & Fill(vLenb, (uop.lrs1_rtype === rtype).asUInt) //& (rmsk << Cat(rsel, 0.U(3.W)))
+        uop.prs2_busy := vbusy.prs2_busy & Fill(vLenb, (uop.lrs2_rtype === rtype).asUInt) //& (rmsk << Cat(rsel, 0.U(3.W)))
+        uop.prs3_busy := vbusy.prs3_busy & Fill(vLenb, uop.frs3_en.asUInt) //& (rmsk << Cat(rsel, 0.U(3.W)))
         uop.prvm_busy := vbusy.prvm_busy & Fill(vLenb, (!uop.is_rvv || !uop.v_unmasked).asUInt)
       } else {
         val busy = busytable.io.busy_resps(w)
