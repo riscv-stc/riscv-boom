@@ -693,13 +693,13 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   val ren_mask = ~(Fill(vLenSz,1.U) << (7.U - vsew))
   uop.v_re_alloc  := (vstart & ren_mask(vLenSz,0)) === 0.U
 
-  when (usingVector.B && is_v_ls && !uop.v_unmasked) {
-    uop.iq_type := IQT_MVEC
-    uop.fu_code := FU_MEMV
-    when (uop.uses_ldq) {
-      uop.frs3_en := true.B
-      uop.lrs3 := inst(RD_MSB,RD_LSB)
+  when (usingVector.B && cs.is_rvv && !uop.v_unmasked) {
+    when (is_v_ls) {
+      uop.iq_type := IQT_MVEC
+      uop.fu_code := FU_MEMV
     }
+    uop.frs3_en := true.B
+    uop.lrs3 := inst(RD_MSB,RD_LSB)
   }
 
   // handle load tail: dispatch to vector pipe
