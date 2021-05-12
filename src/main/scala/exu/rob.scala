@@ -386,8 +386,8 @@ class Rob(
         assert (rob_val(cidx) === true.B, "[rob] store writing back to invalid entry.")
         assert (rob_bsy(cidx) === true.B, "[rob] store writing back to a not-busy entry.")
         if (O3PIPEVIEW_PRINTF) {
-	  printf("%d; O3PipeView:complete:%d\n",
-	    rob_uop(GetRowIdx(clr_rob_idx.bits)).debug_events.fetch_seq, io.debug_tsc)
+          printf("%d; O3PipeView:complete:%d\n",
+            rob_uop(GetRowIdx(clr_rob_idx.bits)).debug_events.fetch_seq, io.debug_tsc)
         }
       }
     }
@@ -485,9 +485,12 @@ class Rob(
         rob_uop(i).br_mask := GetNewBrMask(io.brupdate, br_mask)
       }
 
-      when (IsKilledByVM(io.vmupdate, rob_uop(i))) {
-        assert(rob_val(i), "Vmask Kill invalide entry")
-        assert(rob_uop(i).is_rvv, "Vmask Kill invalide entry")
+      when (io.vmupdate.map(u =>
+          u.valid && !u.bits.v_active &&
+          GetRowIdx(u.bits.rob_idx) === i.U &&
+          MatchBank(GetBankIdx(u.bits.rob_idx))).reduce(_||_)) {
+        assert(rob_val(i), "Vmask Kill invalid entry")
+        assert(rob_uop(i).is_rvv, "Vmask Kill invalid entry")
         assert(rob_uop(i).uses_ldq || rob_uop(i).uses_stq, "Vmask Kill non-lsu entry")
         rob_unsafe(i) := false.B
         rob_exception(i) := false.B
