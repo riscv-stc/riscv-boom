@@ -178,8 +178,8 @@ abstract class ExecutionUnit(
   // TODO add "number of fflag ports", so we can properly account for FPU+Mem combinations
   def hasFFlags     : Boolean = hasFpu || hasFdiv
 
-  require ((hasFpu || hasFdiv) ^ (hasAlu || hasMul || hasMem || hasIfpu),
-    "[execute] we no longer support mixing FP and Integer functional units in the same exe unit.")
+  //require ((hasFpu || hasFdiv) ^ (hasAlu || hasMul || hasMem || hasIfpu),
+    //"[execute] we no longer support mixing FP and Integer functional units in the same exe unit.")
   def hasFcsr = hasIfpu || hasFpu || hasFdiv
   def hasVConfig = usingVector && hasCSR
 
@@ -600,8 +600,10 @@ class VecExeUnit(
   hasVMX         : Boolean = false,
   hasAlu         : Boolean = true,
   hasMul         : Boolean = true,
-  hasDiv         : Boolean = true)
-  (implicit p: Parameters)
+  hasDiv         : Boolean = true,
+  hasIfpu        : Boolean = false,
+  hasFpu         : Boolean = false
+) (implicit p: Parameters)
   extends ExecutionUnit(
     readsVrf         = true,
     writesVrf        = true,
@@ -612,15 +614,23 @@ class VecExeUnit(
     hasAlu           = hasAlu,
     hasMul           = hasMul,
     hasDiv           = hasDiv,
+    hasIfpu          = hasIfpu,
+    hasFpu           = hasFpu,
+    hasFpiu          = hasFpu,
+    hasFdiv          = false,
     hasVector        = true,
-    hasVMX           = hasVMX)
-  with freechips.rocketchip.rocket.constants.MemoryOpConstants
+    hasVMX           = hasVMX
+) with freechips.rocketchip.rocket.constants.MemoryOpConstants
 {
   val out_str =
     BoomCoreStringPrefix("==VecExeUnit==") +
     (if (hasAlu)  BoomCoreStringPrefix(" - ALU") else "") +
     (if (hasMul)  BoomCoreStringPrefix(" - Mul") else "") +
-    (if (hasDiv)  BoomCoreStringPrefix(" - Div") else "")
+    (if (hasDiv)  BoomCoreStringPrefix(" - Div") else "") +
+    (if (hasIfpu) BoomCoreStringPrefix(" - IFPU") else "") +
+    (if (hasFpu)  BoomCoreStringPrefix(" - FPU/FPIU (Latency: " + dfmaLatency + ")") else "")
+
+  val numStages = dfmaLatency
 
   override def toString: String = out_str.toString
 
@@ -632,13 +642,15 @@ class VecExeUnit(
 
   io.fu_types := Mux(hasAlu.B, FU_ALU, 0.U) |
                  Mux(hasMul.B, FU_MUL, 0.U) |
-                 Mux(hasVMX.B, FU_VMX, 0.U) |
-                 Mux(!div_busy && hasDiv.B, FU_DIV, 0.U)
+                 Mux(!div_busy && hasDiv.B, FU_DIV, 0.U) |
+                 Mux(hasIfpu.B, FU_I2F, 0.U) |
+                 Mux(hasFpu.B, FU_FPU | FU_F2I, 0.U) |
+                 Mux(hasVMX.B, FU_VMX, 0.U)
 
   // ALU Unit -------------------------------
   var alu: ALUUnit = null
   if (hasAlu) {
-    alu = Module(new ALUUnit(numStages = numBypassStages, dataWidth = eLen))
+    alu = Module(new ALUUnit(numStages = numStages, dataWidth = eLen))
     alu.io.req.valid := io.req.valid && (io.req.bits.uop.fu_code === FU_ALU || io.req.bits.uop.fu_code_is(FU_VMX))
     vec_fu_units += alu
     vresp_fu_units += alu
@@ -647,7 +659,7 @@ class VecExeUnit(
   // Pipelined, IMul Unit ------------------
   var imul: PipelinedMulUnit = null
   if (hasMul) {
-    imul = Module(new PipelinedMulUnit(numBypassStages, eLen))
+    imul = Module(new PipelinedMulUnit(numStages, eLen))
     imul.io <> DontCare
     imul.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_MUL)
     vec_fu_units += imul
@@ -671,6 +683,36 @@ class VecExeUnit(
 
     vec_fu_units += div
     vresp_fu_units += div
+  }
+
+  var ifpu: IntToFPUnit = null
+  if (hasIfpu) {
+    ifpu = Module(new IntToFPUnit(latency=numStages))
+    ifpu.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_I2F)
+    ifpu.io.fcsr_rm    := io.fcsr_rm
+    ifpu.io.resp.ready := DontCare
+    vec_fu_units += ifpu
+    vresp_fu_units += ifpu
+  }
+
+  // FPU Unit -----------------------
+  var fpu: FPUUnit = null
+  val fpu_resp_val = WireInit(false.B)
+  val fpu_resp_fflags = Wire(new ValidIO(new FFlagsResp()))
+  fpu_resp_fflags.valid := false.B
+  if (hasFpu) {
+    fpu = Module(new FPUUnit(vector = true))
+    fpu.io.req.valid         := io.req.valid &&
+                                (io.req.bits.uop.fu_code_is(FU_FPU) ||
+                                io.req.bits.uop.fu_code_is(FU_F2I)) // TODO move to using a separate unit
+    assert(fpu.io.req.bits.pred_data === false.B, "Expecting operations without predication for FPU")
+    fpu.io.fcsr_rm           := io.fcsr_rm
+    fpu.io.resp.ready        := DontCare
+    fpu_resp_val             := fpu.io.resp.valid
+    fpu_resp_fflags          := fpu.io.resp.bits.fflags
+
+    vec_fu_units += fpu
+    vresp_fu_units += fpu
   }
 
   vec_fu_units.map(f => {

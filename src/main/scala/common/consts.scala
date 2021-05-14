@@ -63,7 +63,7 @@ trait IQType
   val IQT_MFP = 6.U(IQT_SZ.W)
   val IQT_MVEC= 0xA.U(IQT_SZ.W)
   val IQT_IVEC= 0x9.U(IQT_SZ.W)
-  val IQT_VFP = 0xC.U(IQT_SZ.W)
+  val IQT_FVEC= 0xC.U(IQT_SZ.W)
 }
 
 
@@ -156,8 +156,10 @@ trait ScalarOpConstants
   // Decode Stage Control Signals
   val RT_FIX   = 0.U(3.W)
   val RT_FLT   = 1.U(3.W)
-  val RT_VEC   = 3.U(3.W) // pass-through (prs1 := lrs1, etc)
-  val RT_VI    = 4.U(3.W) // RS1 as simm5 (vop.vi)
+  val RT_VI    = 2.U(3.W) // RS1 as simm5 (vop.vi), TODO: move to OP selection
+  val RT_VEC   = 4.U(3.W) // vector, width vsew
+  val RT_VECN  = 5.U(3.W) // vector, width vsew/2
+  val RT_VECW  = 6.U(3.W) // vector, width vsew*2
   val RT_X     = 7.U(3.W) // not-a-register (but shouldn't get a busy-bit, etc.)
                              // TODO rename RT_NAR
 

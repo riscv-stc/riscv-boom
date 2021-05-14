@@ -259,7 +259,6 @@ class RegisterRead(
     if (numReadPorts > 0) io.exe_reqs(w).bits.rs1_data := exe_reg_rs1_data(w)
     if (numReadPorts > 1) io.exe_reqs(w).bits.rs2_data := exe_reg_rs2_data(w)
     if (numReadPorts > 2) io.exe_reqs(w).bits.rs3_data := exe_reg_rs3_data(w)
-    if (numReadPorts > 3 && vector) io.exe_reqs(w).bits.uop.v_active := exe_reg_rvm_data(w)
     if (enableSFBOpt)     io.exe_reqs(w).bits.pred_data := exe_reg_pred_data(w)
 
     if (usingVector) {
@@ -281,13 +280,15 @@ class RegisterRead(
         val is_v_load  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_ldq
         val is_v_store = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_stq
         val is_masked  = !exe_reg_uops(w).v_unmasked
-        val is_active  = exe_reg_rvm_data(w)
-        io.exe_reqs(w).valid    := exe_reg_valids(w) && (!is_v_load || !is_active)
+        io.exe_reqs(w).valid    := exe_reg_valids(w) && (!is_v_load || !exe_reg_rvm_data(w))
         io.vmupdate(w).valid    := exe_reg_valids(w) && (is_v_store || is_v_load) && is_masked
         io.vmupdate(w).bits     := exe_reg_uops(w)
-        if (numReadPorts > 3) io.vmupdate(w).bits.v_active := is_active
+        io.vmupdate(w).bits.v_active := exe_reg_rvm_data(w)
+        val vstart = exe_reg_uops(w).vstart
+        val vl     = exe_reg_uops(w).vconfig.vl
+        val is_active  = exe_reg_rvm_data(w) && vstart < vl
+        io.exe_reqs(w).bits.uop.v_active := is_active
       }
-
     }
   }
 }

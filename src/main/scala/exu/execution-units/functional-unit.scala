@@ -492,7 +492,7 @@ class ALUUnit(
   val r_val  = RegInit(VecInit(Seq.fill(numStages) { false.B }))
   val r_data = Reg(Vec(numStages, UInt(xLen.W)))
   val r_pred = Reg(Vec(numStages, Bool()))
-  val v_inactive = io.req.bits.uop.is_rvv && ((io.req.bits.uop.vstart >= io.req.bits.uop.vconfig.vl) || !io.req.bits.uop.v_active)
+  val v_inactive = io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active
   val alu_out = Mux(io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data,
     Mux(io.req.bits.uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
     Mux(io.req.bits.uop.uopc === uopMOV, io.req.bits.rs2_data,
@@ -632,7 +632,7 @@ class MemAddrCalcUnit(implicit p: Parameters)
  * All FP instructions are padded out to the max latency unit for easy
  * write-port scheduling.
  */
-class FPUUnit(implicit p: Parameters)
+class FPUUnit(vector: Boolean = false)(implicit p: Parameters)
   extends PipelinedFunctionalUnit(
     numStages = p(tile.TileKey).core.fpu.get.dfmaLatency,
     numBypassStages = 0,
@@ -640,7 +640,7 @@ class FPUUnit(implicit p: Parameters)
     dataWidth = 65,
     needsFcsr = true)
 {
-  val fpu = Module(new FPU())
+  val fpu = Module(new FPU(vector = vector))
   fpu.io.req.valid         := io.req.valid
   fpu.io.req.bits.uop      := io.req.bits.uop
   fpu.io.req.bits.rs1_data := io.req.bits.rs1_data

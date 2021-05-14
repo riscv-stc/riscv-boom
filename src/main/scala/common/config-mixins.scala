@@ -559,7 +559,7 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               numFetchBufferEntries = 16,
               ftq = FtqParameters(nEntries=32),
               nPerfCounters = 29,
-              fpu = Some(freechips.rocketchip.tile.FPUParams(sfmaLatency=4, dfmaLatency=4, divSqrt=true)),
+              fpu = Some(freechips.rocketchip.tile.FPUParams(minFLen=16, fLen=64, sfmaLatency=4, dfmaLatency=4, divSqrt=true)),
               useVector = true,
               vLen = 1024,
               eLen = 64,
