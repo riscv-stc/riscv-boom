@@ -723,7 +723,6 @@ object MicroOpcodes extends Enumeration {
   // VFSUB_V*
   val uopVFRSUB_enum    = Value
   val uopVFRSUB         = uopVFRSUB_enum.id.U(UOPC_SZ.W)
-  // VFRSUB_VF
   // 14.3. widening floating-point add/sub
   // VFWADD_V*
   // VFWSUB_V*
@@ -742,16 +741,30 @@ object MicroOpcodes extends Enumeration {
   // 14.5. widening FP mul
   //val uopVFWMUL_V*
   // 14.6 single-width FP fused mul-add
+  // VFMACC_V*
   val uopVFMACC_enum    = Value
   val uopVFMACC         = uopVFMACC_enum.id.U(UOPC_SZ.W)
-  // VFMACC_V*
   // VFNMACC_V*
+  val uopVFNMACC_enum   = Value
+  val uopVFNMACC        = uopVFNMACC_enum.id.U(UOPC_SZ.W)
   // VFMSAC_V*
+  val uopVFMSAC_enum    = Value
+  val uopVFMSAC         = uopVFMSAC_enum.id.U(UOPC_SZ.W)
   // VFNMSAC_V*
+  val uopVFNMSAC_enum   = Value
+  val uopVFNMSAC        = uopVFNMSAC_enum.id.U(UOPC_SZ.W)
   // VFMADD_V*
+  val uopVFMADD_enum    = Value
+  val uopVFMADD         = uopVFMADD_enum.id.U(UOPC_SZ.W)
   // VFNMADD_V*
+  val uopVFNMADD_enum   = Value
+  val uopVFNMADD        = uopVFNMADD_enum.id.U(UOPC_SZ.W)
   // VFMSUB_V*
+  val uopVFMSUB_enum    = Value
+  val uopVFMSUB         = uopVFMSUB_enum.id.U(UOPC_SZ.W)
   // VFNMSUB_V*
+  val uopVFNMSUB_enum   = Value
+  val uopVFNMSUB        = uopVFNMSUB_enum.id.U(UOPC_SZ.W)
   // 14.7. widening FP fused mul-add
   // VFWMACC_V*
   // VFWNMACC_V*

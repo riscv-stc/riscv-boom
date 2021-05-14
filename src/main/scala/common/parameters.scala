@@ -96,6 +96,7 @@ case class BoomCoreParams(
   scontextWidth: Int = 0,
 
   /* vector extension */
+  override val minFLen: Int = 16,
   override val useVector: Boolean = false,
   override val vLen: Int = 0,
   override val eLen: Int = 0,
@@ -269,6 +270,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   def vLenSz = log2Ceil(vLen)
   def eLenSelSz = log2Ceil(numELENinVLEN)
   def eLenb = eLen/8
+  //val minFLen = boomParams.minFLen
 
   //************************************
   // Implicitly calculated constants

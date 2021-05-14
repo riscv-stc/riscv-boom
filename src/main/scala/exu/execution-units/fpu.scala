@@ -24,7 +24,7 @@ import boom.util.{ImmGenRm, ImmGenTyp}
  * most of these signals are already created, just need to be translated
  * to the Rocket FPU-speak
  */
-class UOPCodeFPUDecoder(implicit p: Parameters) extends BoomModule with HasFPUParameters
+class UOPCodeFPUDecoder(vector: Boolean = false)(implicit p: Parameters) extends BoomModule with HasFPUParameters
 {
   val io = IO(new Bundle {
     val uopc = Input(Bits(UOPC_SZ.W))
@@ -102,11 +102,38 @@ class UOPCodeFPUDecoder(implicit p: Parameters) extends BoomModule with HasFPUPa
     BitPat(uopFNMSUB_D) -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
     )
 
+    //                                     swap12         fma
+    //                                     | swap32       | div
+    //                                     | | typeTagIn  | | sqrt
+    //                          ldst       | | | typeTagOut | | wflags
+    //                          | wen      | | | | from_int | | |
+    //                          | | ren1   | | | | | to_int | | |
+    //                          | | | ren2 | | | | | | fastpipe |
+    //                          | | | | ren3 | | | | | |  | | | |
+    //                          | | | | |  | | | | | | |  | | | |
+  val v_table: Array[(BitPat, List[BitPat])] =
+    Array(
+    BitPat(uopVFADD)    -> List(X,X,Y,Y,N, N,Y,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFSUB)    -> List(X,X,Y,Y,N, N,Y,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFRSUB)   -> List(X,X,Y,Y,N, N,Y,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFMUL)    -> List(X,X,Y,Y,N, N,N,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFMACC)   -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFNMACC)  -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFMSAC)   -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFNMSAC)  -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFMADD)   -> List(X,X,Y,Y,Y, N,Y,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFNMADD)  -> List(X,X,Y,Y,Y, N,Y,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFMSUB)   -> List(X,X,Y,Y,Y, N,Y,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFNMSUB)  -> List(X,X,Y,Y,Y, N,Y,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFMIN)    -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,Y)
+   ,BitPat(uopVFMAX)    -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,Y)
+    )
+
 //   val insns = fLen match {
 //      case 32 => f_table
 //      case 64 => f_table ++ d_table
 //   }
-  val insns = f_table ++ d_table
+  val insns = if (vector) v_table else f_table ++ d_table
   val decoder = rocket.DecodeLogic(io.uopc, default, insns)
 
   val s = io.sigs
@@ -119,7 +146,7 @@ class UOPCodeFPUDecoder(implicit p: Parameters) extends BoomModule with HasFPUPa
 /**
  * FP fused multiple add decoder for the FPU
  */
-class FMADecoder extends Module
+class FMADecoder(vector: Boolean = false) extends Module
 {
   val io = IO(new Bundle {
     val uopc = Input(UInt(UOPC_SZ.W))
@@ -127,7 +154,22 @@ class FMADecoder extends Module
   })
 
   val default: List[BitPat] = List(BitPat("b??"))
-  val table: Array[(BitPat, List[BitPat])] =
+  val table: Array[(BitPat, List[BitPat])] = if (vector) {
+    Array(
+      BitPat(uopVFADD)    -> List(BitPat("b00"))
+     ,BitPat(uopVFSUB)    -> List(BitPat("b10"))
+     ,BitPat(uopVFRSUB)   -> List(BitPat("b01"))
+     ,BitPat(uopVFMUL)    -> List(BitPat("b00"))
+     ,BitPat(uopVFMACC)   -> List(BitPat("b00"))
+     ,BitPat(uopVFNMACC)  -> List(BitPat("b11"))
+     ,BitPat(uopVFMSAC)   -> List(BitPat("b01"))
+     ,BitPat(uopVFNMSAC)  -> List(BitPat("b10"))
+     ,BitPat(uopVFMADD)   -> List(BitPat("b00"))
+     ,BitPat(uopVFNMADD)  -> List(BitPat("b11"))
+     ,BitPat(uopVFMSUB)   -> List(BitPat("b01"))
+     ,BitPat(uopVFNMSUB)  -> List(BitPat("b10"))
+    )
+  } else {
     Array(
       BitPat(uopFADD_S)   -> List(BitPat("b00")),
       BitPat(uopFSUB_S)   -> List(BitPat("b01")),
@@ -144,6 +186,7 @@ class FMADecoder extends Module
       BitPat(uopFNMADD_D) -> List(BitPat("b11")),
       BitPat(uopFNMSUB_D) -> List(BitPat("b10"))
       )
+  }
 
   val decoder = rocket.DecodeLogic(io.uopc, default, table)
 
@@ -166,7 +209,7 @@ class FpuReq()(implicit p: Parameters) extends BoomBundle
 /**
  * FPU unit that wraps the RocketChip FPU units (which in turn wrap hardfloat)
  */
-class FPU(implicit p: Parameters) extends BoomModule with tile.HasFPUParameters
+class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule with tile.HasFPUParameters
 {
   val io = IO(new Bundle {
     val req = Flipped(new ValidIO(new FpuReq))
@@ -177,43 +220,64 @@ class FPU(implicit p: Parameters) extends BoomModule with tile.HasFPUParameters
   val fpu_latency = dfmaLatency
   val io_req = io.req.bits
 
-  val fp_decoder = Module(new UOPCodeFPUDecoder)
+  val fp_decoder = Module(new UOPCodeFPUDecoder(vector))
   fp_decoder.io.uopc := io_req.uop.uopc
-  val fp_ctrl = fp_decoder.io.sigs
-  val fp_rm = Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U, io_req.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
+  val fp_ctrl = WireInit(fp_decoder.io.sigs)
+  val fp_rm = Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U || io_req.uop.is_rvv, io_req.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
+  val rs1_data = WireInit(io_req.rs1_data)
+  val rs2_data = WireInit(io_req.rs2_data)
+  val rs3_data = WireInit(io_req.rs3_data)
+  if (vector) {
+    val vsew = io_req.uop.vconfig.vtype.vsew
+    assert(!io.req.valid || !io_req.uop.is_rvv || (vsew >= 1.U && vsew <= 3.U), s"unsupported vsew: $vsew")
+    assert(!io.req.valid || io_req.uop.is_rvv && io_req.uop.fp_val, "unsupported data type")
+    val fmt = Mux(vsew === 3.U, D, Mux(vsew === 2.U, S, H))
+    rs1_data := recode(io_req.rs1_data, fmt)
+    rs2_data := recode(io_req.rs2_data, fmt)
+    rs3_data := recode(io_req.rs3_data, fmt)
+    when (io_req.uop.is_rvv) {
+      // TODO considering widening and narrowing operations
+      fp_ctrl.typeTagIn := Mux(vsew === 3.U, D, Mux(vsew === 2.U, S, H))
+      fp_ctrl.typeTagOut:= Mux(vsew === 3.U, D, Mux(vsew === 2.U, S, H))
+      when (!io_req.uop.v_active) {
+        fp_ctrl.ren2 := false.B
+        fp_ctrl.ren3 := false.B
+      }
+    }
+  }
 
-  def fuInput(minT: Option[tile.FType]): tile.FPInput = {
+  def fuInput(minT: Option[tile.FType], vector: Boolean = false): tile.FPInput = {
     val req = Wire(new tile.FPInput)
     val tag = fp_ctrl.typeTagIn
     req <> fp_ctrl
     req.rm := fp_rm
-    req.in1 := unbox(io_req.rs1_data, tag, minT)
-    req.in2 := unbox(io_req.rs2_data, tag, minT)
-    req.in3 := unbox(io_req.rs3_data, tag, minT)
+    req.in1 := unbox(rs1_data, tag, minT)
+    req.in2 := unbox(rs2_data, tag, minT)
+    req.in3 := unbox(rs3_data, tag, minT)
     when (fp_ctrl.swap23) { req.in3 := req.in2 }
     req.typ := ImmGenTyp(io_req.uop.imm_packed)
-    req.fmt := Mux(tag === S, 0.U, 1.U) // TODO support Zfh and avoid special-case below
+    req.fmt := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
     when (io_req.uop.uopc === uopFMV_X_S) {
       req.fmt := 0.U
     }
 
-    val fma_decoder = Module(new FMADecoder)
+    val fma_decoder = Module(new FMADecoder(vector))
     fma_decoder.io.uopc := io_req.uop.uopc
     req.fmaCmd := fma_decoder.io.cmd // ex_reg_inst(3,2) | (!fp_ctrl.ren3 && ex_reg_inst(27))
     req
   }
 
   val dfma = Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.D))
-  dfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === D)
-  dfma.io.in.bits := fuInput(Some(dfma.t))
+  dfma.io.in.bits := fuInput(Some(dfma.t), vector)
 
   val sfma = Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.S))
-  sfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === S)
-  sfma.io.in.bits := fuInput(Some(sfma.t))
+  sfma.io.in.bits := fuInput(Some(sfma.t), vector)
+
+  val hfma = Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.H))
+  hfma.io.in.bits := fuInput(Some(hfma.t), vector)
 
   val fpiu = Module(new tile.FPToInt)
-  fpiu.io.in.valid := io.req.valid && (fp_ctrl.toint || (fp_ctrl.fastpipe && fp_ctrl.wflags))
-  fpiu.io.in.bits := fuInput(None)
+  fpiu.io.in.bits := fuInput(None, vector)
   val fpiu_out = Pipe(RegNext(fpiu.io.in.valid && !fp_ctrl.fastpipe),
                               fpiu.io.out.bits, fpu_latency-1)
   val fpiu_result  = Wire(new tile.FPResult)
@@ -221,29 +285,55 @@ class FPU(implicit p: Parameters) extends BoomModule with tile.HasFPUParameters
   fpiu_result.exc  := fpiu_out.bits.exc
 
   val fpmu = Module(new tile.FPToFP(fpu_latency)) // latency 2 for rocket
-  fpmu.io.in.valid := io.req.valid && fp_ctrl.fastpipe
   fpmu.io.in.bits := fpiu.io.in.bits
   fpmu.io.lt := fpiu.io.out.bits.lt
-  val fpmu_double = Pipe(io.req.valid && fp_ctrl.fastpipe, fp_ctrl.typeTagOut === D, fpu_latency).bits
+  val fpmu_double = Pipe(io.req.valid && fp_ctrl.fastpipe,
+                         (if (vector) fp_ctrl.typeTagOut else fp_ctrl.typeTagOut === D),
+                         fpu_latency).bits
+
+  if (vector) {
+    dfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === D) && (!io_req.uop.is_rvv || io_req.uop.v_active)
+    sfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === S) && (!io_req.uop.is_rvv || io_req.uop.v_active)
+    hfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === H) && (!io_req.uop.is_rvv || io_req.uop.v_active)
+    fpiu.io.in.valid := io.req.valid && (fp_ctrl.toint || (fp_ctrl.fastpipe && fp_ctrl.wflags)) && (!io_req.uop.is_rvv || io_req.uop.v_active)
+    fpmu.io.in.valid := io.req.valid && (fp_ctrl.fastpipe || io_req.uop.is_rvv && !io_req.uop.v_active)
+    when (io_req.uop.is_rvv && !io_req.uop.v_active) {
+      fpmu.io.in.bits.in1 := fpiu.io.in.bits.in3
+    }
+  } else {
+    dfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === D)
+    sfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === S)
+    hfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === H)
+    fpiu.io.in.valid := io.req.valid && (fp_ctrl.toint || (fp_ctrl.fastpipe && fp_ctrl.wflags))
+    fpmu.io.in.valid := io.req.valid && fp_ctrl.fastpipe
+  }
 
   // Response (all FP units have been padded out to the same latency)
   io.resp.valid := fpiu_out.valid ||
                    fpmu.io.out.valid ||
+                   hfma.io.out.valid ||
                    sfma.io.out.valid ||
                    dfma.io.out.valid
+
   val fpu_out_data =
-    Mux(dfma.io.out.valid, box(dfma.io.out.bits.data, true.B),
-    Mux(sfma.io.out.valid, box(sfma.io.out.bits.data, false.B),
-    Mux(fpiu_out.valid,    fpiu_result.data,
-                           box(fpmu.io.out.bits.data, fpmu_double))))
+      Mux(dfma.io.out.valid, box(dfma.io.out.bits.data, D),
+      Mux(sfma.io.out.valid, box(sfma.io.out.bits.data, S),
+      Mux(hfma.io.out.valid, box(hfma.io.out.bits.data, H),
+      Mux(fpiu_out.valid,    fpiu_result.data,
+                             box(fpmu.io.out.bits.data, fpmu_double)))))
 
   val fpu_out_exc =
     Mux(dfma.io.out.valid, dfma.io.out.bits.exc,
     Mux(sfma.io.out.valid, sfma.io.out.bits.exc,
+    Mux(hfma.io.out.valid, hfma.io.out.bits.exc,
     Mux(fpiu_out.valid,    fpiu_result.exc,
-                           fpmu.io.out.bits.exc)))
+                           fpmu.io.out.bits.exc))))
 
-  io.resp.bits.data              := fpu_out_data
+  if (vector) {
+    io.resp.bits.data := ieee(fpu_out_data)
+  } else {
+    io.resp.bits.data := fpu_out_data
+  }
   io.resp.bits.fflags.valid      := io.resp.valid
   io.resp.bits.fflags.bits.flags := fpu_out_exc
 }

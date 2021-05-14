@@ -275,7 +275,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     wdata := wakeup.bits.data
   }
 
-  //exe_units.map(if (_.hasFcsr) _.io.fcsr_rm := io.fcsr_rm)
+  exe_units.map(_.io.fcsr_rm := io.fcsr_rm)
   exe_units.map(_.io.status := io.status)
 
   //-------------------------------------------------------------
