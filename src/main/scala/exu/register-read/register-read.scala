@@ -46,7 +46,7 @@ class RegisterRead(
   registerWidth: Int,
   float: Boolean = false,
   vector: Boolean = false
-)(implicit p: Parameters) extends BoomModule
+)(implicit p: Parameters) extends BoomModule with freechips.rocketchip.tile.HasFPUParameters
 {
   val io = IO(new Bundle {
     // issued micro-ops
@@ -275,7 +275,7 @@ class RegisterRead(
         io.exe_reqs(w).valid := exe_reg_valids(w) && !exe_reg_uops(w).is_rvv
         io.fpupdate(w).valid := exe_reg_valids(w) && exe_reg_uops(w).is_rvv
         io.fpupdate(w).bits.uop := exe_reg_uops(w)
-        io.fpupdate(w).bits.data := exe_reg_rs1_data(w)
+        io.fpupdate(w).bits.data := ieee(exe_reg_rs1_data(w))
       } else if (vector) {
         val is_v_load  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_ldq
         val is_v_store = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_stq
@@ -288,6 +288,11 @@ class RegisterRead(
         val vl     = exe_reg_uops(w).vconfig.vl
         val is_active  = exe_reg_rvm_data(w) && vstart < vl
         io.exe_reqs(w).bits.uop.v_active := is_active
+        // forward inactive ops to ALU
+        when (io.exe_reqs(w).bits.uop.is_rvv && !is_active) {
+          io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
+          io.exe_reqs(w).bits.uop.ctrl.op_fcn := freechips.rocketchip.rocket.ALU.FN_ADD
+        }
       }
     }
   }

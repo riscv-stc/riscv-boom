@@ -12,7 +12,7 @@ import freechips.rocketchip.tile.FPConstants._
 import freechips.rocketchip.tile.{FPUCtrlSigs, HasFPUParameters}
 import freechips.rocketchip.tile
 import freechips.rocketchip.rocket
-import freechips.rocketchip.util.uintToBitPat
+import freechips.rocketchip.util.{uintToBitPat, UIntIsOneOf}
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util.{ImmGenRm, ImmGenTyp}
@@ -121,10 +121,10 @@ class UOPCodeFPUDecoder(vector: Boolean = false)(implicit p: Parameters) extends
    ,BitPat(uopVFNMACC)  -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
    ,BitPat(uopVFMSAC)   -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
    ,BitPat(uopVFNMSAC)  -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
-   ,BitPat(uopVFMADD)   -> List(X,X,Y,Y,Y, N,Y,D,D,N,N,N, Y,N,N,Y)
-   ,BitPat(uopVFNMADD)  -> List(X,X,Y,Y,Y, N,Y,D,D,N,N,N, Y,N,N,Y)
-   ,BitPat(uopVFMSUB)   -> List(X,X,Y,Y,Y, N,Y,D,D,N,N,N, Y,N,N,Y)
-   ,BitPat(uopVFNMSUB)  -> List(X,X,Y,Y,Y, N,Y,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFMADD)   -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFNMADD)  -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFMSUB)   -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
+   ,BitPat(uopVFNMSUB)  -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
    ,BitPat(uopVFMIN)    -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,Y)
    ,BitPat(uopVFMAX)    -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,Y)
     )
@@ -254,11 +254,14 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     req.in1 := unbox(rs1_data, tag, minT)
     req.in2 := unbox(rs2_data, tag, minT)
     req.in3 := unbox(rs3_data, tag, minT)
-    when (fp_ctrl.swap23) { req.in3 := req.in2 }
+    when (fp_ctrl.swap23) { req.in3 := unbox(rs2_data, tag, minT) }
     req.typ := ImmGenTyp(io_req.uop.imm_packed)
     req.fmt := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
     when (io_req.uop.uopc === uopFMV_X_S) {
       req.fmt := 0.U
+    } .elsewhen (vector.B && io_req.uop.uopc.isOneOf(uopVFMADD,uopVFNMADD,uopVFMSUB,uopVFNMSUB)) {
+      req.in2 := unbox(rs3_data, tag, minT)
+      req.in3 := unbox(rs2_data, tag, minT)
     }
 
     val fma_decoder = Module(new FMADecoder(vector))
