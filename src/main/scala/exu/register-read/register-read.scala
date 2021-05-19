@@ -128,27 +128,44 @@ class RegisterRead(
 
     if (vector) {
       val rvm_addr = io.iss_uops(w).prvm
+      val ecnt = io.iss_uops(w).v_split_ecnt
       val vstart = io.iss_uops(w).vstart
       val vsew = io.iss_uops(w).vconfig.vtype.vsew
-      val ecnt = io.iss_uops(w).v_split_ecnt
-      val rd_sh = Mux1H(UIntToOH(vsew(1,0)), Seq(Cat(vstart(2,0),0.U(3.W)),
-                                                 Cat(vstart(1,0),0.U(4.W)),
-                                                 Cat(vstart(0),0.U(5.W)),
-                                                 0.U(6.W)))
-      val (rsel, rmsk) = VRegSel(vstart, vsew, ecnt, eLenb, eLenSelSz)
-      val r_bit_mask = Cat((0 until eLenb).map(i => Fill(8, rmsk(i).asUInt)).reverse)
       if (numReadPorts > 0) {
-        io.rf_read_ports(idx+0).addr := Cat(rs1_addr, rsel)
+        val vs1_sew = vsew
+        val r1_sh = Mux1H(UIntToOH(vs1_sew(1,0)), Seq(Cat(vstart(2,0),0.U(3.W)), Cat(vstart(1,0),0.U(4.W)), Cat(vstart(0),0.U(5.W)), 0.U(6.W)))
+        val (r1sel,r1msk) = VRegSel(vstart, vs1_sew, ecnt, eLenb, eLenSelSz)
+        val r1_bit_mask = Cat((0 until eLenb).map(i => Fill(8, r1msk(i).asUInt)).reverse)
+        val rf_data1 = (io.rf_read_ports(idx+0).data & RegNext(r1_bit_mask)) >> RegNext(r1_sh)
+        val signext1 = Mux1H(UIntToOH(RegNext(vs1_sew(1,0))), Seq(rf_data1(7,0).sextTo(eLen), rf_data1(15,0).sextTo(eLen), rf_data1(31,0).sextTo(eLen), rf_data1(63,0)))
+        io.rf_read_ports(idx+0).addr := Cat(rs1_addr, r1sel)
         rrd_rs1_data(w) := Mux(RegNext(io.iss_uops(w).uses_scalar || io.iss_uops(w).uses_v_simm5), RegNext(io.iss_uops(w).v_scalar_data),
-                           Mux(RegNext(rs1_addr === 0.U), 0.U, (io.rf_read_ports(idx+0).data & RegNext(r_bit_mask)) >> RegNext(rd_sh)))
+                           Mux(RegNext(rs1_addr === 0.U), 0.U, Mux(RegNext(io.iss_uops(w).rt(RS1, isUnsignedV)), rf_data1, signext1)))
       }
       if (numReadPorts > 1) {
-        io.rf_read_ports(idx+1).addr := Cat(rs2_addr, rsel)
-        rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, (io.rf_read_ports(idx+1).data & RegNext(r_bit_mask)) >> RegNext(rd_sh))
+        val vs2_sew = Mux(io.iss_uops(w).rt(RS2, isWidenV),  vsew+1.U,
+                      Mux(io.iss_uops(w).uopc === uopVEXT8,  vsew-3.U,
+                      Mux(io.iss_uops(w).uopc === uopVEXT4,  vsew-2.U,
+                      Mux(io.iss_uops(w).rt(RS2, isNarrowV), vsew-1.U, vsew))))
+        val r2_sh = Mux1H(UIntToOH(vs2_sew(1,0)), Seq(Cat(vstart(2,0),0.U(3.W)), Cat(vstart(1,0),0.U(4.W)), Cat(vstart(0),0.U(5.W)), 0.U(6.W)))
+        val (r2sel,r2msk) = VRegSel(vstart, vs2_sew, ecnt, eLenb, eLenSelSz)
+        val r2_bit_mask = Cat((0 until eLenb).map(i => Fill(8, r2msk(i).asUInt)).reverse)
+        val rf_data2 = (io.rf_read_ports(idx+1).data & RegNext(r2_bit_mask)) >> RegNext(r2_sh)
+        val signext2 = Mux1H(UIntToOH(RegNext(vs2_sew(1,0))), Seq(rf_data2(7,0).sextTo(eLen), rf_data2(15,0).sextTo(eLen), rf_data2(31,0).sextTo(eLen), rf_data2(63,0)))
+        io.rf_read_ports(idx+1).addr := Cat(rs2_addr, r2sel)
+        rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, Mux(RegNext(io.iss_uops(w).rt(RS2, isUnsignedV)), rf_data2, signext2))
       }
       if (numReadPorts > 2) {
-        io.rf_read_ports(idx+2).addr := Cat(rs3_addr, rsel)
-        rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, (io.rf_read_ports(idx+2).data & RegNext(r_bit_mask)) >> RegNext(rd_sh))
+        val vd_sew  = Mux(io.iss_uops(w).uopc.isOneOf(uopVSA), io.iss_uops(w).v_ls_ew,
+                      Mux(io.iss_uops(w).rt(RD, isWidenV ), vsew + 1.U,
+                      Mux(io.iss_uops(w).rt(RD, isNarrowV), vsew - 1.U, vsew)))
+        val rd_sh = Mux1H(UIntToOH(vd_sew(1,0)),  Seq(Cat(vstart(2,0),0.U(3.W)), Cat(vstart(1,0),0.U(4.W)), Cat(vstart(0),0.U(5.W)), 0.U(6.W)))
+        val (rdsel,rdmsk) = VRegSel(vstart, vd_sew,  ecnt, eLenb, eLenSelSz)
+        val rd_bit_mask = Cat((0 until eLenb).map(i => Fill(8, rdmsk(i).asUInt)).reverse)
+        val rf_data3 = (io.rf_read_ports(idx+2).data & RegNext(rd_bit_mask)) >> RegNext(rd_sh)
+        val signext3 = Mux1H(UIntToOH(RegNext(vd_sew(1,0))), Seq(rf_data3(7,0).sextTo(eLen), rf_data3(15,0).sextTo(eLen), rf_data3(31,0).sextTo(eLen), rf_data3(63,0)))
+        io.rf_read_ports(idx+2).addr := Cat(rs3_addr, rdsel)
+        rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, Mux(RegNext(io.iss_uops(w).rt(RD, isUnsignedV)), rf_data3, signext3))
       }
       if (numReadPorts > 3) { // handle vector mask
         io.rf_read_ports(idx+3).addr := Cat(rvm_addr, vstart >> log2Ceil(eLen))
@@ -205,9 +222,7 @@ class RegisterRead(
     var pred_cases = Array((false.B, 0.U(1.W)))
 
     val prs1       = rrd_uops(w).prs1
-    val lrs1_rtype = rrd_uops(w).lrs1_rtype
     val prs2       = rrd_uops(w).prs2
-    val lrs2_rtype = rrd_uops(w).lrs2_rtype
     val ppred      = rrd_uops(w).ppred
 
     for (b <- 0 until numTotalBypassPorts)
@@ -215,9 +230,9 @@ class RegisterRead(
       val bypass = io.bypass(b)
       // can't use "io.bypass.valid(b) since it would create a combinational loop on branch kills"
       rs1_cases ++= Array((bypass.valid && (prs1 === bypass.bits.uop.pdst) && bypass.bits.uop.rf_wen
-        && bypass.bits.uop.dst_rtype === RT_FIX && lrs1_rtype === RT_FIX && (prs1 =/= 0.U), bypass.bits.data))
+        && bypass.bits.uop.rt(RD, isInt) && rrd_uops(w).rt(RS1, isInt) && (prs1 =/= 0.U), bypass.bits.data))
       rs2_cases ++= Array((bypass.valid && (prs2 === bypass.bits.uop.pdst) && bypass.bits.uop.rf_wen
-        && bypass.bits.uop.dst_rtype === RT_FIX && lrs2_rtype === RT_FIX && (prs2 =/= 0.U), bypass.bits.data))
+        && bypass.bits.uop.rt(RD, isInt) && rrd_uops(w).rt(RS2, isInt) && (prs2 =/= 0.U), bypass.bits.data))
     }
 
     for (b <- 0 until numTotalPredBypassPorts)

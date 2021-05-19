@@ -187,38 +187,38 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   // Cut up critical path by delaying the write by a cycle.
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
-  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vElenSz, eLen, RT_VEC, true, eLenb, eLenSelSz))
+  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vElenSz, eLen, isVector, true, eLenb, eLenSelSz))
 
   assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
-  when (io.from_int.valid) { assert (io.from_int.bits.uop.rf_wen && io.from_int.bits.uop.dst_rtype === RT_VEC) }
-  when (io.from_fp.valid)  { assert (io.from_fp.bits.uop.rf_wen  && io.from_fp.bits.uop.dst_rtype  === RT_VEC) }
+  when (io.from_int.valid) { assert (io.from_int.bits.uop.rf_wen && io.from_int.bits.uop.rt(RD, isVector)) }
+  when (io.from_fp.valid)  { assert (io.from_fp.bits.uop.rf_wen  && io.from_fp.bits.uop.rt(RD, isVector)) }
 
   var w_cnt = 1
   for (i <- 1 until memWidth) {
-    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), vElenSz, eLen, RT_VEC, true, eLenb, eLenSelSz))
+    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), vElenSz, eLen, isVector, true, eLenb, eLenSelSz))
     w_cnt += 1
   }
   for (eu <- exe_units) {
     val eu_vresp = eu.io.vresp
     val eu_vresp_uop = eu_vresp.bits.uop
     val vstart = eu_vresp_uop.vstart
-    val vsew = eu_vresp_uop.vconfig.vtype.vsew
-    val ecnt = eu_vresp_uop.v_split_ecnt
+    val eew    = eu_vresp_uop.vd_eew
+    val ecnt   = eu_vresp_uop.v_split_ecnt
     if (eu.writesVrf) {
       if (eu.hasVMX) {
         vregfile.io.write_ports(w_cnt).valid     := eu_vresp.valid && eu_vresp_uop.rf_wen && eu_vresp_uop.uopc =/= uopVSA
       } else {
         vregfile.io.write_ports(w_cnt).valid     := eu_vresp.valid && eu_vresp_uop.rf_wen
       }
-      val (rsel, rmsk) = VRegSel(vstart, vsew, ecnt, eLenb, eLenSelSz)
+      val (rsel, rmsk) = VRegSel(vstart, eew, ecnt, eLenb, eLenSelSz)
       vregfile.io.write_ports(w_cnt).bits.addr := Cat(eu_vresp_uop.pdst, rsel)
       vregfile.io.write_ports(w_cnt).bits.mask := rmsk
-      vregfile.io.write_ports(w_cnt).bits.data := VDataFill(eu_vresp.bits.data, vsew, eLen)
+      vregfile.io.write_ports(w_cnt).bits.data := VDataFill(eu_vresp.bits.data, eew, eLen)
       eu.io.vresp.ready                        := true.B
       when (eu_vresp.valid && eu_vresp_uop.uopc =/= uopVSA) {
         //assert(eu.io.vresp.ready, "No backpressuring the Vec EUs")
         assert(eu.io.vresp.bits.uop.rf_wen, "rf_wen must be high here")
-        assert(eu.io.vresp.bits.uop.dst_rtype === RT_VEC, "wb type must be FLT for fpu")
+        assert(eu.io.vresp.bits.uop.rt(RD, isVector), "wb type must be vector")
       }
       w_cnt += 1
     }
@@ -260,7 +260,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       val exe_resp = eu.io.vresp
       val wb_uop = eu.io.vresp.bits.uop
       val wport = io.wakeups(w_cnt)
-      wport.valid := exe_resp.valid && wb_uop.dst_rtype === RT_VEC
+      wport.valid := exe_resp.valid && wb_uop.rt(RD, isVector)
       wport.bits := exe_resp.bits
 
       w_cnt += 1

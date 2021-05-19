@@ -147,6 +147,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_ls_ew          = if (usingVector) UInt(2.W) else null         // EEW encoded in load/store instruction
   val v_unmasked       = if (usingVector) Bool() else null
   val vstart           = if (usingVector) UInt(vLenSz.W) else null
+  val voffset          = if (usingVector) UInt(vLenSz.W) else null    // element-wise offset from first split
   val v_is_split       = if (usingVector) Bool() else null            // is a split of a vector instruction
   val v_split_ecnt     = if (usingVector) UInt((log2Ceil(vLenb)+1).W) else null
   val v_is_first       = if (usingVector) Bool() else null
@@ -178,7 +179,17 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
 
   def uses_scalar      = is_rvv && (iq_type & (IQT_INT | IQT_FP)) =/= 0.U
   def uses_v_simm5     = is_rvv && lrs1_rtype === RT_VI
-//def is_v_ls          = is_rvv && (uses_ldq || uses_stq)
+  def uses_v_uimm5     = is_rvv && lrs1_rtype === RT_VIU
+  def is_v_ls          = is_rvv && (uses_ldq || uses_stq)
+  def rt(rs: UInt, f: UInt => Bool): Bool = f(Mux1H(UIntToOH(rs), Seq(dst_rtype, lrs1_rtype, lrs2_rtype)))
+
+  def vd_eew: UInt = {
+    val vsew   = vconfig.vtype.vsew
+    val vd_sew = Mux(rt(RD, isWidenV ), vsew + 1.U,
+                 Mux(rt(RD, isNarrowV), vsew - 1.U, vsew))
+    val eew    = Mux(is_v_ls, v_ls_ew, vd_sew)
+    eew
+  }
 }
 
 /**
@@ -494,25 +505,37 @@ object MicroOpcodes extends Enumeration {
   val uopVRSUB          = uopVRSUB_enum.id.U(UOPC_SZ.W)
   // VRSUB_V*
   //  12.2. widening integer add/sub
+//val uopVWADDU_enum    = Value
+//val uopVWADDU         = uopVWADDU_enum.id.U(UOPC_SZ.W)
   // VWADDU_V*
+//val uopVWSUBU_enum    = Value
+//val uopVWSUBU         = uopVWSUBU_enum.id.U(UOPC_SZ.W)
   // VWSUBU_V*
+//val uopVWADD_enum     = Value
+//val uopVWADD          = uopVWADD_enum.id.U(UOPC_SZ.W)
   // VWADD_V*
+//val uopVWSUB_enum     = Value
+//val uopVWSUB          = uopVWSUB_enum.id.U(UOPC_SZ.W)
   // VWSUB_V*
   // 12.3. integer extension
-  val uopVSEXT_enum     = Value
-  val uopVSEXT          = uopVSEXT_enum.id.U(UOPC_SZ.W)
-  // VZEXT_V*
-  // VSEXT_V*
+  val uopVEXT2_enum    = Value
+  val uopVEXT2         = uopVEXT2_enum.id.U(UOPC_SZ.W)
+  val uopVEXT4_enum    = Value
+  val uopVEXT4         = uopVEXT4_enum.id.U(UOPC_SZ.W)
+  val uopVEXT8_enum    = Value
+  val uopVEXT8         = uopVEXT8_enum.id.U(UOPC_SZ.W)
+  // VZEXT_VF*
+  // VSEXT_VF*
   // 12.4. integer add-with-carry/sub-with-borrow
   val uopVADC_enum      = Value
   val uopVADC           = uopVADC_enum.id.U(UOPC_SZ.W)
-  // VADC_V*
+  // VADC_V*M
   val uopVMADC_enum     = Value
   val uopVMADC          = uopVMADC_enum.id.U(UOPC_SZ.W)
   // VMADC_V*
   val uopVSBC_enum      = Value
   val uopVSBC           = uopVSBC_enum.id.U(UOPC_SZ.W)
-  // VSBC_V*
+  // VSBC_V*M
   val uopVMSBC_enum     = Value
   val uopVMSBC          = uopVMSBC_enum.id.U(UOPC_SZ.W)
   // VMSBC_V*
@@ -527,51 +550,81 @@ object MicroOpcodes extends Enumeration {
   val uopVXOR           = uopVXOR_enum.id.U(UOPC_SZ.W)
   // VXOR_V*
   // 12.6. single width bit shift
-  val uopVSHL_enum      = Value
-  val uopVSHL           = uopVSHL_enum.id.U(UOPC_SZ.W)
+  val uopVSLL_enum      = Value
+  val uopVSLL           = uopVSLL_enum.id.U(UOPC_SZ.W)
   // VSLL_V*
-  val uopVSHR_enum      = Value
-  val uopVSHR           = uopVSHR_enum.id.U(UOPC_SZ.W)
+  val uopVSRL_enum      = Value
+  val uopVSRL           = uopVSRL_enum.id.U(UOPC_SZ.W)
   // VSRL_V*
+  val uopVSRA_enum      = Value
+  val uopVSRA           = uopVSRA_enum.id.U(UOPC_SZ.W)
   // VSRA_V*
   // 12.7. narrowing integer right shift
   // VNSRL_W*
   // VNSRA_W*
   // 12.8. integer comparison
-  val uopVMSCMP_enum    = Value
-  val uopVMSCMP         = uopVMSCMP_enum.id.U(UOPC_SZ.W)
+  val uopVMSEQ_enum     = Value
+  val uopVMSEQ          = uopVMSEQ_enum.id.U(UOPC_SZ.W)
   // VMSEQ_V*
+  val uopVMSNE_enum     = Value
+  val uopVMSNE          = uopVMSNE_enum.id.U(UOPC_SZ.W)
   // VMSNE_V*
+  val uopVMSLTU_enum    = Value
+  val uopVMSLTU         = uopVMSLTU_enum.id.U(UOPC_SZ.W)
   // VMSLTU_V*
+  val uopVMSLT_enum     = Value
+  val uopVMSLT          = uopVMSLT_enum.id.U(UOPC_SZ.W)
   // VMSLT_V*
+  val uopVMSLEU_enum    = Value
+  val uopVMSLEU         = uopVMSLEU_enum.id.U(UOPC_SZ.W)
   // VMSLEU_V*
+  val uopVMSLE_enum     = Value
+  val uopVMSLE          = uopVMSLE_enum.id.U(UOPC_SZ.W)
   // VMSLE_V*
+  val uopVMSGTU_enum    = Value
+  val uopVMSGTU         = uopVMSGTU_enum.id.U(UOPC_SZ.W)
   // VMSGTU_V*
+  val uopVMSGT_enum     = Value
+  val uopVMSGT          = uopVMSGT_enum.id.U(UOPC_SZ.W)
   // VMSGT_V*
   // 12.9. integer min/max
+  val uopVMINU_enum     = Value
+  val uopVMINU          = uopVMINU_enum.id.U(UOPC_SZ.W)
+  // VMINU_V*
   val uopVMIN_enum      = Value
   val uopVMIN           = uopVMIN_enum.id.U(UOPC_SZ.W)
-  // VMINU_V*
   // VMIN_V*
+  val uopVMAXU_enum     = Value
+  val uopVMAXU          = uopVMAXU_enum.id.U(UOPC_SZ.W)
+  // VMAXU_V*
   val uopVMAX_enum      = Value
   val uopVMAX           = uopVMAX_enum.id.U(UOPC_SZ.W)
-  // VMAXU_V*
   // VMAX_V*
   // 12.10. single-width integer multiply
   val uopVMUL_enum      = Value
   val uopVMUL           = uopVMUL_enum.id.U(UOPC_SZ.W)
   // VMUL_V*
+  val uopVMULH_enum     = Value
+  val uopVMULH          = uopVMULH_enum.id.U(UOPC_SZ.W)
   // VMULH_V*
+  val uopVMULHU_enum    = Value
+  val uopVMULHU         = uopVMULHU_enum.id.U(UOPC_SZ.W)
   // VMULHU_V*
+  val uopVMULHSU_enum   = Value
+  val uopVMULHSU        = uopVMULHSU_enum.id.U(UOPC_SZ.W)
   // VMULHSU_V*
   // 12.11. integer divide
+  val uopVDIVU_enum     = Value
+  val uopVDIVU          = uopVDIVU_enum.id.U(UOPC_SZ.W)
+  // VDIVU_V*
   val uopVDIV_enum      = Value
   val uopVDIV           = uopVDIV_enum.id.U(UOPC_SZ.W)
-  // VDIVU_V*
   // VDIV_V*
-//val uopVREM_enum      = Value
-//val uopVREM           = uopVREM_enum.id.U(UOPC_SZ.W)
+  val uopVREMU_enum     = Value
+  val uopVREMU          = uopVREMU_enum.id.U(UOPC_SZ.W)
   // VREMU_V*
+  val uopVREM_enum      = Value
+  val uopVREM           = uopVREM_enum.id.U(UOPC_SZ.W)
   // VREM_V*
   // 12.12. widening integer multiply
   // VWMUL_V*
@@ -581,8 +634,14 @@ object MicroOpcodes extends Enumeration {
   val uopVMACC_enum     = Value
   val uopVMACC          = uopVMACC_enum.id.U(UOPC_SZ.W)
   // VMACC_V*
+  val uopVNMSAC_enum    = Value
+  val uopVNMSAC         = uopVNMSAC_enum.id.U(UOPC_SZ.W)
   // VNMSAC_V*
+  val uopVMADD_enum     = Value
+  val uopVMADD          = uopVMADD_enum.id.U(UOPC_SZ.W)
   // VMADD_V*
+  val uopVNMSUB_enum    = Value
+  val uopVNMSUB         = uopVNMSUB_enum.id.U(UOPC_SZ.W)
   // VNMSUB_V*
   // 12.14. widening integer multiply-add
   // VWMACCU_V*

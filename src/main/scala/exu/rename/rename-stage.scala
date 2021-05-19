@@ -234,7 +234,7 @@ class RenameStage(
 {
   require(!(float & vector))
   val pregSz = log2Ceil(numPhysRegs)
-  val rtype = if (float) RT_FLT else if (vector) RT_VEC else RT_FIX
+  val rtype: UInt => Bool = if (float) isFloat else if (vector) isVector else isInt
 
   //-------------------------------------------------------------
   // Helper Functions
@@ -279,18 +279,18 @@ class RenameStage(
   val rbk_valids      = Wire(Vec(plWidth, Bool()))
 
   for (w <- 0 until plWidth) {
-    ren2_alloc_reqs(w)    := ren2_uops(w).ldst_val && ren2_uops(w).dst_rtype === rtype && ren2_fire(w) &&
+    ren2_alloc_reqs(w)    := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_fire(w) &&
                              (~ren2_uops(w).v_is_split || ren2_uops(w).v_re_alloc)
     ren2_br_tags(w).valid := ren2_fire(w) && ren2_uops(w).allocate_brtag
 
     if (usingVector && vector) {
-      com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).dst_rtype === rtype && io.com_valids(w) &&
+      com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w) &&
                        (~io.com_uops(w).v_is_split || io.com_uops(w).v_is_last)
-      rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).dst_rtype === rtype && io.rbk_valids(w) &&
+      rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w) &&
                        (~io.com_uops(w).v_is_split || io.com_uops(w).v_is_first)
     } else {
-      com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).dst_rtype === rtype && io.com_valids(w)
-      rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).dst_rtype === rtype && io.rbk_valids(w)
+      com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w)
+      rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w)
     }
     ren2_br_tags(w).bits  := ren2_uops(w).br_tag
   }
@@ -359,26 +359,26 @@ class RenameStage(
 
     if (usingVector) {
       // record physical names of first split
-      when (uop.v_is_split & uop.v_is_first) {
-        when(uop.lrs1_rtype === rtype) { prs1(w) := io.ren2_uops(w).prs1 }
-        when(uop.lrs2_rtype === rtype) { prs2(w) := io.ren2_uops(w).prs2 }
+      when (uop.v_is_split && uop.v_re_alloc) {
+        when(uop.rt(RS1, rtype)) { prs1(w) := io.ren2_uops(w).prs1 }
+        when(uop.rt(RS2, rtype)) { prs2(w) := io.ren2_uops(w).prs2 }
         when(uop.is_rvv && uop.uses_ldq) {
           prs3(w) := io.ren2_uops(w).stale_pdst
         } .elsewhen(uop.frs3_en && (float.B || vector.B)) {
           prs3(w) := io.ren2_uops(w).prs3
         }
-        when(uop.ldst_val && uop.dst_rtype === rtype) { stale_pdst(w) := io.ren2_uops(w).stale_pdst }
-        when(uop.ldst_val && uop.dst_rtype === rtype) { pdst(w) := io.ren2_uops(w).pdst }
+        when(uop.ldst_val && uop.rt(RD, rtype)) { stale_pdst(w) := io.ren2_uops(w).stale_pdst }
+        when(uop.ldst_val && uop.rt(RD, rtype)) { pdst(w) := io.ren2_uops(w).pdst }
         when(~uop.v_unmasked) { prvm(w) := io.ren2_uops(w).prvm }
       }
 
       // recover physical names for splits other than the first
-      when (uop.v_is_split & ~uop.v_is_first) {
-        when(uop.lrs1_rtype === rtype) { uop.prs1 := prs1(w) }
-        when(uop.lrs2_rtype === rtype) { uop.prs2 := prs2(w) }
+      when (uop.v_is_split && !uop.v_re_alloc) {
+        when(uop.rt(RS1, rtype)) { uop.prs1 := prs1(w) }
+        when(uop.rt(RS2, rtype)) { uop.prs2 := prs2(w) }
         when(uop.frs3_en && (float.B || vector.B)) { uop.prs3 := prs3(w) }
-        when(uop.ldst_val && uop.dst_rtype === rtype) { uop.stale_pdst := stale_pdst(w) }
-        when(uop.ldst_val && uop.dst_rtype === rtype) { uop.pdst := pdst(w) }
+        when(uop.ldst_val && uop.rt(RD, rtype)) { uop.stale_pdst := stale_pdst(w) }
+        when(uop.ldst_val && uop.rt(RD, rtype)) { uop.pdst := pdst(w) }
         when(~uop.v_unmasked) { uop.prvm := prvm(w) }
       }
     }
@@ -393,42 +393,43 @@ class RenameStage(
   busytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
   if (vector) {
     for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) {
-      val (rsel, rmsk) = VRegSel(wk.bits.uop, eLenb, eLenSelSz)
+      val vstart  = wk.bits.uop.vstart
+      val ecnt    = wk.bits.uop.v_split_ecnt
+      val (rsel, rmsk) = VRegSel(vstart, wk.bits.uop.vd_eew, ecnt, eLenb, eLenSelSz)
       bs := rmsk << Cat(rsel, 0.U(3.W))
     }
   }
 
-  assert (!(io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype =/= rtype).reduce(_||_)),
+  assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
    "[rename] Wakeup has wrong rtype.")
 
   for ((uop, w) <- ren2_uops.zipWithIndex) {
     if (usingVector) {
       if (vector) {
         val vbusy = busytable.io.vbusy_resps(w)
-        //val (rsel, rmsk) = VRegSel(uop, eLenb, eLenSelSz)
-        uop.prs1_busy := vbusy.prs1_busy & Fill(vLenb, (uop.lrs1_rtype === rtype).asUInt) //& (rmsk << Cat(rsel, 0.U(3.W)))
-        uop.prs2_busy := vbusy.prs2_busy & Fill(vLenb, (uop.lrs2_rtype === rtype).asUInt) //& (rmsk << Cat(rsel, 0.U(3.W)))
+        uop.prs1_busy := vbusy.prs1_busy & Fill(vLenb, (uop.rt(RS1, rtype)).asUInt) //& (rmsk << Cat(rsel, 0.U(3.W)))
+        uop.prs2_busy := vbusy.prs2_busy & Fill(vLenb, (uop.rt(RS2, rtype)).asUInt) //& (rmsk << Cat(rsel, 0.U(3.W)))
         uop.prs3_busy := vbusy.prs3_busy & Fill(vLenb, uop.frs3_en.asUInt) //& (rmsk << Cat(rsel, 0.U(3.W)))
         uop.prvm_busy := vbusy.prvm_busy & Fill(vLenb, (!uop.is_rvv || !uop.v_unmasked).asUInt)
       } else {
         val busy = busytable.io.busy_resps(w)
-        uop.prs1_busy := Cat(0.U, (uop.lrs1_rtype === rtype && busy.prs1_busy).asUInt)
-        uop.prs2_busy := Cat(0.U, (uop.lrs2_rtype === rtype && busy.prs2_busy).asUInt)
+        uop.prs1_busy := Cat(0.U, (uop.rt(RS1, rtype) && busy.prs1_busy).asUInt)
+        uop.prs2_busy := Cat(0.U, (uop.rt(RS2, rtype) && busy.prs2_busy).asUInt)
         uop.prs3_busy := Cat(0.U, (uop.frs3_en && busy.prs3_busy).asUInt)
 
         val valid = ren2_valids(w)
-        assert (!(valid && busy.prs1_busy(0) && rtype === RT_FIX && uop.lrs1 === 0.U), "[rename] x0 is busy??")
-        assert (!(valid && busy.prs2_busy(0) && rtype === RT_FIX && uop.lrs2 === 0.U), "[rename] x0 is busy??")
+        assert (!(valid && busy.prs1_busy(0) && (!vector.B && !float.B) && uop.lrs1 === 0.U), "[rename] x0 is busy??")
+        assert (!(valid && busy.prs2_busy(0) && (!vector.B && !float.B) && uop.lrs2 === 0.U), "[rename] x0 is busy??")
       }
     } else {
       val busy = busytable.io.busy_resps(w)
-      uop.prs1_busy := uop.lrs1_rtype === rtype && busy.prs1_busy
-      uop.prs2_busy := uop.lrs2_rtype === rtype && busy.prs2_busy
+      uop.prs1_busy := uop.rt(RS1, rtype) && busy.prs1_busy
+      uop.prs2_busy := uop.rt(RS2, rtype) && busy.prs2_busy
       uop.prs3_busy := uop.frs3_en && busy.prs3_busy
 
       val valid = ren2_valids(w)
-      assert (!(valid && busy.prs1_busy && rtype === RT_FIX && uop.lrs1 === 0.U), "[rename] x0 is busy??")
-      assert (!(valid && busy.prs2_busy && rtype === RT_FIX && uop.lrs2 === 0.U), "[rename] x0 is busy??")
+      assert (!(valid && busy.prs1_busy && (!vector.B && !float.B) && uop.lrs1 === 0.U), "[rename] x0 is busy??")
+      assert (!(valid && busy.prs2_busy && (!vector.B && !float.B) && uop.lrs2 === 0.U), "[rename] x0 is busy??")
     }
   }
 
@@ -439,7 +440,7 @@ class RenameStage(
     val can_allocate = freelist.io.alloc_pregs(w).valid
 
     // Push back against Decode stage if Rename1 can't proceed.
-    io.ren_stalls(w) := (ren2_uops(w).dst_rtype === rtype) && !can_allocate
+    io.ren_stalls(w) := (ren2_uops(w).rt(RD, rtype)) && !can_allocate
 
     val bypassed_uop = Wire(new MicroOp)
     if (w > 0) bypassed_uop := BypassAllocations(ren2_uops(w), ren2_uops.slice(0,w), ren2_alloc_reqs.slice(0,w))

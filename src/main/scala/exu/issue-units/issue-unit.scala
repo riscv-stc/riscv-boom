@@ -129,10 +129,10 @@ abstract class IssueUnit(
 
     if (iqType == IQT_MEM.litValue || iqType == IQT_INT.litValue) {
       // For StoreAddrGen for Int, or AMOAddrGen, we go to addr gen state
-      when ((io.dis_uops(w).bits.uopc === uopSTA && io.dis_uops(w).bits.lrs2_rtype === RT_FIX) ||
+      when ((io.dis_uops(w).bits.uopc === uopSTA && io.dis_uops(w).bits.rt(RS2, isInt)) ||
              io.dis_uops(w).bits.uopc === uopAMO_AG) {
         dis_uops(w).iw_state := s_valid_2
-      } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopSTA, uopVSA) && io.dis_uops(w).bits.lrs2_rtype =/= RT_FIX) {
+      } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopSTA, uopVSA) && io.dis_uops(w).bits.rt(RS2, isNotInt)) {
         // For store addr gen for FP, rs2 is the FP/VEC register, and we don't wait for that here
         when (io.dis_uops(w).bits.fp_val) {
           //dis_uops(w).lrs2_rtype := RT_X
@@ -147,8 +147,8 @@ abstract class IssueUnit(
         dis_uops(w).prvm_busy := 0.U
       }
       if (usingVector && iqType == IQT_INT.litValue) {
-        when (dis_uops(w).lrs2_rtype === RT_VEC) { dis_uops(w).prs2_busy := 0.U }
-        when (dis_uops(w).frs3_en )              { dis_uops(w).prs3_busy := 0.U }
+        when (dis_uops(w).rt(RS2, isVector)) { dis_uops(w).prs2_busy := 0.U }
+        when (dis_uops(w).frs3_en )          { dis_uops(w).prs3_busy := 0.U }
       }
     } else if (iqType == IQT_FP.litValue) {
       // FP "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
@@ -158,8 +158,8 @@ abstract class IssueUnit(
       }
       if (usingVector) {
         dis_uops(w).prvm_busy := 0.U
-        when (dis_uops(w).lrs2_rtype === RT_VEC) { dis_uops(w).prs2_busy := 0.U }
-        when (dis_uops(w).is_rvv )               { dis_uops(w).prs3_busy := 0.U }
+        when (dis_uops(w).rt(RS2, isVector)) { dis_uops(w).prs2_busy := 0.U }
+        when (dis_uops(w).is_rvv )           { dis_uops(w).prs3_busy := 0.U }
       }
     } else if (iqType == IQT_VEC.litValue) {
       // VEC "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
