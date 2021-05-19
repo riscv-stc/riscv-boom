@@ -701,11 +701,6 @@ object VRegSel {
     val emsk = VRegMask(vstart, vsew, ecnt, elenb)
     (rsel, emsk)
   }
-
-  def apply(uop: MicroOp, elenb: Int, eLenSelSz: Int): (UInt, UInt) = {
-    val ret = apply(uop.vstart, uop.vconfig.vtype.vsew, uop.v_split_ecnt, elenb, eLenSelSz)
-    ret
-  }
 }
 
 object VDataFill {

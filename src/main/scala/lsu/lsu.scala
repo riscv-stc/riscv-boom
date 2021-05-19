@@ -1352,9 +1352,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       {
         assert(!io.dmem.resp(w).bits.is_hella)
         val ldq_idx = io.dmem.resp(w).bits.uop.ldq_idx
-        val send_iresp = ldq(ldq_idx).bits.uop.dst_rtype === RT_FIX
-        val send_fresp = ldq(ldq_idx).bits.uop.dst_rtype === RT_FLT
-        val send_vresp = ldq(ldq_idx).bits.uop.dst_rtype === RT_VEC
+        val send_iresp = ldq(ldq_idx).bits.uop.rt(RD, isInt)
+        val send_fresp = ldq(ldq_idx).bits.uop.rt(RD, isFloat)
+        val send_vresp = ldq(ldq_idx).bits.uop.rt(RD, isVector)
 
         io.core.exe(w).iresp.bits.uop  := ldq(ldq_idx).bits.uop
         io.core.exe(w).fresp.bits.uop  := ldq(ldq_idx).bits.uop
@@ -1409,14 +1409,14 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                 wb_forward_ld_addr(w),
                                 storegen.data, false.B, coreDataBytes)
 
-      io.core.exe(w).iresp.valid := (forward_uop.dst_rtype === RT_FIX) && data_ready && live
-      io.core.exe(w).fresp.valid := (forward_uop.dst_rtype === RT_FLT) && data_ready && live
+      io.core.exe(w).iresp.valid := (forward_uop.rt(RD, isInt)) && data_ready && live
+      io.core.exe(w).fresp.valid := (forward_uop.rt(RD, isFloat)) && data_ready && live
       io.core.exe(w).iresp.bits.uop  := forward_uop
       io.core.exe(w).fresp.bits.uop  := forward_uop
       io.core.exe(w).iresp.bits.data := loadgen.data
       io.core.exe(w).fresp.bits.data := loadgen.data
       if (usingVector) {
-        io.core.exe(w).vresp.valid := (forward_uop.dst_rtype === RT_VEC) && data_ready && live
+        io.core.exe(w).vresp.valid := (forward_uop.rt(RD, isVector)) && data_ready && live
         io.core.exe(w).vresp.bits.uop  := forward_uop
         io.core.exe(w).vresp.bits.data := loadgen.data
       }

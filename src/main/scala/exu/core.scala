@@ -783,27 +783,27 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     val p_stall = if (enableSFBOpt) pred_rename_stage.io.ren_stalls(w) else false.B
 
     // lrs1 can "pass through" to prs1. Used solely to index the csr file.
-    dis_uops(w).prs1 := Mux(dis_uops(w).lrs1_rtype === RT_VEC, v_uop.prs1,
-                        Mux(dis_uops(w).lrs1_rtype === RT_FLT, f_uop.prs1,
-                        Mux(dis_uops(w).lrs1_rtype === RT_FIX, i_uop.prs1, dis_uops(w).lrs1)))
-    dis_uops(w).prs2 := Mux(dis_uops(w).lrs2_rtype === RT_VEC, v_uop.prs2,
-                        Mux(dis_uops(w).lrs2_rtype === RT_FLT, f_uop.prs2,
-                        Mux(dis_uops(w).lrs2_rtype === RT_FIX, i_uop.prs2, dis_uops(w).lrs2)))
+    dis_uops(w).prs1 := Mux(dis_uops(w).rt(RS1, isVector), v_uop.prs1,
+                        Mux(dis_uops(w).rt(RS1, isFloat ), f_uop.prs1,
+                        Mux(dis_uops(w).rt(RS1, isInt   ), i_uop.prs1, dis_uops(w).lrs1)))
+    dis_uops(w).prs2 := Mux(dis_uops(w).rt(RS2, isVector), v_uop.prs2,
+                        Mux(dis_uops(w).rt(RS2, isFloat ), f_uop.prs2,
+                        Mux(dis_uops(w).rt(RS2, isInt   ), i_uop.prs2, dis_uops(w).lrs2)))
     dis_uops(w).prs3 := Mux(dis_uops(w).is_rvv, v_uop.prs3, f_uop.prs3)
     dis_uops(w).ppred := p_uop.ppred
-    dis_uops(w).pdst := Mux(dis_uops(w).dst_rtype  === RT_VEC, v_uop.pdst,
-                        Mux(dis_uops(w).dst_rtype  === RT_FLT, f_uop.pdst,
-                        Mux(dis_uops(w).dst_rtype  === RT_FIX, i_uop.pdst, p_uop.pdst)))
-    dis_uops(w).stale_pdst := Mux(dis_uops(w).dst_rtype === RT_VEC, v_uop.stale_pdst,
-                              Mux(dis_uops(w).dst_rtype === RT_FLT, f_uop.stale_pdst, i_uop.stale_pdst))
+    dis_uops(w).pdst := Mux(dis_uops(w).rt(RD, isVector), v_uop.pdst,
+                        Mux(dis_uops(w).rt(RD, isFloat ), f_uop.pdst,
+                        Mux(dis_uops(w).rt(RD, isInt   ), i_uop.pdst, p_uop.pdst)))
+    dis_uops(w).stale_pdst := Mux(dis_uops(w).rt(RD, isVector), v_uop.stale_pdst,
+                              Mux(dis_uops(w).rt(RD, isFloat ), f_uop.stale_pdst, i_uop.stale_pdst))
 
     if (usingVector) {
-      dis_uops(w).prs1_busy := Mux1H(Seq((dis_uops(w).lrs1_rtype === RT_FIX,          i_uop.prs1_busy),
-                                         (dis_uops(w).lrs1_rtype === RT_FLT,          f_uop.prs1_busy),
-                                         (dis_uops(w).lrs1_rtype === RT_VEC,          v_uop.prs1_busy)))
-      dis_uops(w).prs2_busy := Mux1H(Seq((dis_uops(w).lrs2_rtype === RT_FIX,          i_uop.prs2_busy),
-                                         (dis_uops(w).lrs2_rtype === RT_FLT,          f_uop.prs2_busy),
-                                         (dis_uops(w).lrs2_rtype === RT_VEC,          v_uop.prs2_busy)))
+      dis_uops(w).prs1_busy := Mux1H(Seq((dis_uops(w).rt(RS1, isInt   ), i_uop.prs1_busy),
+                                         (dis_uops(w).rt(RS1, isFloat ), f_uop.prs1_busy),
+                                         (dis_uops(w).rt(RS1, isVector), v_uop.prs1_busy)))
+      dis_uops(w).prs2_busy := Mux1H(Seq((dis_uops(w).rt(RS2, isInt   ), i_uop.prs2_busy),
+                                         (dis_uops(w).rt(RS2, isFloat ), f_uop.prs2_busy),
+                                         (dis_uops(w).rt(RS2, isVector), v_uop.prs2_busy)))
       dis_uops(w).prs3_busy := Mux1H(Seq((dis_uops(w).frs3_en && dis_uops(w).is_rvv,  v_uop.prs3_busy),
                                          (dis_uops(w).frs3_en && !dis_uops(w).is_rvv, f_uop.prs3_busy),
                                          (!dis_uops(w).frs3_en,                       0.U)))
@@ -811,10 +811,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dis_uops(w).prvm_busy := Mux(dis_uops(w).is_rvv && !dis_uops(w).v_unmasked, v_uop.prvm_busy, 0.U)
       dis_uops(w).v_scalar_busy := dis_uops(w).is_rvv && dis_uops(w).uses_scalar
     } else {
-      dis_uops(w).prs1_busy := i_uop.prs1_busy & (dis_uops(w).lrs1_rtype === RT_FIX) |
-                               f_uop.prs1_busy & (dis_uops(w).lrs1_rtype === RT_FLT)
-      dis_uops(w).prs2_busy := i_uop.prs2_busy & (dis_uops(w).lrs2_rtype === RT_FIX) |
-                               f_uop.prs2_busy & (dis_uops(w).lrs2_rtype === RT_FLT)
+      dis_uops(w).prs1_busy := i_uop.prs1_busy & (dis_uops(w).rt(RS1, isInt)) |
+                               f_uop.prs1_busy & (dis_uops(w).rt(RS1, isFloat))
+      dis_uops(w).prs2_busy := i_uop.prs2_busy & (dis_uops(w).rt(RS2, isInt)) |
+                               f_uop.prs2_busy & (dis_uops(w).rt(RS2, isFloat))
       dis_uops(w).prs3_busy := f_uop.prs3_busy & dis_uops(w).frs3_en
     }
     dis_uops(w).ppred_busy := p_uop.ppred_busy && dis_uops(w).is_sfb_shadow
@@ -945,17 +945,17 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   var iss_wu_idx = 1
   var ren_wu_idx = 1
   // The 0th wakeup port goes to the ll_wbarb
-  int_iss_wakeups(0).valid := ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.dst_rtype === RT_FIX
+  int_iss_wakeups(0).valid := ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.rt(RD, isInt)
   int_iss_wakeups(0).bits  := ll_wbarb.io.out.bits
 
-  int_ren_wakeups(0).valid := ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.dst_rtype === RT_FIX
+  int_ren_wakeups(0).valid := ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.rt(RD, isInt)
   int_ren_wakeups(0).bits  := ll_wbarb.io.out.bits
 
   for (i <- 1 until memWidth) {
-    int_iss_wakeups(i).valid := mem_resps(i).valid && mem_resps(i).bits.uop.dst_rtype === RT_FIX
+    int_iss_wakeups(i).valid := mem_resps(i).valid && mem_resps(i).bits.uop.rt(RD, isInt)
     int_iss_wakeups(i).bits  := mem_resps(i).bits
 
-    int_ren_wakeups(i).valid := mem_resps(i).valid && mem_resps(i).bits.uop.dst_rtype === RT_FIX
+    int_ren_wakeups(i).valid := mem_resps(i).valid && mem_resps(i).bits.uop.rt(RD, isInt)
     int_ren_wakeups(i).bits  := mem_resps(i).bits
     iss_wu_idx += 1
     ren_wu_idx += 1
@@ -970,13 +970,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       slow_wakeup := DontCare
 
       val resp = exe_units(i).io.iresp
-      assert(!(resp.valid && resp.bits.uop.rf_wen && resp.bits.uop.dst_rtype =/= RT_FIX))
+      assert(!(resp.valid && resp.bits.uop.rf_wen && resp.bits.uop.rt(RD, isNotInt)))
 
       // Fast Wakeup (uses just-issued uops that have known latencies)
       fast_wakeup.bits.uop := iss_uops(i)
       fast_wakeup.valid    := iss_valids(i) &&
                               iss_uops(i).bypassable &&
-                              iss_uops(i).dst_rtype === RT_FIX &&
+                              iss_uops(i).rt(RD, isInt) &&
                               iss_uops(i).ldst_val &&
                               !(io.lsu.ld_miss && (iss_uops(i).iw_p1_poisoned || iss_uops(i).iw_p2_poisoned))
 
@@ -985,7 +985,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       slow_wakeup.valid    := resp.valid &&
                                 resp.bits.uop.rf_wen &&
                                 !resp.bits.uop.bypassable &&
-                                resp.bits.uop.dst_rtype === RT_FIX
+                                resp.bits.uop.rt(RD, isInt)
 
       if (exe_units(i).bypassable) {
         int_iss_wakeups(iss_wu_idx) := fast_wakeup
@@ -1329,11 +1329,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
 
   var w_cnt = 1
-  iregfile.io.write_ports(0) := WritePort(ll_wbarb.io.out, ipregSz, xLen, RT_FIX)
+  iregfile.io.write_ports(0) := WritePort(ll_wbarb.io.out, ipregSz, xLen, isInt)
   ll_wbarb.io.in(0) <> mem_resps(0)
   assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
   for (i <- 1 until memWidth) {
-    iregfile.io.write_ports(w_cnt) := WritePort(mem_resps(i), ipregSz, xLen, RT_FIX)
+    iregfile.io.write_ports(w_cnt) := WritePort(mem_resps(i), ipregSz, xLen, isInt)
     w_cnt += 1
   }
 
@@ -1343,11 +1343,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       val wbpdst = wbresp.bits.uop.pdst
       val wbdata = wbresp.bits.data
 
-      def wbIsValid(rtype: UInt) =
-        wbresp.valid && wbresp.bits.uop.rf_wen && wbresp.bits.uop.dst_rtype === rtype
+      def wbIsValid(rtype: UInt => Bool) =
+        wbresp.valid && wbresp.bits.uop.rf_wen && wbresp.bits.uop.rt(RD, rtype)
       val wbReadsCSR = wbresp.bits.uop.ctrl.csr_cmd =/= freechips.rocketchip.rocket.CSR.N
 
-      iregfile.io.write_ports(w_cnt).valid     := wbIsValid(RT_FIX)
+      iregfile.io.write_ports(w_cnt).valid     := wbIsValid(isInt)
       iregfile.io.write_ports(w_cnt).bits.addr := wbpdst
       wbresp.ready := true.B
       if (exe_units(i).hasCSR) {
@@ -1356,16 +1356,16 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         iregfile.io.write_ports(w_cnt).bits.data := wbdata
       }
 
-      assert (!wbIsValid(RT_FLT), "[fppipeline] An FP writeback is being attempted to the Int Regfile.")
+      assert (!wbIsValid(isFloat), "[fppipeline] An FP writeback is being attempted to the Int Regfile.")
 
       assert (!(wbresp.valid &&
         !wbresp.bits.uop.rf_wen &&
-        wbresp.bits.uop.dst_rtype === RT_FIX),
+        wbresp.bits.uop.rt(RD, isInt)),
         "[fppipeline] An Int writeback is being attempted with rf_wen disabled.")
 
       assert (!(wbresp.valid &&
         wbresp.bits.uop.rf_wen &&
-        wbresp.bits.uop.dst_rtype =/= RT_FIX),
+        wbresp.bits.uop.rt(RD, isNotInt)),
         "[fppipeline] writeback being attempted to Int RF with dst != Int type exe_units("+i+").iresp")
       w_cnt += 1
     }
@@ -1415,14 +1415,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val ll_uop = ll_wbarb.io.out.bits.uop
   rob.io.wb_resps(0).valid  := ll_wbarb.io.out.valid && !(ll_uop.uses_stq && !ll_uop.is_amo)
   rob.io.wb_resps(0).bits   <> ll_wbarb.io.out.bits
-  rob.io.debug_wb_valids(0) := ll_wbarb.io.out.valid && ll_uop.dst_rtype =/= RT_X
+  rob.io.debug_wb_valids(0) := ll_wbarb.io.out.valid && ll_uop.rt(RD, isSomeReg)
   rob.io.debug_wb_wdata(0)  := ll_wbarb.io.out.bits.data
   var cnt = 1
   for (i <- 1 until memWidth) {
     val mem_uop = mem_resps(i).bits.uop
     rob.io.wb_resps(cnt).valid := mem_resps(i).valid && !(mem_uop.uses_stq && !mem_uop.is_amo)
     rob.io.wb_resps(cnt).bits  := mem_resps(i).bits
-    rob.io.debug_wb_valids(cnt) := mem_resps(i).valid && mem_uop.dst_rtype =/= RT_X
+    rob.io.debug_wb_valids(cnt) := mem_resps(i).valid && mem_uop.rt(RD, isSomeReg)
     rob.io.debug_wb_wdata(cnt)  := mem_resps(i).bits.data
     cnt += 1
   }
@@ -1436,7 +1436,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
       rob.io.wb_resps(cnt).valid := resp.valid && !(wb_uop.uses_stq && !wb_uop.is_amo)
       rob.io.wb_resps(cnt).bits  <> resp.bits
-      rob.io.debug_wb_valids(cnt) := resp.valid && wb_uop.rf_wen && wb_uop.dst_rtype === RT_FIX
+      rob.io.debug_wb_valids(cnt) := resp.valid && wb_uop.rf_wen && wb_uop.rt(RD, isInt)
       if (eu.hasFFlags) {
         rob.io.fflags(f_cnt) <> resp.bits.fflags
         f_cnt += 1
@@ -1462,7 +1462,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       cnt += 1
       f_cnt += 1
 
-      assert (!(wakeup.valid && wakeup.bits.uop.dst_rtype =/= RT_FLT),
+      assert (!(wakeup.valid && !wakeup.bits.uop.rt(RD, isFloat)),
         "[core] FP wakeup does not write back to a FP register.")
 
       assert (!(wakeup.valid && !wakeup.bits.uop.fp_val),
@@ -1478,7 +1478,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       rob.io.debug_wb_wdata(cnt) := wdata
       cnt += 1
 
-      assert (!(wakeup.valid && wakeup.bits.uop.dst_rtype =/= RT_VEC),
+      assert (!(wakeup.valid && !wakeup.bits.uop.rt(RD, isVector)),
         "[core] VEC wakeup does not write back to a VEC register.")
 
       assert (!(wakeup.valid && !wakeup.bits.uop.is_rvv),
@@ -1587,15 +1587,15 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
           priv,
           Sext(rob.io.commit.uops(w).debug_pc(vaddrBits-1,0), xLen))
         printf_inst(rob.io.commit.uops(w))
-        when (rob.io.commit.uops(w).dst_rtype === RT_FIX && rob.io.commit.uops(w).ldst =/= 0.U) {
+        when (rob.io.commit.uops(w).rt(RD, isInt) && rob.io.commit.uops(w).ldst =/= 0.U) {
           printf(" x%d 0x%x\n",
             rob.io.commit.uops(w).ldst,
             rob.io.commit.debug_wdata(w))
-        } .elsewhen (rob.io.commit.uops(w).dst_rtype === RT_FLT) {
+        } .elsewhen (rob.io.commit.uops(w).rt(RD, isFloat)) {
           printf(" f%d 0x%x\n",
             rob.io.commit.uops(w).ldst,
             rob.io.commit.debug_wdata(w))
-        } .elsewhen (rob.io.commit.uops(w).dst_rtype === RT_VEC) {
+        } .elsewhen (rob.io.commit.uops(w).rt(RD, isVector)) {
           printf(" v%d[%d] 0x%x\n",
             rob.io.commit.uops(w).ldst,
             rob.io.commit.uops(w).vstart,
@@ -1729,7 +1729,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       }
 
       def getWdata(uop: MicroOp, wdata: UInt): UInt = {
-        Mux((uop.dst_rtype === RT_FIX && uop.ldst =/= 0.U) || (uop.dst_rtype === RT_FLT), wdata, 0.U(xLen.W))
+        Mux((uop.rt(RD, isInt) && uop.ldst =/= 0.U) || uop.rt(RD, isFloat), wdata, 0.U(xLen.W))
       }
 
       // use debug_insts instead of uop.debug_inst to use the rob's debug_inst_mem

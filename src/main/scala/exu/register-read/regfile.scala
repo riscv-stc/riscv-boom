@@ -55,27 +55,25 @@ object WritePort
     enq: DecoupledIO[ExeUnitResp],
     addrWidth: Int,
     dataWidth: Int,
-    rtype: UInt,
-    vector: Boolean = false, eLenb: Int = 8, eLenSelSz: Int = 4)
-    (implicit p: Parameters): Valid[RegisterFileWritePort] = {
-     val wport = Wire(Valid(new RegisterFileWritePort(addrWidth, dataWidth, vector)))
-     val enq_uop = enq.bits.uop
-
-     wport.valid := enq.valid && enq_uop.dst_rtype === rtype
-     if (vector) {
-       val vstart = enq_uop.vstart
-       val vsew = enq_uop.vconfig.vtype.vsew
-       val ecnt = enq_uop.v_split_ecnt
-       val (rsel, rmsk) = VRegSel(vstart, vsew, ecnt, eLenb, eLenSelSz)
-       wport.bits.addr := Cat(enq_uop.pdst, rsel)
-       wport.bits.mask := rmsk
-       wport.bits.data := VDataFill(enq.bits.data, vsew, eLenb*8)
-     } else {
-       wport.bits.addr := enq_uop.pdst
-       wport.bits.data := enq.bits.data
-     }
-     enq.ready := true.B
-     wport
+    rtype: UInt => Bool,
+    vector: Boolean = false, eLenb: Int = 8, eLenSelSz: Int = 4
+  ) (implicit p: Parameters): Valid[RegisterFileWritePort] = {
+    val wport = Wire(Valid(new RegisterFileWritePort(addrWidth, dataWidth, vector)))
+    val enq_uop = enq.bits.uop
+    wport.valid := enq.valid && enq_uop.rt(RD, rtype)
+    if (vector) {
+      val vstart = enq_uop.vstart
+      val ecnt   = enq_uop.v_split_ecnt
+      val (rsel, rmsk) = VRegSel(vstart, enq_uop.vd_eew, ecnt, eLenb, eLenSelSz)
+      wport.bits.addr := Cat(enq_uop.pdst, rsel)
+      wport.bits.mask := rmsk
+      wport.bits.data := VDataFill(enq.bits.data, enq_uop.vd_eew, eLenb*8)
+    } else {
+      wport.bits.addr := enq_uop.pdst
+      wport.bits.data := enq.bits.data
+    }
+    enq.ready := true.B
+    wport
   }
 }
 

@@ -259,9 +259,13 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     req.fmt := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
     when (io_req.uop.uopc === uopFMV_X_S) {
       req.fmt := 0.U
-    } .elsewhen (vector.B && io_req.uop.uopc.isOneOf(uopVFMADD,uopVFNMADD,uopVFMSUB,uopVFNMSUB)) {
-      req.in2 := unbox(rs3_data, tag, minT)
-      req.in3 := unbox(rs2_data, tag, minT)
+    } .elsewhen (vector.B) {
+      when (io_req.uop.uopc.isOneOf(uopVFMADD,uopVFNMADD,uopVFMSUB,uopVFNMSUB)) {
+        req.in2 := unbox(rs3_data, tag, minT)
+        req.in3 := unbox(rs2_data, tag, minT)
+      } .elsewhen (io_req.uop.uopc.isOneOf(uopVFMIN,uopVFMAX)) {
+        req.rm := Cat(0.U(2.W), (io_req.uop.uopc === uopVFMAX).asUInt)
+      }
     }
 
     val fma_decoder = Module(new FMADecoder(vector))
@@ -295,14 +299,15 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
                          fpu_latency).bits
 
   if (vector) {
-    dfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === D) && (!io_req.uop.is_rvv || io_req.uop.v_active)
-    sfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === S) && (!io_req.uop.is_rvv || io_req.uop.v_active)
-    hfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === H) && (!io_req.uop.is_rvv || io_req.uop.v_active)
-    fpiu.io.in.valid := io.req.valid && (fp_ctrl.toint || (fp_ctrl.fastpipe && fp_ctrl.wflags)) && (!io_req.uop.is_rvv || io_req.uop.v_active)
-    fpmu.io.in.valid := io.req.valid && (fp_ctrl.fastpipe || io_req.uop.is_rvv && !io_req.uop.v_active)
-    when (io_req.uop.is_rvv && !io_req.uop.v_active) {
-      fpmu.io.in.bits.in1 := fpiu.io.in.bits.in3
-    }
+    dfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === D) //&& (!io_req.uop.is_rvv || io_req.uop.v_active)
+    sfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === S) //&& (!io_req.uop.is_rvv || io_req.uop.v_active)
+    hfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === H) //&& (!io_req.uop.is_rvv || io_req.uop.v_active)
+    fpiu.io.in.valid := io.req.valid && (fp_ctrl.toint || (fp_ctrl.fastpipe && fp_ctrl.wflags)) //&& (!io_req.uop.is_rvv || io_req.uop.v_active)
+    fpmu.io.in.valid := io.req.valid && fp_ctrl.fastpipe //&& (!io_req.uop.is_rvv || io_req.uop.v_active)
+    // inactive elements are handled through vector integer path
+//  when (io_req.uop.is_rvv && !io_req.uop.v_active) {
+//    fpmu.io.in.bits.in1 := fpiu.io.in.bits.in3
+//  }
   } else {
     dfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === D)
     sfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === S)

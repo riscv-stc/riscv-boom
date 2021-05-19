@@ -153,15 +153,39 @@ trait ScalarOpConstants
   val IS_J   = 4.U(3.W)  // UJ-Type (J/JAL)
   val IS_X   = BitPat("b???")
 
+  val RD  = 0.U(2.W)
+  val RS1 = 1.U(2.W)
+  val RS2 = 2.U(2.W)
+  val RS3 = 3.U(2.W)
   // Decode Stage Control Signals
-  val RT_FIX   = 0.U(3.W)
-  val RT_FLT   = 1.U(3.W)
-  val RT_VI    = 2.U(3.W) // RS1 as simm5 (vop.vi), TODO: move to OP selection
-  val RT_VEC   = 4.U(3.W) // vector, width vsew
-  val RT_VECN  = 5.U(3.W) // vector, width vsew/2
-  val RT_VECW  = 6.U(3.W) // vector, width vsew*2
-  val RT_X     = 7.U(3.W) // not-a-register (but shouldn't get a busy-bit, etc.)
+  val RT_FIX   = 0x0.U(4.W)
+  val RT_FLT   = 0x1.U(4.W)
+  val RT_VI    = 0x2.U(4.W) // RS1 as simm5 (vop.vi), TODO: move to OP selection
+  val RT_FIXU  = 0x4.U(4.W) // RS1 used as unsigned for vector
+  val RT_VIU   = 0x6.U(4.W) // RS1 as uimm5 (vop.vi), TODO: move to OP selection
+  val RT_X     = 0x7.U(4.W) // not-a-register (but shouldn't get a busy-bit, etc.)
+  val RT_VEC   = 0x8.U(4.W) // vector, signed width vsew
+  val RT_VN    = 0x9.U(4.W) // vector, signed width vsew/2
+  val RT_VW    = 0xA.U(4.W) // vector, signed width vsew*2 (for v*ext, maybe *4 *8)
+  val RT_VF    = 0xB.U(4.W) // vector, ieee FP format
+  val RT_VU    = 0xC.U(4.W) // vector, unsigned width vsew
+  val RT_VNU   = 0xD.U(4.W) // vector, unsigned width vsew/2
+  val RT_VWU   = 0xE.U(4.W) // vector, unsigned width vsew*2 (for v*ext, maybe *4 *8)
+  val RT_VM    = 0xF.U(4.W) // VD is mask bit
                              // TODO rename RT_NAR
+
+  def isInt      (rt: UInt): Bool = (rt === RT_FIX || rt === RT_FIXU)
+  def isNotInt   (rt: UInt): Bool = !isInt(rt)
+  def isFloat    (rt: UInt): Bool = (rt === RT_FLT)
+  def isVector   (rt: UInt): Bool = rt(3)
+  def isWidenV   (rt: UInt): Bool = (rt === RT_VW || rt === RT_VWU)
+  def isNarrowV  (rt: UInt): Bool = (rt === RT_VN || rt === RT_VNU)
+  def isUnsignedV(rt: UInt): Bool = (rt === RT_VU || rt === RT_VWU || rt === RT_VNU || rt === RT_VIU || rt === RT_VF)
+  def isNotReg   (rt: UInt): Bool = (rt === RT_X  || rt === RT_VI  || rt === RT_VIU)
+  def isSomeReg  (rt: UInt): Bool = !isNotReg(rt)
+  def isRvvSImm5 (rt: UInt): Bool = (rt === RT_VI)
+  def isRvvUImm5 (rt: UInt): Bool = (rt === RT_VIU)
+  def isRvvImm5  (rt: UInt): Bool = (rt === RT_VI || rt === RT_VIU)
 
   val uopX    = BitPat.dontCare(boom.common.MicroOpcodes.UOPC_SZ)
   // The Bubble Instruction (Machine generated NOP)
