@@ -119,6 +119,7 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
   val dis_stq_idx = Output(Vec(coreWidth, UInt(stqAddrSz.W)))
 
   val ldq_full    = Output(Vec(coreWidth, Bool()))
+  val ld_flight   =  Output(Bool())
   val stq_full    = Output(Vec(coreWidth, Bool()))
 
   val fp_stdata   = if (usingFPU) Flipped(Decoupled(new ExeUnitResp(fLen))) else null
@@ -293,6 +294,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   var ldq_full = Bool()
   var stq_full = Bool()
 
+  io.core.ld_flight := ldq.map(_.valid).reduce(_||_)
   for (w <- 0 until coreWidth)
   {
     ldq_full = WrapInc(ld_enq_idx, numLdqEntries) === ldq_head

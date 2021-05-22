@@ -1174,7 +1174,136 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   // Extra I/O
   // Delay retire/exception 1 cycle
-  csr.io.retire    := RegNext(PopCount(rob.io.commit.arch_valids.asUInt))
+  val mispred_recovery = WireInit(VecInit(Seq.fill(coreWidth)(false.B)))    //slots
+  val fetch_bubbles = WireInit(VecInit(Seq.fill(coreWidth)(false.B)))
+  val fetch_latency =WireInit(false.B)                                      //cycles
+  val br_mispred_reitred = WireInit(VecInit(Seq.fill(coreWidth)(false.B)))  //slots
+  val br_resteers = WireInit((false.B))                                     //cycles
+  val machine_clears = WireInit((false.B))                                  //cycles
+  val fp_retired = WireInit(VecInit(Seq.fill(coreWidth)(false.B)))          //slots
+  val icache_miss = WireInit(false.B)         //cycles
+  val itlb_miss = WireInit(false.B)           //cycles
+  val div_busy = WireInit(false.B)            //cycles
+  val exe_stall = WireInit(false.B)           //cycles
+  val memstall_anyload = WireInit(false.B)    //cycles
+  val memstall_l1miss = WireInit(false.B)     //cycles
+  val memstall_l2miss =WireInit(false.B)      //cycles
+  val exe_port_all = WireInit(false.B)        //cycles
+  val extmem_outstanding = WireInit(false.B)  //cycles
+
+  fetch_latency := (!dec_fire.reduce(_||_)) && (!dec_stalls.reduce(_||_))
+
+  when((brupdate.b2.mispredict && !RegNext(rob.io.flush.valid)) || RegNext(rob.io.flush.valid)) {
+      br_resteers := true.B
+  } .elsewhen(dis_fire.reduce(_||_)) {
+      br_resteers := false.B
+  }
+
+  when(RegNext(rob.io.flush.valid)) {
+      machine_clears := true.B
+  } .elsewhen(dis_fire.reduce(_||_)) {
+      machine_clears := false.B
+  }
+
+  when(exe_units.withFilter(_.hasDiv).map(_.io.int_div_busy).reduce(_||_)
+      || fp_pipeline.io.fp_div_busy) {
+      div_busy := true.B
+  } .otherwise {
+      div_busy := false.B
+  }
+
+  when((!iss_valids.reduce(_||_)) && (!fp_pipeline.io.fp_iss_valids.reduce(_||_))
+      && (!div_busy)) {
+      exe_stall := true.B
+  } .otherwise {
+      exe_stall := false.B
+  }
+
+  when(iss_valids.reduce(_||_) || fp_pipeline.io.fp_iss_valids.reduce(_||_)
+      || div_busy) {
+      exe_port_all := true.B
+  } .otherwise {
+      exe_port_all := false.B
+  }
+
+  when((!dis_fire.reduce(_||_)) && io.lsu.ld_flight) {
+      memstall_anyload := true.B
+  } .elsewhen(!dis_fire.reduce(_||_)) {
+      memstall_anyload := false.B
+  }
+
+  when(io.ifu.perf.acquire) {
+      icache_miss := true.B
+  } .elsewhen(dis_fire.reduce(_||_)) {
+      icache_miss := false.B
+  }
+
+  when(io.ifu.perf.tlbMiss) {
+      itlb_miss := true.B
+  } .elsewhen(dis_fire.reduce(_||_)) {
+      itlb_miss := false.B
+  }
+
+  when((!dis_fire.reduce(_||_)) && io.lsu.perf.acquire) {
+      memstall_l1miss := true.B
+  } .elsewhen(dis_fire.reduce(_||_)) {
+      memstall_l1miss := false.B
+  }
+
+  when((!dis_fire.reduce(_||_)) && io.lsu.perf.acquire) {
+      memstall_l2miss := true.B
+  } .elsewhen(dis_fire.reduce(_||_)) {
+      memstall_l2miss := false.B
+  }
+
+  when((!dis_fire.reduce(_||_)) && io.lsu.perf.acquire) {
+      extmem_outstanding := true.B
+  } .elsewhen(dis_fire.reduce(_||_)) {
+      extmem_outstanding := false.B
+  }
+
+  for (w <- 0 until coreWidth) {
+      when(brupdate.b2.mispredict && !RegNext(rob.io.flush.valid)) {
+        mispred_recovery(w) := true.B
+      } .elsewhen(dis_valids(w)) {
+        mispred_recovery(w) := false.B
+      }
+
+      fetch_bubbles(w) := (!dec_fire(w)) && (!dec_stalls(w))
+      br_mispred_reitred(w) := rob.io.commit.valids(w) && (rob.io.commit.uops(w).debug_fsrc === BSRC_C)
+
+      fp_retired(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w)
+  }
+
+  csr.io.instrs_dispatched := RegNext(PopCount(dis_fire.asUInt))
+  csr.io.fetch_bubbles := RegNext(PopCount(fetch_bubbles.asUInt))
+  csr.io.fetch_latency := RegNext(PopCount(fetch_latency.asUInt))       //cycles
+  csr.io.recovery_bubbles := RegNext(PopCount(mispred_recovery.asUInt))
+  csr.io.icache_miss := RegNext(PopCount(icache_miss.asUInt))
+  csr.io.itlb_miss := RegNext(PopCount(itlb_miss.asUInt))
+
+  csr.io.br_mispred_retired := RegNext(PopCount(br_mispred_reitred.asUInt))
+  csr.io.br_resteers := RegNext(PopCount(br_resteers.asUInt))           //cycles
+  csr.io.machine_clears := RegNext(PopCount(machine_clears.asUInt))
+
+  csr.io.fp_retired := RegNext(PopCount(fp_retired.asUInt))
+
+  csr.io.div_busy := RegNext(PopCount(div_busy.asUInt))
+  csr.io.exe_stall := RegNext(PopCount(exe_stall.asUInt))             //cycles
+  csr.io.exe_port_all := RegNext(PopCount(exe_port_all.asUInt))
+  csr.io.exe_port0 := RegNext(PopCount(iss_valids(0).asUInt))         //mem
+  csr.io.exe_port1 := RegNext(PopCount(iss_valids(1).asUInt))
+  csr.io.exe_port2 := RegNext(PopCount(iss_valids(2).asUInt))
+  csr.io.exe_port3 := RegNext(PopCount(iss_valids(3).asUInt))
+  csr.io.exe_port4 := RegNext(PopCount(fp_pipeline.io.fp_iss_valids.reduce(_||_)))
+
+  csr.io.memstall_anyload := RegNext(PopCount(memstall_anyload.asUInt))
+  csr.io.memstall_l1miss := RegNext(PopCount(memstall_l1miss.asUInt))
+  csr.io.memstall_l2miss := RegNext(PopCount(memstall_l2miss.asUInt))
+  csr.io.extmem_outstanding := RegNext(PopCount(extmem_outstanding.asUInt))
+  csr.io.memstall_stores := RegNext(PopCount(io.lsu.stq_full.asUInt))     //cycles
+
+  csr.io.retire := RegNext(PopCount(rob.io.commit.arch_valids.asUInt))
   csr.io.exception := RegNext(rob.io.com_xcpt.valid)
   // csr.io.pc used for setting EPC during exception or CSR.io.trace.
 
