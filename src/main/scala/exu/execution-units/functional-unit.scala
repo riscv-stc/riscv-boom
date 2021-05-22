@@ -24,7 +24,7 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.ALU._
 import freechips.rocketchip.util._
 import freechips.rocketchip.tile
-import freechips.rocketchip.rocket.{PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR,VConfig,VType}
+import freechips.rocketchip.rocket.{DecodeLogic,PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR,VConfig,VType}
 
 import boom.common._
 import boom.common.MicroOpcodes._
@@ -37,6 +37,7 @@ import boom.util._
 object FUConstants
 {
   // bit mask, since a given execution pipeline may support multiple functional units
+  val FUC_SZ = 12
   val FU_X   = BitPat.dontCare(FUC_SZ)
   val FU_ALU_ID = 0
   val FU_JMP_ID = 1
@@ -48,8 +49,8 @@ object FUConstants
   val FU_FDV_ID = 7
   val FU_I2F_ID = 8
   val FU_F2I_ID = 9
-  val FU_VMX_ID = 10 // vec load /store index vec store data
-  val FUC_SZ = 11
+  val FU_VMX_ID = 10  // vec load /store index vec store data
+  val FU_MAC_ID = 11
   val FU_ALU = (1<<FU_ALU_ID).U(FUC_SZ.W)
   val FU_JMP = (1<<FU_JMP_ID).U(FUC_SZ.W)
   val FU_MEM = (1<<FU_MEM_ID).U(FUC_SZ.W)
@@ -61,6 +62,7 @@ object FUConstants
   val FU_I2F = (1<<FU_I2F_ID).U(FUC_SZ.W)
   val FU_F2I = (1<<FU_F2I_ID).U(FUC_SZ.W)
   val FU_VMX = (1<<FU_VMX_ID).U(FUC_SZ.W)
+  val FU_MAC = (1<<FU_MAC_ID).U(FUC_SZ.W)
 
   // FP stores generate data through FP F2I, and generate address through MemAddrCalc
   def FU_F2IMEM = ((1 << FU_MEM_ID) | (1 << FU_F2I_ID)).U(FUC_SZ.W)
@@ -540,7 +542,7 @@ class MemAddrCalcUnit(implicit p: Parameters)
 {
   val uop = io.req.bits.uop
   // unit stride
-  val vsew = Mux(usingVector.B & uop.is_rvv, uop.vconfig.vtype.vsew, 0.U)
+  val vsew = Mux(usingVector.B & uop.is_rvv, uop.v_ls_ew, 0.U)
   // unit stride load/store
   val vec_us_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVL, uopVSA) // or uopVLFF
   // FIXME: constant stride load/store
@@ -793,4 +795,60 @@ class PipelinedMulUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   imul.io.req.bits.tag := DontCare
   // response
   io.resp.bits.data    := imul.io.resp.bits.data
+}
+
+/**
+ * Pipelined multiply-accumulator functional unit that wraps around the RocketChip pipelined multiplier
+ *
+ * @param numStages number of pipeline stages
+ * @param dataWidth size of the data being passed into the functional unit
+ */
+class VecMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
+  extends PipelinedFunctionalUnit(
+    numStages = numStages,
+    numBypassStages = 0,
+    earliestBypassStage = 0,
+    dataWidth = dataWidth
+) {
+  val in_req = WireInit(io.req)
+  when (io.req.bits.uop.uopc.isOneOf(uopVMADD, uopVNMSUB)) {
+    in_req.bits.rs2_data := io.req.bits.rs3_data
+    in_req.bits.rs3_data := io.req.bits.rs2_data
+  }
+  when (io.req.bits.uop.uopc.isOneOf(uopVNMSAC, uopVNMSUB)) {
+    in_req.bits.rs1_data := ~io.req.bits.rs1_data +& 1.U
+  }
+  val in = Pipe(in_req.valid, in_req.bits)
+
+  val decode = List(
+    FN_MUL    -> List(N, X, X, N, N),
+    FN_MULH   -> List(Y, Y, Y, N, N),
+    FN_MULHU  -> List(Y, N, N, N, N),
+    FN_MULHSU -> List(Y, Y, N, N, N),
+    FN_MULU   -> List(N, N, N, N, N),
+    FN_MULSU  -> List(N, Y, N, N, N),
+    FN_MACC   -> List(N, Y, Y, Y, Y),
+    FN_MACCU  -> List(N, N, N, Y, N),
+    FN_MACCSU -> List(N, Y, N, Y, N),
+    FN_MACCUS -> List(N, N, Y, Y, N),
+    )
+  val cmdHi :: lhsSigned :: rhsSigned :: doAcc :: accSigned :: Nil =
+    DecodeLogic(in.bits.uop.ctrl.op_fcn, List(X, X, X, X, X), decode).map(_.asBool)
+
+  val lhs = Cat(lhsSigned && in.bits.rs1_data(dataWidth-1), in.bits.rs1_data).asSInt
+  val rhs = Cat(rhsSigned && in.bits.rs2_data(dataWidth-1), in.bits.rs2_data).asSInt
+  val acc = Mux(doAcc, Cat(accSigned && in.bits.rs3_data(dataWidth-1), in.bits.rs3_data).asSInt, 0.S)
+  when (in.valid && doAcc) { assert(in.bits.uop.frs3_en, "Incorrect frs3_en") }
+  val macc = lhs * rhs +& acc
+  val vd_eew = in.bits.uop.vd_eew
+  val unsigned = in.bits.uop.rt(RD, isUnsignedV)
+  val hi  = Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Mux(unsigned, 0.U((dataWidth-8).W),  Fill(dataWidth-8,  macc(15))), macc(15,  8)),
+                                   Cat(Mux(unsigned, 0.U((dataWidth-16).W), Fill(dataWidth-16, macc(31))), macc(31, 16)),
+                                   Cat(Mux(unsigned, 0.U((dataWidth-32).W), Fill(dataWidth-32, macc(63))), macc(63, 32)),
+                                   macc(127, 64)))
+  val muxed = Mux(cmdHi, hi, macc(dataWidth-1, 0))
+
+  val resp = Pipe(in, numStages-1)
+  io.resp.valid := resp.valid
+  io.resp.bits.data := Pipe(in.valid, muxed, numStages-1).bits
 }

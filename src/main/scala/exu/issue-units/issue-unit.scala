@@ -140,9 +140,11 @@ abstract class IssueUnit(
         }
       }
       dis_uops(w).prs3_busy := 0.U
-      if (usingVector && iqType == IQT_MEM.litValue) {
-//      dis_uops(w).prvm_busy := Mux(dis_uops(w).uopc.is_rvv, io.dis_uops(w).bits.prvm_busy, 0.U)
-//      already assigned in rename stage
+      if (usingVector && iqType == IQT_INT.litValue) {
+        when (io.dis_uops(w).valid && io.dis_uops(w).bits.is_rvv && !io.dis_uops(w).bits.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)) {
+          assert(io.dis_uops(w).bits.uses_scalar, "unexpected rvv in INT pipe")
+          dis_uops(w).fu_code := FU_ALU
+        }
       } else {
         dis_uops(w).prvm_busy := 0.U
       }

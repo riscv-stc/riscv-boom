@@ -139,7 +139,7 @@ class RegisterRead(
         val rf_data1 = (io.rf_read_ports(idx+0).data & RegNext(r1_bit_mask)) >> RegNext(r1_sh)
         val signext1 = Mux1H(UIntToOH(RegNext(vs1_sew(1,0))), Seq(rf_data1(7,0).sextTo(eLen), rf_data1(15,0).sextTo(eLen), rf_data1(31,0).sextTo(eLen), rf_data1(63,0)))
         io.rf_read_ports(idx+0).addr := Cat(rs1_addr, r1sel)
-        rrd_rs1_data(w) := Mux(RegNext(io.iss_uops(w).uses_scalar || io.iss_uops(w).uses_v_simm5), RegNext(io.iss_uops(w).v_scalar_data),
+        rrd_rs1_data(w) := Mux(RegNext(io.iss_uops(w).uses_scalar || io.iss_uops(w).uses_v_simm5 || io.iss_uops(w).uses_v_uimm5), RegNext(io.iss_uops(w).v_scalar_data),
                            Mux(RegNext(rs1_addr === 0.U), 0.U, Mux(RegNext(io.iss_uops(w).rt(RS1, isUnsignedV)), rf_data1, signext1)))
       }
       if (numReadPorts > 1) {

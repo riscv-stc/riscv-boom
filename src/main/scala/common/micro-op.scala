@@ -627,8 +627,14 @@ object MicroOpcodes extends Enumeration {
   val uopVREM           = uopVREM_enum.id.U(UOPC_SZ.W)
   // VREM_V*
   // 12.12. widening integer multiply
+//val uopVWMUL_enum     = Value // reuse uopVMUL
+//val uopVWMUL          = uopVWMUL_enum.id.U(UOPC_SZ.W)
   // VWMUL_V*
+  val uopVWMULU_enum    = Value
+  val uopVWMULU         = uopVWMULU_enum.id.U(UOPC_SZ.W)
   // VWMULU_V*
+  val uopVWMULSU_enum   = Value
+  val uopVWMULSU        = uopVWMULSU_enum.id.U(UOPC_SZ.W)
   // VWMULSU_V*
   // 12.13. single-width integer multiply-add
   val uopVMACC_enum     = Value
@@ -644,9 +650,17 @@ object MicroOpcodes extends Enumeration {
   val uopVNMSUB         = uopVNMSUB_enum.id.U(UOPC_SZ.W)
   // VNMSUB_V*
   // 12.14. widening integer multiply-add
+  val uopVWMACCU_enum   = Value
+  val uopVWMACCU        = uopVWMACCU_enum.id.U(UOPC_SZ.W)
   // VWMACCU_V*
+//val uopVWMACC_enum    = Value // reuse uopVMACC
+//val uopVWMACC         = uopVWMACC_enum.id.U(UOPC_SZ.W)
   // VWMACC_V*
+  val uopVWMACCSU_enum  = Value
+  val uopVWMACCSU       = uopVWMACCSU_enum.id.U(UOPC_SZ.W)
   // VWMACCSU_V*
+  val uopVWMACCUS_enum  = Value
+  val uopVWMACCUS       = uopVWMACCUS_enum.id.U(UOPC_SZ.W)
   // VWMACCUS_VX
   // 12.15. integer merge
   val uopMERGE_enum     = Value
