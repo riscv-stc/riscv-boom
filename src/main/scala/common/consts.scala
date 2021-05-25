@@ -167,7 +167,7 @@ trait ScalarOpConstants
   val RT_VEC   = 0x8.U(4.W) // vector, signed width vsew
   val RT_VN    = 0x9.U(4.W) // vector, signed width vsew/2
   val RT_VW    = 0xA.U(4.W) // vector, signed width vsew*2 (for v*ext, maybe *4 *8)
-  val RT_VF    = 0xB.U(4.W) // vector, ieee FP format
+  val RT_VF    = 0xB.U(4.W) // vector, ieee FP format, currently not used
   val RT_VU    = 0xC.U(4.W) // vector, unsigned width vsew
   val RT_VNU   = 0xD.U(4.W) // vector, unsigned width vsew/2
   val RT_VWU   = 0xE.U(4.W) // vector, unsigned width vsew*2 (for v*ext, maybe *4 *8)

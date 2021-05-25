@@ -127,6 +127,10 @@ class UOPCodeFPUDecoder(vector: Boolean = false)(implicit p: Parameters) extends
    ,BitPat(uopVFNMSUB)  -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
    ,BitPat(uopVFMIN)    -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,Y)
    ,BitPat(uopVFMAX)    -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,Y)
+   ,BitPat(uopVFSGNJ)   -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,N)
+   ,BitPat(uopVFSGNJN)  -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,N)
+   ,BitPat(uopVFSGNJX)  -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,N)
+   ,BitPat(uopVFCLASS)  -> List(X,X,Y,N,N, N,X,D,D,N,Y,N, N,N,N,N)
     )
 
 //   val insns = fLen match {
@@ -227,44 +231,60 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
   val rs1_data = WireInit(io_req.rs1_data)
   val rs2_data = WireInit(io_req.rs2_data)
   val rs3_data = WireInit(io_req.rs3_data)
+  val vd_widen = io_req.uop.rt(RD , isWidenV)
+  val vs2_widen= io_req.uop.rt(RS2, isWidenV)
   if (vector) {
     val vsew = io_req.uop.vconfig.vtype.vsew
-    assert(!io.req.valid || !io_req.uop.is_rvv || (vsew >= 1.U && vsew <= 3.U), s"unsupported vsew: $vsew")
-    assert(!io.req.valid || io_req.uop.is_rvv && io_req.uop.fp_val, "unsupported data type")
-    val fmt = Mux(vsew === 3.U, D, Mux(vsew === 2.U, S, H))
-    rs1_data := recode(io_req.rs1_data, fmt)
-    rs2_data := recode(io_req.rs2_data, fmt)
-    rs3_data := recode(io_req.rs3_data, fmt)
+    val vd_sew  = Mux(vd_widen, vsew+1.U, vsew)
+    val vd_fmt  = Mux(vd_sew  === 3.U, D, Mux(vd_sew  === 2.U, S, H))
+    val vs1_fmt = Mux(vsew    === 3.U, D, Mux(vsew    === 2.U, S, H))
+    val vs2_fmt = Mux(vs2_widen, vd_fmt, vs1_fmt)
+    when (io.req.valid && io_req.uop.is_rvv) {
+      assert(io_req.uop.fp_val, "unexpected fp_val")
+      assert(io_req.uop.v_active, "unexpected inactive split")
+      assert(vsew >= 1.U && vsew <= 3.U, "unsupported vsew")
+      assert(vd_sew >= 1.U && vd_sew <= 3.U, "unsupported vd_sew")
+    }
+    rs1_data := recode(io_req.rs1_data, vs1_fmt)
+    rs2_data := recode(io_req.rs2_data, vs2_fmt)
+    rs3_data := recode(io_req.rs3_data, vd_fmt)
     when (io_req.uop.is_rvv) {
-      // TODO considering widening and narrowing operations
-      fp_ctrl.typeTagIn := Mux(vsew === 3.U, D, Mux(vsew === 2.U, S, H))
-      fp_ctrl.typeTagOut:= Mux(vsew === 3.U, D, Mux(vsew === 2.U, S, H))
-      when (!io_req.uop.v_active) {
-        fp_ctrl.ren2 := false.B
-        fp_ctrl.ren3 := false.B
-      }
+      fp_ctrl.typeTagIn := vs1_fmt
+      fp_ctrl.typeTagOut:= vd_fmt
     }
   }
 
+  // FIXME: S->H widening operation must be fixed
   def fuInput(minT: Option[tile.FType], vector: Boolean = false): tile.FPInput = {
-    val req = Wire(new tile.FPInput)
-    val tag = fp_ctrl.typeTagIn
+    val req     = Wire(new tile.FPInput)
+    val tagIn   = fp_ctrl.typeTagIn
+    val tag     = fp_ctrl.typeTagOut
+    val vs2_tag = Mux(vector.B && vd_widen && !vs2_widen, tagIn, tag)
     req <> fp_ctrl
     req.rm := fp_rm
-    req.in1 := unbox(rs1_data, tag, minT)
-    req.in2 := unbox(rs2_data, tag, minT)
-    req.in3 := unbox(rs3_data, tag, minT)
-    when (fp_ctrl.swap23) { req.in3 := unbox(rs2_data, tag, minT) }
+    val unbox_rs1 = Mux(vector.B && vd_widen,               unbox(rs1_data, tagIn,   None), unbox(rs1_data, tag, minT))
+    val unbox_rs2 = Mux(vector.B && vd_widen && !vs2_widen, unbox(rs2_data, vs2_tag, None), unbox(rs2_data, tag, minT))
+    //val unbox_rs1 = unbox(rs1_data, tagIn,    minT)
+    //val unbox_rs2 = unbox(rs2_data, vs2_tag,  minT)
+    val unbox_rs3 = unbox(rs3_data, tag,      minT)
+    req.in1 := unbox_rs1
+    req.in2 := unbox_rs2
+    req.in3 := unbox_rs3
+    when (fp_ctrl.swap23) { req.in3 := unbox_rs2 }
     req.typ := ImmGenTyp(io_req.uop.imm_packed)
     req.fmt := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
     when (io_req.uop.uopc === uopFMV_X_S) {
       req.fmt := 0.U
     } .elsewhen (vector.B) {
       when (io_req.uop.uopc.isOneOf(uopVFMADD,uopVFNMADD,uopVFMSUB,uopVFNMSUB)) {
-        req.in2 := unbox(rs3_data, tag, minT)
-        req.in3 := unbox(rs2_data, tag, minT)
-      } .elsewhen (io_req.uop.uopc.isOneOf(uopVFMIN,uopVFMAX)) {
-        req.rm := Cat(0.U(2.W), (io_req.uop.uopc === uopVFMAX).asUInt)
+        req.in2 := unbox_rs3
+        req.in3 := unbox_rs2
+      } .elsewhen (io_req.uop.uopc.isOneOf(uopVFMIN,uopVFSGNJ)) {
+        req.rm := 0.U
+      } .elsewhen (io_req.uop.uopc.isOneOf(uopVFMAX,uopVFSGNJN)) {
+        req.rm := 1.U
+      } .elsewhen (io_req.uop.uopc.isOneOf(uopVFSGNJX)) {
+        req.rm := 2.U
       }
     }
 
