@@ -866,20 +866,30 @@ object MicroOpcodes extends Enumeration {
   val uopVFSGNJ_enum    = Value
   val uopVFSGNJ         = uopVFSGNJ_enum.id.U(UOPC_SZ.W)
   // VFSGNJ_V*
+  val uopVFSGNJN_enum   = Value
+  val uopVFSGNJN        = uopVFSGNJN_enum.id.U(UOPC_SZ.W)
   // VFSGNJN_V*
+  val uopVFSGNJX_enum   = Value
+  val uopVFSGNJX        = uopVFSGNJX_enum.id.U(UOPC_SZ.W)
   // VFSGNJX_V*
   // 14.13. FP compare
-  val uopVMFCMP_I2F_enum= Value
-  val uopVMFCMP_I2F     = uopVMFCMP_I2F_enum.id.U(UOPC_SZ.W)
-  val uopVMFCMP_F2I_enum= Value
-  val uopVMFCMP_F2I     = uopVMFCMP_F2I_enum.id.U(UOPC_SZ.W)
-  val uopVMFCMP_F2F_enum= Value
-  val uopVMFCMP_F2F     = uopVMFCMP_F2F_enum.id.U(UOPC_SZ.W)
+  val uopVMFEQ_enum     = Value
+  val uopVMFEQ          = uopVMFEQ_enum.id.U(UOPC_SZ.W)
   // VMFEQ_V*
+  val uopVMFNE_enum     = Value
+  val uopVMFNE          = uopVMFNE_enum.id.U(UOPC_SZ.W)
   // VMFNE_V*
+  val uopVMFLT_enum     = Value
+  val uopVMFLT          = uopVMFLT_enum.id.U(UOPC_SZ.W)
   // VMFLT_V*
+  val uopVMFLE_enum     = Value
+  val uopVMFLE          = uopVMFLE_enum.id.U(UOPC_SZ.W)
   // VMFLE_V*
+  val uopVMFGT_enum     = Value
+  val uopVMFGT          = uopVMFGT_enum.id.U(UOPC_SZ.W)
   // VMFGT_VF
+  val uopVMFGE_enum     = Value
+  val uopVMFGE          = uopVMFGE_enum.id.U(UOPC_SZ.W)
   // VMFGE_VF
   // 14.14. FP classify
   val uopVFCLASS_enum   = Value

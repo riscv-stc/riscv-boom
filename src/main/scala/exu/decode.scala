@@ -553,8 +553,18 @@ object VectorDecode extends DecodeConstants
  ,VFSUB_VV    ->List(Y, Y, X, uopVFSUB,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFSUB_VF    ->List(Y, Y, X, uopVFSUB,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFRSUB_VF   ->List(Y, Y, X, uopVFRSUB,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWADD_VV   ->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWADD_VF   ->List(Y, Y, X, uopVFADD,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWADD_WV   ->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWADD_WF   ->List(Y, Y, X, uopVFADD,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWSUB_VV   ->List(Y, Y, X, uopVFSUB,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWSUB_VF   ->List(Y, Y, X, uopVFSUB,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWSUB_WV   ->List(Y, Y, X, uopVFSUB,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWSUB_WF   ->List(Y, Y, X, uopVFSUB,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFMUL_VV    ->List(Y, Y, X, uopVFMUL,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFMUL_VF    ->List(Y, Y, X, uopVFMUL,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWMUL_VV   ->List(Y, Y, X, uopVFMUL,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWMUL_VF   ->List(Y, Y, X, uopVFMUL,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFMACC_VV   ->List(Y, Y, X, uopVFMACC,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFMACC_VF   ->List(Y, Y, X, uopVFMACC,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFNMACC_VV  ->List(Y, Y, X, uopVFNMACC,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
@@ -571,10 +581,25 @@ object VectorDecode extends DecodeConstants
  ,VFMSUB_VF   ->List(Y, Y, X, uopVFMSUB,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFNMSUB_VV  ->List(Y, Y, X, uopVFNMSUB,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFNMSUB_VF  ->List(Y, Y, X, uopVFNMSUB,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWMACC_VV  ->List(Y, Y, X, uopVFMACC,      IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWMACC_VF  ->List(Y, Y, X, uopVFMACC,      IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWNMACC_VV ->List(Y, Y, X, uopVFNMACC,     IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWNMACC_VF ->List(Y, Y, X, uopVFNMACC,     IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWMSAC_VV  ->List(Y, Y, X, uopVFMSAC,      IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWMSAC_VF  ->List(Y, Y, X, uopVFMSAC,      IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWNMSAC_VV ->List(Y, Y, X, uopVFNMSAC,     IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWNMSAC_VF ->List(Y, Y, X, uopVFNMSAC,     IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFMIN_VV    ->List(Y, Y, X, uopVFMIN,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFMIN_VF    ->List(Y, Y, X, uopVFMIN,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFMAX_VV    ->List(Y, Y, X, uopVFMAX,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFMAX_VF    ->List(Y, Y, X, uopVFMAX,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSGNJ_VV   ->List(Y, Y, X, uopVFSGNJ,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSGNJ_VF   ->List(Y, Y, X, uopVFSGNJ,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSGNJN_VV  ->List(Y, Y, X, uopVFSGNJN,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSGNJN_VF  ->List(Y, Y, X, uopVFSGNJN,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSGNJX_VV  ->List(Y, Y, X, uopVFSGNJX,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSGNJX_VF  ->List(Y, Y, X, uopVFSGNJX,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFCLASS_V   ->List(Y, Y, X, uopVFCLASS,     IQT_VEC ,FU_FPU ,RT_VEC, RT_X  , RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
   )
 }
 //scalastyle:on
@@ -804,8 +829,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vs1_inc    = vstart >> (vLenSz.U - 3.U - vsew)
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
-      assert(vsew >= vd_nfactor  && vsew + vd_wfactor  <= 3.U, "Unsupported vd_sew")
-      assert(vsew >= vs2_nfactor && vsew + vs2_wfactor <= 3.U, "Unsupported vs2_sew")
+      //assert(vsew >= vd_nfactor  && vsew + vd_wfactor  <= 3.U, "Unsupported vd_sew")
+      //assert(vsew >= vs2_nfactor && vsew + vs2_wfactor <= 3.U, "Unsupported vs2_sew")
     }
 
     //val eLen_ecnt = eLen.U >> (vsew+3.U)
@@ -846,9 +871,12 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     when (cs.is_rvv) {
       uop.ldst := inst(RD_MSB,RD_LSB)   + vd_inc
-      uop.lrs1 := inst(RS1_MSB,RS1_LSB) + vs1_inc
+      when (uop.rt(RS1, isVector)) {
+        uop.lrs1 := inst(RS1_MSB,RS1_LSB) + vs1_inc
+      }
       uop.lrs2 := inst(RS2_MSB,RS2_LSB) + vs2_inc
       uop.lrs3 := uop.ldst
+      uop.frs3_en := cs.uses_vm
     }
 
     when (cs.is_rvv && !uop.v_unmasked) {
