@@ -13,9 +13,10 @@ import freechips.rocketchip.tile.{FPUCtrlSigs, HasFPUParameters}
 import freechips.rocketchip.tile
 import freechips.rocketchip.rocket
 import freechips.rocketchip.util.{uintToBitPat, UIntIsOneOf}
+import FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
-import boom.util.{ImmGenRm, ImmGenTyp}
+import boom.util.{ImmGenRm, ImmGenTyp, ImmGenTypRVV, CheckF2IRm, CheckF2FRm}
 
 /**
  * FP Decoder for the FPU
@@ -131,6 +132,8 @@ class UOPCodeFPUDecoder(vector: Boolean = false)(implicit p: Parameters) extends
    ,BitPat(uopVFSGNJN)  -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,N)
    ,BitPat(uopVFSGNJX)  -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,N)
    ,BitPat(uopVFCLASS)  -> List(X,X,Y,N,N, N,X,D,D,N,Y,N, N,N,N,N)
+   ,BitPat(uopVFCVT_F2I)-> List(X,X,Y,N,N, Y,X,D,D,N,Y,N, N,N,N,Y)
+   ,BitPat(uopVFCVT_I2F)-> List(X,X,N,N,N, Y,X,D,D,Y,N,N, N,N,N,Y)
     )
 
 //   val insns = fLen match {
@@ -227,7 +230,8 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
   val fp_decoder = Module(new UOPCodeFPUDecoder(vector))
   fp_decoder.io.uopc := io_req.uop.uopc
   val fp_ctrl = WireInit(fp_decoder.io.sigs)
-  val fp_rm = Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U || io_req.uop.is_rvv, io_req.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
+  //val fp_rm = Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U || io_req.uop.is_rvv, io_req.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
+  val fp_rm = Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U, io_req.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
   val rs1_data = WireInit(io_req.rs1_data)
   val rs2_data = WireInit(io_req.rs2_data)
   val rs3_data = WireInit(io_req.rs3_data)
@@ -261,7 +265,11 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     val tag     = fp_ctrl.typeTagOut
     val vs2_tag = Mux(vector.B && vd_widen && !vs2_widen, tagIn, tag)
     req <> fp_ctrl
-    req.rm := fp_rm
+    //req.rm := fp_rm
+    req.rm := Mux(~io_req.uop.is_rvv, fp_rm, 
+              Mux(io_req.uop.fu_code === FU_F2I && CheckF2IRm(io_req.uop.imm_packed), 1.U, 
+              Mux(io_req.uop.uopc === uopVFCVT_F2F && CheckF2FRm(io_req.uop.imm_packed), 6.U,
+              io_req.fcsr_rm)))
     val unbox_rs1 = Mux(vector.B && vd_widen,               unbox(rs1_data, tagIn,   None), unbox(rs1_data, tag, minT))
     val unbox_rs2 = Mux(vector.B && vd_widen && !vs2_widen, unbox(rs2_data, vs2_tag, None), unbox(rs2_data, tag, minT))
     //val unbox_rs1 = unbox(rs1_data, tagIn,    minT)
@@ -270,8 +278,10 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     req.in1 := unbox_rs1
     req.in2 := unbox_rs2
     req.in3 := unbox_rs3
+    when (fp_ctrl.swap12) { req.in1 := unbox_rs2 }  // e.g. vfcvt.x.f.v vd, vs2, vm
     when (fp_ctrl.swap23) { req.in3 := unbox_rs2 }
-    req.typ := ImmGenTyp(io_req.uop.imm_packed)
+    //req.typ := ImmGenTyp(io_req.uop.imm_packed)
+    req.typ := Mux(io_req.uop.is_rvv, ImmGenTypRVV(io_req.uop.imm_packed), ImmGenTyp(io_req.uop.imm_packed)) // typ of F2I and I2F
     req.fmt := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
     when (io_req.uop.uopc === uopFMV_X_S) {
       req.fmt := 0.U
@@ -305,6 +315,7 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
 
   val fpiu = Module(new tile.FPToInt)
   fpiu.io.in.bits := fuInput(None, vector)
+
   val fpiu_out = Pipe(RegNext(fpiu.io.in.valid && !fp_ctrl.fastpipe),
                               fpiu.io.out.bits, fpu_latency-1)
   val fpiu_result  = Wire(new tile.FPResult)
@@ -358,7 +369,7 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
                            fpmu.io.out.bits.exc))))
 
   if (vector) {
-    io.resp.bits.data := ieee(fpu_out_data)
+    io.resp.bits.data := Mux(fpiu_out.valid, fpu_out_data, ieee(fpu_out_data))   // fpiu_out outputs integer numbers
   } else {
     io.resp.bits.data := fpu_out_data
   }
