@@ -41,7 +41,6 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
     val status           = Input(new freechips.rocketchip.rocket.MStatus())
 
     val dis_uops         = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
-    val fp_iss_valids      = Output(Vec(fpIssueParams.issueWidth, Bool()))
 
     // +1 for recoding.
     val ll_wports        = Flipped(Vec(memWidth, Decoupled(new ExeUnitResp(fLen+1))))// from memory unit
@@ -54,7 +53,6 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
     val debug_wb_wdata   = Output(Vec(numWakeupPorts, UInt((fLen+1).W)))
-    val fp_div_busy = Output(Bool())
   })
 
   //**********************************
@@ -118,7 +116,6 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   // Output (Issue)
   for (i <- 0 until issue_unit.issueWidth) {
     iss_valids(i) := issue_unit.io.iss_valids(i)
-    io.fp_iss_valids(i) := issue_unit.io.iss_valids(i)
     iss_uops(i) := issue_unit.io.iss_uops(i)
 
     var fu_types = exe_units(i).io.fu_types
@@ -275,7 +272,6 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
 
   exe_units.map(_.io.fcsr_rm := io.fcsr_rm)
   exe_units.map(_.io.status := io.status)
-  io.fp_div_busy := exe_units.withFilter(_.hasFdiv).map(_.io.fp_div_busy).reduce(_||_)
 
   //-------------------------------------------------------------
   // **** Flush Pipeline ****

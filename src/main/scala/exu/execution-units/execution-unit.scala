@@ -147,8 +147,6 @@ abstract class ExecutionUnit(
 
     // TODO move this out of ExecutionUnit
     val com_exception = if (hasMem || hasRocc) Input(Bool()) else null
-    val int_div_busy = Output(Bool())
-    val fp_div_busy  = Output(Bool())
   })
 
   if (writesIrf)   {
@@ -398,7 +396,6 @@ class ALUExeUnit(
                     (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV))
 
     iresp_fu_units += div
-    io.int_div_busy := div_busy
   }
 
   // Mem Unit --------------------------
@@ -540,7 +537,6 @@ class FPUExeUnit(
     fdiv_resp_fflags := fdivsqrt.io.resp.bits.fflags
 
     fu_units += fdivsqrt
-    io.fp_div_busy := fdiv_busy
   }
 
   // Outputs (Write Port #0)  ---------------
