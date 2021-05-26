@@ -102,7 +102,7 @@ class IssueUnitIO(
  * Abstract top level issue unit
  *
  * @param numIssueSlots depth of issue queue
- * @param issueWidth amoutn of operations that can be issued at once
+ * @param issueWidth amount of operations that can be issued at once
  * @param numWakeupPorts number of wakeup ports for issue unit
  * @param iqType type of issue queue (mem, int, fp)
  */
