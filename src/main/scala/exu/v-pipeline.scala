@@ -201,7 +201,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   for (eu <- exe_units) {
     val eu_vresp = eu.io.vresp
     val eu_vresp_uop = eu_vresp.bits.uop
-    val vstart = eu_vresp_uop.vstart
+    val vstart = Mux(eu_vresp_uop.rt(RD, isReduceV), 0.U, eu_vresp_uop.vstart)
     val eew    = eu_vresp_uop.vd_eew
     val ecnt   = eu_vresp_uop.v_split_ecnt
     if (eu.writesVrf) {

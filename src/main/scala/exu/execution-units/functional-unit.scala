@@ -498,8 +498,11 @@ class ALUUnit(
   val alu_out = Mux(io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data,
     Mux(io.req.bits.uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
     Mux(io.req.bits.uop.uopc === uopMOV, io.req.bits.rs2_data,
+        Mux(io.req.bits.uop.uopc.isOneOf(uopVMIN, uopVMINU) && !v_inactive, Mux(alu.io.out(0), io.req.bits.rs2_data, io.req.bits.rs1_data),
+        Mux(io.req.bits.uop.uopc.isOneOf(uopVMAX, uopVMAXU) && !v_inactive, Mux(alu.io.out(0), io.req.bits.rs1_data, io.req.bits.rs2_data),
+        Mux(io.req.bits.uop.rt(RD, isReduceV) && v_inactive, io.req.bits.rs1_data,
         Mux(io.req.bits.uop.uopc.isOneOf(uopVSA, uopVL) || v_inactive, io.req.bits.rs3_data,
-            alu.io.out)))
+            alu.io.out))))))
   r_val (0) := io.req.valid
   r_data(0) := Mux(io.req.bits.uop.is_sfb_br, pc_sel === PC_BRJMP, alu_out)
   r_pred(0) := io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data
@@ -803,7 +806,7 @@ class PipelinedMulUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
  * @param numStages number of pipeline stages
  * @param dataWidth size of the data being passed into the functional unit
  */
-class VecMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
+class IntMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   extends PipelinedFunctionalUnit(
     numStages = numStages,
     numBypassStages = 0,
