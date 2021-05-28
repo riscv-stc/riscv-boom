@@ -703,16 +703,25 @@ object MicroOpcodes extends Enumeration {
   // VWREDSUMU_VS
   // VWREDSUM_VS
   // 16.1. mask logical
-  val uopVMLOGIC_enum   = Value
-  val uopVMLOGIC        = uopVMLOGIC_enum.id.U(UOPC_SZ.W)
-  // VMAND_MM
-  // VMNAND_MM
-  // VMANDNOT_MM
-  // VMXOR_MM
-  // VMOR_MM
-  // VMNOR_MM
-  // VMORNOT_MM
-  // VMXNOR_MM
+  // val uopVMLOGIC_enum   = Value
+  // val uopVMLOGIC        = uopVMLOGIC_enum.id.U(UOPC_SZ.W)
+  // 16.1. vector mask-register logical instructions
+  val uopVMAND_enum     = Value
+  val uopVMAND          = uopVMAND_enum.id.U(UOPC_SZ.W)
+  val uopVMNAND_enum    = Value
+  val uopVMNAND         = uopVMNAND_enum.id.U(UOPC_SZ.W)
+  val uopVMANDNOT_enum  = Value
+  val uopVMANDNOT       = uopVMANDNOT_enum.id.U(UOPC_SZ.W)
+  val uopVMXOR_enum     = Value
+  val uopVMXOR          = uopVMXOR_enum.id.U(UOPC_SZ.W)
+  val uopVMOR_enum      = Value
+  val uopVMOR           = uopVMOR_enum.id.U(UOPC_SZ.W)
+  val uopVMNOR_enum     = Value
+  val uopVMNOR          = uopVMNOR_enum.id.U(UOPC_SZ.W)
+  val uopVMORNOT_enum   = Value
+  val uopVMORNOT        = uopVMORNOT_enum.id.U(UOPC_SZ.W)
+  val uopVMXNOR_enum     = Value
+  val uopVMXNOR          = uopVMXNOR_enum.id.U(UOPC_SZ.W)
   // 16.2. mask popc
   val uopVPOPC_enum     = Value
   val uopVPOPC          = uopVPOPC_enum.id.U(UOPC_SZ.W)

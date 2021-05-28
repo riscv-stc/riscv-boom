@@ -435,15 +435,23 @@ class IssueSlot(
       io.uop.v_scalar_data  := Mux(io.uop.rt(RS1, isRvvSImm5), Cat(Fill(eLen-5, io.uop.prs1(4).asUInt), io.uop.prs1(4,0)),
                                Mux(io.uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), io.uop.prs1(4,0)), sdata))
       when (io.request && io.grant && !io.uop.uopc.isOneOf(uopVL, uopVSA)) {
-        val vsew = slot_uop.vconfig.vtype.vsew(1,0)
+        val vmlogic_insn = io.uop.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
+        // sew = 3.U => 64bit element
+        val vmlogic_split_ecnt = slot_uop.v_split_ecnt>>(3.U+3.U) + (slot_uop.v_split_ecnt(5) | slot_uop.v_split_ecnt(4) | slot_uop.v_split_ecnt(3))
+        val vmlogic_spilt_is_last = slot_uop.voffset + io.uop.v_split_ecnt === vmlogic_split_ecnt
+        val v_is_last = slot_uop.voffset + io.uop.v_split_ecnt === slot_uop.v_split_ecnt
+
+        // vmask use sew=3, 64bit ALU
+        val vsew = Mux(vmlogic_insn, 3.U, slot_uop.vconfig.vtype.vsew(1,0))
         //val eLen_ecnt = eLen.U >> (vsew+3.U)
         val ren_mask = ~(Fill(vLenSz,1.U) << (7.U-vsew))
         io.uop.v_split_ecnt := 1.U //eLen_ecnt, TODO consider masking
         io.uop.v_is_first := (slot_uop.voffset & ren_mask(vLenSz,0)) === 0.U
-        io.uop.v_is_last  := slot_uop.voffset + io.uop.v_split_ecnt === slot_uop.v_split_ecnt
+        io.uop.v_is_last  := Mux(vmlogic_insn, vmlogic_spilt_is_last, v_is_last)
         next_uop.voffset  := slot_uop.voffset + io.uop.v_split_ecnt
         io.out_uop.voffset:= next_uop.voffset
         slot_uop.voffset  := next_uop.voffset
+        io.uop.vconfig.vtype.vsew := Mux(vmlogic_insn, 3.U, next_uop.vconfig.vtype.vsew)
       }
       // merge input busy status and wake-up status
       next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_)

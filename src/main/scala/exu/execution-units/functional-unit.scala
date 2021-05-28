@@ -354,22 +354,24 @@ class ALUUnit(
     val avl       = Mux(vsetivli, uop.prs1, rs1_data)
     val new_vl    = VType.computeVL(avl, vtypei, io.vconfig.vl, useCurrentVL, useMaxVL, false.B)
 
-    op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,  Sext(imm_xprlen.asUInt, xLen),
-               Mux(uop.ctrl.op2_sel === OP2_IMMC, io.req.bits.uop.prs1(4,0),
-               Mux(uop.ctrl.op2_sel === OP2_RS2 , io.req.bits.rs2_data,
-               Mux(uop.ctrl.op2_sel === OP2_NEXT, Mux(uop.is_rvc, 2.U, 4.U),
-               Mux(uop.ctrl.op2_sel === OP2_VL,   new_vl, 0.U)))))
+    op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,     Sext(imm_xprlen.asUInt, xLen),
+               Mux(uop.ctrl.op2_sel === OP2_IMMC,    io.req.bits.uop.prs1(4,0),
+               Mux(uop.ctrl.op2_sel === OP2_RS2 ,    io.req.bits.rs2_data,
+               Mux(uop.ctrl.op2_sel === OP1_INV_VS2, ~io.req.bits.rs2_data,
+               Mux(uop.ctrl.op2_sel === OP2_NEXT,    Mux(uop.is_rvc, 2.U, 4.U),
+               Mux(uop.ctrl.op2_sel === OP2_VL,      new_vl, 0.U))))))
 
     val set_vconfig = vsetvl | vsetvli | vsetivli
     io.resp.bits.uop.vconfig.vl := RegEnable(new_vl, set_vconfig)
     io.resp.bits.uop.vconfig.vtype := RegEnable(VType.fromUInt(vtypei), set_vconfig)
   } else {
-    op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,  Sext(imm_xprlen.asUInt, xLen),
-               Mux(uop.ctrl.op2_sel === OP2_IMMC, io.req.bits.uop.prs1(4,0),
-               Mux(uop.ctrl.op2_sel === OP2_RS2 , io.req.bits.rs2_data,
-               Mux(uop.ctrl.op2_sel === OP2_NEXT, Mux(uop.is_rvc, 2.U, 4.U),
-               Mux(uop.ctrl.op2_sel === OP2_VS1,  io.req.bits.rs1_data,
-                                                  0.U)))))
+    op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,     Sext(imm_xprlen.asUInt, xLen),
+               Mux(uop.ctrl.op2_sel === OP2_IMMC,    io.req.bits.uop.prs1(4,0),
+               Mux(uop.ctrl.op2_sel === OP2_RS2 ,    io.req.bits.rs2_data,
+               Mux(uop.ctrl.op2_sel === OP2_NEXT,    Mux(uop.is_rvc, 2.U, 4.U),
+               Mux(uop.ctrl.op2_sel === OP2_VS1,     io.req.bits.rs1_data,
+               Mux(uop.ctrl.op2_sel === OP2_INV_VS1, ~io.req.bits.rs1_data,
+                                                     0.U))))))
   }
 
   val alu = Module(new freechips.rocketchip.rocket.ALU())
@@ -496,8 +498,9 @@ class ALUUnit(
   val alu_out = Mux(io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data,
     Mux(io.req.bits.uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
     Mux(io.req.bits.uop.uopc === uopMOV, io.req.bits.rs2_data,
-        Mux(io.req.bits.uop.uopc.isOneOf(uopVSA, uopVL) || v_inactive, io.req.bits.rs3_data,
-            alu.io.out)))
+    Mux(io.req.bits.uop.uopc.isOneOf(uopVSA, uopVL) || v_inactive, io.req.bits.rs3_data,
+    Mux(io.req.bits.uop.uopc === uopVMXNOR, ~alu.io.out,
+            alu.io.out))))
   r_val (0) := io.req.valid
   r_data(0) := Mux(io.req.bits.uop.is_sfb_br, pc_sel === PC_BRJMP, alu_out)
   r_pred(0) := io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data

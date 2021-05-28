@@ -554,6 +554,14 @@ object VectorDecode extends DecodeConstants
  ,VFMIN_VF    ->List(Y, Y, X, uopVFMIN,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFMAX_VV    ->List(Y, Y, X, uopVFMAX,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFMAX_VF    ->List(Y, Y, X, uopVFMAX,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VMAND_MM    ->List(Y, Y, X, uopVMAND,       IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMNAND_MM   ->List(Y, Y, X, uopVMNAND,      IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMANDNOT_MM ->List(Y, Y, X, uopVMANDNOT,    IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMXOR_MM    ->List(Y, Y, X, uopVMXOR,       IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMOR_MM     ->List(Y, Y, X, uopVMOR,        IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMNOR_MM    ->List(Y, Y, X, uopVMNOR,       IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMORNOT_MM  ->List(Y, Y, X, uopVMORNOT,     IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMXNOR_MM   ->List(Y, Y, X, uopVMXNOR,      IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
   )
 }
 //scalastyle:on
