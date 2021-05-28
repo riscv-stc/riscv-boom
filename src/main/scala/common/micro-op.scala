@@ -702,9 +702,9 @@ object MicroOpcodes extends Enumeration {
   val uopVNCLIP         = uopVNCLIP_enum.id.U(UOPC_SZ.W)
   // VNCLIPU_W*
   // VNCLIP_W*
-  // 15.1. single-width INT reduction
-  val uopVRED_enum      = Value
-  val uopVRED           = uopVRED_enum.id.U(UOPC_SZ.W)
+  // 15.1. single-width INT reduction, reuse corresponding uopc
+//val uopVRED_enum      = Value
+//val uopVRED           = uopVRED_enum.id.U(UOPC_SZ.W)
   // VREDSUM_VS
   // VREDMAXU_VS
   // VREDMAX_VS
@@ -932,9 +932,9 @@ object MicroOpcodes extends Enumeration {
   // VFNCVT_F_X_W
   // VFNCVT_F_F_W
   // VFNCVT_ROD_F_F_W
-  // 15.3. single-width FP reduction
-  val uopVFRED_enum     = Value
-  val uopVFRED          = uopVFRED_enum.id.U(UOPC_SZ.W)
+  // 15.3. single-width FP reduction, reuse corresponding uopc
+//val uopVFRED_enum     = Value
+//val uopVFRED          = uopVFRED_enum.id.U(UOPC_SZ.W)
   // VFREDOSUM_VS
   // VFREDSUM_VS
   // VFREDMAX_VS

@@ -407,7 +407,8 @@ object FDivSqrtDecode extends DecodeConstants
 /**
  * Vector Extension
  */
-object VectorDecode extends DecodeConstants
+// chisel complaints on single giant table, so we use multiple objects
+object VectorLSDecode extends DecodeConstants
 {
   val table: Array[(BitPat, List[BitPat])] = Array(
               //                                                                       frs3_en                        wakeup_delay
@@ -440,7 +441,24 @@ object VectorDecode extends DecodeConstants
  ,VSSE16_V    ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
  ,VSSE32_V    ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
  ,VSSE64_V    ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
- ,VADD_VV     ->List(Y, N, X, uopVADD,        IQT_VEC ,FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ )
+}
+
+object VectorIntDecode extends DecodeConstants
+{
+  val table: Array[(BitPat, List[BitPat])] = Array(
+              //                                                                       frs3_en                        wakeup_delay
+              //     is val inst?                                                      |  imm sel                     |    bypassable (aka, known/fixed latency)
+              //     |  is fp inst?                                                    |  |     uses_ldq              |    |  is_br              is vector instruction
+              //     |  |  is single-prec?                             rs1 regtype     |  |     |  uses_stq           |    |  |                  |  can be split
+              //     |  |  |  micro-code                               |       rs2 type|  |     |  |  is_amo          |    |  |                  |  |  use vm?
+              //     |  |  |  |               iq-type  func unit       |       |       |  |     |  |  |  is_fence     |    |  |                  |  |  |  ew of ls vector
+              //     |  |  |  |               |        |               |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall?  |
+              //     |  |  |  |               |        |       dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
+              //     |  |  |  |               |        |       regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit |  |
+              //     |  |  |  |               |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd   |  |  |
+              //     |  |  |  |               |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |      |  |  |  |
+  VADD_VV     ->List(Y, N, X, uopVADD,        IQT_VEC ,FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VADD_VX     ->List(Y, N, X, uopVADD,        IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VADD_VI     ->List(Y, N, X, uopVADD,        IQT_VEC ,FU_ALU ,RT_VEC, RT_VI , RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VSUB_VV     ->List(Y, N, X, uopVSUB,        IQT_VEC ,FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
@@ -548,7 +566,24 @@ object VectorDecode extends DecodeConstants
  ,VWMACCSU_VV ->List(Y, N, X, uopVWMACCSU,    IQT_VEC ,FU_MAC ,RT_VW , RT_VEC, RT_VU , Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VWMACCSU_VX ->List(Y, N, X, uopVWMACCSU,    IQT_IVEC,FU_MAC ,RT_VW , RT_FIX, RT_VU , Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VWMACCUS_VX ->List(Y, N, X, uopVWMACCUS,    IQT_IVEC,FU_MAC ,RT_VW , RT_FIXU,RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFADD_VV    ->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ )
+}
+
+object VectorFPDecode extends DecodeConstants
+{
+  val table: Array[(BitPat, List[BitPat])] = Array (
+              //                                                                       frs3_en                        wakeup_delay
+              //     is val inst?                                                      |  imm sel                     |    bypassable (aka, known/fixed latency)
+              //     |  is fp inst?                                                    |  |     uses_ldq              |    |  is_br              is vector instruction
+              //     |  |  is single-prec?                             rs1 regtype     |  |     |  uses_stq           |    |  |                  |  can be split
+              //     |  |  |  micro-code                               |       rs2 type|  |     |  |  is_amo          |    |  |                  |  |  use vm?
+              //     |  |  |  |               iq-type  func unit       |       |       |  |     |  |  |  is_fence     |    |  |                  |  |  |  ew of ls vector
+              //     |  |  |  |               |        |               |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall?  |
+              //     |  |  |  |               |        |       dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
+              //     |  |  |  |               |        |       regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit |  |
+              //     |  |  |  |               |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd   |  |  |
+              //     |  |  |  |               |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |      |  |  |  |
+  VFADD_VV    ->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFADD_VF    ->List(Y, Y, X, uopVFADD,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFSUB_VV    ->List(Y, Y, X, uopVFSUB,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFSUB_VF    ->List(Y, Y, X, uopVFSUB,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
@@ -603,7 +638,40 @@ object VectorDecode extends DecodeConstants
  ,VMV_V_V     ->List(Y, N, X, uopVMV_V,       IQT_VEC, FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VMV_V_X     ->List(Y, N, X, uopVMV_V,       IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VMV_V_I     ->List(Y, N, X, uopVMV_V,       IQT_VEC, FU_ALU ,RT_VEC, RT_VI,  RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
-  )
+ )
+}
+
+object VectorRedDecode extends DecodeConstants
+{
+  val table: Array[(BitPat, List[BitPat])] = Array (
+              //                                                                       frs3_en                        wakeup_delay
+              //     is val inst?                                                      |  imm sel                     |    bypassable (aka, known/fixed latency)
+              //     |  is fp inst?                                                    |  |     uses_ldq              |    |  is_br              is vector instruction
+              //     |  |  is single-prec?                             rs1 regtype     |  |     |  uses_stq           |    |  |                  |  can be split
+              //     |  |  |  micro-code                               |       rs2 type|  |     |  |  is_amo          |    |  |                  |  |  use vm?
+              //     |  |  |  |               iq-type  func unit       |       |       |  |     |  |  |  is_fence     |    |  |                  |  |  |  ew of ls vector
+              //     |  |  |  |               |        |               |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall?  |
+              //     |  |  |  |               |        |       dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
+              //     |  |  |  |               |        |       regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit |  |
+              //     |  |  |  |               |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd   |  |  |
+              //     |  |  |  |               |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |      |  |  |  |
+  VREDSUM_VS  ->List(Y, N, X, uopVADD,        IQT_VEC ,FU_ALU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VREDMAXU_VS ->List(Y, N, X, uopVMAXU,       IQT_VEC ,FU_ALU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VREDMAX_VS  ->List(Y, N, X, uopVMAX,        IQT_VEC ,FU_ALU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VREDMINU_VS ->List(Y, N, X, uopVMINU,       IQT_VEC ,FU_ALU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VREDMIN_VS  ->List(Y, N, X, uopVMIN,        IQT_VEC ,FU_ALU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VREDAND_VS  ->List(Y, N, X, uopVAND,        IQT_VEC ,FU_ALU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VREDOR_VS   ->List(Y, N, X, uopVOR,         IQT_VEC ,FU_ALU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VREDXOR_VS  ->List(Y, N, X, uopVXOR,        IQT_VEC ,FU_ALU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VWREDSUMU_VS->List(Y, N, X, uopVADD,        IQT_VEC ,FU_ALU ,RT_VRWU,RT_VRWU,RT_VU , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VWREDSUM_VS ->List(Y, N, X, uopVADD,        IQT_VEC ,FU_ALU ,RT_VRW ,RT_VRW ,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFREDOSUM_VS->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFREDSUM_VS ->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFREDMIN_VS ->List(Y, Y, X, uopVFMIN,       IQT_VEC ,FU_FPU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFREDMAX_VS ->List(Y, Y, X, uopVFMAX,       IQT_VEC ,FU_FPU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWREDOSUM_VS->List(Y,Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VRW ,RT_VRW ,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWREDSUM_VS->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VRW ,RT_VRW ,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ )
 }
 //scalastyle:on
 // TODO:
@@ -691,7 +759,10 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   var decode_table = XDecode.table
   if (usingFPU) decode_table ++= FDecode.table
   if (usingFPU && usingFDivSqrt) decode_table ++= FDivSqrtDecode.table
-  if (usingVector) decode_table ++= VectorDecode.table
+  if (usingVector) decode_table ++= VectorLSDecode.table
+  if (usingVector) decode_table ++= VectorIntDecode.table
+  if (usingVector) decode_table ++= VectorFPDecode.table
+  if (usingVector) decode_table ++= VectorRedDecode.table
   if (usingRoCC) decode_table ++= RoCCDecode.table
   decode_table ++= (if (xLen == 64) X64Decode.table else X32Decode.table)
 
@@ -899,7 +970,36 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.frs3_en := true.B
     }
 
-    io.enq_stall := cs.can_be_split & ~uop.v_is_last
+    val red_op  = cs.is_rvv && isReduceV(cs.dst_type)
+    val red_act = RegInit(false.B)
+
+    when (io.kill) {
+      red_act := false.B
+    } .elsewhen (red_op && io.deq_fire && red_act && split_last) {
+      red_act := false.B
+    } .elsewhen (red_op && io.deq_fire && !red_act) {
+      red_act := true.B
+    }
+
+    io.enq_stall := cs.can_be_split && !uop.v_is_last
+
+    when (cs.is_rvv && red_op) {
+      // keep vd during reduction
+      uop.ldst := inst(RD_MSB,RD_LSB)
+      uop.lrs3 := uop.ldst
+      when (!red_act) {
+        // insert an undisturbing move before actual reduction
+        vstart          := vstart
+        uop.uopc        := uopVADD
+        uop.v_unmasked  := false.B
+        uop.dst_rtype   := RT_VEC
+        // keep lrs1_rtype to distinguish this inserted mov and actual reduction
+        //uop.lrs1_rtype  := RT_VEC
+        uop.vconfig.vl  := 0.U // make all elements inactive
+        io.enq_stall    := true.B
+      }
+    }
+
   } // if usingvector
   io.deq.uop := uop
 

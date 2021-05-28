@@ -659,9 +659,9 @@ class VecExeUnit(
   }
 
   // Pipelined, IMul Unit ------------------
-  var imacc: VecMulAcc = null
+  var imacc: IntMulAcc = null
   if (hasMacc) {
-    imacc = Module(new VecMulAcc(numStages, eLen))
+    imacc = Module(new IntMulAcc(numStages, eLen))
     imacc.io <> DontCare
     imacc.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_MAC)
     vec_fu_units += imacc

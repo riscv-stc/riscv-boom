@@ -279,15 +279,20 @@ class RenameStage(
   val rbk_valids      = Wire(Vec(plWidth, Bool()))
 
   for (w <- 0 until plWidth) {
+    // NOTE: for reduction vd should be renamed only when vstart is 0
     ren2_alloc_reqs(w)    := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_fire(w) &&
-                             (~ren2_uops(w).v_is_split || ren2_uops(w).v_re_alloc)
+                             (~ren2_uops(w).v_is_split ||
+                              (ren2_uops(w).v_re_alloc && !ren2_uops(w).rt(RD, isReduceV)))
     ren2_br_tags(w).valid := ren2_fire(w) && ren2_uops(w).allocate_brtag
 
     if (usingVector && vector) {
+      val com_red     = io.com_uops(w).rt(RS1, isReduceV)
+      val com_red_act = io.com_uops(w).rt(RD, isReduceV)
+      val com_red_mov = com_red && !com_red_act
       com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w) &&
-                       (~io.com_uops(w).v_is_split || io.com_uops(w).v_is_last)
+                       (!io.com_uops(w).v_is_split || io.com_uops(w).v_is_last && !com_red_mov)
       rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w) &&
-                       (~io.com_uops(w).v_is_split || io.com_uops(w).v_is_first)
+                       (!io.com_uops(w).v_is_split || io.com_uops(w).v_is_first && !com_red_act)
     } else {
       com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w)
       rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w)
@@ -359,17 +364,33 @@ class RenameStage(
 
     if (usingVector) {
       // record physical names of first split
+      // for reduction, vs1, vd, vm should be consistent through vrgroup
+      // NOTE: for reduction vd may overlap vs1, vs2, or vm
+      // NOTE: for reduction we need read VS2 map through this, but skip vs1 and do not re-alloc vd
       when (uop.v_is_split && uop.v_re_alloc) {
-        when(uop.rt(RS1, rtype)) { prs1(w) := io.ren2_uops(w).prs1 }
-        when(uop.rt(RS2, rtype)) { prs2(w) := io.ren2_uops(w).prs2 }
+        when(uop.rt(RS1, rtype) && !uop.rt(RD, isReduceV)) { prs1(w) := io.ren2_uops(w).prs1 }
+        when(uop.rt(RS2, rtype) && !uop.rt(RD, isReduceV)) { prs2(w) := io.ren2_uops(w).prs2 }
+        // TODO: check the essentiality of following when block, since decode may already handle this part
         when(uop.is_rvv && uop.uses_ldq) {
           prs3(w) := io.ren2_uops(w).stale_pdst
-        } .elsewhen(uop.frs3_en && (float.B || vector.B)) {
+        } .elsewhen(uop.frs3_en && (float.B || vector.B) && !uop.rt(RD, isReduceV)) {
           prs3(w) := io.ren2_uops(w).prs3
         }
-        when(uop.ldst_val && uop.rt(RD, rtype)) { stale_pdst(w) := io.ren2_uops(w).stale_pdst }
-        when(uop.ldst_val && uop.rt(RD, rtype)) { pdst(w) := io.ren2_uops(w).pdst }
-        when(~uop.v_unmasked) { prvm(w) := io.ren2_uops(w).prvm }
+        when(uop.ldst_val && uop.rt(RD, rtype) && !uop.rt(RD, isReduceV)) { stale_pdst(w) := io.ren2_uops(w).stale_pdst }
+        when(uop.ldst_val && uop.rt(RD, rtype) && !uop.rt(RD, isReduceV)) { pdst(w) := io.ren2_uops(w).pdst }
+        when(~uop.v_unmasked                   && !uop.rt(RD, isReduceV)) { prvm(w) := io.ren2_uops(w).prvm }
+        when(uop.rt(RD, isReduceV)) {
+          when(uop.rt(RS1, rtype)) { uop.prs1 := prs1(w) }
+          when(uop.rt(RS2, rtype) && uop.v_is_first) { uop.prs2 := prs2(w) }
+          when(uop.frs3_en && vector.B) { uop.prs3 := prs3(w) }
+          when(uop.rt(RD,  rtype)) { uop.stale_pdst := stale_pdst(w) }
+          when(uop.rt(RD,  rtype)) { uop.pdst := pdst(w) }
+          when(~uop.v_unmasked)    { uop.prvm := prvm(w) }
+        }
+        // vd may overlap vs2, latch vs2 on reduction mov
+        when (uop.rt(RS1, isReduceV)) {
+          when(uop.rt(RS2, rtype) && (!uop.rt(RD, isReduceV) || !uop.v_is_first)) { prs2(w) := uop.prs2 }
+        }
       }
 
       // recover physical names for splits other than the first
@@ -397,6 +418,12 @@ class RenameStage(
       val ecnt    = wk.bits.uop.v_split_ecnt
       val (rsel, rmsk) = VRegSel(vstart, wk.bits.uop.vd_eew, ecnt, eLenb, eLenSelSz)
       bs := rmsk << Cat(rsel, 0.U(3.W))
+      // only the final split clears busy status for recductions
+      when (wk.bits.uop.rt(RS1, isReduceV)) {
+        val is_act = wk.bits.uop.rt(RD, isReduceV)
+        val is_fin = (vstart + 1.U === wk.bits.uop.vconfig.vl)
+        bs := Fill(vLenb, (is_act && is_fin).asUInt)
+      }
     }
   }
 
