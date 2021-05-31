@@ -438,8 +438,8 @@ class IssueSlot(
   io.out_uop.br_mask    := next_br_mask
   if (usingVector) {
     if (vector) {
-// value to next slot should be current latched version
-// ignore element busy masking, we keep busy status for entire v-register (i.e. p1,p2,p3,pm)
+      // value to next slot should be current latched version
+      // ignore element busy masking, we keep busy status for entire v-register (i.e. p1,p2,p3,pm)
       io.out_uop.prs1_busy  := ~p1 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
       io.out_uop.prs2_busy  := ~p2 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
       io.out_uop.prs3_busy  := ~p3 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
@@ -457,9 +457,9 @@ class IssueSlot(
         io.uop.v_split_ecnt := 1.U //eLen_ecnt, TODO consider masking
         io.uop.v_is_first := (slot_uop.voffset & ren_mask(vLenSz,0)) === 0.U
         io.uop.v_is_last  := slot_uop.voffset + io.uop.v_split_ecnt === slot_uop.v_split_ecnt
-        next_uop.voffset  := slot_uop.voffset + io.uop.v_split_ecnt
-        io.out_uop.voffset:= next_uop.voffset
-        slot_uop.voffset  := next_uop.voffset
+        val next_voffset   = slot_uop.voffset + io.uop.v_split_ecnt
+        io.out_uop.voffset:= next_voffset
+        slot_uop.voffset  := next_voffset
         when (slot_uop.rt(RD, isReduceV)) {
           // prs1 uses true rs1 only for the first split of entire reduction op
           io.uop.prs1 := Mux(io.uop.vstart === 0.U, slot_uop.prs1, slot_uop.pdst)
