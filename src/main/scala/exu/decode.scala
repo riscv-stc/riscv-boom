@@ -921,7 +921,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     // sew = 3.U => 64bit element
     val vmlogic_split_ecnt = vLen.U>>(3.U+3.U)
     // vmask use sew=3, 64bit ALU
-    uop.vconfig.vtype.vsew := Mux(vmlogic_insn, 3.U, uop.vconfig.vtype.vsew)
+    uop.vconfig.vtype.vsew := Mux(vmlogic_insn, 3.U, vsew)
     //val eLen_ecnt = eLen.U >> (vsew+3.U)
     val vmlogic_tolal_ecnt = vLen.U>>(3.U+3.U)
 
