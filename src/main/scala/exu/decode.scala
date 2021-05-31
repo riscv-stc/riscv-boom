@@ -566,6 +566,14 @@ object VectorIntDecode extends DecodeConstants
  ,VWMACCSU_VV ->List(Y, N, X, uopVWMACCSU,    IQT_VEC ,FU_MAC ,RT_VW , RT_VEC, RT_VU , Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VWMACCSU_VX ->List(Y, N, X, uopVWMACCSU,    IQT_IVEC,FU_MAC ,RT_VW , RT_FIX, RT_VU , Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VWMACCUS_VX ->List(Y, N, X, uopVWMACCUS,    IQT_IVEC,FU_MAC ,RT_VW , RT_FIXU,RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VMAND_MM    ->List(Y, Y, X, uopVMAND,       IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMNAND_MM   ->List(Y, Y, X, uopVMNAND,      IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMANDNOT_MM ->List(Y, Y, X, uopVMANDNOT,    IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMXOR_MM    ->List(Y, Y, X, uopVMXOR,       IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMOR_MM     ->List(Y, Y, X, uopVMOR,        IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMNOR_MM    ->List(Y, Y, X, uopVMNOR,       IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMORNOT_MM  ->List(Y, Y, X, uopVMORNOT,     IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMXNOR_MM   ->List(Y, Y, X, uopVMXNOR,      IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
  )
 }
 
@@ -638,14 +646,6 @@ object VectorFPDecode extends DecodeConstants
  ,VMV_V_V     ->List(Y, N, X, uopVMV_V,       IQT_VEC, FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VMV_V_X     ->List(Y, N, X, uopVMV_V,       IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VMV_V_I     ->List(Y, N, X, uopVMV_V,       IQT_VEC, FU_ALU ,RT_VEC, RT_VI,  RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VMAND_MM    ->List(Y, Y, X, uopVMAND,       IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
- ,VMNAND_MM   ->List(Y, Y, X, uopVMNAND,      IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
- ,VMANDNOT_MM ->List(Y, Y, X, uopVMANDNOT,    IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
- ,VMXOR_MM    ->List(Y, Y, X, uopVMXOR,       IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
- ,VMOR_MM     ->List(Y, Y, X, uopVMOR,        IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
- ,VMNOR_MM    ->List(Y, Y, X, uopVMNOR,       IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
- ,VMORNOT_MM  ->List(Y, Y, X, uopVMORNOT,     IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
- ,VMXNOR_MM   ->List(Y, Y, X, uopVMXNOR,      IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
  )
 }
 
@@ -920,8 +920,6 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vmlogic_insn = cs.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
     // sew = 3.U => 64bit element
     val vmlogic_split_ecnt = vLen.U>>(3.U+3.U)
-    // vmask use sew=3, 64bit ALU
-    uop.vconfig.vtype.vsew := Mux(vmlogic_insn, 3.U, vsew)
     //val eLen_ecnt = eLen.U >> (vsew+3.U)
     val vmlogic_tolal_ecnt = vLen.U>>(3.U+3.U)
 
@@ -949,6 +947,10 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.v_unmasked  := !cs.uses_vm || inst(VM_BIT)
     uop.vxsat       := false.B
     uop.vconfig     := io.csr_vconfig
+
+    // vmasklogic use sew=3, 64bit ALU
+    uop.vconfig.vtype.vsew := Mux(vmlogic_insn, 3.U, vsew)
+
     uop.vconfig.vtype.reserved := DontCare
     uop.vstart      := vstart
     uop.voffset     := 0.U
