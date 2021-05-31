@@ -451,24 +451,15 @@ class IssueSlot(
                                Mux(io.uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), io.uop.prs1(4,0)), sdata))
       val red_iss_p1 = WireInit(p1)
       when (io.request && io.grant && !io.uop.uopc.isOneOf(uopVL, uopVSA)) {
-        val vmlogic_insn = io.uop.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
-        // sew = 3.U => 64bit element
-        val vmlogic_split_ecnt = vLen.U>>(3.U+3.U)
-        // vmask use sew=3, 64bit ALU
-        val vsew = Mux(vmlogic_insn, 3.U, slot_uop.vconfig.vtype.vsew(1,0))
+        val vsew = slot_uop.vconfig.vtype.vsew(1,0)
         //val eLen_ecnt = eLen.U >> (vsew+3.U)
         val ren_mask = ~(Fill(vLenSz,1.U) << (7.U-vsew))
         io.uop.v_split_ecnt := 1.U //eLen_ecnt, TODO consider masking
         io.uop.v_is_first := (slot_uop.voffset & ren_mask(vLenSz,0)) === 0.U
-
-        val vmlogic_spilt_is_last = slot_uop.voffset + io.uop.v_split_ecnt === vmlogic_split_ecnt
-        val v_is_last = slot_uop.voffset + io.uop.v_split_ecnt === slot_uop.v_split_ecnt
-
-        io.uop.v_is_last  := Mux(vmlogic_insn, vmlogic_spilt_is_last, v_is_last)
+        io.uop.v_is_last  := slot_uop.voffset + io.uop.v_split_ecnt === slot_uop.v_split_ecnt
         next_uop.voffset  := slot_uop.voffset + io.uop.v_split_ecnt
         io.out_uop.voffset:= next_uop.voffset
         slot_uop.voffset  := next_uop.voffset
-        io.uop.vconfig.vtype.vsew := Mux(vmlogic_insn, 3.U, next_uop.vconfig.vtype.vsew)
         when (slot_uop.rt(RD, isReduceV)) {
           // prs1 uses true rs1 only for the first split of entire reduction op
           io.uop.prs1 := Mux(io.uop.vstart === 0.U, slot_uop.prs1, slot_uop.pdst)

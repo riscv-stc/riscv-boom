@@ -915,11 +915,22 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       //assert(vsew >= vs2_nfactor && vsew + vs2_wfactor <= 3.U, "Unsupported vs2_sew")
     }
 
+
+    // vmasklogic 
+    val vmlogic_insn = cs.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
+    // sew = 3.U => 64bit element
+    val vmlogic_split_ecnt = vLen.U>>(3.U+3.U)
+    // vmask use sew=3, 64bit ALU
+    uop.vconfig.vtype.vsew := Mux(vmlogic_insn, 3.U, uop.vconfig.vtype.vsew)
+    //val eLen_ecnt = eLen.U >> (vsew+3.U)
+    val vmlogic_tolal_ecnt = vLen.U>>(3.U+3.U)
+
+
     //val eLen_ecnt = eLen.U >> (vsew+3.U)
     val vLen_ecnt = vLen.U >> (vd_sew+3.U)
-    val split_ecnt = Mux(is_v_ls, 1.U, vLen_ecnt)
+    val split_ecnt = Mux(is_v_ls, 1.U, Mux(vmlogic_insn, vmlogic_split_ecnt, vLen_ecnt))
     // for store, we can skip inactive locations; otherwise, we have to visit every element
-    val total_ecnt = Mux(cs.uses_stq, io.csr_vconfig.vl, vlmax)
+    val total_ecnt = Mux(cs.uses_stq, io.csr_vconfig.vl, Mux(vmlogic_insn, vmlogic_tolal_ecnt, vlmax))
     val split_last = vstart + split_ecnt === total_ecnt
     when (io.kill) {
       vstart  := 0.U
