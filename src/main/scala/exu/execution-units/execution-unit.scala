@@ -73,6 +73,7 @@ class FFlagsResp(implicit p: Parameters) extends BoomBundle
  * @param hasAlu does the exe unit have a alu
  * @param hasFpu does the exe unit have a fpu
  * @param hasMul does the exe unit have a multiplier
+ * @param hasMacc does the exe unit have a multiply-accumulator
  * @param hasDiv does the exe unit have a divider
  * @param hasFdiv does the exe unit have a FP divider
  * @param hasIfpu does the exe unit have a int to FP unit
@@ -98,6 +99,7 @@ abstract class ExecutionUnit(
   val hasAlu           : Boolean       = false,
   val hasFpu           : Boolean       = false,
   val hasMul           : Boolean       = false,
+  val hasMacc          : Boolean       = false,
   val hasDiv           : Boolean       = false,
   val hasFdiv          : Boolean       = false,
   val hasIfpu          : Boolean       = false,
@@ -599,7 +601,7 @@ class FPUExeUnit(
 class VecExeUnit(
   hasVMX         : Boolean = false,
   hasAlu         : Boolean = true,
-  hasMul         : Boolean = true,
+  hasMacc        : Boolean = true,
   hasDiv         : Boolean = true,
   hasIfpu        : Boolean = false,
   hasFpu         : Boolean = false
@@ -607,12 +609,12 @@ class VecExeUnit(
   extends ExecutionUnit(
     readsVrf         = true,
     writesVrf        = true,
-    numBypassStages  = if (hasMul) 3 else 1,
+    numBypassStages  = if (hasMacc) 3 else 1,
     dataWidth        = p(tile.TileKey).core.eLen,
     bypassable       = false,
     alwaysBypassable = false,
     hasAlu           = hasAlu,
-    hasMul           = hasMul,
+    hasMacc          = hasMacc,
     hasDiv           = hasDiv,
     hasIfpu          = hasIfpu,
     hasFpu           = hasFpu,
@@ -625,8 +627,8 @@ class VecExeUnit(
   val out_str =
     BoomCoreStringPrefix("==VecExeUnit==") +
     (if (hasAlu)  BoomCoreStringPrefix(" - ALU") else "") +
-    (if (hasMul)  BoomCoreStringPrefix(" - Mul") else "") +
-    (if (hasDiv)  BoomCoreStringPrefix(" - Div") else "") +
+    (if (hasMacc) BoomCoreStringPrefix(" - MACC") else "") +
+    (if (hasDiv)  BoomCoreStringPrefix(" - DIV") else "") +
     (if (hasIfpu) BoomCoreStringPrefix(" - IFPU") else "") +
     (if (hasFpu)  BoomCoreStringPrefix(" - FPU/FPIU (Latency: " + dfmaLatency + ")") else "")
 
@@ -640,12 +642,12 @@ class VecExeUnit(
   val vec_fu_units   = ArrayBuffer[FunctionalUnit]()
   val vresp_fu_units = ArrayBuffer[FunctionalUnit]()
 
-  io.fu_types := Mux(hasAlu.B, FU_ALU, 0.U) |
-                 Mux(hasMul.B, FU_MUL, 0.U) |
+  io.fu_types := Mux(hasAlu.B,              FU_ALU, 0.U) |
+                 Mux(hasMacc.B,             FU_MAC, 0.U) |
                  Mux(!div_busy && hasDiv.B, FU_DIV, 0.U) |
-                 Mux(hasIfpu.B, FU_I2F, 0.U) |
-                 Mux(hasFpu.B, FU_FPU | FU_F2I, 0.U) |
-                 Mux(hasVMX.B, FU_VMX, 0.U)
+                 Mux(hasIfpu.B,             FU_I2F, 0.U) |
+                 Mux(hasFpu.B,     FU_FPU | FU_F2I, 0.U) |
+                 Mux(hasVMX.B,              FU_VMX, 0.U)
 
   // ALU Unit -------------------------------
   var alu: ALUUnit = null
@@ -657,13 +659,13 @@ class VecExeUnit(
   }
 
   // Pipelined, IMul Unit ------------------
-  var imul: PipelinedMulUnit = null
-  if (hasMul) {
-    imul = Module(new PipelinedMulUnit(numStages, eLen))
-    imul.io <> DontCare
-    imul.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_MUL)
-    vec_fu_units += imul
-    vresp_fu_units += imul
+  var imacc: IntMulAcc = null
+  if (hasMacc) {
+    imacc = Module(new IntMulAcc(numStages, eLen))
+    imacc.io <> DontCare
+    imacc.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_MAC)
+    vec_fu_units += imacc
+    vresp_fu_units += imacc
   }
 
   // Div/Rem Unit -----------------------

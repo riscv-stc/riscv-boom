@@ -68,6 +68,7 @@ object WritePort
       wport.bits.addr := Cat(enq_uop.pdst, rsel)
       wport.bits.mask := rmsk
       wport.bits.data := VDataFill(enq.bits.data, enq_uop.vd_eew, eLenb*8)
+      when (wport.valid) { assert(enq_uop.vd_eew <= 3.U) }
     } else {
       wport.bits.addr := enq_uop.pdst
       wport.bits.data := enq.bits.data

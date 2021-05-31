@@ -627,8 +627,14 @@ object MicroOpcodes extends Enumeration {
   val uopVREM           = uopVREM_enum.id.U(UOPC_SZ.W)
   // VREM_V*
   // 12.12. widening integer multiply
+//val uopVWMUL_enum     = Value // reuse uopVMUL
+//val uopVWMUL          = uopVWMUL_enum.id.U(UOPC_SZ.W)
   // VWMUL_V*
+  val uopVWMULU_enum    = Value
+  val uopVWMULU         = uopVWMULU_enum.id.U(UOPC_SZ.W)
   // VWMULU_V*
+  val uopVWMULSU_enum   = Value
+  val uopVWMULSU        = uopVWMULSU_enum.id.U(UOPC_SZ.W)
   // VWMULSU_V*
   // 12.13. single-width integer multiply-add
   val uopVMACC_enum     = Value
@@ -644,9 +650,17 @@ object MicroOpcodes extends Enumeration {
   val uopVNMSUB         = uopVNMSUB_enum.id.U(UOPC_SZ.W)
   // VNMSUB_V*
   // 12.14. widening integer multiply-add
+  val uopVWMACCU_enum   = Value
+  val uopVWMACCU        = uopVWMACCU_enum.id.U(UOPC_SZ.W)
   // VWMACCU_V*
+//val uopVWMACC_enum    = Value // reuse uopVMACC
+//val uopVWMACC         = uopVWMACC_enum.id.U(UOPC_SZ.W)
   // VWMACC_V*
+  val uopVWMACCSU_enum  = Value
+  val uopVWMACCSU       = uopVWMACCSU_enum.id.U(UOPC_SZ.W)
   // VWMACCSU_V*
+  val uopVWMACCUS_enum  = Value
+  val uopVWMACCUS       = uopVWMACCUS_enum.id.U(UOPC_SZ.W)
   // VWMACCUS_VX
   // 12.15. integer merge
   val uopMERGE_enum     = Value
@@ -688,9 +702,9 @@ object MicroOpcodes extends Enumeration {
   val uopVNCLIP         = uopVNCLIP_enum.id.U(UOPC_SZ.W)
   // VNCLIPU_W*
   // VNCLIP_W*
-  // 15.1. single-width INT reduction
-  val uopVRED_enum      = Value
-  val uopVRED           = uopVRED_enum.id.U(UOPC_SZ.W)
+  // 15.1. single-width INT reduction, reuse corresponding uopc
+//val uopVRED_enum      = Value
+//val uopVRED           = uopVRED_enum.id.U(UOPC_SZ.W)
   // VREDSUM_VS
   // VREDMAXU_VS
   // VREDMAX_VS
@@ -861,20 +875,30 @@ object MicroOpcodes extends Enumeration {
   val uopVFSGNJ_enum    = Value
   val uopVFSGNJ         = uopVFSGNJ_enum.id.U(UOPC_SZ.W)
   // VFSGNJ_V*
+  val uopVFSGNJN_enum   = Value
+  val uopVFSGNJN        = uopVFSGNJN_enum.id.U(UOPC_SZ.W)
   // VFSGNJN_V*
+  val uopVFSGNJX_enum   = Value
+  val uopVFSGNJX        = uopVFSGNJX_enum.id.U(UOPC_SZ.W)
   // VFSGNJX_V*
   // 14.13. FP compare
-  val uopVMFCMP_I2F_enum= Value
-  val uopVMFCMP_I2F     = uopVMFCMP_I2F_enum.id.U(UOPC_SZ.W)
-  val uopVMFCMP_F2I_enum= Value
-  val uopVMFCMP_F2I     = uopVMFCMP_F2I_enum.id.U(UOPC_SZ.W)
-  val uopVMFCMP_F2F_enum= Value
-  val uopVMFCMP_F2F     = uopVMFCMP_F2F_enum.id.U(UOPC_SZ.W)
+  val uopVMFEQ_enum     = Value
+  val uopVMFEQ          = uopVMFEQ_enum.id.U(UOPC_SZ.W)
   // VMFEQ_V*
+  val uopVMFNE_enum     = Value
+  val uopVMFNE          = uopVMFNE_enum.id.U(UOPC_SZ.W)
   // VMFNE_V*
+  val uopVMFLT_enum     = Value
+  val uopVMFLT          = uopVMFLT_enum.id.U(UOPC_SZ.W)
   // VMFLT_V*
+  val uopVMFLE_enum     = Value
+  val uopVMFLE          = uopVMFLE_enum.id.U(UOPC_SZ.W)
   // VMFLE_V*
+  val uopVMFGT_enum     = Value
+  val uopVMFGT          = uopVMFGT_enum.id.U(UOPC_SZ.W)
   // VMFGT_VF
+  val uopVMFGE_enum     = Value
+  val uopVMFGE          = uopVMFGE_enum.id.U(UOPC_SZ.W)
   // VMFGE_VF
   // 14.14. FP classify
   val uopVFCLASS_enum   = Value
@@ -917,9 +941,9 @@ object MicroOpcodes extends Enumeration {
   // VFNCVT_F_X_W
   // VFNCVT_F_F_W
   // VFNCVT_ROD_F_F_W
-  // 15.3. single-width FP reduction
-  val uopVFRED_enum     = Value
-  val uopVFRED          = uopVFRED_enum.id.U(UOPC_SZ.W)
+  // 15.3. single-width FP reduction, reuse corresponding uopc
+//val uopVFRED_enum     = Value
+//val uopVFRED          = uopVFRED_enum.id.U(UOPC_SZ.W)
   // VFREDOSUM_VS
   // VFREDSUM_VS
   // VFREDMAX_VS

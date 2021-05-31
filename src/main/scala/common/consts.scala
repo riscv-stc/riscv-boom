@@ -160,29 +160,35 @@ trait ScalarOpConstants
   val RS2 = 2.U(2.W)
   val RS3 = 3.U(2.W)
   // Decode Stage Control Signals
-  val RT_FIX   = 0x0.U(4.W)
-  val RT_FLT   = 0x1.U(4.W)
-  val RT_VI    = 0x2.U(4.W) // RS1 as simm5 (vop.vi), TODO: move to OP selection
-  val RT_FIXU  = 0x4.U(4.W) // RS1 used as unsigned for vector
-  val RT_VIU   = 0x6.U(4.W) // RS1 as uimm5 (vop.vi), TODO: move to OP selection
-  val RT_X     = 0x7.U(4.W) // not-a-register (but shouldn't get a busy-bit, etc.)
-  val RT_VEC   = 0x8.U(4.W) // vector, signed width vsew
-  val RT_VN    = 0x9.U(4.W) // vector, signed width vsew/2
-  val RT_VW    = 0xA.U(4.W) // vector, signed width vsew*2 (for v*ext, maybe *4 *8)
-  val RT_VF    = 0xB.U(4.W) // vector, ieee FP format
-  val RT_VU    = 0xC.U(4.W) // vector, unsigned width vsew
-  val RT_VNU   = 0xD.U(4.W) // vector, unsigned width vsew/2
-  val RT_VWU   = 0xE.U(4.W) // vector, unsigned width vsew*2 (for v*ext, maybe *4 *8)
-  val RT_VM    = 0xF.U(4.W) // vector, VS/VD is mask bit, vl bit
+  val RT_FIX   = 0x00.U(5.W)
+  val RT_FLT   = 0x01.U(5.W)
+  val RT_VI    = 0x02.U(5.W) // RS1 as simm5 (vop.vi), TODO: move to OP selection
+  val RT_FIXU  = 0x04.U(5.W) // RS1 used as unsigned for vector
+  val RT_VIU   = 0x06.U(5.W) // RS1 as uimm5 (vop.vi), TODO: move to OP selection
+  val RT_X     = 0x07.U(5.W) // not-a-register (but shouldn't get a busy-bit, etc.)
+  val RT_VEC   = 0x10.U(5.W) // vector, signed width vsew
+  val RT_VN    = 0x11.U(5.W) // vector, signed width vsew/2
+  val RT_VW    = 0x12.U(5.W) // vector, signed width vsew*2 (for v*ext, maybe *4 *8)
+  val RT_VF    = 0x13.U(5.W) // vector, ieee FP format, currently not used
+  val RT_VU    = 0x14.U(5.W) // vector, unsigned width vsew
+  val RT_VNU   = 0x15.U(5.W) // vector, unsigned width vsew/2
+  val RT_VWU   = 0x16.U(5.W) // vector, unsigned width vsew*2 (for v*ext, maybe *4 *8)
+  val RT_VM    = 0x17.U(5.W) // VD is mask bit
+  val RT_VRED  = 0x18.U(5.W) // vector, signed reduction VD/VS1 with vsew
+  val RT_VRW   = 0x1A.U(5.W) // vector, signed reduction VD/VS1 with vsew*2
+  val RT_VRU   = 0x1C.U(5.W) // vector, unsigned reduction VD/VS1 with vsew
+  val RT_VRWU  = 0x1E.U(5.W) // vector, unsigned reduction VD/VS1 with vsew*2
                              // TODO rename RT_NAR
 
   def isInt      (rt: UInt): Bool = (rt === RT_FIX || rt === RT_FIXU)
   def isNotInt   (rt: UInt): Bool = !isInt(rt)
   def isFloat    (rt: UInt): Bool = (rt === RT_FLT)
-  def isVector   (rt: UInt): Bool = rt(3)
-  def isWidenV   (rt: UInt): Bool = (rt === RT_VW || rt === RT_VWU)
+  def isVector   (rt: UInt): Bool = rt(4)
+  def isWidenV   (rt: UInt): Bool = (rt === RT_VW || rt === RT_VWU || rt === RT_VRW || rt === RT_VRWU)
   def isNarrowV  (rt: UInt): Bool = (rt === RT_VN || rt === RT_VNU)
-  def isUnsignedV(rt: UInt): Bool = (rt === RT_VU || rt === RT_VWU || rt === RT_VNU || rt === RT_VIU || rt === RT_VF)
+  def isUnsignedV(rt: UInt): Bool = (rt === RT_VU || rt === RT_VWU || rt === RT_VNU || rt === RT_VIU || rt === RT_VRU || rt === RT_VRWU)
+  def isReduceV  (rt: UInt): Bool = rt(3)
+  def isMaskVD   (rt: UInt): Bool = (rt === RT_VM)
   def isNotReg   (rt: UInt): Bool = (rt === RT_X  || rt === RT_VI  || rt === RT_VIU)
   def isSomeReg  (rt: UInt): Bool = !isNotReg(rt)
   def isRvvSImm5 (rt: UInt): Bool = (rt === RT_VI)

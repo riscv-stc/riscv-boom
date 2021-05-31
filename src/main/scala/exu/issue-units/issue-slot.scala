@@ -128,7 +128,7 @@ class IssueSlot(
     val ret = Wire(Bool())
     val uop = slot_uop
     if (vector) {
-      val vstart  = uop.vstart + uop.voffset
+      val vstart  = Mux(uop.rt(rs, isReduceV), 0.U, uop.vstart + uop.voffset)
       val vsew    = uop.vconfig.vtype.vsew
       val vs_sew  = Mux(uop.uopc === uopVEXT8, vsew - 3.U,
                     Mux(uop.uopc === uopVEXT4, vsew - 2.U,
@@ -251,7 +251,9 @@ class IssueSlot(
   when (io.in_uop.valid) {
     if (usingVector) {
       if (vector) {
-        in_p1 := ~io.in_uop.bits.prs1_busy
+        val in_reduce = io.in_uop.bits.rt(RD, isReduceV)
+        val in_first  = io.in_uop.bits.v_is_first
+        in_p1 := ~io.in_uop.bits.prs1_busy & Fill(vLenb, Mux(in_reduce, in_first, true.B).asUInt)
         in_p2 := ~io.in_uop.bits.prs2_busy
         in_p3 := ~io.in_uop.bits.prs3_busy
         in_pm := ~io.in_uop.bits.prvm_busy
@@ -304,6 +306,19 @@ class IssueSlot(
       wake_p2(i) := (wk_mask << Cat(wk_sel, 0.U(3.W))) & Fill(vLenb, wk_rs2.asUInt)
       wake_p3(i) := (wk_mask << Cat(wk_sel, 0.U(3.W))) & Fill(vLenb, wk_rs3.asUInt)
       wake_pm(i) := (wk_mask << Cat(wk_sel, 0.U(3.W))) & Fill(vLenb, wk_rvm.asUInt)
+      when (wk_uop.rt(RS1, isReduceV)) {
+        // make sure splits across issue slots will be woken in order
+        // consider uops that depends on the reduction result, the must not be incorrectly woken
+        val wk_act  = wk_uop.rt(RD, isReduceV)
+        val i_am_red= next_uop.rt(RD, isReduceV)
+        val wk_rd   = wk_valid && (wk_pdst === next_uop.pdst)
+        val wk_next = (wk_vstart + 1.U) === (next_uop.vstart + next_uop.voffset)
+        val wk_last = (wk_vstart + 1.U) === wk_uop.vconfig.vtype.vlMax
+        wake_p1(i) := Fill(vLenb, Mux(i_am_red, wk_rd && wk_act && wk_next, wk_rs1 && wk_last).asUInt)
+        wake_p2(i) := Fill(vLenb, (wk_rs2 && wk_act && wk_last).asUInt)
+        wake_p3(i) := Fill(vLenb, (wk_rs3 && wk_act && wk_last).asUInt)
+        wake_pm(i) := Fill(vLenb, (wk_rvm && wk_act && wk_last).asUInt)
+      }
     } else {
       when (wk_valid && (wk_pdst === next_uop.prs1)) {
         next_p1 := true.B
@@ -434,6 +449,7 @@ class IssueSlot(
       // handle VOP_VI, prs1 records the value of lrs1, and is used as simm5
       io.uop.v_scalar_data  := Mux(io.uop.rt(RS1, isRvvSImm5), Cat(Fill(eLen-5, io.uop.prs1(4).asUInt), io.uop.prs1(4,0)),
                                Mux(io.uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), io.uop.prs1(4,0)), sdata))
+      val red_iss_p1 = WireInit(p1)
       when (io.request && io.grant && !io.uop.uopc.isOneOf(uopVL, uopVSA)) {
         val vmlogic_insn = io.uop.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
         // sew = 3.U => 64bit element
@@ -453,9 +469,17 @@ class IssueSlot(
         io.out_uop.voffset:= next_uop.voffset
         slot_uop.voffset  := next_uop.voffset
         io.uop.vconfig.vtype.vsew := Mux(vmlogic_insn, 3.U, next_uop.vconfig.vtype.vsew)
+        when (slot_uop.rt(RD, isReduceV)) {
+          // prs1 uses true rs1 only for the first split of entire reduction op
+          io.uop.prs1 := Mux(io.uop.vstart === 0.U, slot_uop.prs1, slot_uop.pdst)
+          // clear ready on p1
+          red_iss_p1 := 0.U
+          io.out_uop.prs1_busy := ~(0.U(vLenb.W))
+          slot_uop.prs1_busy := ~(0.U(vLenb.W))
+        }
       }
       // merge input busy status and wake-up status
-      next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_)
+      next_p1 := Mux(io.in_uop.valid, in_p1, red_iss_p1) | wake_p1.reduce(_|_)
       next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_)
       next_p3 := Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_)
       next_pm := Mux(io.in_uop.valid, in_pm, pm) | wake_pm.reduce(_|_)
