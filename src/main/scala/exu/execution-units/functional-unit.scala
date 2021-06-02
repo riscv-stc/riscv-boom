@@ -554,12 +554,13 @@ class MemAddrCalcUnit(implicit p: Parameters)
   val vsew = Mux(usingVector.B & uop.is_rvv, uop.v_ls_ew, 0.U)
   // unit stride load/store
   val vec_us_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVL, uopVSA) // or uopVLFF
-  // FIXME: constant stride load/store
-  //val vec_cs_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLS, uopVSSA)
-  // FIXME: indexed load/store
-  //val vec_idx_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+  val vec_cs_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLS, uopVSSA)
+  val vec_idx_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
   val op1 = io.req.bits.rs1_data.asSInt
-  val op2 = Mux(vec_us_ls, (uop.vstart << vsew).asSInt, uop.imm_packed(19,8).asSInt)
+  val op2 = Mux(vec_us_ls, (uop.vstart << vsew).asSInt,
+            Mux(vec_cs_ls, io.req.bits.rs2_data.asSInt * uop.vstart.asUInt, // TODO: any better way?
+            Mux(vec_idx_ls, uop.v_xls_offset.asSInt,
+                uop.imm_packed(19,8).asSInt)))
 
   // perform address calculation
   val sum = (op1 + op2).asUInt
