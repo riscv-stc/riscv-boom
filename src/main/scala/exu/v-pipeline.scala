@@ -202,6 +202,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val eu_vresp = eu.io.vresp
     val eu_vresp_uop = eu_vresp.bits.uop
     val vstart = Mux(eu_vresp_uop.rt(RD, isReduceV), 0.U, eu_vresp_uop.vstart)
+    val v_elem = Mux(eu_vresp_uop.v_seg_ls, eu_vresp_uop.v_seg_e, vstart)
     val eew    = eu_vresp_uop.vd_eew
     val ecnt   = eu_vresp_uop.v_split_ecnt
     if (eu.writesVrf) {
@@ -210,7 +211,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       } else {
         vregfile.io.write_ports(w_cnt).valid     := eu_vresp.valid && eu_vresp_uop.rf_wen
       }
-      val (rsel, rmsk) = VRegSel(vstart, eew, ecnt, eLenb, eLenSelSz)
+      val (rsel, rmsk) = VRegSel(v_elem, eew, ecnt, eLenb, eLenSelSz)
       vregfile.io.write_ports(w_cnt).bits.addr := Cat(eu_vresp_uop.pdst, rsel)
       vregfile.io.write_ports(w_cnt).bits.mask := rmsk
       vregfile.io.write_ports(w_cnt).bits.data := VDataFill(eu_vresp.bits.data, eew, eLen)
