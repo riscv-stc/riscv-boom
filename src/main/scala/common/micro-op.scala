@@ -181,13 +181,17 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   def uses_v_simm5     = is_rvv && lrs1_rtype === RT_VI
   def uses_v_uimm5     = is_rvv && lrs1_rtype === RT_VIU
   def is_v_ls          = is_rvv && (uses_ldq || uses_stq)
+  def uses_v_ls_ew     = uopc.isOneOf(MicroOpcodes.uopVL,
+                                      MicroOpcodes.uopVSA,
+                                      MicroOpcodes.uopVLS,
+                                      MicroOpcodes.uopVSSA)
   def rt(rs: UInt, f: UInt => Bool): Bool = f(Mux1H(UIntToOH(rs), Seq(dst_rtype, lrs1_rtype, lrs2_rtype)))
 
   def vd_eew: UInt = {
     val vsew   = vconfig.vtype.vsew
     val vd_sew = Mux(rt(RD, isWidenV ), vsew + 1.U,
                  Mux(rt(RD, isNarrowV), vsew - 1.U, vsew))
-    val eew    = Mux(is_v_ls, v_ls_ew, vd_sew)
+    val eew    = Mux(uses_v_ls_ew, v_ls_ew, vd_sew)
     eew
   }
 }

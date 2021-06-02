@@ -134,7 +134,7 @@ class IssueSlot(
                     Mux(uop.uopc === uopVEXT4, vsew - 2.U,
                     Mux(uop.rt(rs, isNarrowV), vsew - 1.U,
                     Mux(uop.rt(rs, isWidenV),  vsew + 1.U, vsew))))
-      val eew     = Mux(uop.is_v_ls, uop.v_ls_ew, vs_sew)
+      val eew     = Mux(uop.uses_v_ls_ew, uop.v_ls_ew, vs_sew)
       val ecnt = 1.U // TODO, consider eLen_ecnt
       val (rsel, rmsk) = VRegSel(vstart, eew, ecnt, vLenb, eLenSelSz)
       val rsh = Cat(rsel, 0.U(3.W))
