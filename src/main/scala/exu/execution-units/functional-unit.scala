@@ -504,7 +504,7 @@ class ALUUnit(
         Mux(io.req.bits.uop.uopc.isOneOf(uopVMAX, uopVMAXU) && !v_inactive, Mux(alu.io.out(0), io.req.bits.rs1_data, io.req.bits.rs2_data),
         Mux(io.req.bits.uop.rt(RD, isReduceV) && v_inactive, io.req.bits.rs1_data,
         Mux(io.req.bits.uop.uopc.isOneOf(uopVSA, uopVL) || v_inactive, io.req.bits.rs3_data,
-        Mux(io.req.bits.uop.uopc === uopVMXNOR, ~alu.io.out,
+        Mux(io.req.bits.uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR), ~alu.io.out,
             alu.io.out)))))))
   r_val (0) := io.req.valid
   r_data(0) := Mux(io.req.bits.uop.is_sfb_br, pc_sel === PC_BRJMP, alu_out)
