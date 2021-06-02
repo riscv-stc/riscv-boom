@@ -16,7 +16,7 @@ import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.VConfig
-import freechips.rocketchip.util.{ElaborationArtefacts}
+import freechips.rocketchip.util.{ElaborationArtefacts, UIntIsOneOf}
 
 import boom.exu.FUConstants
 
