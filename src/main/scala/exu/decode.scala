@@ -574,6 +574,12 @@ object VectorIntDecode extends DecodeConstants
  ,VMNOR_MM    ->List(Y, Y, X, uopVMNOR,       IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
  ,VMORNOT_MM  ->List(Y, Y, X, uopVMORNOT,     IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
  ,VMXNOR_MM   ->List(Y, Y, X, uopVMXNOR,      IQT_VEC ,FU_ALU ,RT_VM,  RT_VM,  RT_VM,  N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VMV_V_V     ->List(Y, N, X, uopVMV_V,       IQT_VEC ,FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VMV_V_X     ->List(Y, N, X, uopVMV_V,       IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VMV_V_I     ->List(Y, N, X, uopVMV_V,       IQT_VEC, FU_ALU ,RT_VEC, RT_VI,  RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VMERGE_VVM  ->List(Y, N, X, uopMERGE,       IQT_VEC ,FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VMERGE_VXM  ->List(Y, N, X, uopMERGE,       IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VMERGE_VIM  ->List(Y, N, X, uopMERGE,       IQT_VEC ,FU_ALU ,RT_VEC, RT_VI , RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  )
 }
 
@@ -643,9 +649,7 @@ object VectorFPDecode extends DecodeConstants
  ,VFSGNJX_VV  ->List(Y, Y, X, uopVFSGNJX,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFSGNJX_VF  ->List(Y, Y, X, uopVFSGNJX,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VFCLASS_V   ->List(Y, Y, X, uopVFCLASS,     IQT_VEC ,FU_FPU ,RT_VEC, RT_X  , RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VMV_V_V     ->List(Y, N, X, uopVMV_V,       IQT_VEC, FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VMV_V_X     ->List(Y, N, X, uopVMV_V,       IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VMV_V_I     ->List(Y, N, X, uopVMV_V,       IQT_VEC, FU_ALU ,RT_VEC, RT_VI,  RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMV_V_F    ->List(Y, Y, X, uopVFMV_V_F,    IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  )
 }
 

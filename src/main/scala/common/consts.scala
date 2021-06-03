@@ -187,7 +187,7 @@ trait ScalarOpConstants
   def isWidenV   (rt: UInt): Bool = (rt === RT_VW || rt === RT_VWU || rt === RT_VRW || rt === RT_VRWU)
   def isNarrowV  (rt: UInt): Bool = (rt === RT_VN || rt === RT_VNU)
   def isUnsignedV(rt: UInt): Bool = (rt === RT_VU || rt === RT_VWU || rt === RT_VNU || rt === RT_VIU || rt === RT_VRU || rt === RT_VRWU)
-  def isReduceV  (rt: UInt): Bool = rt(3)
+  def isReduceV  (rt: UInt): Bool = (rt(4,3) === 3.U)
   def isMaskVD   (rt: UInt): Bool = (rt === RT_VM)
   def isNotReg   (rt: UInt): Bool = (rt === RT_X  || rt === RT_VI  || rt === RT_VIU)
   def isSomeReg  (rt: UInt): Bool = !isNotReg(rt)
