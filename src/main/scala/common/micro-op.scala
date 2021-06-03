@@ -16,7 +16,7 @@ import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.VConfig
-import freechips.rocketchip.util.{ElaborationArtefacts}
+import freechips.rocketchip.util.{ElaborationArtefacts,UIntIsOneOf}
 
 import boom.exu.FUConstants
 
@@ -74,7 +74,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val taken            = Bool()
 
   val imm_packed       = UInt(LONGEST_IMM_SZ.W) // densely pack the imm in decode...
-                                              // then translate and sign-extend in execute
+                                                // then translate and sign-extend in execute
   val csr_addr         = UInt(CSR_ADDR_SZ.W)    // only used for critical path reasons in Exe
   val rob_idx          = UInt(robAddrSz.W)
   val ldq_idx          = UInt(ldqAddrSz.W)
@@ -160,7 +160,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_seg_e          = if (usingVector) UInt(vLenSz.W) else null    // element index, for segment load/store
   val v_xls_offset     = if (usingVector) UInt(eLen.W) else null      // address offset for indexed load/store
 
-    // purely debug information
+  // purely debug information
   val debug_wdata      = UInt(xLen.W)
   val debug_events     = new DebugStageEvents
 
