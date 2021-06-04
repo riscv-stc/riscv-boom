@@ -132,7 +132,7 @@ abstract class IssueUnit(
       when ((io.dis_uops(w).bits.uopc === uopSTA && io.dis_uops(w).bits.rt(RS2, isInt)) ||
              io.dis_uops(w).bits.uopc === uopAMO_AG) {
         dis_uops(w).iw_state := s_valid_2
-      } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopSTA, uopVSA) && io.dis_uops(w).bits.rt(RS2, isNotInt)) {
+      } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopSTA, uopVSA, uopVSUXA, uopVSOXA) && io.dis_uops(w).bits.rt(RS2, isNotInt)) {
         // For store addr gen for FP, rs2 is the FP/VEC register, and we don't wait for that here
         when (io.dis_uops(w).bits.fp_val) {
           //dis_uops(w).lrs2_rtype := RT_X
@@ -166,10 +166,12 @@ abstract class IssueUnit(
     } else if (iqType == IQT_VEC.litValue) {
       // VEC "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
       // VEC Load that arrives here are tail splits, prs3 holds stale register name, read in RRD
-      when (io.dis_uops(w).bits.uopc.isOneOf(uopVSA, uopVL)) {
+      when (io.dis_uops(w).bits.uopc.isOneOf(uopVSA, uopVL, uopVLS, uopVSSA)) {
         //dis_uops(w).lrs1_rtype := RT_FIX
         dis_uops(w).prs1_busy  := 0.U
         dis_uops(w).prs2_busy  := 0.U
+      } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
+        dis_uops(w).prs1_busy  := 0.U
       }
     }
 

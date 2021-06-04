@@ -148,6 +148,7 @@ class RegisterRead(
                            Mux(RegNext(rs1_addr === 0.U), 0.U, Mux(RegNext(io.iss_uops(w).rt(RS1, isUnsignedV)), rf_data1, signext1)))
       }
       if (numReadPorts > 1) {
+        // Note: v_ls_ew records index sew for index load/store
         val vs2_sew = Mux(io.iss_uops(w).rt(RS2, isWidenV),  vsew+1.U,
                       Mux(io.iss_uops(w).uopc === uopVEXT8,  vsew-3.U,
                       Mux(io.iss_uops(w).uopc === uopVEXT4,  vsew-2.U,
@@ -162,7 +163,7 @@ class RegisterRead(
         rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, Mux(RegNext(io.iss_uops(w).rt(RS2, isUnsignedV)), rf_data2, signext2))
       }
       if (numReadPorts > 2) {
-        val vd_sew  = Mux(io.iss_uops(w).uopc.isOneOf(uopVSA), io.iss_uops(w).v_ls_ew,
+        val vd_sew  = Mux(io.iss_uops(w).uses_v_ls_ew, io.iss_uops(w).v_ls_ew,
                       Mux(io.iss_uops(w).rt(RD, isWidenV ), vsew + 1.U,
                       Mux(io.iss_uops(w).rt(RD, isNarrowV), vsew - 1.U, vsew)))
         val rd_sh = Mux1H(UIntToOH(vd_sew(1,0)),  Seq(Cat(v_elem(2,0),0.U(3.W)), Cat(v_elem(1,0),0.U(4.W)), Cat(v_elem(0),0.U(5.W)), 0.U(6.W)))
@@ -177,7 +178,7 @@ class RegisterRead(
         io.rf_read_ports(idx+3).addr := Cat(rvm_addr, vstart >> log2Ceil(eLen))
         rrd_rvm_data(w) := Mux(RegNext(io.iss_uops(w).v_unmasked), 1.U,
                                io.rf_read_ports(idx+3).data(RegNext(vstart(log2Ceil(eLen)-1,0))))
-        assert(!(io.iss_valids(w) && io.iss_uops(w).uopc === uopVL && io.iss_uops(w).v_unmasked &&
+        assert(!(io.iss_valids(w) && io.iss_uops(w).uopc.isOneOf(uopVL, uopVLS, uopVLUX, uopVLOX) && io.iss_uops(w).v_unmasked &&
                io.iss_uops(w).vstart < io.iss_uops(w).vconfig.vl), "unmasked body load should not come here.")
       }
     } else {

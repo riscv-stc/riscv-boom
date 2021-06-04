@@ -218,8 +218,14 @@ object MemRRdDecode extends RRdDecodeConstants
                                // |      |  |  use mem pipe        |         |         |     rf wen |
                                // |      |  |  |  alu fcn  wd/word?|         |         |     |      |
                                // |      |  |  |  |        |       |         |         |     |      |
-         BitPat(uopVL)    -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_X, REN_0, CSR.N),
-         BitPat(uopVSA)   -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_X, REN_0, CSR.N),
+//       BitPat(uopVL)    -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_X, REN_0, CSR.N),
+//       BitPat(uopVSA)   -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_X, REN_0, CSR.N),
+//       BitPat(uopVLS)   -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
+//       BitPat(uopVSSA)  -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
+//       BitPat(uopVLUX)  -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
+//       BitPat(uopVSUXA) -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
+//       BitPat(uopVLOX)  -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
+//       BitPat(uopVSOXA) -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
          BitPat(uopLD)    -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_I, REN_0, CSR.N),
          BitPat(uopSTA)   -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_S, REN_0, CSR.N),
          BitPat(uopSTD)   -> List(BR_N , N, N, Y, FN_X   , DW_X  , OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
@@ -390,9 +396,9 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
   io.rrd_uop.ctrl.imm_sel := rrd_cs.imm_sel
   io.rrd_uop.ctrl.op_fcn  := rrd_cs.op_fcn.asUInt
   io.rrd_uop.ctrl.fcn_dw  := rrd_cs.fcn_dw.asBool
-  io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD, uopVL)
-  io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopVSA, uopAMO_AG)
-  io.rrd_uop.ctrl.is_std  := io.rrd_uop.uopc === uopSTD || (io.rrd_uop.ctrl.is_sta && io.rrd_uop.rt(RS2, isInt))
+  io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD, uopVL, uopVLS, uopVLUX, uopVLOX)
+  io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopVSA, uopVSSA, uopVSUXA, uopVSOXA, uopAMO_AG)
+  io.rrd_uop.ctrl.is_std  := io.rrd_uop.uopc === uopSTD || (io.rrd_uop.ctrl.is_sta && io.rrd_uop.rt(RS2, isInt) && !io.rrd_uop.is_rvv)
 
   when (io.rrd_uop.uopc === uopAMO_AG || (io.rrd_uop.uopc === uopLD && io.rrd_uop.mem_cmd === M_XLR)) {
     io.rrd_uop.imm_packed := 0.U

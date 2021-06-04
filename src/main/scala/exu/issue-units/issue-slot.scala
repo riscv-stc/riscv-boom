@@ -117,7 +117,7 @@ class IssueSlot(
   def last_check: Bool = {
     val ret = Wire(Bool())
     if (vector) {
-      ret := io.uop.v_is_last || io.uop.uopc.isOneOf(uopVL, uopVSA)
+      ret := io.uop.v_is_last || io.uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     } else {
       ret := true.B
     }
@@ -458,7 +458,7 @@ class IssueSlot(
       io.uop.v_scalar_data  := Mux(io.uop.rt(RS1, isRvvSImm5), Cat(Fill(eLen-5, io.uop.prs1(4).asUInt), io.uop.prs1(4,0)),
                                Mux(io.uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), io.uop.prs1(4,0)), sdata))
       val red_iss_p1 = WireInit(p1)
-      when (io.request && io.grant && !io.uop.uopc.isOneOf(uopVL, uopVSA)) {
+      when (io.request && io.grant && !io.uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
         val vsew = slot_uop.vconfig.vtype.vsew(1,0)
         //val eLen_ecnt = eLen.U >> (vsew+3.U)
         val ren_mask = ~(Fill(vLenSz,1.U) << (7.U-vsew))

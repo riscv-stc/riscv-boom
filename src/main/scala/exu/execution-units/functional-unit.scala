@@ -501,7 +501,7 @@ class ALUUnit(
         Mux(io.req.bits.uop.uopc.isOneOf(uopVMIN, uopVMINU) && !v_inactive, Mux(alu.io.out(0), io.req.bits.rs2_data, io.req.bits.rs1_data),
         Mux(io.req.bits.uop.uopc.isOneOf(uopVMAX, uopVMAXU) && !v_inactive, Mux(alu.io.out(0), io.req.bits.rs1_data, io.req.bits.rs2_data),
         Mux(io.req.bits.uop.rt(RD, isReduceV) && v_inactive, io.req.bits.rs1_data,
-        Mux(io.req.bits.uop.uopc.isOneOf(uopVSA, uopVL) || v_inactive, io.req.bits.rs3_data,
+        Mux(io.req.bits.uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA) || v_inactive, io.req.bits.rs3_data,
             alu.io.out))))))
   r_val (0) := io.req.valid
   r_data(0) := Mux(io.req.bits.uop.is_sfb_br, pc_sel === PC_BRJMP, alu_out)
@@ -576,7 +576,7 @@ class MemAddrCalcUnit(implicit p: Parameters)
   }
 
   assert (!(uop.fp_val && io.req.valid && uop.uopc =/= uopLD && uop.uopc =/= uopSTA) &&
-          !(uop.is_rvv && io.req.valid && uop.uopc =/= uopVL && uop.uopc =/= uopVSA),
+          !(uop.is_rvv && io.req.valid && !uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)),
           "[maddrcalc] assert we never get store data in here.")
 
   // Handle misaligned exceptions
@@ -596,12 +596,12 @@ class MemAddrCalcUnit(implicit p: Parameters)
 
   val ma_ld, ma_st, dbg_bp, bp = Wire(Bool())
   if (usingVector) {
-    ma_ld  := io.req.valid && uop.uopc.isOneOf(uopLD, uopVL) && misaligned
-    ma_st  := io.req.valid && uop.uopc.isOneOf(uopSTA, uopVSA, uopAMO_AG) && misaligned
-    dbg_bp := io.req.valid && ((uop.uopc.isOneOf(uopLD, uopVL)   && bkptu.io.debug_ld) ||
-                               (uop.uopc.isOneOf(uopSTA, uopVSA) && bkptu.io.debug_st))
-    bp     := io.req.valid && ((uop.uopc.isOneOf(uopLD, uopVL)   && bkptu.io.xcpt_ld) ||
-                               (uop.uopc.isOneOf(uopSTA, uopVSA) && bkptu.io.xcpt_st))
+    ma_ld  := io.req.valid && uop.uopc.isOneOf(uopLD, uopVL, uopVLS, uopVLUX, uopVLOX) && misaligned
+    ma_st  := io.req.valid && uop.uopc.isOneOf(uopSTA, uopVSA, uopVSSA, uopVSUXA, uopVSOXA, uopAMO_AG) && misaligned
+    dbg_bp := io.req.valid && ((uop.uopc.isOneOf(uopLD, uopVL, uopVLS, uopVLUX, uopVLOX)   && bkptu.io.debug_ld) ||
+                               (uop.uopc.isOneOf(uopSTA, uopVSA, uopVSSA, uopVSUXA, uopVSOXA) && bkptu.io.debug_st))
+    bp     := io.req.valid && ((uop.uopc.isOneOf(uopLD, uopVL, uopVLS, uopVLUX, uopVLOX)   && bkptu.io.xcpt_ld) ||
+                               (uop.uopc.isOneOf(uopSTA, uopVSA, uopVSSA, uopVSUXA, uopVSOXA) && bkptu.io.xcpt_st))
   } else {
     ma_ld  := io.req.valid && uop.uopc === uopLD && misaligned
     ma_st  := io.req.valid && (uop.uopc === uopSTA || uop.uopc === uopAMO_AG) && misaligned

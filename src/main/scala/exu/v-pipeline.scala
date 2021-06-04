@@ -17,6 +17,7 @@ import chisel3.util._
 import freechips.rocketchip.config.{Parameters}
 import freechips.rocketchip.rocket.MStatus
 import freechips.rocketchip.tile.FPConstants
+import freechips.rocketchip.util.{UIntIsOneOf}
 
 import boom.exu.FUConstants._
 import boom.common._
@@ -207,7 +208,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val ecnt   = eu_vresp_uop.v_split_ecnt
     if (eu.writesVrf) {
       if (eu.hasVMX) {
-        vregfile.io.write_ports(w_cnt).valid     := eu_vresp.valid && eu_vresp_uop.rf_wen && eu_vresp_uop.uopc =/= uopVSA
+        vregfile.io.write_ports(w_cnt).valid     := eu_vresp.valid && eu_vresp_uop.rf_wen && !eu_vresp_uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
       } else {
         vregfile.io.write_ports(w_cnt).valid     := eu_vresp.valid && eu_vresp_uop.rf_wen
       }
@@ -216,7 +217,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       vregfile.io.write_ports(w_cnt).bits.mask := rmsk
       vregfile.io.write_ports(w_cnt).bits.data := VDataFill(eu_vresp.bits.data, eew, eLen)
       eu.io.vresp.ready                        := true.B
-      when (eu_vresp.valid && eu_vresp_uop.uopc =/= uopVSA) {
+      when (eu_vresp.valid && !eu_vresp_uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)) {
         //assert(eu.io.vresp.ready, "No backpressuring the Vec EUs")
         assert(eu.io.vresp.bits.uop.rf_wen, "rf_wen must be high here")
         assert(eu.io.vresp.bits.uop.rt(RD, isVector), "wb type must be vector")
@@ -229,7 +230,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   val vmx_unit = exe_units.vmx_unit
   val vmx_resp = vmx_unit.io.vresp
 
-  io.to_sdq.valid := vmx_resp.valid & vmx_resp.bits.uop.uopc === uopVSA
+  io.to_sdq.valid := vmx_resp.valid && vmx_resp.bits.uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
   io.to_sdq.bits  := vmx_resp.bits
   io.to_int.valid := false.B // FIXME
   io.to_int.bits  := DontCare
