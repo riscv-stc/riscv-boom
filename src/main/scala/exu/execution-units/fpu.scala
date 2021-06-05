@@ -16,7 +16,7 @@ import freechips.rocketchip.util.{uintToBitPat, UIntIsOneOf}
 import FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
-import boom.util.{ImmGenRm, ImmGenTyp, ImmGenTypRVV, CheckF2IRm, CheckF2FRm}
+import boom.util.{ImmGenRm, ImmGenRmVSGN, ImmGenTyp, ImmGenTypRVV, CheckF2IRm, CheckF2FRm}
 
 /**
  * FP Decoder for the FPU
@@ -128,12 +128,11 @@ class UOPCodeFPUDecoder(vector: Boolean = false)(implicit p: Parameters) extends
    ,BitPat(uopVFNMSUB)  -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
    ,BitPat(uopVFMIN)    -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,Y)
    ,BitPat(uopVFMAX)    -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,Y)
-   ,BitPat(uopVFSGNJ)   -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,N)
-   ,BitPat(uopVFSGNJN)  -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,N)
-   ,BitPat(uopVFSGNJX)  -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,N)
-   ,BitPat(uopVFCLASS)  -> List(X,X,Y,N,N, N,X,D,D,N,Y,N, N,N,N,N)
+   ,BitPat(uopVFSGNJ)   -> List(X,X,Y,Y,N, Y,N,D,D,N,N,Y, N,N,N,N)
+   ,BitPat(uopVFCLASS)  -> List(X,X,Y,N,N, Y,X,D,D,N,Y,N, N,N,N,N)
    ,BitPat(uopVFCVT_F2I)-> List(X,X,Y,N,N, Y,X,D,D,N,Y,N, N,N,N,Y)
    ,BitPat(uopVFCVT_I2F)-> List(X,X,N,N,N, Y,X,D,D,Y,N,N, N,N,N,Y)
+   ,BitPat(uopVFCVT_F2F)-> List(X,X,Y,N,N, Y,X,D,D,N,N,Y, N,N,N,Y)
     )
 
 //   val insns = fLen match {
@@ -267,9 +266,11 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     req <> fp_ctrl
     //req.rm := fp_rm
     req.rm := Mux(~io_req.uop.is_rvv, fp_rm, 
-              Mux(io_req.uop.fu_code === FU_F2I && CheckF2IRm(io_req.uop.imm_packed), 1.U, 
+              Mux(io_req.uop.fu_code_is(FU_F2I) && CheckF2IRm(io_req.uop.imm_packed), 1.U, 
+              Mux(io_req.uop.uopc === uopVFCLASS, 1.U,
+              Mux(io_req.uop.uopc === uopVFSGNJ,  ImmGenRmVSGN(io_req.uop.imm_packed),
               Mux(io_req.uop.uopc === uopVFCVT_F2F && CheckF2FRm(io_req.uop.imm_packed), 6.U,
-              io_req.fcsr_rm)))
+              io_req.fcsr_rm)))))
     val unbox_rs1 = Mux(vector.B && vd_widen,               unbox(rs1_data, tagIn,   None), unbox(rs1_data, tag, minT))
     val unbox_rs2 = Mux(vector.B && vd_widen && !vs2_widen, unbox(rs2_data, vs2_tag, None), unbox(rs2_data, tag, minT))
     //val unbox_rs1 = unbox(rs1_data, tagIn,    minT)
@@ -278,24 +279,22 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     req.in1 := unbox_rs1
     req.in2 := unbox_rs2
     req.in3 := unbox_rs3
-    when (fp_ctrl.swap12) { req.in1 := unbox_rs2 }  // e.g. vfcvt.x.f.v vd, vs2, vm
+    // e.g. vfcvt.x.f.v   vd, vs2, vm
+    // e.g. vfsgnj.vv vd, vs2, vs1, vm
+    when (fp_ctrl.swap12) { 
+      req.in1 := unbox_rs2
+      req.in2 := unbox_rs1
+    }
     when (fp_ctrl.swap23) { req.in3 := unbox_rs2 }
     //req.typ := ImmGenTyp(io_req.uop.imm_packed)
-    req.typ := Mux(io_req.uop.is_rvv, ImmGenTypRVV(io_req.uop.imm_packed), ImmGenTyp(io_req.uop.imm_packed)) // typ of F2I and I2F
+    val typ1 = Mux(tag === D, 1.U(1.W), 0.U(1.W))
+    req.typ := Mux(io_req.uop.is_rvv, ImmGenTypRVV(typ1, io_req.uop.imm_packed), ImmGenTyp(io_req.uop.imm_packed)) // typ of F2I and I2F
     req.fmt := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
     when (io_req.uop.uopc === uopFMV_X_S) {
       req.fmt := 0.U
-    } .elsewhen (vector.B) {
-      when (io_req.uop.uopc.isOneOf(uopVFMADD,uopVFNMADD,uopVFMSUB,uopVFNMSUB)) {
+    } .elsewhen (io_req.uop.uopc.isOneOf(uopVFMADD,uopVFNMADD,uopVFMSUB,uopVFNMSUB)) {
         req.in2 := unbox_rs3
         req.in3 := unbox_rs2
-      } .elsewhen (io_req.uop.uopc.isOneOf(uopVFMIN,uopVFSGNJ)) {
-        req.rm := 0.U
-      } .elsewhen (io_req.uop.uopc.isOneOf(uopVFMAX,uopVFSGNJN)) {
-        req.rm := 1.U
-      } .elsewhen (io_req.uop.uopc.isOneOf(uopVFSGNJX)) {
-        req.rm := 2.U
-      }
     }
 
     val fma_decoder = Module(new FMADecoder(vector))

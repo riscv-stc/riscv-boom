@@ -17,6 +17,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util._
 
+import FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
@@ -305,8 +306,12 @@ class RegisterRead(
         val vl     = exe_reg_uops(w).vconfig.vl
         val is_active  = exe_reg_rvm_data(w) && vstart < vl
         io.exe_reqs(w).bits.uop.v_active := is_active
+        
+        val uopc_fdiv = (io.exe_reqs(w).bits.uop.uopc === uopVFDIV)  ||
+                        (io.exe_reqs(w).bits.uop.uopc === uopVFRDIV) ||
+                        (io.exe_reqs(w).bits.uop.uopc === uopVFSQRT) 
         // forward inactive ops to ALU
-        when (io.exe_reqs(w).bits.uop.is_rvv && !is_active) {
+        when (io.exe_reqs(w).bits.uop.is_rvv && !is_active && !uopc_fdiv) {
           io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
           io.exe_reqs(w).bits.uop.ctrl.op_fcn := freechips.rocketchip.rocket.ALU.FN_ADD
         }
