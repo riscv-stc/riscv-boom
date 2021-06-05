@@ -820,7 +820,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   if (usingFPU && usingFDivSqrt) decode_table ++= FDivSqrtDecode.table
   if (usingVector) decode_table ++= VectorCfgDecode.table
   if (usingVector) decode_table ++= VectorLSDecode.table
-  if (usingVector) decode_table ++= VectorIntDecode.table
+  //if (usingVector) decode_table ++= VectorIntDecode.table
   if (usingVector) decode_table ++= VectorFPDecode.table
   //if (usingVector) decode_table ++= VectorRedDecode.table
   // if (usingRoCC) decode_table ++= RoCCDecode.table
