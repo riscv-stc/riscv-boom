@@ -305,12 +305,12 @@ class RegisterRead(
         val vl     = exe_reg_uops(w).vconfig.vl
 
         val vmlogic_insn = exe_reg_uops(w).uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
-        val vlMax     = exe_reg_uops(w).vconfig.vtype.vlMax
-        val vsew64bit = 3.U + 3.U
-        val vmlogic_vl = vlMax >> vsew64bit + (vlMax(0) || vlMax(1) || vlMax(2) || vlMax(3) || vlMax(4) || vlMax(5))
+        val vsew64bit = 3.U +& 3.U
+        val vmlogic_vl = vl >> vsew64bit + (vl(0) || vl(1) || vl(2) || vl(3) || vl(4) || vl(5))
         val vmlogic_active = exe_reg_rvm_data(w) && vstart < vmlogic_vl
 
         val is_active  = Mux(vmlogic_insn, vmlogic_active, exe_reg_rvm_data(w) && vstart < vl)
+
         io.exe_reqs(w).bits.uop.v_active := is_active
         // forward inactive ops to ALU
         when (io.exe_reqs(w).bits.uop.is_rvv && !is_active) {

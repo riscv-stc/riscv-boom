@@ -500,12 +500,16 @@ class ALUUnit(
   val isVMerge: Bool = io.req.bits.uop.is_rvv && io.req.bits.uop.uopc === uopMERGE
   val v_inactive = io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active
 
-  val v_is_last = io.req.bits.uop.is_rvv && io.req.bits.uop.v_is_last
-  val vmlogic_alu_result = Mux(io.req.bits.uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR), ~alu.io.out, alu.io.out)
-  val vmlogic_vl = io.req.bits.uop.vconfig.vl
+  val vl = io.req.bits.uop.vconfig.vl
+  val vstart = io.req.bits.uop.vstart
+  val vsew64bit  = 3.U +& 3.U
+  val vmlogic_vl = vl >> vsew64bit + (vl(0) || vl(1) || vl(2) || vl(3) || vl(4) || vl(5))
+  val is_vmlogic_last_ecnt = vstart == vmlogic_vl
+
   val vmlogic_mask = boom.util.MaskGen(0.U, vmlogic_vl(5,0), 64)
+  val vmlogic_alu_result = Mux(io.req.bits.uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR), ~alu.io.out, alu.io.out)
   val vmlogic_last_result = (vmlogic_alu_result & vmlogic_mask) | (io.req.bits.rs3_data & (~vmlogic_mask))
-  val vmlogic_result = Mux(v_is_last, vmlogic_last_result, vmlogic_alu_result)
+  val vmlogic_result = Mux(is_vmlogic_last_ecnt.B, vmlogic_last_result, vmlogic_alu_result)
 
 
   val alu_out = Mux(io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data,
