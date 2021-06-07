@@ -504,7 +504,7 @@ class ALUUnit(
   val vstart = io.req.bits.uop.vstart
   val byteWidth = 3.U
   val vsew64bit = 3.U
-  val vmlogic_vl = vl >> ( byteWidth +& vsew64bit) + (vl(0) || vl(1) || vl(2) || vl(3) || vl(4) || vl(5))
+  val vmlogic_vl = (vl(0) || vl(1) || vl(2) || vl(3) || vl(4) || vl(5)) +& (vl>>(byteWidth +& vsew64bit))
   val is_vmlogic_last_ecnt = vstart == vmlogic_vl
 
   val vmlogic_mask = boom.util.MaskGen(0.U, vmlogic_vl(5,0), 64)
