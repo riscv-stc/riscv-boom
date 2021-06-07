@@ -923,7 +923,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     // vmasklogic 
     val vmlogic_insn = cs.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
     // 3.U => Byte index, vsew => element num, vsew => element length, vlmul_sign => vmul
-    val vsew64bit = 3.U + 3.U
+    val vsew64bit = 3.U +& 3.U
     val vmlogic_split_ecnt = vLen.U >> ( vsew + vsew64bit - io.csr_vconfig.vtype.vlmul_sign)
     // vsew => element num
     val vmlogic_tolal_ecnt = vlmax >> vsew64bit
