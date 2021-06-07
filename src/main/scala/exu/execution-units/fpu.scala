@@ -267,17 +267,14 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     val tag     = fp_ctrl.typeTagOut
     val vs2_tag = Mux(vector.B && (vd_widen ^ vs2_widen), tagIn, tag)
     req <> fp_ctrl
-    //req.rm := fp_rm
     req.rm := Mux(~io_req.uop.is_rvv, fp_rm, 
               Mux(io_req.uop.fu_code_is(FU_F2I) && CheckF2IRm(io_req.uop.imm_packed), 1.U, 
               Mux(io_req.uop.uopc === uopVFCLASS, 1.U,
               Mux(io_req.uop.uopc === uopVFSGNJ,  ImmGenRmVSGN(io_req.uop.imm_packed),
               Mux(io_req.uop.uopc === uopVFCVT_F2F && CheckF2FRm(io_req.uop.imm_packed), 6.U,
               io_req.fcsr_rm)))))
-    val unbox_rs1 = Mux(vector.B && vd_widen,               unbox(rs1_data, tagIn,   None), unbox(rs1_data, tag, minT))
-    val unbox_rs2 = Mux(vector.B && (vd_widen ^ vs2_widen), unbox(rs2_data, vs2_tag, None), unbox(rs2_data, tag, minT))
-    //val unbox_rs1 = unbox(rs1_data, tagIn,    minT)
-    //val unbox_rs2 = unbox(rs2_data, vs2_tag,  minT)
+    val unbox_rs1 = Mux(vector.B && vd_widen,               unbox(rs1_data, tagIn,   None), unbox(rs1_data, tagIn, minT))
+    val unbox_rs2 = Mux(vector.B && (vd_widen ^ vs2_widen), unbox(rs2_data, vs2_tag, None), unbox(rs2_data, vs2_tag, minT))
     val unbox_rs3 = unbox(rs3_data, tag,      minT)
     req.in1 := unbox_rs1
     req.in2 := unbox_rs2
