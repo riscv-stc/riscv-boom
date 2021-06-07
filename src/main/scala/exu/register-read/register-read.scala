@@ -308,9 +308,9 @@ class RegisterRead(
         val byteWidth = 3.U
         val vsew64bit = 3.U
         val vmlogic_vl = (vl(0) || vl(1) || vl(2) || vl(3) || vl(4) || vl(5)) +& (vl>>(byteWidth +& vsew64bit))
-        val vmlogic_in_active = exe_reg_rvm_data(w) && vstart > vmlogic_vl
+        val vmlogic_active = exe_reg_rvm_data(w) && vstart < vmlogic_vl
 
-        val is_active  = Mux(vmlogic_insn, ~vmlogic_in_active, exe_reg_rvm_data(w) && vstart < vl)
+        val is_active  = Mux(vmlogic_insn, vmlogic_active, exe_reg_rvm_data(w) && vstart < vl)
 
         io.exe_reqs(w).bits.uop.v_active := is_active
         // forward inactive ops to ALU
