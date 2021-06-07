@@ -965,9 +965,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vseg_vs2_inc = vseg_elem >> (vLenSz.U - 3.U - vs2_sew)
 
     uop.is_rvv      := cs.is_rvv
-    uop.v_ls_ew     := Mux(is_v_ls_index, vsew, cs.v_ls_ew)
+    uop.v_ls_ew     := cs.v_ls_ew
     when (is_v_ls) {
-      uop.mem_size  := uop.v_ls_ew
+      uop.mem_size  := Mux(is_v_ls_index, vsew, cs.v_ls_ew)
       uop.mem_signed:= false.B
     }
     uop.v_unmasked  := !cs.uses_vm || inst(VM_BIT)
@@ -984,7 +984,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.v_is_first  := (vstart === 0.U)
     uop.v_is_last   := split_last
     val ren_mask = ~(Fill(vLenSz,1.U) << (7.U - vd_sew))
+    val vs1_mask = ~(Fill(vLenSz,1.U) << (7.U - vsew))
+    val vs2_mask = ~(Fill(vLenSz,1.U) << (7.U - vs2_sew))
     uop.v_re_alloc  := (vstart & ren_mask(vLenSz,0)) === 0.U
+    uop.v_re_vs1    := (vstart & vs1_mask(vLenSz,0)) === 0.U
+    uop.v_re_vs2    := (vstart & vs2_mask(vLenSz,0)) === 0.U
 
     when (cs.is_rvv) {
       uop.ldst := inst(RD_MSB,RD_LSB)   + vd_inc
@@ -1004,10 +1008,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.frs3_en := true.B
     }
 
+    uop.v_idx_ls     := is_v_ls_index
     uop.v_xls_offset := 0.U
-    when (cs.is_rvv && is_v_ls_index) {
-      uop.v_unmasked := false.B // force indexed load/store wait for vmupdate
-    }
 
     uop.v_seg_ls := false.B
     uop.v_seg_f := 0.U

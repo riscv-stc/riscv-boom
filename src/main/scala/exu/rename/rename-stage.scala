@@ -368,56 +368,74 @@ class RenameStage(
       // for reduction, vs1, vd, vm should be consistent through vrgroup
       // NOTE: for reduction vd may overlap vs1, vs2, or vm
       // NOTE: for reduction we need read VS2 map through this, but skip vs1 and do not re-alloc vd
-      when (uop.v_is_split && uop.v_re_alloc) {
-        when(uop.rt(RS1, rtype) && !uop.rt(RD, isReduceV)) { prs1(0) := io.ren2_uops(w).prs1 }
-        when(uop.rt(RS2, rtype) && !uop.rt(RD, isReduceV)) { prs2(0) := io.ren2_uops(w).prs2 }
-        // TODO: check the essentiality of following when block, since decode may already handle this part
-        when(uop.is_rvv && uop.uses_ldq) {
-          prs3(0) := io.ren2_uops(w).stale_pdst
-        } .elsewhen(uop.frs3_en && (float.B || vector.B) && !uop.rt(RD, isReduceV)) {
-          prs3(0) := io.ren2_uops(w).prs3
-        }
-        when(uop.ldst_val && uop.rt(RD, rtype) && !uop.rt(RD, isReduceV)) { stale_pdst(0) := io.ren2_uops(w).stale_pdst }
-        when(uop.ldst_val && uop.rt(RD, rtype) && !uop.rt(RD, isReduceV)) { pdst(0) := io.ren2_uops(w).pdst }
-        when(~uop.v_unmasked                   && !uop.rt(RD, isReduceV)) { prvm(0) := io.ren2_uops(w).prvm }
-        when(uop.rt(RD, isReduceV)) {
-          when(uop.rt(RS1, rtype)) { uop.prs1 := prs1(0) }
-          when(uop.rt(RS2, rtype) && uop.v_is_first) { uop.prs2 := prs2(0) }
-          when(uop.frs3_en && vector.B) { uop.prs3 := prs3(0) }
-          when(uop.rt(RD,  rtype)) { uop.stale_pdst := stale_pdst(0) }
-          when(uop.rt(RD,  rtype)) { uop.pdst := pdst(0) }
-          when(~uop.v_unmasked)    { uop.prvm := prvm(0) }
-        }
-        // vd may overlap vs2, latch vs2 on reduction mov
-        when (uop.rt(RS1, isReduceV)) {
-          when(uop.rt(RS2, rtype) && (!uop.rt(RD, isReduceV) || !uop.v_is_first)) { prs2(0) := uop.prs2 }
-        }
-        // handle seg ls, latch for different v_seg_f's
-        when (uop.v_seg_ls) {
-          when(uop.rt(RS1, rtype)) { prs1(uop.v_seg_f) := io.ren2_uops(w).prs1 }
-          when(uop.rt(RS2, rtype)) { prs2(uop.v_seg_f) := io.ren2_uops(w).prs2 }
-          when(uop.frs3_en && (float.B || vector.B)) { prs3(uop.v_seg_f) := io.ren2_uops(w).prs3 }
-          when(uop.ldst_val && uop.rt(RD, rtype)) { stale_pdst(uop.v_seg_f) := io.ren2_uops(w).stale_pdst }
-          when(uop.ldst_val && uop.rt(RD, rtype)) { pdst(uop.v_seg_f) := io.ren2_uops(w).pdst }
-          when(~uop.v_unmasked                  ) { prvm(uop.v_seg_f) := io.ren2_uops(w).prvm }
-        }
-      }
-
-      // recover physical names for splits other than the first
-      when (uop.v_is_split && !uop.v_re_alloc) {
-        when(uop.rt(RS1, rtype)) { uop.prs1 := prs1(0) }
-        when(uop.rt(RS2, rtype)) { uop.prs2 := prs2(0) }
-        when(uop.frs3_en && (float.B || vector.B)) { uop.prs3 := prs3(0) }
-        when(uop.ldst_val && uop.rt(RD, rtype)) { uop.stale_pdst := stale_pdst(0) }
-        when(uop.ldst_val && uop.rt(RD, rtype)) { uop.pdst := pdst(0) }
-        when(~uop.v_unmasked) { uop.prvm := prvm(0) }
-        when(uop.v_seg_ls) {
-          when(uop.rt(RS1, rtype)) { uop.prs1 := prs1(uop.v_seg_f) }
-          when(uop.rt(RS2, rtype)) { uop.prs2 := prs2(uop.v_seg_f) }
+      when (uop.v_is_split) {
+        // handle VD
+        when (uop.v_re_alloc) {
+          // TODO: check the essentiality of following when block, since decode may already handle this part
+          when(uop.is_rvv && uop.uses_ldq) {
+            prs3(0) := io.ren2_uops(w).stale_pdst
+          } .elsewhen(uop.frs3_en && (float.B || vector.B) && !uop.rt(RD, isReduceV)) {
+            prs3(0) := io.ren2_uops(w).prs3
+          }
+          when(uop.ldst_val && uop.rt(RD, rtype) && !uop.rt(RD, isReduceV)) { stale_pdst(0) := io.ren2_uops(w).stale_pdst }
+          when(uop.ldst_val && uop.rt(RD, rtype) && !uop.rt(RD, isReduceV)) { pdst(0) := io.ren2_uops(w).pdst }
+          when(~uop.v_unmasked                   && !uop.rt(RD, isReduceV)) { prvm(0) := io.ren2_uops(w).prvm }
+          when(uop.rt(RD, isReduceV)) {
+            when(uop.frs3_en && vector.B) { uop.prs3 := prs3(0) }
+            when(uop.rt(RD,  rtype)) { uop.stale_pdst := stale_pdst(0) }
+            when(uop.rt(RD,  rtype)) { uop.pdst := pdst(0) }
+            when(~uop.v_unmasked)    { uop.prvm := prvm(0) }
+          }
+          // handle seg ls, latch for different v_seg_f's
+          when (uop.v_seg_ls) {
+            when(uop.frs3_en && (float.B || vector.B)) { prs3(uop.v_seg_f) := io.ren2_uops(w).prs3 }
+            when(uop.ldst_val && uop.rt(RD, rtype)) { stale_pdst(uop.v_seg_f) := io.ren2_uops(w).stale_pdst }
+            when(uop.ldst_val && uop.rt(RD, rtype)) { pdst(uop.v_seg_f) := io.ren2_uops(w).pdst }
+            when(~uop.v_unmasked                  ) { prvm(uop.v_seg_f) := io.ren2_uops(w).prvm }
+          }
+        } .otherwise {
           when(uop.frs3_en && (float.B || vector.B)) { uop.prs3 := prs3(uop.v_seg_f) }
           when(uop.ldst_val && uop.rt(RD, rtype)) { uop.stale_pdst := stale_pdst(uop.v_seg_f) }
           when(uop.ldst_val && uop.rt(RD, rtype)) { uop.pdst := pdst(uop.v_seg_f) }
           when(~uop.v_unmasked) { uop.prvm := prvm(uop.v_seg_f) }
+        }
+
+        //handle VS1/RS1
+        when (uop.v_re_vs1) {
+          when(uop.rt(RS1, rtype) && !uop.rt(RD, isReduceV)) { prs1(0) := io.ren2_uops(w).prs1 }
+          when(uop.rt(RD, isReduceV)) {
+            when(uop.rt(RS1, rtype)) { uop.prs1 := prs1(0) }
+          }
+          // handle seg ls, latch for different v_seg_f's
+          when (uop.v_seg_ls) {
+            when(uop.rt(RS1, rtype)) { prs1(uop.v_seg_f) := io.ren2_uops(w).prs1 }
+          }
+        } .otherwise {
+          when(uop.rt(RS1, rtype)) { uop.prs1 := prs1(0) }
+          when(uop.v_seg_ls) {
+            when(uop.rt(RS1, rtype)) { uop.prs1 := prs1(uop.v_seg_f) }
+          }
+        }
+
+        //handle VS2
+        when (uop.v_re_vs2) {
+          when(uop.rt(RS2, rtype) && !uop.rt(RD, isReduceV)) { prs2(0) := io.ren2_uops(w).prs2 }
+          when(uop.rt(RD, isReduceV)) {
+            when(uop.rt(RS2, rtype) && uop.v_is_first) { uop.prs2 := prs2(0) }
+          }
+          // vd may overlap vs2, latch vs2 on reduction mov
+          when (uop.rt(RS1, isReduceV)) {
+            when(uop.rt(RS2, rtype) && (!uop.rt(RD, isReduceV) || !uop.v_is_first)) { prs2(0) := uop.prs2 }
+          }
+          // handle seg ls, latch for different v_seg_f's
+          when (uop.v_seg_ls) {
+            when(uop.rt(RS2, rtype)) { prs2(uop.v_seg_f) := io.ren2_uops(w).prs2 }
+          }
+        } .otherwise {
+          when(uop.rt(RS2, rtype)) { uop.prs2 := prs2(0) }
+          when(uop.v_seg_ls) {
+            when(uop.rt(RS2, rtype)) { uop.prs2 := prs2(uop.v_seg_f) }
+          }
         }
       }
     }

@@ -153,7 +153,7 @@ class RegisterRead(
                       Mux(io.iss_uops(w).uopc === uopVEXT8,  vsew-3.U,
                       Mux(io.iss_uops(w).uopc === uopVEXT4,  vsew-2.U,
                       Mux(io.iss_uops(w).rt(RS2, isNarrowV), vsew-1.U,
-                      Mux(io.iss_uops(w).uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA), io.iss_uops(w).v_ls_ew, vsew)))))
+                      Mux(io.iss_uops(w).v_idx_ls, io.iss_uops(w).v_ls_ew, vsew)))))
         val r2_sh = Mux1H(UIntToOH(vs2_sew(1,0)), Seq(Cat(v_elem(2,0),0.U(3.W)), Cat(v_elem(1,0),0.U(4.W)), Cat(v_elem(0),0.U(5.W)), 0.U(6.W)))
         val (r2sel,r2msk) = VRegSel(v_elem, vs2_sew, ecnt, eLenb, eLenSelSz)
         val r2_bit_mask = Cat((0 until eLenb).map(i => Fill(8, r2msk(i).asUInt)).reverse)
@@ -178,8 +178,8 @@ class RegisterRead(
         io.rf_read_ports(idx+3).addr := Cat(rvm_addr, vstart >> log2Ceil(eLen))
         rrd_rvm_data(w) := Mux(RegNext(io.iss_uops(w).v_unmasked), 1.U,
                                io.rf_read_ports(idx+3).data(RegNext(vstart(log2Ceil(eLen)-1,0))))
-        assert(!(io.iss_valids(w) && io.iss_uops(w).uopc.isOneOf(uopVL, uopVLS, uopVLUX, uopVLOX) && io.iss_uops(w).v_unmasked &&
-               io.iss_uops(w).vstart < io.iss_uops(w).vconfig.vl), "unmasked body load should not come here.")
+        assert(!(io.iss_valids(w) && io.iss_uops(w).uopc.isOneOf(uopVL, uopVLS) && io.iss_uops(w).v_unmasked &&
+               io.iss_uops(w).vstart < io.iss_uops(w).vconfig.vl), "unmasked vecotr load (except indexed load) should not come here.")
       }
     } else {
       if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := rs1_addr
@@ -299,21 +299,18 @@ class RegisterRead(
         io.fpupdate(w).bits.uop := exe_reg_uops(w)
         io.fpupdate(w).bits.data := ieee(exe_reg_rs1_data(w))
       } else if (vector) {
-        val is_v_load  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_ldq
-        val is_v_store = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_stq
+        val uses_ldq   = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_ldq
+        val uses_stq   = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_stq
         val is_masked  = !exe_reg_uops(w).v_unmasked
+        val is_idx_ls  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).v_idx_ls
         val vstart     = exe_reg_uops(w).vstart
         val vl         = exe_reg_uops(w).vconfig.vl
         val is_active  = exe_reg_rvm_data(w) && vstart < vl
-        io.exe_reqs(w).valid    := exe_reg_valids(w) && (!is_v_load || !exe_reg_rvm_data(w))
-        io.vmupdate(w).valid    := exe_reg_valids(w) && (is_v_store || is_v_load) && is_masked
+        io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w))
+        io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
         io.vmupdate(w).bits     := exe_reg_uops(w)
         io.vmupdate(w).bits.v_active := is_active
-        io.vmupdate(w).bits.v_xls_offset := Mux1H(UIntToOH(exe_reg_uops(w).v_ls_ew(1,0)),
-            Seq(exe_reg_rs2_data(w)(7,0).sextTo(eLen),
-                exe_reg_rs2_data(w)(15,0).sextTo(eLen),
-                exe_reg_rs2_data(w)(31,0).sextTo(eLen),
-                exe_reg_rs2_data(w)(63,0)))
+        io.vmupdate(w).bits.v_xls_offset := exe_reg_rs2_data(w)
         io.exe_reqs(w).bits.uop.v_active := is_active
         // forward inactive ops to ALU
         when (io.exe_reqs(w).bits.uop.is_rvv && !is_active) {

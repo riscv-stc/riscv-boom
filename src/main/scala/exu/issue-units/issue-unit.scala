@@ -132,21 +132,26 @@ abstract class IssueUnit(
       when ((io.dis_uops(w).bits.uopc === uopSTA && io.dis_uops(w).bits.rt(RS2, isInt)) ||
              io.dis_uops(w).bits.uopc === uopAMO_AG) {
         dis_uops(w).iw_state := s_valid_2
-      } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopSTA, uopVSA, uopVSUXA, uopVSOXA) && io.dis_uops(w).bits.rt(RS2, isNotInt)) {
+      } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopSTA, uopVSA) && io.dis_uops(w).bits.rt(RS2, isNotInt)) {
         // For store addr gen for FP, rs2 is the FP/VEC register, and we don't wait for that here
         when (io.dis_uops(w).bits.fp_val) {
           //dis_uops(w).lrs2_rtype := RT_X
-          dis_uops(w).prs2_busy  := 0.U
+          dis_uops(w).prs2_busy := 0.U
         }
+      } .elsewhen (io.dis_uops(w).bits.is_rvv && io.dis_uops(w).bits.v_idx_ls) {
+        dis_uops(w).prs2_busy := 0.U
+        dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
       }
       dis_uops(w).prs3_busy := 0.U
-      if (usingVector && iqType == IQT_INT.litValue) {
-        when (io.dis_uops(w).valid && io.dis_uops(w).bits.is_rvv && !io.dis_uops(w).bits.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)) {
-          assert(io.dis_uops(w).bits.uses_scalar, "unexpected rvv in INT pipe")
-          dis_uops(w).fu_code := FU_ALU
+      if (iqType == IQT_INT.litValue) {
+        if (usingVector) {
+          when (io.dis_uops(w).valid && io.dis_uops(w).bits.is_rvv && !io.dis_uops(w).bits.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)) {
+            assert(io.dis_uops(w).bits.uses_scalar, "unexpected rvv in INT pipe")
+            dis_uops(w).fu_code := FU_ALU
+          }
+        } else {
+          dis_uops(w).prvm_busy := 0.U
         }
-      } else {
-        dis_uops(w).prvm_busy := 0.U
       }
       if (usingVector && iqType == IQT_INT.litValue) {
         when (dis_uops(w).rt(RS2, isVector)) { dis_uops(w).prs2_busy := 0.U }

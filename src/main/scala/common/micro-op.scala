@@ -153,11 +153,14 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_is_first       = if (usingVector) Bool() else null
   val v_is_last        = if (usingVector) Bool() else null
   val v_re_alloc       = if (usingVector) Bool() else null            // do rename allocation on first split for every vreg
+  val v_re_vs1         = if (usingVector) Bool() else null            // do rename mapping for narrowing ops
+  val v_re_vs2         = if (usingVector) Bool() else null            // do rename mapping for indexed LS / narrowing ops
   val vxsat            = if (usingVector) Bool() else null            // saturating flag
   val vconfig          = if (usingVector) new VConfig else null       // TODO: tag since DECODE
   val v_seg_ls         = if (usingVector) Bool() else null            // segment load/store indicator
   val v_seg_f          = if (usingVector) UInt(3.W) else null         // field index, for segment load/store
   val v_seg_e          = if (usingVector) UInt(vLenSz.W) else null    // element index, for segment load/store
+  val v_idx_ls         = if (usingVector) Bool() else null            // indexed load/store indicator
   val v_xls_offset     = if (usingVector) UInt(eLen.W) else null      // address offset for indexed load/store
 
   // purely debug information

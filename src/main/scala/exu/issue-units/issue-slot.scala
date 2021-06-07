@@ -98,7 +98,8 @@ class IssueSlot(
   val p3    = if(vector) RegInit(0.U(vLenb.W)) else RegInit(false.B)
   val pm    = if(vector) RegInit(0.U(vLenb.W)) else if (usingVector && iqType == IQT_MEM.litValue) RegInit(false.B) else null
   val ps    = if(vector) RegInit(false.B) else null
-  val sdata = if(vector || usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
+  val sdata = if(vector) RegInit(0.U(eLen.W)) else null
+  val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
 
   // Poison if woken up by speculative load.
@@ -155,7 +156,7 @@ class IssueSlot(
       ret := uop.v_unmasked || p(vstart >> 3.U)
     } else {
       if (usingVector && iqType == IQT_MEM.litValue) {
-        ret := !uop.is_rvv || uop.v_unmasked || p(0)
+        ret := !uop.is_rvv || (uop.v_unmasked && !uop.v_idx_ls) || p(0)
       } else {
         ret := true.B
       }
@@ -242,7 +243,7 @@ class IssueSlot(
   val in_p1 = if (vector) WireInit(p1) else null
   val in_p2 = if (vector) WireInit(p2) else null
   val in_p3 = if (vector) WireInit(p3) else null
-  val in_pm = if (vector) WireInit(pm) else null
+  val in_pm = if (vector || usingVector && iqType == IQT_MEM.litValue) WireInit(pm) else null
   val wake_p1 = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
   val wake_p2 = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
   val wake_p3 = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
@@ -265,8 +266,8 @@ class IssueSlot(
         next_p2 := !io.in_uop.bits.prs2_busy(0)
         next_p3 := !io.in_uop.bits.prs3_busy(0)
         if (iqType == IQT_MEM.litValue) {
-          next_pm := io.in_uop.bits.v_unmasked
-          sdata := io.in_uop.bits.v_xls_offset
+          in_pm := !io.in_uop.bits.prvm_busy(0)
+          vxofs := io.in_uop.bits.v_xls_offset
         }
       }
     } else {
@@ -382,11 +383,9 @@ class IssueSlot(
   }
 
   if (usingVector && !vector && iqType == IQT_MEM.litValue) {
-    when (io.vmupdate.map(_.valid).reduce(_||_)) {
-      next_pm := io.vmupdate.map(v => v.valid && v.bits.rob_idx === next_uop.rob_idx).reduce(_||_)
-      when (next_uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
-        sdata := Mux1H(io.vmupdate.map(x => (x.valid, x.bits.v_xls_offset)))
-      }
+    next_pm := io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx).reduce(_||_)
+    when (next_uop.v_idx_ls && io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid)).reduce(_||_)) {
+      vxofs := Mux1H(io.vmupdate.map(x => (x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid), x.bits.v_xls_offset)))
     }
     when (IsKilledByVM(io.vmupdate, slot_uop)) {
       next_state := s_invalid
@@ -488,7 +487,8 @@ class IssueSlot(
       io.out_uop.prs3_busy  := Cat(0.U, !p3)
       if (iqType == IQT_MEM.litValue) {
         io.out_uop.prvm_busy := Cat(0.U, !pm)
-        io.out_uop.v_xls_offset := sdata
+        io.out_uop.v_xls_offset := vxofs
+        io.uop.v_xls_offset := vxofs
       } else {
         io.out_uop.prvm_busy := 0.U
       }
@@ -523,8 +523,10 @@ class IssueSlot(
   p2 := next_p2
   p3 := next_p3
   ppred := next_ppred
-  if (vector || usingVector && iqType == IQT_MEM.litValue) {
+  if (vector) {
     pm := next_pm
+  } else if (usingVector && iqType == IQT_MEM.litValue) {
+    pm := Mux(io.in_uop.valid, in_pm, pm) | next_pm
   }
 
   // debug outputs
