@@ -194,7 +194,7 @@ trait ScalarOpConstants
   def isRvvSImm5 (rt: UInt): Bool = (rt === RT_VI)
   def isRvvUImm5 (rt: UInt): Bool = (rt === RT_VIU)
   def isRvvImm5  (rt: UInt): Bool = (rt === RT_VI || rt === RT_VIU)
-  def isVMask    (rt: UInt): Bool = (rt === RT_VM)
+  def isMaskV    (rt: UInt): Bool = (rt === RT_VM)
 
   val uopX    = BitPat.dontCare(boom.common.MicroOpcodes.UOPC_SZ)
   // The Bubble Instruction (Machine generated NOP)

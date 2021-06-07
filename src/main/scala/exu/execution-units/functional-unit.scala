@@ -499,6 +499,15 @@ class ALUUnit(
   val r_pred = Reg(Vec(numStages, Bool()))
   val isVMerge: Bool = io.req.bits.uop.is_rvv && io.req.bits.uop.uopc === uopMERGE
   val v_inactive = io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active
+
+  val v_is_last = io.req.bits.uop.is_rvv && io.req.bits.uop.v_is_last
+  val vmlogic_alu_result = Mux(io.req.bits.uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR), ~alu.io.out, alu.io.out)
+  val vmlogic_vl = io.req.bits.uop.vconfig.vl
+  val vmlogic_mask = boom.util.MaskGen(0.U, vmlogic_vl(5,0), 64)
+  val vmlogic_last_result = (vmlogic_alu_result & vmlogic_mask) | (io.req.bits.rs3_data & (~vmlogic_mask))
+  val vmlogic_result = Mux(v_is_last, vmlogic_last_result, vmlogic_alu_result)
+
+
   val alu_out = Mux(io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data,
     Mux(io.req.bits.uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
     Mux(io.req.bits.uop.uopc === uopMOV, io.req.bits.rs2_data,
@@ -506,7 +515,7 @@ class ALUUnit(
         Mux(io.req.bits.uop.uopc.isOneOf(uopVMAX, uopVMAXU) && !v_inactive, Mux(alu.io.out(0), io.req.bits.rs1_data, io.req.bits.rs2_data),
         Mux(io.req.bits.uop.rt(RD, isReduceV) && v_inactive, io.req.bits.rs1_data,
         Mux(io.req.bits.uop.uopc.isOneOf(uopVSA, uopVL) || v_inactive, io.req.bits.rs3_data,
-        Mux(io.req.bits.uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR), ~alu.io.out,
+        Mux(io.req.bits.uop.rt(RD, isMaskV), vmlogic_result,
             alu.io.out)))))))
   r_val (0) := io.req.valid
   r_data(0) := Mux(io.req.bits.uop.is_sfb_br, pc_sel === PC_BRJMP,
