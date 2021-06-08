@@ -324,8 +324,8 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
   val fpmu = Module(new tile.FPToFP(fpu_latency)) // latency 2 for rocket
   fpmu.io.in.bits := fpiu.io.in.bits
   fpmu.io.lt := fpiu.io.out.bits.lt
-  val fpmu_double = Pipe(io.req.valid && fp_ctrl.fastpipe,
-                         (if (vector) fp_ctrl.typeTagOut else fp_ctrl.typeTagOut === D),
+  val fpmu_dtype = Pipe(io.req.valid && fp_ctrl.fastpipe,
+                         fp_ctrl.typeTagOut,
                          fpu_latency).bits
 
   if (vector) {
@@ -358,7 +358,7 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
       Mux(sfma.io.out.valid, box(sfma.io.out.bits.data, S),
       Mux(hfma.io.out.valid, box(hfma.io.out.bits.data, H),
       Mux(fpiu_out.valid,    fpiu_result.data,
-                             box(fpmu.io.out.bits.data, fpmu_double)))))
+                             box(fpmu.io.out.bits.data, fpmu_dtype)))))
 
   val fpu_out_exc =
     Mux(dfma.io.out.valid, dfma.io.out.bits.exc,
