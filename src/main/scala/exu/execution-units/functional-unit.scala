@@ -689,9 +689,10 @@ class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
   if (vector) {
     val vsew = io_req.uop.vconfig.vtype.vsew
     val vd_sew  = Mux(vd_widen, vsew+1.U, vsew)
+    val vs2_sew = Mux(vs2_widen, vsew+1.U, vsew)
     val vd_fmt  = Mux(vd_sew  === 3.U, D, Mux(vd_sew  === 2.U, S, H))
     val vs1_fmt = Mux(vsew    === 3.U, D, Mux(vsew    === 2.U, S, H))
-    val vs2_fmt = Mux(vs2_widen, vd_fmt, vs1_fmt)
+    val vs2_fmt = Mux(vs2_sew === 3.U, D, Mux(vs2_sew === 2.U, S, H))
     when (io.req.valid && io_req.uop.is_rvv) {
       assert(io_req.uop.fp_val, "unexpected fp_val")
       assert(io_req.uop.v_active, "unexpected inactive split")
@@ -701,7 +702,7 @@ class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
    
     when (io_req.uop.is_rvv) {
       // TODO considering widening and narrowing operations
-      fp_ctrl.typeTagIn := vs1_fmt
+      fp_ctrl.typeTagIn := vs2_fmt
       fp_ctrl.typeTagOut:= vd_fmt
     }
   }

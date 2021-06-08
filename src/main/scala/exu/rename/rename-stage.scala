@@ -396,7 +396,8 @@ class RenameStage(
       // recover physical names for splits other than the first
       when (uop.v_is_split && !uop.v_re_alloc) {
         when(uop.rt(RS1, rtype)) { uop.prs1 := prs1(w) }
-        when(uop.rt(RS2, rtype)) { uop.prs2 := prs2(w) }
+        //when(uop.rt(RS2, rtype)) { uop.prs2 := prs2(w) }
+        when(uop.rt(RS2, rtype) && !uop.rt(RS2, isWidenV)) { uop.prs2 := prs2(w) }
         when(uop.frs3_en && (float.B || vector.B)) { uop.prs3 := prs3(w) }
         when(uop.ldst_val && uop.rt(RD, rtype)) { uop.stale_pdst := stale_pdst(w) }
         when(uop.ldst_val && uop.rt(RD, rtype)) { uop.pdst := pdst(w) }

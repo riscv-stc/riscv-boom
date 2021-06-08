@@ -238,10 +238,11 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
   val vs2_widen= io_req.uop.rt(RS2, isWidenV)
   if (vector) {
     val vsew = io_req.uop.vconfig.vtype.vsew
-    val vd_sew  = Mux(vd_widen, vsew+1.U, vsew)
+    val vd_sew  = Mux(vd_widen,  vsew+1.U, vsew)
+    val vs2_sew = Mux(vs2_widen, vsew+1.U, vsew)
     val vd_fmt  = Mux(vd_sew  === 3.U, D, Mux(vd_sew  === 2.U, S, H))
     val vs1_fmt = Mux(vsew    === 3.U, D, Mux(vsew    === 2.U, S, H))
-    val vs2_fmt = Mux(vs2_widen, vd_fmt, vs1_fmt)
+    val vs2_fmt = Mux(vs2_sew === 3.U, D, Mux(vs2_sew === 2.U, S, H))
     when (io.req.valid && io_req.uop.is_rvv) {
       assert(io_req.uop.fp_val, "unexpected fp_val")
       assert(io_req.uop.v_active, "unexpected inactive split")
@@ -252,7 +253,7 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     rs2_data := recode(io_req.rs2_data, vs2_fmt)
     rs3_data := recode(io_req.rs3_data, vd_fmt)
     when (io_req.uop.is_rvv) {
-      fp_ctrl.typeTagIn := vs1_fmt
+      fp_ctrl.typeTagIn := Mux(fp_ctrl.swap12, vs2_fmt, vs1_fmt)
       fp_ctrl.typeTagOut:= vd_fmt
     }
   }
@@ -262,7 +263,7 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     val req     = Wire(new tile.FPInput)
     val tagIn   = fp_ctrl.typeTagIn
     val tag     = fp_ctrl.typeTagOut
-    val vs2_tag = Mux(vector.B && vd_widen && !vs2_widen, tagIn, tag)
+    val vs2_tag = Mux(vector.B && (vd_widen ^ vs2_widen), tagIn, tag)
     req <> fp_ctrl
     //req.rm := fp_rm
     req.rm := Mux(~io_req.uop.is_rvv, fp_rm, 
@@ -272,7 +273,7 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
               Mux(io_req.uop.uopc === uopVFCVT_F2F && CheckF2FRm(io_req.uop.imm_packed), 6.U,
               io_req.fcsr_rm)))))
     val unbox_rs1 = Mux(vector.B && vd_widen,               unbox(rs1_data, tagIn,   None), unbox(rs1_data, tag, minT))
-    val unbox_rs2 = Mux(vector.B && vd_widen && !vs2_widen, unbox(rs2_data, vs2_tag, None), unbox(rs2_data, tag, minT))
+    val unbox_rs2 = Mux(vector.B && (vd_widen ^ vs2_widen), unbox(rs2_data, vs2_tag, None), unbox(rs2_data, tag, minT))
     //val unbox_rs1 = unbox(rs1_data, tagIn,    minT)
     //val unbox_rs2 = unbox(rs2_data, vs2_tag,  minT)
     val unbox_rs3 = unbox(rs3_data, tag,      minT)
