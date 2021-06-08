@@ -82,6 +82,7 @@ class CtrlSigs extends Bundle
   val v_ls_ew         = UInt(2.W)
   val rocc            = Bool()
 
+  /*
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decode_default, table)
     val sigs =
@@ -94,6 +95,7 @@ class CtrlSigs extends Bundle
       rocc := false.B
       this
   }
+  */
 }
 
 // scalastyle:off
@@ -807,6 +809,60 @@ class DecodeUnitIo(implicit p: Parameters) extends BoomBundle
 /**
  * Decode unit that takes in a single instruction and generates a MicroOp.
  */
+class ScalarDecodeTable(implicit p: Parameters) extends BoomModule
+{
+  val io = IO(new Bundle {
+    val inst = Input(UInt(32.W))
+    val cs   = Output(new CtrlSigs())
+  })
+  var decode_table = XDecode.table
+  if (usingFPU) decode_table ++= FDecode.table
+  if (usingFPU && usingFDivSqrt) decode_table ++= FDivSqrtDecode.table
+  //if (usingVector) decode_table ++= VectorLSDecode.table
+  //if (usingVector) decode_table ++= VectorIntDecode.table
+  if (usingVector) decode_table ++= VectorFPDecode.table
+  //if (usingVector) decode_table ++= VectorRedDecode.table
+  // if (usingRoCC) decode_table ++= RoCCDecode.table
+  decode_table ++= (if (xLen == 64) X64Decode.table else X32Decode.table)
+
+  val decoder = freechips.rocketchip.rocket.DecodeLogic(io.inst, XDecode.decode_default, decode_table)
+
+  val s = io.cs
+  val sigs = 
+      Seq(s.legal, s.fp_val, s.fp_single, s.uopc, s.iq_type, s.fu_code, s.dst_type, s.rs1_type,
+          s.rs2_type, s.frs3_en, s.imm_sel, s.uses_ldq, s.uses_stq, s.is_amo,
+          s.is_fence, s.is_fencei, s.mem_cmd, s.wakeup_delay, s.bypassable,
+          s.is_br, s.is_sys_pc2epc, s.inst_unique, s.flush_on_commit, s.csr_cmd,
+          s.is_rvv, s.can_be_split, s.uses_vm, s.v_ls_ew)
+  sigs zip decoder map {case(s,d) => s := d}
+  s.rocc := false.B
+}
+
+class VectorDecodeTable(implicit p: Parameters) extends BoomModule
+{
+  val io = IO(new Bundle {
+    val inst = Input(UInt(32.W))
+    val cs   = Output(new CtrlSigs())
+  })
+  var decode_table = VectorCfgDecode.table
+  if (usingVector) decode_table ++= VectorLSDecode.table
+  if (usingVector) decode_table ++= VectorIntDecode.table
+  if (usingVector) decode_table ++= VectorFPDecode.table
+  if (usingVector) decode_table ++= VectorRedDecode.table
+
+  val decoder = freechips.rocketchip.rocket.DecodeLogicCopy(io.inst, XDecode.decode_default, decode_table)
+
+  val s = io.cs
+  val sigs = 
+      Seq(s.legal, s.fp_val, s.fp_single, s.uopc, s.iq_type, s.fu_code, s.dst_type, s.rs1_type,
+          s.rs2_type, s.frs3_en, s.imm_sel, s.uses_ldq, s.uses_stq, s.is_amo,
+          s.is_fence, s.is_fencei, s.mem_cmd, s.wakeup_delay, s.bypassable,
+          s.is_br, s.is_sys_pc2epc, s.inst_unique, s.flush_on_commit, s.csr_cmd,
+          s.is_rvv, s.can_be_split, s.uses_vm, s.v_ls_ew)
+  sigs zip decoder map {case(s,d) => s := d}
+  s.rocc := false.B
+}
+
 class DecodeUnit(implicit p: Parameters) extends BoomModule
   with freechips.rocketchip.rocket.constants.MemoryOpConstants
 {
@@ -815,20 +871,17 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   val uop = Wire(new MicroOp())
   uop := io.enq.uop
 
-  var decode_table = XDecode.table
-  if (usingFPU) decode_table ++= FDecode.table
-  if (usingFPU && usingFDivSqrt) decode_table ++= FDivSqrtDecode.table
-  if (usingVector) decode_table ++= VectorCfgDecode.table
-  if (usingVector) decode_table ++= VectorLSDecode.table
-  //if (usingVector) decode_table ++= VectorIntDecode.table
-  if (usingVector) decode_table ++= VectorFPDecode.table
-  //if (usingVector) decode_table ++= VectorRedDecode.table
-  // if (usingRoCC) decode_table ++= RoCCDecode.table
-  decode_table ++= (if (xLen == 64) X64Decode.table else X32Decode.table)
-
   val inst = uop.inst
 
-  val cs = Wire(new CtrlSigs()).decode(inst, decode_table)
+  val scalarDecoder = Module(new ScalarDecodeTable)
+  scalarDecoder.io.inst := inst
+  val cs_scalar  = WireInit(scalarDecoder.io.cs)
+
+  val vectorDecoder = Module(new VectorDecodeTable)
+  vectorDecoder.io.inst := inst
+  val cs_vector = WireInit(vectorDecoder.io.cs)
+
+  val cs = Mux(cs_scalar.legal, cs_scalar, cs_vector)
 
   // Exception Handling
   val vsetvl = cs.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
