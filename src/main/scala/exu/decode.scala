@@ -1078,7 +1078,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.voffset     := 0.U
     uop.v_is_split  := cs.can_be_split
     uop.v_split_ecnt:= split_ecnt
-    uop.vconfig.vtype.vsew := Mux(vmlogic_insn, 3.U, vsew))
+    uop.vconfig.vtype.vsew := Mux(vmlogic_insn, 3.U, vsew)
     when (io.deq_fire && cs.can_be_split) {
       assert(cs.is_rvv, "can_be_split applies only to vector instructions.")
     }
