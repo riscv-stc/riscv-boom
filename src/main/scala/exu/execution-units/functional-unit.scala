@@ -504,13 +504,14 @@ class ALUUnit(
   val vstart = io.req.bits.uop.vstart
   val byteWidth = 3.U
   val vsew64bit = 3.U
+  val is_power_of_two = vl(5,0) === 0.U
   val vmlogic_vl = (vl(0) || vl(1) || vl(2) || vl(3) || vl(4) || vl(5)) +& (vl>>(byteWidth +& vsew64bit))
   val is_vmlogic_last_ecnt = vstart === (vmlogic_vl-1.U)
 
   val vmlogic_mask = boom.util.MaskGen(0.U, vl(5,0), 64)
   val vmlogic_alu_result = Mux(io.req.bits.uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR), ~alu.io.out, alu.io.out)
   val vmlogic_last_result = (vmlogic_alu_result & vmlogic_mask) | (io.req.bits.rs3_data & (~vmlogic_mask))
-  val vmlogic_result = Mux(is_vmlogic_last_ecnt, vmlogic_last_result, vmlogic_alu_result)
+  val vmlogic_result = Mux(is_vmlogic_last_ecnt & (~is_power_of_two), vmlogic_last_result, vmlogic_alu_result)
 
 
   val alu_out = Mux(io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data,
