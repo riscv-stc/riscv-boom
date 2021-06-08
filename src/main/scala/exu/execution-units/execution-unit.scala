@@ -523,7 +523,7 @@ class FPUExeUnit(
     fdivsqrt.io.req.bits.uop      := io.req.bits.uop
     fdivsqrt.io.req.bits.rs1_data := io.req.bits.rs1_data
     fdivsqrt.io.req.bits.rs2_data := io.req.bits.rs2_data
-    fdivsqrt.io.req.bits.rs3_data := DontCare
+    fdivsqrt.io.req.bits.rs3_data := io.req.bits.rs3_data
     fdivsqrt.io.req.bits.pred_data := false.B
     fdivsqrt.io.req.bits.kill     := io.req.bits.kill
     fdivsqrt.io.fcsr_rm           := io.fcsr_rm
@@ -604,7 +604,8 @@ class VecExeUnit(
   hasMacc        : Boolean = true,
   hasDiv         : Boolean = true,
   hasIfpu        : Boolean = false,
-  hasFpu         : Boolean = false
+  hasFpu         : Boolean = false,
+  hasFdiv        : Boolean = false
 ) (implicit p: Parameters)
   extends ExecutionUnit(
     readsVrf         = true,
@@ -619,7 +620,7 @@ class VecExeUnit(
     hasIfpu          = hasIfpu,
     hasFpu           = hasFpu,
     hasFpiu          = hasFpu,
-    hasFdiv          = false,
+    hasFdiv          = hasFdiv,
     hasVector        = true,
     hasVMX           = hasVMX
 ) with freechips.rocketchip.rocket.constants.MemoryOpConstants
@@ -637,17 +638,19 @@ class VecExeUnit(
   override def toString: String = out_str.toString
 
   val div_busy  = WireInit(false.B)
+  val fdiv_busy = WireInit(false.B)
 
   // The Functional Units --------------------
   val vec_fu_units   = ArrayBuffer[FunctionalUnit]()
-  val vresp_fu_units = ArrayBuffer[FunctionalUnit]()
+  //val vresp_fu_units = ArrayBuffer[FunctionalUnit]()
 
-  io.fu_types := Mux(hasAlu.B,              FU_ALU, 0.U) |
-                 Mux(hasMacc.B,             FU_MAC, 0.U) |
-                 Mux(!div_busy && hasDiv.B, FU_DIV, 0.U) |
-                 Mux(hasIfpu.B,             FU_I2F, 0.U) |
-                 Mux(hasFpu.B,     FU_FPU | FU_F2I, 0.U) |
-                 Mux(hasVMX.B,              FU_VMX, 0.U)
+  io.fu_types := Mux(hasAlu.B,                FU_ALU, 0.U) |
+                 Mux(hasMacc.B,               FU_MAC, 0.U) |
+                 Mux(!div_busy && hasDiv.B,   FU_DIV, 0.U) |
+                 Mux(hasIfpu.B,               FU_I2F, 0.U) |
+                 Mux(hasFpu.B,       FU_FPU | FU_F2I, 0.U) |
+                 Mux(hasVMX.B,                FU_VMX, 0.U) |
+                 Mux(!fdiv_busy && hasFdiv.B, FU_FDV, 0.U)
 
   // ALU Unit -------------------------------
   var alu: ALUUnit = null
@@ -655,7 +658,7 @@ class VecExeUnit(
     alu = Module(new ALUUnit(numStages = numStages, dataWidth = eLen))
     alu.io.req.valid := io.req.valid && (io.req.bits.uop.fu_code === FU_ALU || io.req.bits.uop.fu_code_is(FU_VMX))
     vec_fu_units += alu
-    vresp_fu_units += alu
+    //vresp_fu_units += alu
   }
 
   // Pipelined, IMul Unit ------------------
@@ -665,7 +668,7 @@ class VecExeUnit(
     imacc.io <> DontCare
     imacc.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_MAC)
     vec_fu_units += imacc
-    vresp_fu_units += imacc
+    //vresp_fu_units += imacc
   }
 
   // Div/Rem Unit -----------------------
@@ -677,24 +680,24 @@ class VecExeUnit(
     div.io.req.valid           := io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV) && hasDiv.B
 
     // share write port with the pipelined units
-    div.io.resp.ready := !(vresp_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
+    div.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
 
     div_resp_val := div.io.resp.valid
     div_busy     := !div.io.req.ready ||
                     (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV))
 
     vec_fu_units += div
-    vresp_fu_units += div
+    //vresp_fu_units += div
   }
 
   var ifpu: IntToFPUnit = null
   if (hasIfpu) {
-    ifpu = Module(new IntToFPUnit(latency=numStages))
+    ifpu = Module(new IntToFPUnit(latency=numStages, vector = true))
     ifpu.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_I2F)
     ifpu.io.fcsr_rm    := io.fcsr_rm
     ifpu.io.resp.ready := DontCare
     vec_fu_units += ifpu
-    vresp_fu_units += ifpu
+    //vresp_fu_units += ifpu
   }
 
   // FPU Unit -----------------------
@@ -714,7 +717,37 @@ class VecExeUnit(
     fpu_resp_fflags          := fpu.io.resp.bits.fflags
 
     vec_fu_units += fpu
-    vresp_fu_units += fpu
+    //vresp_fu_units += fpu
+  }
+
+  // FDiv/FSqrt Unit -----------------------
+  var fdivsqrt: FDivSqrtUnit = null
+  val fdiv_resp_fflags = Wire(new ValidIO(new FFlagsResp()))
+  fdiv_resp_fflags := DontCare
+  fdiv_resp_fflags.valid := false.B
+  if (hasFdiv) {
+    fdivsqrt = Module(new FDivSqrtUnit(vector = true))
+    fdivsqrt.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_FDV)
+    fdivsqrt.io.req.bits.uop      := io.req.bits.uop
+    fdivsqrt.io.req.bits.rs1_data := io.req.bits.rs1_data
+    fdivsqrt.io.req.bits.rs2_data := io.req.bits.rs2_data
+    fdivsqrt.io.req.bits.rs3_data := DontCare
+    fdivsqrt.io.req.bits.pred_data := false.B
+    fdivsqrt.io.req.bits.kill     := io.req.bits.kill
+    fdivsqrt.io.fcsr_rm           := io.fcsr_rm
+    fdivsqrt.io.brupdate          := io.brupdate
+
+    // share write port with the pipelined units
+    //fdivsqrt.io.resp.ready := !(vresp_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready  // TODO PERF will get blocked by fpiu.
+    fdivsqrt.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready  // TODO PERF will get blocked by fpiu.
+
+
+    fdiv_busy := !fdivsqrt.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_FDV))
+
+    fdiv_resp_fflags := fdivsqrt.io.resp.bits.fflags
+
+    vec_fu_units += fdivsqrt
+    //vresp_fu_units += fdivsqrt
   }
 
   vec_fu_units.map(f => {
@@ -725,26 +758,37 @@ class VecExeUnit(
     f.io.req.bits.pred_data := io.req.bits.pred_data
     f.io.req.bits.kill := io.req.bits.kill
     f.io.brupdate := io.brupdate
-    if (f != div) f.io.resp.ready := io.vresp.ready
+    if (f != div && f != fdivsqrt) f.io.resp.ready := io.vresp.ready
   })
 
   // Outputs (Write Port #0)  ---------------
   if (writesVrf) {
-    io.vresp.valid     := vresp_fu_units.map(_.io.resp.valid).reduce(_|_)
-    io.vresp.bits.uop  := PriorityMux(vresp_fu_units.map(f =>
+    io.vresp.valid     := vec_fu_units.map(_.io.resp.valid).reduce(_|_)
+    io.vresp.bits.uop  := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.uop)))
-    io.vresp.bits.data := PriorityMux(vresp_fu_units.map(f =>
+    io.vresp.bits.data := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.data)))
-    io.vresp.bits.predicated := PriorityMux(vresp_fu_units.map(f =>
+    io.vresp.bits.predicated := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.predicated)))
   }
 
-  assert ((PopCount(vresp_fu_units.map(_.io.resp.valid)) <= 1.U && !div_resp_val) ||
-          (PopCount(vresp_fu_units.map(_.io.resp.valid)) <= 2.U && (div_resp_val)),
+  /*
+  no more guaranteed as div and fdiv are both unpipelined
+  assert ((PopCount(vec_fu_units.map(_.io.resp.valid)) <= 1.U && !div_resp_val) ||
+          (PopCount(vec_fu_units.map(_.io.resp.valid)) <= 2.U && (div_resp_val)),
           "Multiple functional units are fighting over the write port.")
+  */
 
   override def supportedFuncUnits = {
     new SupportedFuncUnits(
+      alu = hasAlu,
+      jmp = hasJmpUnit,
+      mem = hasMem,
+      muld = hasMul || hasDiv,
+      fpu = hasFpu,
+      csr = hasCSR,
+      fdiv = hasFdiv,
+      ifpu = hasIfpu,
       vector = true
     )
   }

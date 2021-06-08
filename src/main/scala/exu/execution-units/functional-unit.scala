@@ -671,7 +671,7 @@ class FPUUnit(vector: Boolean = false)(implicit p: Parameters)
  *
  * @param latency the amount of stages to delay by
  */
-class IntToFPUnit(latency: Int)(implicit p: Parameters)
+class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
   extends PipelinedFunctionalUnit(
     numStages = latency,
     numBypassStages = 0,
@@ -680,22 +680,48 @@ class IntToFPUnit(latency: Int)(implicit p: Parameters)
     needsFcsr = true)
   with tile.HasFPUParameters
 {
-  val fp_decoder = Module(new UOPCodeFPUDecoder) // TODO use a simpler decoder
+  val fp_decoder = Module(new UOPCodeFPUDecoder(vector)) // TODO use a simpler decoder
   val io_req = io.req.bits
   fp_decoder.io.uopc := io_req.uop.uopc
-  val fp_ctrl = fp_decoder.io.sigs
-  val fp_rm = Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U, io.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
+  val fp_ctrl = WireInit(fp_decoder.io.sigs)
+  val fp_rm = Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U || io_req.uop.is_rvv, io.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
+  val vd_widen = io_req.uop.rt(RD , isWidenV)
+  val vs2_widen= io_req.uop.rt(RS2, isWidenV)
+  if (vector) {
+    val vsew = io_req.uop.vconfig.vtype.vsew
+    val vd_sew  = Mux(vd_widen, vsew+1.U, vsew)
+    val vs2_sew = Mux(vs2_widen, vsew+1.U, vsew)
+    val vd_fmt  = Mux(vd_sew  === 3.U, D, Mux(vd_sew  === 2.U, S, H))
+    val vs1_fmt = Mux(vsew    === 3.U, D, Mux(vsew    === 2.U, S, H))
+    val vs2_fmt = Mux(vs2_sew === 3.U, D, Mux(vs2_sew === 2.U, S, H))
+    when (io.req.valid && io_req.uop.is_rvv) {
+      assert(io_req.uop.fp_val, "unexpected fp_val")
+      assert(io_req.uop.v_active, "unexpected inactive split")
+      assert(vsew >= 1.U && vsew <= 3.U, "unsupported vsew")
+      assert(vd_sew >= 1.U && vd_sew <= 3.U, "unsupported vd_sew")
+    }
+   
+    when (io_req.uop.is_rvv) {
+      // TODO considering widening and narrowing operations
+      fp_ctrl.typeTagIn := vs2_fmt
+      fp_ctrl.typeTagOut:= vd_fmt
+    }
+  }
   val req = Wire(new tile.FPInput)
   val tag = fp_ctrl.typeTagIn
 
   req <> fp_ctrl
 
   req.rm := fp_rm
-  req.in1 := unbox(io_req.rs1_data, tag, None)
-  req.in2 := unbox(io_req.rs2_data, tag, None)
+  //req.in1 := Mux(fp_ctrl.swap12, unbox(io_req.rs2_data, tag, None), unbox(io_req.rs1_data, tag, None))
+  //req.in2 := unbox(io_req.rs2_data, tag, None)
+  req.in1 := Mux(fp_ctrl.swap12, io_req.rs2_data, io_req.rs1_data)
+  req.in2 := DontCare
   req.in3 := DontCare
-  req.typ := ImmGenTyp(io_req.uop.imm_packed)
-  req.fmt := DontCare // FIXME: this may not be the right thing to do here
+  req.typeTagIn := fp_ctrl.typeTagOut      // IntToFP typeTagIn, based on float width, not integer
+  val typ1 = Mux(tag === D, 1.U(1.W), 0.U(1.W))
+  req.typ := Mux(io_req.uop.is_rvv, ImmGenTypRVV(typ1, io_req.uop.imm_packed), ImmGenTyp(io_req.uop.imm_packed))
+  req.fmt := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
   req.fmaCmd := DontCare
 
   assert (!(io.req.valid && fp_ctrl.fromint && req.in1(xLen).asBool),
@@ -704,14 +730,17 @@ class IntToFPUnit(latency: Int)(implicit p: Parameters)
   assert (!(io.req.valid && !fp_ctrl.fromint),
     "[func] Only support fromInt micro-ops.")
 
-  val ifpu = Module(new tile.IntToFP(intToFpLatency))
+  val ifpu = Module(new tile.IntToFP(latency))
   ifpu.io.in.valid := io.req.valid
   ifpu.io.in.bits := req
-  ifpu.io.in.bits.in1 := io_req.rs1_data
-  val out_double = Pipe(io.req.valid, fp_ctrl.typeTagOut === D, intToFpLatency).bits
+  //ifpu.io.in.bits.in1 := io_req.rs1_data
+  //val out_double = Pipe(io.req.valid, fp_ctrl.typeTagOut === D, intToFpLatency).bits
+  val outTypeTag = Pipe(io.req.valid, fp_ctrl.typeTagOut, latency).bits
+  val outRVV     = Pipe(io.req.valid, io_req.uop.is_rvv,  latency).bits
 
 //io.resp.bits.data              := box(ifpu.io.out.bits.data, !io.resp.bits.uop.fp_single)
-  io.resp.bits.data              := box(ifpu.io.out.bits.data, out_double)
+  io.resp.bits.data              := Mux(outRVV, ieee(box(ifpu.io.out.bits.data, outTypeTag)),
+                                        box(ifpu.io.out.bits.data, outTypeTag))
   io.resp.bits.fflags.valid      := ifpu.io.out.valid
   io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
   io.resp.bits.fflags.bits.flags := ifpu.io.out.bits.exc
