@@ -17,6 +17,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util._
 
+import FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
@@ -129,7 +130,10 @@ class RegisterRead(
     if (vector) {
       val rvm_addr = io.iss_uops(w).prvm
       val ecnt = io.iss_uops(w).v_split_ecnt
+      // segment load/store have different element index
       val vstart = io.iss_uops(w).vstart
+      val v_elem = Mux(io.iss_uops(w).v_seg_ls, io.iss_uops(w).v_seg_e, vstart)
+      // mask bits uses ordinary vstart as element index
       val vsew = io.iss_uops(w).vconfig.vtype.vsew
       if (numReadPorts > 0) {
         val is_reduce = io.iss_uops(w).rt(RD, isReduceV)
@@ -148,9 +152,10 @@ class RegisterRead(
         val vs2_sew = Mux(io.iss_uops(w).rt(RS2, isWidenV),  vsew+1.U,
                       Mux(io.iss_uops(w).uopc === uopVEXT8,  vsew-3.U,
                       Mux(io.iss_uops(w).uopc === uopVEXT4,  vsew-2.U,
-                      Mux(io.iss_uops(w).rt(RS2, isNarrowV), vsew-1.U, vsew))))
-        val r2_sh = Mux1H(UIntToOH(vs2_sew(1,0)), Seq(Cat(vstart(2,0),0.U(3.W)), Cat(vstart(1,0),0.U(4.W)), Cat(vstart(0),0.U(5.W)), 0.U(6.W)))
-        val (r2sel,r2msk) = VRegSel(vstart, vs2_sew, ecnt, eLenb, eLenSelSz)
+                      Mux(io.iss_uops(w).rt(RS2, isNarrowV), vsew-1.U,
+                      Mux(io.iss_uops(w).uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA), io.iss_uops(w).v_ls_ew, vsew)))))
+        val r2_sh = Mux1H(UIntToOH(vs2_sew(1,0)), Seq(Cat(v_elem(2,0),0.U(3.W)), Cat(v_elem(1,0),0.U(4.W)), Cat(v_elem(0),0.U(5.W)), 0.U(6.W)))
+        val (r2sel,r2msk) = VRegSel(v_elem, vs2_sew, ecnt, eLenb, eLenSelSz)
         val r2_bit_mask = Cat((0 until eLenb).map(i => Fill(8, r2msk(i).asUInt)).reverse)
         val rf_data2 = (io.rf_read_ports(idx+1).data & RegNext(r2_bit_mask)) >> RegNext(r2_sh)
         val signext2 = Mux1H(UIntToOH(RegNext(vs2_sew(1,0))), Seq(rf_data2(7,0).sextTo(eLen), rf_data2(15,0).sextTo(eLen), rf_data2(31,0).sextTo(eLen), rf_data2(63,0)))
@@ -161,8 +166,8 @@ class RegisterRead(
         val vd_sew  = Mux(io.iss_uops(w).uopc.isOneOf(uopVSA), io.iss_uops(w).v_ls_ew,
                       Mux(io.iss_uops(w).rt(RD, isWidenV ), vsew + 1.U,
                       Mux(io.iss_uops(w).rt(RD, isNarrowV), vsew - 1.U, vsew)))
-        val rd_sh = Mux1H(UIntToOH(vd_sew(1,0)),  Seq(Cat(vstart(2,0),0.U(3.W)), Cat(vstart(1,0),0.U(4.W)), Cat(vstart(0),0.U(5.W)), 0.U(6.W)))
-        val (rdsel,rdmsk) = VRegSel(vstart, vd_sew,  ecnt, eLenb, eLenSelSz)
+        val rd_sh = Mux1H(UIntToOH(vd_sew(1,0)),  Seq(Cat(v_elem(2,0),0.U(3.W)), Cat(v_elem(1,0),0.U(4.W)), Cat(v_elem(0),0.U(5.W)), 0.U(6.W)))
+        val (rdsel,rdmsk) = VRegSel(v_elem, vd_sew,  ecnt, eLenb, eLenSelSz)
         val rd_bit_mask = Cat((0 until eLenb).map(i => Fill(8, rdmsk(i).asUInt)).reverse)
         val rf_data3 = (io.rf_read_ports(idx+2).data & RegNext(rd_bit_mask)) >> RegNext(rd_sh)
         val signext3 = Mux1H(UIntToOH(RegNext(vd_sew(1,0))), Seq(rf_data3(7,0).sextTo(eLen), rf_data3(15,0).sextTo(eLen), rf_data3(31,0).sextTo(eLen), rf_data3(63,0)))
@@ -297,12 +302,9 @@ class RegisterRead(
         val is_v_load  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_ldq
         val is_v_store = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_stq
         val is_masked  = !exe_reg_uops(w).v_unmasked
+        val vstart     = exe_reg_uops(w).vstart
+        val vl         = exe_reg_uops(w).vconfig.vl
         io.exe_reqs(w).valid    := exe_reg_valids(w) && (!is_v_load || !exe_reg_rvm_data(w))
-        io.vmupdate(w).valid    := exe_reg_valids(w) && (is_v_store || is_v_load) && is_masked
-        io.vmupdate(w).bits     := exe_reg_uops(w)
-        io.vmupdate(w).bits.v_active := exe_reg_rvm_data(w)
-        val vstart = exe_reg_uops(w).vstart
-        val vl     = exe_reg_uops(w).vconfig.vl
 
         val vmlogic_insn = exe_reg_uops(w).uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
         val byteWidth = 3.U
@@ -312,9 +314,23 @@ class RegisterRead(
 
         val is_active  = Mux(vmlogic_insn, vmlogic_active, exe_reg_rvm_data(w) && vstart < vl)
 
+        io.vmupdate(w).valid    := exe_reg_valids(w) && (is_v_store || is_v_load) && is_masked
+        io.vmupdate(w).bits     := exe_reg_uops(w)
+        io.vmupdate(w).bits.v_active := exe_reg_rvm_data(w)
+        io.vmupdate(w).bits.v_active := is_active
+        io.vmupdate(w).bits.v_xls_offset := Mux1H(UIntToOH(exe_reg_uops(w).v_ls_ew(1,0)),
+            Seq(exe_reg_rs2_data(w)(7,0).sextTo(eLen),
+                exe_reg_rs2_data(w)(15,0).sextTo(eLen),
+                exe_reg_rs2_data(w)(31,0).sextTo(eLen),
+                exe_reg_rs2_data(w)(63,0)))
+
         io.exe_reqs(w).bits.uop.v_active := is_active
+        
+        val uopc_fdiv = (io.exe_reqs(w).bits.uop.uopc === uopVFDIV)  ||
+                        (io.exe_reqs(w).bits.uop.uopc === uopVFRDIV) ||
+                        (io.exe_reqs(w).bits.uop.uopc === uopVFSQRT) 
         // forward inactive ops to ALU
-        when (io.exe_reqs(w).bits.uop.is_rvv && !is_active) {
+        when (io.exe_reqs(w).bits.uop.is_rvv && !is_active && !uopc_fdiv) {
           io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
           io.exe_reqs(w).bits.uop.ctrl.op_fcn := freechips.rocketchip.rocket.ALU.FN_ADD
         }

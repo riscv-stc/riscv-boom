@@ -408,7 +408,7 @@ object FDivSqrtDecode extends DecodeConstants
  * Vector Extension
  */
 // chisel complaints on single giant table, so we use multiple objects
-object VectorLSDecode extends DecodeConstants
+object VectorCfgDecode extends DecodeConstants
 {
   val table: Array[(BitPat, List[BitPat])] = Array(
               //                                                                       frs3_en                        wakeup_delay
@@ -425,7 +425,13 @@ object VectorLSDecode extends DecodeConstants
   VSETVLI     ->List(Y, N, X, uopVSETVLI,     IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.W, Y, N, N, 0.U)  // TODO optimize us
  ,VSETIVLI    ->List(Y, N, X, uopVSETIVLI,    IQT_INT, FU_CSR, RT_FIX, RT_X  , RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.W, Y, N, N, 0.U)
  ,VSETVL      ->List(Y, N, X, uopVSETVL,      IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.W, Y, N, N, 0.U)
- ,VLE8_V      ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ )
+}
+
+object VectorLSDecode extends DecodeConstants
+{
+  val table: Array[(BitPat, List[BitPat])] = Array(
+  VLE8_V      ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VLE16_V     ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
  ,VLE32_V     ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
  ,VLE64_V     ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
@@ -441,6 +447,22 @@ object VectorLSDecode extends DecodeConstants
  ,VSSE16_V    ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
  ,VSSE32_V    ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
  ,VSSE64_V    ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
+ ,VLUXEI8_V   ->List(Y, N, X, uopVLUX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VLUXEI16_V  ->List(Y, N, X, uopVLUX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
+ ,VLUXEI32_V  ->List(Y, N, X, uopVLUX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
+ ,VLUXEI64_V  ->List(Y, N, X, uopVLUX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
+ ,VSUXEI8_V   ->List(Y, N, X, uopVSUXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VSUXEI16_V  ->List(Y, N, X, uopVSUXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
+ ,VSUXEI32_V  ->List(Y, N, X, uopVSUXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
+ ,VSUXEI64_V  ->List(Y, N, X, uopVSUXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
+ ,VLOXEI8_V   ->List(Y, N, X, uopVLOX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VLOXEI16_V  ->List(Y, N, X, uopVLOX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
+ ,VLOXEI32_V  ->List(Y, N, X, uopVLOX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
+ ,VLOXEI64_V  ->List(Y, N, X, uopVLOX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
+ ,VSOXEI8_V   ->List(Y, N, X, uopVSOXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VSOXEI16_V  ->List(Y, N, X, uopVSOXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
+ ,VSOXEI32_V  ->List(Y, N, X, uopVSOXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
+ ,VSOXEI64_V  ->List(Y, N, X, uopVSOXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
  )
 }
 
@@ -586,70 +608,95 @@ object VectorIntDecode extends DecodeConstants
 object VectorFPDecode extends DecodeConstants
 {
   val table: Array[(BitPat, List[BitPat])] = Array (
-              //                                                                       frs3_en                        wakeup_delay
-              //     is val inst?                                                      |  imm sel                     |    bypassable (aka, known/fixed latency)
-              //     |  is fp inst?                                                    |  |     uses_ldq              |    |  is_br              is vector instruction
-              //     |  |  is single-prec?                             rs1 regtype     |  |     |  uses_stq           |    |  |                  |  can be split
-              //     |  |  |  micro-code                               |       rs2 type|  |     |  |  is_amo          |    |  |                  |  |  use vm?
-              //     |  |  |  |               iq-type  func unit       |       |       |  |     |  |  |  is_fence     |    |  |                  |  |  |  ew of ls vector
-              //     |  |  |  |               |        |               |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall?  |
-              //     |  |  |  |               |        |       dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
-              //     |  |  |  |               |        |       regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit |  |
-              //     |  |  |  |               |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd   |  |  |
-              //     |  |  |  |               |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |      |  |  |  |
-  VFADD_VV    ->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFADD_VF    ->List(Y, Y, X, uopVFADD,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFSUB_VV    ->List(Y, Y, X, uopVFSUB,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFSUB_VF    ->List(Y, Y, X, uopVFSUB,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFRSUB_VF   ->List(Y, Y, X, uopVFRSUB,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWADD_VV   ->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWADD_VF   ->List(Y, Y, X, uopVFADD,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWADD_WV   ->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWADD_WF   ->List(Y, Y, X, uopVFADD,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWSUB_VV   ->List(Y, Y, X, uopVFSUB,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWSUB_VF   ->List(Y, Y, X, uopVFSUB,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWSUB_WV   ->List(Y, Y, X, uopVFSUB,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWSUB_WF   ->List(Y, Y, X, uopVFSUB,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMUL_VV    ->List(Y, Y, X, uopVFMUL,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMUL_VF    ->List(Y, Y, X, uopVFMUL,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWMUL_VV   ->List(Y, Y, X, uopVFMUL,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWMUL_VF   ->List(Y, Y, X, uopVFMUL,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMACC_VV   ->List(Y, Y, X, uopVFMACC,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMACC_VF   ->List(Y, Y, X, uopVFMACC,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFNMACC_VV  ->List(Y, Y, X, uopVFNMACC,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFNMACC_VF  ->List(Y, Y, X, uopVFNMACC,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMSAC_VV   ->List(Y, Y, X, uopVFMSAC,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMSAC_VF   ->List(Y, Y, X, uopVFMSAC,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFNMSAC_VV  ->List(Y, Y, X, uopVFNMSAC,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFNMSAC_VF  ->List(Y, Y, X, uopVFNMSAC,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMADD_VV   ->List(Y, Y, X, uopVFMADD,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMADD_VF   ->List(Y, Y, X, uopVFMADD,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFNMADD_VV  ->List(Y, Y, X, uopVFNMADD,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFNMADD_VF  ->List(Y, Y, X, uopVFNMADD,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMSUB_VV   ->List(Y, Y, X, uopVFMSUB,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMSUB_VF   ->List(Y, Y, X, uopVFMSUB,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFNMSUB_VV  ->List(Y, Y, X, uopVFNMSUB,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFNMSUB_VF  ->List(Y, Y, X, uopVFNMSUB,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWMACC_VV  ->List(Y, Y, X, uopVFMACC,      IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWMACC_VF  ->List(Y, Y, X, uopVFMACC,      IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWNMACC_VV ->List(Y, Y, X, uopVFNMACC,     IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWNMACC_VF ->List(Y, Y, X, uopVFNMACC,     IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWMSAC_VV  ->List(Y, Y, X, uopVFMSAC,      IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWMSAC_VF  ->List(Y, Y, X, uopVFMSAC,      IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWNMSAC_VV ->List(Y, Y, X, uopVFNMSAC,     IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFWNMSAC_VF ->List(Y, Y, X, uopVFNMSAC,     IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMIN_VV    ->List(Y, Y, X, uopVFMIN,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMIN_VF    ->List(Y, Y, X, uopVFMIN,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMAX_VV    ->List(Y, Y, X, uopVFMAX,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMAX_VF    ->List(Y, Y, X, uopVFMAX,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFSGNJ_VV   ->List(Y, Y, X, uopVFSGNJ,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFSGNJ_VF   ->List(Y, Y, X, uopVFSGNJ,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFSGNJN_VV  ->List(Y, Y, X, uopVFSGNJN,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFSGNJN_VF  ->List(Y, Y, X, uopVFSGNJN,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFSGNJX_VV  ->List(Y, Y, X, uopVFSGNJX,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFSGNJX_VF  ->List(Y, Y, X, uopVFSGNJX,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFCLASS_V   ->List(Y, Y, X, uopVFCLASS,     IQT_VEC ,FU_FPU ,RT_VEC, RT_X  , RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VFMV_V_F    ->List(Y, Y, X, uopVFMV_V_F,    IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+                   //                                                                       frs3_en                        wakeup_delay
+                   //     is val inst?                                                      |  imm sel                     |    bypassable (aka, known/fixed latency)
+                   //     |  is fp inst?                                                    |  |     uses_ldq              |    |  is_br              is vector instruction
+                   //     |  |  is single-prec?                             rs1 regtype     |  |     |  uses_stq           |    |  |                  |  can be split
+                   //     |  |  |  micro-code                               |       rs2 type|  |     |  |  is_amo          |    |  |                  |  |  use vm?
+                   //     |  |  |  |               iq-type  func unit       |       |       |  |     |  |  |  is_fence     |    |  |                  |  |  |  ew of ls vector
+                   //     |  |  |  |               |        |               |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall?  |
+                   //     |  |  |  |               |        |       dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
+                   //     |  |  |  |               |        |       regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit |  |
+                   //     |  |  |  |               |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd   |  |  |
+                   //     |  |  |  |               |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |      |  |  |  |
+  VFADD_VV         ->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFADD_VF         ->List(Y, Y, X, uopVFADD,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSUB_VV         ->List(Y, Y, X, uopVFSUB,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSUB_VF         ->List(Y, Y, X, uopVFSUB,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFRSUB_VF        ->List(Y, Y, X, uopVFRSUB,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWADD_VV        ->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWADD_VF        ->List(Y, Y, X, uopVFADD,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWADD_WV        ->List(Y, Y, X, uopVFADD,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWADD_WF        ->List(Y, Y, X, uopVFADD,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWSUB_VV        ->List(Y, Y, X, uopVFSUB,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWSUB_VF        ->List(Y, Y, X, uopVFSUB,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWSUB_WV        ->List(Y, Y, X, uopVFSUB,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWSUB_WF        ->List(Y, Y, X, uopVFSUB,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMUL_VV         ->List(Y, Y, X, uopVFMUL,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMUL_VF         ->List(Y, Y, X, uopVFMUL,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFDIV_VV         ->List(Y, Y, X, uopVFDIV,       IQT_VEC ,FU_FDV ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFDIV_VF         ->List(Y, Y, X, uopVFDIV,       IQT_FVEC,FU_FDV ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFRDIV_VF        ->List(Y, Y, X, uopVFRDIV,      IQT_FVEC,FU_FDV ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWMUL_VV        ->List(Y, Y, X, uopVFMUL,       IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWMUL_VF        ->List(Y, Y, X, uopVFMUL,       IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMACC_VV        ->List(Y, Y, X, uopVFMACC,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMACC_VF        ->List(Y, Y, X, uopVFMACC,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNMACC_VV       ->List(Y, Y, X, uopVFNMACC,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNMACC_VF       ->List(Y, Y, X, uopVFNMACC,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMSAC_VV        ->List(Y, Y, X, uopVFMSAC,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMSAC_VF        ->List(Y, Y, X, uopVFMSAC,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNMSAC_VV       ->List(Y, Y, X, uopVFNMSAC,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNMSAC_VF       ->List(Y, Y, X, uopVFNMSAC,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMADD_VV        ->List(Y, Y, X, uopVFMADD,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMADD_VF        ->List(Y, Y, X, uopVFMADD,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNMADD_VV       ->List(Y, Y, X, uopVFNMADD,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNMADD_VF       ->List(Y, Y, X, uopVFNMADD,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMSUB_VV        ->List(Y, Y, X, uopVFMSUB,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMSUB_VF        ->List(Y, Y, X, uopVFMSUB,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNMSUB_VV       ->List(Y, Y, X, uopVFNMSUB,     IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNMSUB_VF       ->List(Y, Y, X, uopVFNMSUB,     IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWMACC_VV       ->List(Y, Y, X, uopVFMACC,      IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWMACC_VF       ->List(Y, Y, X, uopVFMACC,      IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWNMACC_VV      ->List(Y, Y, X, uopVFNMACC,     IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWNMACC_VF      ->List(Y, Y, X, uopVFNMACC,     IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWMSAC_VV       ->List(Y, Y, X, uopVFMSAC,      IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWMSAC_VF       ->List(Y, Y, X, uopVFMSAC,      IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWNMSAC_VV      ->List(Y, Y, X, uopVFNMSAC,     IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWNMSAC_VF      ->List(Y, Y, X, uopVFNMSAC,     IQT_FVEC,FU_FPU ,RT_VW , RT_FLT, RT_VEC, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSQRT_V         ->List(Y, Y, X, uopVFSQRT,      IQT_VEC ,FU_FDV ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMIN_VV         ->List(Y, Y, X, uopVFMIN,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMIN_VF         ->List(Y, Y, X, uopVFMIN,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMAX_VV         ->List(Y, Y, X, uopVFMAX,       IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMAX_VF         ->List(Y, Y, X, uopVFMAX,       IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSGNJ_VV        ->List(Y, Y, X, uopVFSGNJ,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSGNJ_VF        ->List(Y, Y, X, uopVFSGNJ,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSGNJN_VV       ->List(Y, Y, X, uopVFSGNJ,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSGNJN_VF       ->List(Y, Y, X, uopVFSGNJ,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSGNJX_VV       ->List(Y, Y, X, uopVFSGNJ,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFSGNJX_VF       ->List(Y, Y, X, uopVFSGNJ,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFCLASS_V        ->List(Y, Y, X, uopVFCLASS,     IQT_VEC ,FU_F2I ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFMV_V_F         ->List(Y, Y, X, uopVFMV_V_F,    IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFCVT_XU_F_V     ->List(Y, Y, X, uopVFCVT_F2I,   IQT_VEC ,FU_F2I ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFCVT_X_F_V      ->List(Y, Y, X, uopVFCVT_F2I,   IQT_VEC ,FU_F2I ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFCVT_F_XU_V     ->List(Y, Y, X, uopVFCVT_I2F,   IQT_VEC ,FU_I2F ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFCVT_F_X_V      ->List(Y, Y, X, uopVFCVT_I2F,   IQT_VEC ,FU_I2F ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFCVT_RTZ_XU_F_V ->List(Y, Y, X, uopVFCVT_F2I,   IQT_VEC ,FU_F2I ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFCVT_RTZ_X_F_V  ->List(Y, Y, X, uopVFCVT_F2I,   IQT_VEC ,FU_F2I ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWCVT_XU_F_V    ->List(Y, Y, X, uopVFCVT_F2I,   IQT_VEC ,FU_F2I ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWCVT_X_F_V     ->List(Y, Y, X, uopVFCVT_F2I,   IQT_VEC ,FU_F2I ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWCVT_F_XU_V    ->List(Y, Y, X, uopVFCVT_I2F,   IQT_VEC ,FU_I2F ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWCVT_F_X_V     ->List(Y, Y, X, uopVFCVT_I2F,   IQT_VEC ,FU_I2F ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWCVT_F_F_V     ->List(Y, Y, X, uopVFCVT_F2F,   IQT_VEC ,FU_FPU ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWCVT_RTZ_XU_F_V->List(Y, Y, X, uopVFCVT_F2I,   IQT_VEC ,FU_F2I ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFWCVT_RTZ_X_F_V ->List(Y, Y, X, uopVFCVT_F2I,   IQT_VEC ,FU_F2I ,RT_VW , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNCVT_XU_F_W    ->List(Y, Y, X, uopVFCVT_F2I,   IQT_VEC ,FU_F2I ,RT_VEC, RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNCVT_X_F_W     ->List(Y, Y, X, uopVFCVT_F2I,   IQT_VEC ,FU_F2I ,RT_VEC, RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNCVT_F_XU_W    ->List(Y, Y, X, uopVFCVT_I2F,   IQT_VEC ,FU_I2F ,RT_VEC, RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNCVT_F_X_W     ->List(Y, Y, X, uopVFCVT_I2F,   IQT_VEC ,FU_I2F ,RT_VEC, RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNCVT_F_F_W     ->List(Y, Y, X, uopVFCVT_F2F,   IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNCVT_ROD_F_F_W ->List(Y, Y, X, uopVFCVT_F2F,   IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNCVT_RTZ_XU_F_W->List(Y, Y, X, uopVFCVT_F2I,   IQT_VEC ,FU_F2I ,RT_VEC, RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VFNCVT_RTZ_X_F_W ->List(Y, Y, X, uopVFCVT_F2I,   IQT_VEC ,FU_F2I ,RT_VEC, RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  )
 }
 
@@ -771,11 +818,12 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   var decode_table = XDecode.table
   if (usingFPU) decode_table ++= FDecode.table
   if (usingFPU && usingFDivSqrt) decode_table ++= FDivSqrtDecode.table
+  if (usingVector) decode_table ++= VectorCfgDecode.table
   if (usingVector) decode_table ++= VectorLSDecode.table
   if (usingVector) decode_table ++= VectorIntDecode.table
   if (usingVector) decode_table ++= VectorFPDecode.table
-  if (usingVector) decode_table ++= VectorRedDecode.table
-  if (usingRoCC) decode_table ++= RoCCDecode.table
+  //if (usingVector) decode_table ++= VectorRedDecode.table
+  // if (usingRoCC) decode_table ++= RoCCDecode.table
   decode_table ++= (if (xLen == 64) X64Decode.table else X32Decode.table)
 
   val inst = uop.inst
@@ -895,11 +943,20 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   //
   if (usingVector) {
     val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
-    //val is_v_ls_stride = false.B
-    val is_v_ls_index = false.B
+    val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
+    val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+    val vseg_nf = inst(NF_MSB, NF_LSB)
+    val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) // FIXME: exclude whole register load/store
     val vstart  = RegInit(0.U((vLenSz+1).W))
+    val vseg_finc = RegInit(0.U(3.W))
+    val vseg_gidx = RegInit(0.U(3.W))
+    val vseg_elem = RegInit(0.U(vLenSz.W))
     val vlmax = io.csr_vconfig.vtype.vlMax
     val vsew = io.csr_vconfig.vtype.vsew
+    val vlmul = io.csr_vconfig.vtype.vlmul_mag
+    // excluding negative vlmul at the moment
+    // TODO: support negative vlmul
+    assert(!io.csr_vconfig.vtype.vlmul_sign)
     val vd_wfactor = Mux(uop.rt(RD,  isWidenV ), 1.U, 0.U)
     val vd_nfactor = Mux(uop.rt(RD,  isNarrowV), 1.U, 0.U)
     val vs2_wfactor= Mux(uop.rt(RS2, isWidenV ), 1.U, 0.U)
@@ -908,8 +965,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(uop.rt(RS2, isNarrowV), 1.U, 0.U))) // uopVEXT2 is included
     val vd_sew     = Mux(uop.rt(RD,  isWidenV ), vsew + vd_wfactor,
                      Mux(uop.rt(RD,  isNarrowV), vsew - vd_nfactor, vsew))
-    val vs2_sew    = Mux(uop.rt(RS2, isWidenV ), vsew + vs2_wfactor,
-                     Mux(uop.rt(RS2, isNarrowV), vsew - vs2_nfactor,vsew))
+    val vs2_sew    = Mux(is_v_ls_index, Cat(0.U(1.W), cs.v_ls_ew),
+                     Mux(uop.rt(RS2, isWidenV ), vsew + vs2_wfactor,
+                     Mux(uop.rt(RS2, isNarrowV), vsew - vs2_nfactor,vsew)))
     val vd_inc     = vstart >> (vLenSz.U - 3.U - vd_sew)
     val vs2_inc    = vstart >> (vLenSz.U - 3.U - vs2_sew)
     val vs1_inc    = vstart >> (vLenSz.U - 3.U - vsew)
@@ -930,22 +988,36 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
 
     //val eLen_ecnt = eLen.U >> (vsew+3.U)
-    val vLen_ecnt = vLen.U >> (vd_sew+3.U)
+    //val vLen_ecnt = vLen.U >> (vd_sew+3.U)
+    val vLen_ecnt = Mux(vs2_sew > vd_sew, vLen.U >> (vs2_sew+3.U), vLen.U >> (vd_sew+3.U))
     val split_ecnt = Mux(is_v_ls, 1.U, Mux(vmlogic_insn, vmlogic_split_ecnt, vLen_ecnt))
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     val total_ecnt = Mux(cs.uses_stq, io.csr_vconfig.vl, Mux(vmlogic_insn, vmlogic_tolal_ecnt, vlmax))
     val split_last = vstart + split_ecnt === total_ecnt
     when (io.kill) {
-      vstart  := 0.U
-    } .elsewhen (cs.can_be_split & ~split_last & io.deq_fire) {
-      vstart  := vstart + split_ecnt
+      vstart    := 0.U
+      vseg_finc := 0.U
+      vseg_elem := 0.U
+      vseg_gidx := 0.U
     } .elsewhen (~cs.can_be_split | split_last & io.deq_fire) {
-      vstart  := 0.U
+      vstart    := 0.U
+      vseg_finc := 0.U
+      vseg_elem := 0.U
+      vseg_gidx := 0.U
+    } .elsewhen (cs.can_be_split & ~split_last & io.deq_fire) {
+      vstart    := vstart + split_ecnt
+      when (is_v_ls_seg) {
+        vseg_finc := Mux(vseg_finc === vseg_nf, 0.U, vseg_finc + 1.U)
+        vseg_elem := vseg_elem + Mux(vseg_finc === vseg_nf, 1.U, 0.U)
+        vseg_gidx := vseg_gidx + Mux((vseg_finc === vseg_nf) && (vseg_elem + 1.U === vLen_ecnt), 1.U, 0.U)
+      }
     }
+    val vseg_vd_inc  = (vseg_finc << vlmul) + vseg_gidx
+    val vseg_vs2_inc = vseg_elem >> (vLenSz.U - 3.U - vs2_sew)
 
     uop.is_rvv      := cs.is_rvv
     uop.v_ls_ew     := Mux(is_v_ls_index, vsew, cs.v_ls_ew)
-    when (is_v_ls) { // update mem size
+    when (is_v_ls) {
       uop.mem_size  := uop.v_ls_ew
       uop.mem_signed:= false.B
     }
@@ -984,8 +1056,26 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.frs3_en := true.B
     }
 
+    uop.v_xls_offset := 0.U
+    when (cs.is_rvv && is_v_ls_index) {
+      uop.v_unmasked := false.B // force indexed load/store wait for vmupdate
+    }
+
+    uop.v_seg_ls := false.B
+    uop.v_seg_f := 0.U
+    uop.v_seg_e := 0.U
+    when (cs.is_rvv && is_v_ls_seg) {
+      uop.ldst := inst(RD_MSB,RD_LSB) + vseg_vd_inc
+      uop.lrs2 := inst(RS2_MSB,RS2_LSB) + vseg_vs2_inc
+      uop.lrs3 := uop.ldst
+      uop.v_re_alloc := (vseg_elem & ren_mask(vLenSz,0)) === 0.U
+      uop.v_seg_ls   := true.B
+      uop.v_seg_f    := vseg_finc
+      uop.v_seg_e    := vseg_elem
+    }
+
     // handle load tail: dispatch to vector pipe
-    // masked load / store, send to vec pipe
+    // masked load / store, send to vector pipe
     when (cs.is_rvv && cs.uses_ldq && vstart >= io.csr_vconfig.vl) {
       uop.iq_type := IQT_VEC
       uop.fu_code := FU_VMX

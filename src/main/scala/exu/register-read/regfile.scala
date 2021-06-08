@@ -63,8 +63,9 @@ object WritePort
     wport.valid := enq.valid && enq_uop.rt(RD, rtype)
     if (vector) {
       val vstart = enq_uop.vstart
+      val v_elem = Mux(enq_uop.v_seg_ls, enq_uop.v_seg_e, vstart)
       val ecnt   = enq_uop.v_split_ecnt
-      val (rsel, rmsk) = VRegSel(vstart, enq_uop.vd_eew, ecnt, eLenb, eLenSelSz)
+      val (rsel, rmsk) = VRegSel(v_elem, enq_uop.vd_eew, ecnt, eLenb, eLenSelSz)
       wport.bits.addr := Cat(enq_uop.pdst, rsel)
       wport.bits.mask := rmsk
       wport.bits.data := VDataFill(enq.bits.data, enq_uop.vd_eew, eLenb*8)

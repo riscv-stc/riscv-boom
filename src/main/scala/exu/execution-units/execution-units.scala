@@ -146,7 +146,10 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(impl
     val vec_width = issueParams.find(_.iqType == IQT_VEC.litValue).get.issueWidth
     for (w <- 0 until vec_width) {
       val hasVMX = (w == 0)
-      val vec_exe_unit = Module(new VecExeUnit(hasVMX = hasVMX, hasIfpu = true, hasFpu = true))
+      val vec_exe_unit = Module(new VecExeUnit(hasVMX = hasVMX, 
+                                               hasIfpu = true, 
+                                               hasFpu = true, 
+                                               hasFdiv = usingFDivSqrt))
       exe_units += vec_exe_unit
     }
   }

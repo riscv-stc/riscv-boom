@@ -288,11 +288,25 @@ object ImmGen
  */
 object ImmGenRm { def apply(ip: UInt): UInt = { return ip(2,0) } }
 
+// in scalar floating-point ins., sgnj/sgnjn/sgnjx are encoded in the RM field
+// in vector floating-point ins., sgnj/sgnjn/sgnjx are encoded in the funct6 field
+object ImmGenRmVSGN { def apply(ip: UInt): UInt = { return ip(16,14) } }
+
+// rounding mode: RTZ mode when vs1[2:1] = 2'b11 in vf*cvt.rtz* instructions
+object CheckF2IRm { def apply(ip: UInt): Bool = { return ip(5,4) === 3.U } }
+// rounding mode: RTO mode in vnfcvt.rod.f.f.w instruction
+object CheckF2FRm { def apply(ip: UInt): Bool = { return ip(3) === 1.U } }
+
 /**
  * Object to get the FP function fype from a packed immediate.
  * Note: only works if !(IS_B or IS_S)
  */
 object ImmGenTyp { def apply(ip: UInt): UInt = { return ip(9,8) } }
+
+// for RV-V instructions only!
+// For vfcvt.x*.f.v and vfcvt.f.x*.v instructions, signed or unsigned is encoded in the vs1 field
+// bit[15] in the instruction
+object ImmGenTypRVV { def apply(bit: UInt, ip: UInt): UInt = { return Cat(bit, ~ip(3)) } }
 
 /**
  * Object to see if an instruction is a JALR.

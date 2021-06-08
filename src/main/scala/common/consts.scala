@@ -235,6 +235,8 @@ trait ScalarOpConstants
 trait RISCVConstants
 {
   // abstract out instruction decode magic numbers
+  val OPC_MSB = 6
+  val OPC_LSB = 0
   val RD_MSB  = 11
   val RD_LSB  = 7
   val RS1_MSB = 19
@@ -244,6 +246,8 @@ trait RISCVConstants
   val RS3_MSB = 31
   val RS3_LSB = 27
   val VM_BIT  = 25
+  val NF_MSB  = 31
+  val NF_LSB  = 29
 
   val CSR_ADDR_MSB = 31
   val CSR_ADDR_LSB = 20

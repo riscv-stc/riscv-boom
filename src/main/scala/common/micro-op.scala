@@ -74,7 +74,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val taken            = Bool()
 
   val imm_packed       = UInt(LONGEST_IMM_SZ.W) // densely pack the imm in decode...
-                                              // then translate and sign-extend in execute
+                                                // then translate and sign-extend in execute
   val csr_addr         = UInt(CSR_ADDR_SZ.W)    // only used for critical path reasons in Exe
   val rob_idx          = UInt(robAddrSz.W)
   val ldq_idx          = UInt(ldqAddrSz.W)
@@ -142,7 +142,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val prvm             = if (usingVector) UInt(maxPregSz.W) else null
   val prvm_busy        = if (usingVector) UInt(vLenb.W) else null
   val v_scalar_busy    = if (usingVector) Bool() else null
-  val v_scalar_data    = if (usingVector) UInt(eLen.W) else null
+  val v_scalar_data    = if (usingVector) UInt(eLen.W) else null      // scalar value for vector pipe
   val v_active         = if (usingVector) Bool() else null
   val v_ls_ew          = if (usingVector) UInt(2.W) else null         // EEW encoded in load/store instruction
   val v_unmasked       = if (usingVector) Bool() else null
@@ -155,8 +155,12 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_re_alloc       = if (usingVector) Bool() else null            // do rename allocation on first split for every vreg
   val vxsat            = if (usingVector) Bool() else null            // saturating flag
   val vconfig          = if (usingVector) new VConfig else null       // TODO: tag since DECODE
+  val v_seg_ls         = if (usingVector) Bool() else null            // segment load/store indicator
+  val v_seg_f          = if (usingVector) UInt(3.W) else null         // field index, for segment load/store
+  val v_seg_e          = if (usingVector) UInt(vLenSz.W) else null    // element index, for segment load/store
+  val v_xls_offset     = if (usingVector) UInt(eLen.W) else null      // address offset for indexed load/store
 
-    // purely debug information
+  // purely debug information
   val debug_wdata      = UInt(xLen.W)
   val debug_events     = new DebugStageEvents
 
