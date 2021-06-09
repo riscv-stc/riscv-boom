@@ -1,0 +1,22 @@
+stages:
+  - build
+
+build:
+  stage : build
+  script: |
+    cd ~/chipyard
+    git pull
+    ./scripts/init-submodules-no-riscv-tools.sh
+    rsync -az $CI_PROJECT_DIR/* generators/boom
+    module load chipyard
+    bsub -J ci -Ip make -C sims/vcs CONFIG=StcBoomConfig -j
+    bsub -J ci -Ip make -C sims/vcs CONFIG=StcBoomConfig -j run-asm-tests
+    bsub -J ci -Ip make -C sims/vcs CONFIG=StcBoomConfig -j run-bmark-tests
+  timeout: 5h
+  artifacts:
+    paths:
+      - chipyard/sims/vcs
+    name: vcs
+  tags:
+    - lsf
+
