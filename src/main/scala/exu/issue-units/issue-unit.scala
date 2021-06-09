@@ -142,6 +142,9 @@ abstract class IssueUnit(
         dis_uops(w).prs2_busy := 0.U
         dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
       }
+      when (io.dis_uops(w).bits.is_rvv && !io.dis_uops(w).bits.v_unmasked) {
+        dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
+      }
       dis_uops(w).prs3_busy := 0.U
       if (iqType == IQT_INT.litValue) {
         if (usingVector) {

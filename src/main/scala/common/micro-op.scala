@@ -159,7 +159,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val vconfig          = if (usingVector) new VConfig else null       // TODO: tag since DECODE
   val v_seg_ls         = if (usingVector) Bool() else null            // segment load/store indicator
   val v_seg_f          = if (usingVector) UInt(3.W) else null         // field index, for segment load/store
-  val v_seg_e          = if (usingVector) UInt(vLenSz.W) else null    // element index, for segment load/store
+  val v_seg_nf         = if (usingVector) UInt(4.W) else null         // number of fields
   val v_idx_ls         = if (usingVector) Bool() else null            // indexed load/store indicator
   val v_xls_offset     = if (usingVector) UInt(eLen.W) else null      // address offset for indexed load/store
 

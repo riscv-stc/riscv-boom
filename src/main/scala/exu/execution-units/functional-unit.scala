@@ -551,9 +551,11 @@ class MemAddrCalcUnit(implicit p: Parameters)
   val vec_cs_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLS, uopVSSA)
   val vec_idx_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
   val op1 = io.req.bits.rs1_data.asSInt
-  val op2 = Mux(vec_us_ls, (uop.vstart << vsew).asSInt,
-            Mux(vec_cs_ls, io.req.bits.rs2_data.asSInt * uop.vstart.asUInt, // TODO: any better way?
-            Mux(vec_idx_ls, uop.v_xls_offset.asSInt,
+  // TODO: optimize multiplications here
+  val op2 = Mux(vec_us_ls, ((uop.vstart * uop.v_seg_nf + uop.v_seg_f) << vsew).asSInt,
+            // TODO: any better way instead of multiplication?
+            Mux(vec_cs_ls, io.req.bits.rs2_data.asSInt * uop.vstart.asUInt + Cat(0.U(1.W), uop.v_seg_f << vsew).asSInt,
+            Mux(vec_idx_ls, uop.v_xls_offset.asSInt + Cat(0.U(1.W), uop.v_seg_f << vsew).asSInt,
                 uop.imm_packed(19,8).asSInt)))
 
   // perform address calculation

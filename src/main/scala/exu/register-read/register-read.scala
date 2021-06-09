@@ -131,7 +131,6 @@ class RegisterRead(
       val ecnt = io.iss_uops(w).v_split_ecnt
       // segment load/store have different element index
       val vstart = io.iss_uops(w).vstart
-      val v_elem = Mux(io.iss_uops(w).v_seg_ls, io.iss_uops(w).v_seg_e, vstart)
       // mask bits uses ordinary vstart as element index
       val vsew = io.iss_uops(w).vconfig.vtype.vsew
       if (numReadPorts > 0) {
@@ -154,8 +153,8 @@ class RegisterRead(
                       Mux(io.iss_uops(w).uopc === uopVEXT4,  vsew-2.U,
                       Mux(io.iss_uops(w).rt(RS2, isNarrowV), vsew-1.U,
                       Mux(io.iss_uops(w).v_idx_ls, io.iss_uops(w).v_ls_ew, vsew)))))
-        val r2_sh = Mux1H(UIntToOH(vs2_sew(1,0)), Seq(Cat(v_elem(2,0),0.U(3.W)), Cat(v_elem(1,0),0.U(4.W)), Cat(v_elem(0),0.U(5.W)), 0.U(6.W)))
-        val (r2sel,r2msk) = VRegSel(v_elem, vs2_sew, ecnt, eLenb, eLenSelSz)
+        val r2_sh = Mux1H(UIntToOH(vs2_sew(1,0)), Seq(Cat(vstart(2,0),0.U(3.W)), Cat(vstart(1,0),0.U(4.W)), Cat(vstart(0),0.U(5.W)), 0.U(6.W)))
+        val (r2sel,r2msk) = VRegSel(vstart, vs2_sew, ecnt, eLenb, eLenSelSz)
         val r2_bit_mask = Cat((0 until eLenb).map(i => Fill(8, r2msk(i).asUInt)).reverse)
         val rf_data2 = (io.rf_read_ports(idx+1).data & RegNext(r2_bit_mask)) >> RegNext(r2_sh)
         val signext2 = Mux1H(UIntToOH(RegNext(vs2_sew(1,0))), Seq(rf_data2(7,0).sextTo(eLen), rf_data2(15,0).sextTo(eLen), rf_data2(31,0).sextTo(eLen), rf_data2(63,0)))
@@ -166,8 +165,8 @@ class RegisterRead(
         val vd_sew  = Mux(io.iss_uops(w).uses_v_ls_ew, io.iss_uops(w).v_ls_ew,
                       Mux(io.iss_uops(w).rt(RD, isWidenV ), vsew + 1.U,
                       Mux(io.iss_uops(w).rt(RD, isNarrowV), vsew - 1.U, vsew)))
-        val rd_sh = Mux1H(UIntToOH(vd_sew(1,0)),  Seq(Cat(v_elem(2,0),0.U(3.W)), Cat(v_elem(1,0),0.U(4.W)), Cat(v_elem(0),0.U(5.W)), 0.U(6.W)))
-        val (rdsel,rdmsk) = VRegSel(v_elem, vd_sew,  ecnt, eLenb, eLenSelSz)
+        val rd_sh = Mux1H(UIntToOH(vd_sew(1,0)),  Seq(Cat(vstart(2,0),0.U(3.W)), Cat(vstart(1,0),0.U(4.W)), Cat(vstart(0),0.U(5.W)), 0.U(6.W)))
+        val (rdsel,rdmsk) = VRegSel(vstart, vd_sew,  ecnt, eLenb, eLenSelSz)
         val rd_bit_mask = Cat((0 until eLenb).map(i => Fill(8, rdmsk(i).asUInt)).reverse)
         val rf_data3 = (io.rf_read_ports(idx+2).data & RegNext(rd_bit_mask)) >> RegNext(rd_sh)
         val signext3 = Mux1H(UIntToOH(RegNext(vd_sew(1,0))), Seq(rf_data3(7,0).sextTo(eLen), rf_data3(15,0).sextTo(eLen), rf_data3(31,0).sextTo(eLen), rf_data3(63,0)))

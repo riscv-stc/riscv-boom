@@ -129,8 +129,7 @@ class IssueSlot(
     val ret = Wire(Bool())
     val uop = slot_uop
     if (vector) {
-      val vstart  = Mux(uop.rt(rs, isReduceV), 0.U,
-                    Mux(uop.v_seg_ls, uop.v_seg_e, uop.vstart + uop.voffset))
+      val vstart  = Mux(uop.rt(rs, isReduceV), 0.U, uop.vstart + uop.voffset)
       val vsew    = uop.vconfig.vtype.vsew
       val vs_sew  = Mux(uop.uopc === uopVEXT8, vsew - 3.U,
                     Mux(uop.uopc === uopVEXT4, vsew - 2.U,
@@ -301,9 +300,8 @@ class IssueSlot(
     if (vector) {
       val wk_uop = io.wakeup_ports(i).bits.uop
       val wk_vstart = wk_uop.vstart
-      val wk_elem   = Mux(wk_uop.v_seg_ls, wk_uop.v_seg_e, wk_vstart)
       val wk_ecnt   = wk_uop.v_split_ecnt
-      val (wk_sel, wk_mask) = VRegSel(wk_elem, wk_uop.vd_eew, wk_ecnt, eLenb, eLenSelSz)
+      val (wk_sel, wk_mask) = VRegSel(wk_vstart, wk_uop.vd_eew, wk_ecnt, eLenb, eLenSelSz)
       val wk_rs1 = wk_valid && (wk_pdst === next_uop.prs1)
       val wk_rs2 = wk_valid && (wk_pdst === next_uop.prs2)
       val wk_rs3 = wk_valid && (wk_pdst === next_uop.prs3) && next_uop.frs3_en

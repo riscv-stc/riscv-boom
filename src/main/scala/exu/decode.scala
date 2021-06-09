@@ -910,7 +910,6 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vstart  = RegInit(0.U((vLenSz+1).W))
     val vseg_finc = RegInit(0.U(3.W))
     val vseg_gidx = RegInit(0.U(3.W))
-    val vseg_elem = RegInit(0.U(vLenSz.W))
     val vlmax = io.csr_vconfig.vtype.vlMax
     val vsew = io.csr_vconfig.vtype.vsew
     val vlmul = io.csr_vconfig.vtype.vlmul_mag
@@ -923,8 +922,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vs2_nfactor= Mux(uop.uopc === uopVEXT8 , 3.U,
                      Mux(uop.uopc === uopVEXT4 , 2.U,
                      Mux(uop.rt(RS2, isNarrowV), 1.U, 0.U))) // uopVEXT2 is included
-    val vd_sew     = Mux(uop.rt(RD,  isWidenV ), vsew + vd_wfactor,
-                     Mux(uop.rt(RD,  isNarrowV), vsew - vd_nfactor, vsew))
+    val vd_sew     = Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew,
+                     Mux(uop.rt(RD,  isWidenV ), vsew + vd_wfactor,
+                     Mux(uop.rt(RD,  isNarrowV), vsew - vd_nfactor, vsew)))
     val vs2_sew    = Mux(is_v_ls_index, Cat(0.U(1.W), cs.v_ls_ew),
                      Mux(uop.rt(RS2, isWidenV ), vsew + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), vsew - vs2_nfactor,vsew)))
@@ -942,27 +942,27 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val split_ecnt = Mux(is_v_ls, 1.U, vLen_ecnt)
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     val total_ecnt = Mux(cs.uses_stq, io.csr_vconfig.vl, vlmax)
-    val split_last = vstart + split_ecnt === total_ecnt
+    val vseg_flast = vseg_finc === vseg_nf
+    val elem_last  = vstart + split_ecnt === total_ecnt
+    val split_last = elem_last && Mux(is_v_ls_seg, vseg_flast, true.B)
     when (io.kill) {
       vstart    := 0.U
       vseg_finc := 0.U
-      vseg_elem := 0.U
       vseg_gidx := 0.U
     } .elsewhen (~cs.can_be_split | split_last & io.deq_fire) {
       vstart    := 0.U
       vseg_finc := 0.U
-      vseg_elem := 0.U
       vseg_gidx := 0.U
     } .elsewhen (cs.can_be_split & ~split_last & io.deq_fire) {
-      vstart    := vstart + split_ecnt
       when (is_v_ls_seg) {
-        vseg_finc := Mux(vseg_finc === vseg_nf, 0.U, vseg_finc + 1.U)
-        vseg_elem := vseg_elem + Mux(vseg_finc === vseg_nf, 1.U, 0.U)
-        vseg_gidx := vseg_gidx + Mux((vseg_finc === vseg_nf) && (vseg_elem + 1.U === vLen_ecnt), 1.U, 0.U)
+        vseg_finc := Mux(vseg_flast, 0.U, vseg_finc + 1.U)
+        vstart    := vstart    + Mux(vseg_flast, 1.U, 0.U)
+        vseg_gidx := vseg_gidx + Mux((vseg_flast) && uop.v_re_alloc, 1.U, 0.U)
+      } .otherwise {
+        vstart    := vstart + split_ecnt
       }
     }
     val vseg_vd_inc  = (vseg_finc << vlmul) + vseg_gidx
-    val vseg_vs2_inc = vseg_elem >> (vLenSz.U - 3.U - vs2_sew)
 
     uop.is_rvv      := cs.is_rvv
     uop.v_ls_ew     := cs.v_ls_ew
@@ -982,7 +982,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       assert(cs.is_rvv, "can_be_split applies only to vector instructions.")
     }
     uop.v_is_first  := (vstart === 0.U)
-    uop.v_is_last   := split_last
+    uop.v_is_last   := elem_last
     val ren_mask = ~(Fill(vLenSz,1.U) << (7.U - vd_sew))
     val vs1_mask = ~(Fill(vLenSz,1.U) << (7.U - vsew))
     val vs2_mask = ~(Fill(vLenSz,1.U) << (7.U - vs2_sew))
@@ -1011,17 +1011,15 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.v_idx_ls     := is_v_ls_index
     uop.v_xls_offset := 0.U
 
-    uop.v_seg_ls := false.B
-    uop.v_seg_f := 0.U
-    uop.v_seg_e := 0.U
+    uop.v_seg_ls  := false.B
+    uop.v_seg_f   := 0.U
+    uop.v_seg_nf  := 1.U
     when (cs.is_rvv && is_v_ls_seg) {
       uop.ldst := inst(RD_MSB,RD_LSB) + vseg_vd_inc
-      uop.lrs2 := inst(RS2_MSB,RS2_LSB) + vseg_vs2_inc
       uop.lrs3 := uop.ldst
-      uop.v_re_alloc := (vseg_elem & ren_mask(vLenSz,0)) === 0.U
       uop.v_seg_ls   := true.B
       uop.v_seg_f    := vseg_finc
-      uop.v_seg_e    := vseg_elem
+      uop.v_seg_nf   := 1.U(4.W) + vseg_nf
     }
 
     // handle load tail: dispatch to vector pipe
@@ -1044,7 +1042,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       red_act := true.B
     }
 
-    io.enq_stall := cs.can_be_split && !uop.v_is_last
+    io.enq_stall := cs.can_be_split && !split_last
 
     when (cs.is_rvv && red_op) {
       // keep vd during reduction
