@@ -545,17 +545,18 @@ class MemAddrCalcUnit(implicit p: Parameters)
 {
   val uop = io.req.bits.uop
   // unit stride
-  val vsew = Mux(usingVector.B & uop.is_rvv, uop.v_ls_ew, 0.U)
+  val v_ls_ew = Mux(usingVector.B & uop.is_rvv, uop.v_ls_ew, 0.U)
+  val uop_sew = Mux(usingVector.B & uop.is_rvv, uop.vconfig.vtype.vsew, 0.U)
   // unit stride load/store
   val vec_us_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVL, uopVSA) // or uopVLFF
   val vec_cs_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLS, uopVSSA)
   val vec_idx_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
   val op1 = io.req.bits.rs1_data.asSInt
   // TODO: optimize multiplications here
-  val op2 = Mux(vec_us_ls, ((uop.vstart * uop.v_seg_nf + uop.v_seg_f) << vsew).asSInt,
+  val op2 = Mux(vec_us_ls, ((uop.vstart * uop.v_seg_nf + uop.v_seg_f) << v_ls_ew).asSInt,
             // TODO: any better way instead of multiplication?
-            Mux(vec_cs_ls, io.req.bits.rs2_data.asSInt * uop.vstart.asUInt + Cat(0.U(1.W), uop.v_seg_f << vsew).asSInt,
-            Mux(vec_idx_ls, uop.v_xls_offset.asSInt + Cat(0.U(1.W), uop.v_seg_f << vsew).asSInt,
+            Mux(vec_cs_ls, io.req.bits.rs2_data.asSInt * uop.vstart.asUInt + Cat(0.U(1.W), uop.v_seg_f << v_ls_ew).asSInt,
+            Mux(vec_idx_ls, uop.v_xls_offset.asSInt + Cat(0.U(1.W), uop.v_seg_f << uop_sew).asSInt,
                 uop.imm_packed(19,8).asSInt)))
 
   // perform address calculation
