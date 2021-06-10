@@ -732,12 +732,12 @@ class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
   req <> fp_ctrl
 
   req.rm := fp_rm
-  //req.in1 := Mux(fp_ctrl.swap12, unbox(io_req.rs2_data, tag, None), unbox(io_req.rs1_data, tag, None))
-  //req.in2 := unbox(io_req.rs2_data, tag, None)
-  req.in1 := Mux(fp_ctrl.swap12, io_req.rs2_data, io_req.rs1_data)
-  req.in2 := DontCare
+  req.in1 := Mux(fp_ctrl.swap12, unbox(io_req.rs2_data, tag, None), unbox(io_req.rs1_data, tag, None))
+  req.in2 := unbox(io_req.rs2_data, tag, None)
   req.in3 := DontCare
-  req.typeTagIn := fp_ctrl.typeTagOut      // IntToFP typeTagIn, based on float width, not integer
+  when(fp_ctrl.wflags) {
+    req.typeTagIn := fp_ctrl.typeTagOut      // IntToFP typeTagIn, based on float width, not integer
+  }
   val typ1 = Mux(tag === D, 1.U(1.W), 0.U(1.W))
   req.typ := Mux(io_req.uop.is_rvv, ImmGenTypRVV(typ1, io_req.uop.imm_packed), ImmGenTyp(io_req.uop.imm_packed))
   req.fmt := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
@@ -752,8 +752,7 @@ class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
   val ifpu = Module(new tile.IntToFP(latency))
   ifpu.io.in.valid := io.req.valid
   ifpu.io.in.bits := req
-  //ifpu.io.in.bits.in1 := io_req.rs1_data
-  //val out_double = Pipe(io.req.valid, fp_ctrl.typeTagOut === D, intToFpLatency).bits
+  ifpu.io.in.bits.in1 := Mux(fp_ctrl.swap12, io_req.rs2_data, io_req.rs1_data)
   val outTypeTag = Pipe(io.req.valid, fp_ctrl.typeTagOut, latency).bits
   val outRVV     = Pipe(io.req.valid, io_req.uop.is_rvv,  latency).bits
 
