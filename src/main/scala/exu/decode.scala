@@ -447,22 +447,22 @@ object VectorLSDecode extends DecodeConstants
  ,VSSE16_V    ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
  ,VSSE32_V    ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
  ,VSSE64_V    ->List(Y, N, X, uopVSSA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_FIX, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
- ,VLUXEI8_V   ->List(Y, N, X, uopVLUX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VLUXEI16_V  ->List(Y, N, X, uopVLUX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
- ,VLUXEI32_V  ->List(Y, N, X, uopVLUX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
- ,VLUXEI64_V  ->List(Y, N, X, uopVLUX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
- ,VSUXEI8_V   ->List(Y, N, X, uopVSUXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VSUXEI16_V  ->List(Y, N, X, uopVSUXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
- ,VSUXEI32_V  ->List(Y, N, X, uopVSUXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
- ,VSUXEI64_V  ->List(Y, N, X, uopVSUXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
- ,VLOXEI8_V   ->List(Y, N, X, uopVLOX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VLOXEI16_V  ->List(Y, N, X, uopVLOX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
- ,VLOXEI32_V  ->List(Y, N, X, uopVLOX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
- ,VLOXEI64_V  ->List(Y, N, X, uopVLOX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VEC, N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
- ,VSOXEI8_V   ->List(Y, N, X, uopVSOXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
- ,VSOXEI16_V  ->List(Y, N, X, uopVSOXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
- ,VSOXEI32_V  ->List(Y, N, X, uopVSOXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
- ,VSOXEI64_V  ->List(Y, N, X, uopVSOXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VEC, Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
+ ,VLUXEI8_V   ->List(Y, N, X, uopVLUX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VU , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VLUXEI16_V  ->List(Y, N, X, uopVLUX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VU , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
+ ,VLUXEI32_V  ->List(Y, N, X, uopVLUX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VU , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
+ ,VLUXEI64_V  ->List(Y, N, X, uopVLUX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VU , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
+ ,VSUXEI8_V   ->List(Y, N, X, uopVSUXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VU , Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VSUXEI16_V  ->List(Y, N, X, uopVSUXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VU , Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
+ ,VSUXEI32_V  ->List(Y, N, X, uopVSUXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VU , Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
+ ,VSUXEI64_V  ->List(Y, N, X, uopVSUXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VU , Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
+ ,VLOXEI8_V   ->List(Y, N, X, uopVLOX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VU , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VLOXEI16_V  ->List(Y, N, X, uopVLOX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VU , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
+ ,VLOXEI32_V  ->List(Y, N, X, uopVLOX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VU , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
+ ,VLOXEI64_V  ->List(Y, N, X, uopVLOX,        IQT_MVEC,FU_MEMV,RT_VEC, RT_FIX, RT_VU , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
+ ,VSOXEI8_V   ->List(Y, N, X, uopVSOXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VU , Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+ ,VSOXEI16_V  ->List(Y, N, X, uopVSOXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VU , Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
+ ,VSOXEI32_V  ->List(Y, N, X, uopVSOXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VU , Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
+ ,VSOXEI64_V  ->List(Y, N, X, uopVSOXA,       IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_VU , Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
  )
 }
 
@@ -912,10 +912,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vseg_gidx = RegInit(0.U(3.W))
     val vlmax = io.csr_vconfig.vtype.vlMax
     val vsew = io.csr_vconfig.vtype.vsew
-    val vlmul = io.csr_vconfig.vtype.vlmul_mag
+    val vlmul_sign = io.csr_vconfig.vtype.vlmul_sign
+    val vlmul = Mux(vlmul_sign, 0.U(2.W), io.csr_vconfig.vtype.vlmul_mag)
     // excluding negative vlmul at the moment
-    // TODO: support negative vlmul
-    assert(!io.csr_vconfig.vtype.vlmul_sign)
     val vd_wfactor = Mux(uop.rt(RD,  isWidenV ), 1.U, 0.U)
     val vd_nfactor = Mux(uop.rt(RD,  isNarrowV), 1.U, 0.U)
     val vs2_wfactor= Mux(uop.rt(RS2, isWidenV ), 1.U, 0.U)
@@ -941,7 +940,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vLen_ecnt = vLen.U >> (vd_sew+3.U)
     val split_ecnt = Mux(is_v_ls, 1.U, vLen_ecnt)
     // for store, we can skip inactive locations; otherwise, we have to visit every element
-    val total_ecnt = Mux(cs.uses_stq, io.csr_vconfig.vl, vlmax)
+    // for fractional lmul, we need visit at least one entire vreg
+    val total_ecnt = Mux(cs.uses_stq, io.csr_vconfig.vl, Mux(vlmul_sign, vLen_ecnt, vlmax))
     val vseg_flast = vseg_finc === vseg_nf
     val elem_last  = vstart + split_ecnt === total_ecnt
     val split_last = elem_last && Mux(is_v_ls_seg, vseg_flast, true.B)
@@ -991,11 +991,13 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.v_re_vs2    := (vstart & vs2_mask(vLenSz,0)) === 0.U
 
     when (cs.is_rvv) {
-      uop.ldst := inst(RD_MSB,RD_LSB)   + vd_inc
+      uop.ldst := inst(RD_MSB,RD_LSB) + vd_inc
       when (uop.rt(RS1, isVector)) {
         uop.lrs1 := inst(RS1_MSB,RS1_LSB) + vs1_inc
       }
-      uop.lrs2 := inst(RS2_MSB,RS2_LSB) + vs2_inc
+      when (uop.rt(RS2, isVector)) {
+        uop.lrs2 := inst(RS2_MSB,RS2_LSB) + vs2_inc
+      }
       uop.lrs3 := uop.ldst
       uop.frs3_en := cs.uses_vm
     }
