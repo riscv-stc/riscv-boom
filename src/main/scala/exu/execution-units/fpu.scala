@@ -273,9 +273,9 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
               Mux(io_req.uop.uopc === uopVFMIN, 0.U,
               Mux(io_req.uop.uopc === uopVFSGNJ,  ImmGenRmVSGN(io_req.uop.imm_packed),
               Mux(io_req.uop.uopc === uopVFCVT_F2F && CheckF2FRm(io_req.uop.imm_packed), 6.U,
-              io_req.fcsr_rm)))))
-    val unbox_rs1 = Mux(vector.B && vd_widen,               unbox(rs1_data, tagIn,   None), unbox(rs1_data, tagIn, minT))
-    val unbox_rs2 = Mux(vector.B && (vd_widen ^ vs2_widen), unbox(rs2_data, vs2_tag, None), unbox(rs2_data, vs2_tag, minT))
+              io_req.fcsr_rm))))))
+    val unbox_rs1 = Mux(vector.B && vd_widen,               unbox(rs1_data, tagIn,   None), unbox(rs1_data, tag, minT))
+    val unbox_rs2 = Mux(vector.B && (vd_widen ^ vs2_widen), unbox(rs2_data, vs2_tag, None), unbox(rs2_data, tag, minT))
     val unbox_rs3 = unbox(rs3_data, tag,      minT)
     if(vector) {
       req.in1 := unbox_rs1
@@ -332,9 +332,7 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
   val fpmu = Module(new tile.FPToFP(fpu_latency)) // latency 2 for rocket
   fpmu.io.in.bits := fpiu.io.in.bits
   fpmu.io.lt := fpiu.io.out.bits.lt
-  val fpmu_double = Pipe(io.req.valid && fp_ctrl.fastpipe, fp_ctrl.typeTagOut, fpu_latency).bits
-  //                       (if (vector) fp_ctrl.typeTagOut else fp_ctrl.typeTagOut === D),
-  //                       fpu_latency).bits
+  val fpmu_dtype = Pipe(io.req.valid && fp_ctrl.fastpipe, fp_ctrl.typeTagOut, fpu_latency).bits
 
   if (vector) {
     dfma.io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === D) //&& (!io_req.uop.is_rvv || io_req.uop.v_active)

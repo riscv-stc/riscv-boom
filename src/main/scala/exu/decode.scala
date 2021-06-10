@@ -818,11 +818,7 @@ class ScalarDecodeTable(implicit p: Parameters) extends BoomModule
   var decode_table = XDecode.table
   if (usingFPU) decode_table ++= FDecode.table
   if (usingFPU && usingFDivSqrt) decode_table ++= FDivSqrtDecode.table
-  //if (usingVector) decode_table ++= VectorLSDecode.table
-  //if (usingVector) decode_table ++= VectorIntDecode.table
-  if (usingVector) decode_table ++= VectorFPDecode.table
-  //if (usingVector) decode_table ++= VectorRedDecode.table
-  // if (usingRoCC) decode_table ++= RoCCDecode.table
+  if (usingRoCC) decode_table ++= RoCCDecode.table
   decode_table ++= (if (xLen == 64) X64Decode.table else X32Decode.table)
 
   val decoder = freechips.rocketchip.rocket.DecodeLogic(io.inst, XDecode.decode_default, decode_table)
@@ -1082,7 +1078,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.voffset     := 0.U
     uop.v_is_split  := cs.can_be_split
     uop.v_split_ecnt:= split_ecnt
-    uop.vconfig.vtype.vsew := 3.U
+    //uop.vconfig.vtype.vsew := 3.U
     when (io.deq_fire && cs.can_be_split) {
       assert(cs.is_rvv, "can_be_split applies only to vector instructions.")
     }
