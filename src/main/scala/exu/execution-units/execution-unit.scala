@@ -161,7 +161,7 @@ abstract class ExecutionUnit(
   if (writesFrf)   {
     io.fresp.bits.fflags.valid := false.B
     io.fresp.bits.predicated := false.B
-    assert(io.fresp.ready)
+    //assert(io.fresp.ready)
   }
   if (writesLlFrf) {
     io.ll_fresp.bits.fflags.valid := false.B
@@ -610,6 +610,7 @@ class VecExeUnit(
   extends ExecutionUnit(
     readsVrf         = true,
     writesVrf        = true,
+    writesFrf        = true,
     numBypassStages  = if (hasMacc) 3 else 1,
     dataWidth        = p(tile.TileKey).core.eLen,
     bypassable       = false,
@@ -656,7 +657,8 @@ class VecExeUnit(
   var alu: ALUUnit = null
   if (hasAlu) {
     alu = Module(new ALUUnit(numStages = numStages, dataWidth = eLen))
-    alu.io.req.valid := io.req.valid && (io.req.bits.uop.fu_code === FU_ALU || io.req.bits.uop.fu_code_is(FU_VMX))
+    alu.io.req.valid := io.req.valid && (io.req.bits.uop.fu_code === FU_ALU || io.req.bits.uop.fu_code_is(FU_VMX)) &&
+      (io.req.bits.uop.uopc =/= uopVFMV_F_S)
     vec_fu_units += alu
     //vresp_fu_units += alu
   }
@@ -771,6 +773,23 @@ class VecExeUnit(
     io.vresp.bits.predicated := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.predicated)))
   }
+
+  if (writesFrf){
+    val vecToFPQueue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth),
+        numStages))
+    vecToFPQueue.io.enq.valid := io.req.valid && (io.req.bits.uop.uopc === uopVFMV_F_S) && !io.req.bits.uop.vstart.orR()
+    vecToFPQueue.io.enq.bits.uop := io.req.bits.uop
+    /* @fixme: fix elen 64bits currently, flexible sew need to be supported. */
+    vecToFPQueue.io.enq.bits.uop.mem_size := 2.U
+    vecToFPQueue.io.enq.bits.data := io.req.bits.rs2_data
+    vecToFPQueue.io.enq.bits.predicated := false.B
+    vecToFPQueue.io.enq.bits.fflags := DontCare
+    vecToFPQueue.io.brupdate := io.brupdate
+    vecToFPQueue.io.flush := io.req.bits.kill
+    io.fresp <> vecToFPQueue.io.deq
+    assert(!(vecToFPQueue.io.enq.valid && !vecToFPQueue.io.enq.ready))
+  }
+
 
   /*
   no more guaranteed as div and fdiv are both unpipelined

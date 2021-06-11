@@ -134,6 +134,7 @@ class UOPCodeFPUDecoder(vector: Boolean = false)(implicit p: Parameters) extends
    ,BitPat(uopVFCVT_F2I)-> List(X,X,Y,N,N, Y,X,D,D,N,Y,N, N,N,N,Y)
    ,BitPat(uopVFCVT_I2F)-> List(X,X,N,N,N, Y,X,D,D,Y,N,N, N,N,N,Y)
    ,BitPat(uopVFCVT_F2F)-> List(X,X,Y,N,N, Y,X,D,D,N,N,Y, N,N,N,Y)
+   ,BitPat(uopVFMV_S_F) -> List(X,X,Y,N,N, N,Y,D,D,N,N,N, Y,N,N,N)
     )
 
 //   val insns = fLen match {
@@ -176,6 +177,8 @@ class FMADecoder(vector: Boolean = false) extends Module
      ,BitPat(uopVFMSUB)   -> List(BitPat("b01"))
      ,BitPat(uopVFNMSUB)  -> List(BitPat("b10"))
      ,BitPat(uopVFMV_V_F) -> List(BitPat("b00"))
+     ,BitPat(uopVFMV_F_S) -> List(BitPat("b00"))
+     ,BitPat(uopVFMV_S_F) -> List(BitPat("b00"))
     )
   } else {
     Array(

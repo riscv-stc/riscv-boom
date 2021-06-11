@@ -49,6 +49,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
     val to_int           = Decoupled(new ExeUnitResp(xLen))           // to integer RF
     val fpupdate         = if (usingVector) Output(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
 
+    val fromVec: Vec[DecoupledIO[ExeUnitResp]] = Flipped(Vec(vecWidth, Decoupled(new ExeUnitResp(eLen))))
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(fLen+1)))
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
@@ -173,7 +174,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   // **** Writeback Stage ****
   //-------------------------------------------------------------
 
-  val ll_wbarb = Module(new Arbiter(new ExeUnitResp(fLen+1), 2))
+  val ll_wbarb = Module(new Arbiter(new ExeUnitResp(fLen+1), 2 + vecWidth))
 
 
   // Hookup load writeback -- and recode FP values.
@@ -186,6 +187,13 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
 
   val ifpu_resp = io.from_int
   ll_wbarb.io.in(1) <> ifpu_resp
+
+  val vecResp: Vec[DecoupledIO[ExeUnitResp]] = io.fromVec
+    Seq.tabulate(vecWidth)(i => i).foreach{ i =>
+      ll_wbarb.io.in(2 + i) <> vecResp(i)
+      ll_wbarb.io.in(2 + i).bits.data := recode(vecResp(i).bits.data,
+        vecResp(i).bits.uop.mem_size)
+    }
 
 
   // Cut up critical path by delaying the write by a cycle.
