@@ -494,6 +494,7 @@ class ALUUnit(
   val r_val  = RegInit(VecInit(Seq.fill(numStages) { false.B }))
   val r_data = Reg(Vec(numStages, UInt(xLen.W)))
   val r_pred = Reg(Vec(numStages, Bool()))
+  val isVMerge: Bool = io.req.bits.uop.is_rvv && io.req.bits.uop.uopc === uopMERGE
   val v_inactive = io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active
   val alu_out = Mux(io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data,
     Mux(io.req.bits.uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
@@ -504,7 +505,12 @@ class ALUUnit(
         Mux(io.req.bits.uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA) || v_inactive, io.req.bits.rs3_data,
             alu.io.out))))))
   r_val (0) := io.req.valid
-  r_data(0) := Mux(io.req.bits.uop.is_sfb_br, pc_sel === PC_BRJMP, alu_out)
+  r_data(0) := Mux(io.req.bits.uop.is_sfb_br, pc_sel === PC_BRJMP,
+    Mux(isVMerge,
+      Mux(!io.req.bits.uop.v_active, io.req.bits.rs2_data, io.req.bits.rs1_data),
+      alu_out
+    )
+  )
   r_pred(0) := io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data
   for (i <- 1 until numStages) {
     r_val(i)  := r_val(i-1)
