@@ -902,7 +902,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   // vector stuff
   //
   if (usingVector) {
+    val ls_vconfig = WireInit(io.csr_vconfig)
+    ls_vconfig.vtype.vsew := cs.v_ls_ew
+    val ls_vlmax = ls_vconfig.vtype.vlMax
     val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
+    val is_v_ls_ustride = cs.uopc.isOneOf(uopVL, uopVSA)
     val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
     val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     val vseg_nf = inst(NF_MSB, NF_LSB)
@@ -910,7 +914,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vstart  = RegInit(0.U((vLenSz+1).W))
     val vseg_finc = RegInit(0.U(3.W))
     val vseg_gidx = RegInit(0.U(3.W))
-    val vlmax = io.csr_vconfig.vtype.vlMax
+    val vlmax = Mux(is_v_ls_ustride || is_v_ls_stride, ls_vlmax, io.csr_vconfig.vtype.vlMax)
     val vsew = io.csr_vconfig.vtype.vsew
     val vlmul_sign = io.csr_vconfig.vtype.vlmul_sign
     val vlmul = Mux(vlmul_sign, 0.U(2.W), io.csr_vconfig.vtype.vlmul_mag)
