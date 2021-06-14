@@ -1394,7 +1394,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     v_pipeline.io.to_int.ready := true.B
     v_pipeline.io.from_fp.valid := false.B
     v_pipeline.io.from_fp.bits := DontCare
-    v_pipeline.io.to_fp.ready := true.B
+    fp_pipeline.io.fromVec <> v_pipeline.io.to_fp
+    //v_pipeline.io.to_fp.ready := true.B
     v_pipeline.io.ll_wports  <> exe_units.memory_units.map(_.io.ll_vresp)
   }
 

@@ -963,10 +963,10 @@ object MicroOpcodes extends Enumeration {
   // VFWREDOSUM_VS
   // VFWREDSUM_VS
   // 17.2. FP salar move
-  val uopVMV_F_S_enum   = Value
-  val uopVMV_F_S        = uopVMV_F_S_enum.id.U(UOPC_SZ.W)
-  val uopVMV_S_F_enum   = Value
-  val uopVMV_S_F        = uopVMV_S_F_enum.id.U(UOPC_SZ.W)
+  val uopVFMV_F_S_enum   = Value
+  val uopVFMV_F_S        = uopVFMV_F_S_enum.id.U(UOPC_SZ.W)
+  val uopVFMV_S_F_enum   = Value
+  val uopVFMV_S_F        = uopVFMV_S_F_enum.id.U(UOPC_SZ.W)
   // 17.3. slide
   val uopVFSLIDE1UP_enum= Value
   val uopVFSLIDE1UP     = uopVFSLIDE1UP_enum.id.U(UOPC_SZ.W)
