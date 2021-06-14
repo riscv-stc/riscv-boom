@@ -433,10 +433,12 @@ object VectorCfgDecode extends DecodeConstants
 object VectorLSDecode extends DecodeConstants
 {
   val table: Array[(BitPat, List[BitPat])] = Array(
-  VLE8_V      ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
+  VLM_V       ->List(Y, N, X, uopVLM,         IQT_MEM, FU_MEM, RT_VEC, RT_FIX, RT_X,   N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
+ ,VLE8_V      ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VLE16_V     ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
  ,VLE32_V     ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
  ,VLE64_V     ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 3.U)
+ ,VSM_V       ->List(Y, N, X, uopVSMA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, N, 0.U)
  ,VSE8_V      ->List(Y, N, X, uopVSA,         IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 0.U)
  ,VSE16_V     ->List(Y, N, X, uopVSA,         IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 1.U)
  ,VSE32_V     ->List(Y, N, X, uopVSA,         IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N, Y, Y, Y, 2.U)
@@ -1002,6 +1004,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_v_ls_ustride = cs.uopc.isOneOf(uopVL, uopVSA)
     val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
     val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+    val is_v_mask_ls = cs.uopc.isOneOf(uopVLM, uopVSMA)
     val vseg_nf = inst(NF_MSB, NF_LSB)
     val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) // FIXME: exclude whole register load/store
     val vstart  = RegInit(0.U((vLenSz+1).W))
@@ -1046,7 +1049,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val split_ecnt = Mux(is_v_ls, 1.U, Mux(vmlogic_insn, vmlogic_split_ecnt, vLen_ecnt))
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     // for fractional lmul, we need visit at least one entire vreg
-    val total_ecnt = Mux(cs.uses_stq, io.csr_vconfig.vl, Mux(vlmul_sign, vLen_ecnt, Mux(vmlogic_insn, vmlogic_tolal_ecnt, vlmax)))
+    val total_ecnt = Mux(cs.uses_stq, Mux(is_v_mask_ls, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl), Mux(vlmul_sign, vLen_ecnt, Mux(vmlogic_insn, vmlogic_tolal_ecnt, vlmax)))
     val vseg_flast = vseg_finc === vseg_nf
     val elem_last  = vstart + split_ecnt === total_ecnt
     val split_last = elem_last && Mux(is_v_ls_seg, vseg_flast, true.B)
@@ -1117,6 +1120,16 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     }
 
     uop.v_idx_ls     := is_v_ls_index
+
+    when (cs.is_rvv && cs.uopc === uopVLM) {
+      uop.uopc := uopVL
+      // make elements >= ceil(vl/8) inactive
+      uop.vconfig.vl := (io.csr_vconfig.vl + 7.U) >> 3.U
+    }
+    when (cs.is_rvv && cs.uopc === uopVSMA) {
+      uop.uopc := uopVSA
+    }
+
     uop.v_xls_offset := 0.U
 
     uop.v_seg_ls  := false.B
