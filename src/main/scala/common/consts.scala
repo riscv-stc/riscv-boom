@@ -113,11 +113,12 @@ trait ScalarOpConstants
   val BR_JR  = 8.U(4.W)  // Jump Register
 
   // RS1 Operand Select Signal
-  val OP1_RS1 = 0.U(2.W) // Register Source #1
-  val OP1_ZERO= 1.U(2.W)
-  val OP1_PC  = 2.U(2.W)
-  val OP1_VS2 = 3.U(2.W) // for vector
-  val OP1_X   = BitPat("b??")
+  val OP1_RS1 = 0.U(3.W) // Register Source #1
+  val OP1_ZERO= 1.U(3.W)
+  val OP1_PC  = 2.U(3.W)
+  val OP1_VS2 = 3.U(3.W) // for vector
+  val OP1_INV_VS2 = 4.U(3.W) // for vector mask insn
+  val OP1_X   = BitPat("b???")
 
   // RS2 Operand Select Signal
   val OP2_RS2 = 0.U(3.W) // Register Source #2
@@ -127,6 +128,7 @@ trait ScalarOpConstants
   val OP2_IMMC= 4.U(3.W) // for CSR imm found in RS1
   val OP2_VL  = 5.U(3.W) // for vset{i}vl{i}
   val OP2_VS1 = 6.U(3.W) // for vector
+  val OP2_INV_VS1 = 7.U(3.W) // for vector mask insn
   val OP2_X   = BitPat("b???")
 
   // Register File Write Enable Signal
@@ -192,6 +194,7 @@ trait ScalarOpConstants
   def isRvvSImm5 (rt: UInt): Bool = (rt === RT_VI)
   def isRvvUImm5 (rt: UInt): Bool = (rt === RT_VIU)
   def isRvvImm5  (rt: UInt): Bool = (rt === RT_VI || rt === RT_VIU)
+  def isMaskV    (rt: UInt): Bool = (rt === RT_VM)
 
   val uopX    = BitPat.dontCare(boom.common.MicroOpcodes.UOPC_SZ)
   // The Bubble Instruction (Machine generated NOP)

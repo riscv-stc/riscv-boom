@@ -17,6 +17,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util._
 
+import FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
@@ -304,15 +305,23 @@ class RegisterRead(
         val is_idx_ls  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).v_idx_ls
         val vstart     = exe_reg_uops(w).vstart
         val vl         = exe_reg_uops(w).vconfig.vl
-        val is_active  = exe_reg_rvm_data(w) && vstart < vl
+        val vmlogic_insn = exe_reg_uops(w).uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
+        val byteWidth = 3.U
+        val vsew64bit = 3.U
+        val vmlogic_vl = (vl(0) || vl(1) || vl(2) || vl(3) || vl(4) || vl(5)) +& (vl>>(byteWidth +& vsew64bit))
+        val vmlogic_active = exe_reg_rvm_data(w) && vstart < vmlogic_vl
+        val is_active  = Mux(vmlogic_insn, vmlogic_active, exe_reg_rvm_data(w) && vstart < vl)
         io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w))
         io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
         io.vmupdate(w).bits     := exe_reg_uops(w)
         io.vmupdate(w).bits.v_active := is_active
         io.vmupdate(w).bits.v_xls_offset := exe_reg_rs2_data(w)
         io.exe_reqs(w).bits.uop.v_active := is_active
+        val uopc_fdiv = (io.exe_reqs(w).bits.uop.uopc === uopVFDIV)  ||
+                        (io.exe_reqs(w).bits.uop.uopc === uopVFRDIV) ||
+                        (io.exe_reqs(w).bits.uop.uopc === uopVFSQRT)
         // forward inactive ops to ALU
-        when (io.exe_reqs(w).bits.uop.is_rvv && !is_active) {
+        when (io.exe_reqs(w).bits.uop.is_rvv && !is_active && !uopc_fdiv) {
           io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
           io.exe_reqs(w).bits.uop.ctrl.op_fcn := freechips.rocketchip.rocket.ALU.FN_ADD
         }

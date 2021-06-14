@@ -340,7 +340,8 @@ class ALUUnit(
   } else {
     op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data,
                Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , io.req.bits.rs2_data,
-                                                         0.U))
+               Mux(uop.ctrl.op1_sel.asUInt === OP1_INV_VS2, ~io.req.bits.rs2_data,
+                                                         0.U)))
   }
 
   // operand 2 select
@@ -356,22 +357,24 @@ class ALUUnit(
     val avl       = Mux(vsetivli, uop.prs1, rs1_data)
     val new_vl    = VType.computeVL(avl, vtypei, io.vconfig.vl, useCurrentVL, useMaxVL, false.B)
 
-    op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,  Sext(imm_xprlen.asUInt, xLen),
-               Mux(uop.ctrl.op2_sel === OP2_IMMC, io.req.bits.uop.prs1(4,0),
-               Mux(uop.ctrl.op2_sel === OP2_RS2 , io.req.bits.rs2_data,
-               Mux(uop.ctrl.op2_sel === OP2_NEXT, Mux(uop.is_rvc, 2.U, 4.U),
-               Mux(uop.ctrl.op2_sel === OP2_VL,   new_vl, 0.U)))))
+    op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,     Sext(imm_xprlen.asUInt, xLen),
+               Mux(uop.ctrl.op2_sel === OP2_IMMC,    io.req.bits.uop.prs1(4,0),
+               Mux(uop.ctrl.op2_sel === OP2_RS2 ,    io.req.bits.rs2_data,
+               Mux(uop.ctrl.op2_sel === OP2_INV_VS1, ~io.req.bits.rs1_data,
+               Mux(uop.ctrl.op2_sel === OP2_NEXT,    Mux(uop.is_rvc, 2.U, 4.U),
+               Mux(uop.ctrl.op2_sel === OP2_VL,      new_vl, 0.U))))))
 
     val set_vconfig = vsetvl | vsetvli | vsetivli
     io.resp.bits.uop.vconfig.vl := RegEnable(new_vl, set_vconfig)
     io.resp.bits.uop.vconfig.vtype := RegEnable(VType.fromUInt(vtypei), set_vconfig)
   } else {
-    op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,  Sext(imm_xprlen.asUInt, xLen),
-               Mux(uop.ctrl.op2_sel === OP2_IMMC, io.req.bits.uop.prs1(4,0),
-               Mux(uop.ctrl.op2_sel === OP2_RS2 , io.req.bits.rs2_data,
-               Mux(uop.ctrl.op2_sel === OP2_NEXT, Mux(uop.is_rvc, 2.U, 4.U),
-               Mux(uop.ctrl.op2_sel === OP2_VS1,  io.req.bits.rs1_data,
-                                                  0.U)))))
+    op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,     Sext(imm_xprlen.asUInt, xLen),
+               Mux(uop.ctrl.op2_sel === OP2_IMMC,    io.req.bits.uop.prs1(4,0),
+               Mux(uop.ctrl.op2_sel === OP2_RS2 ,    io.req.bits.rs2_data,
+               Mux(uop.ctrl.op2_sel === OP2_NEXT,    Mux(uop.is_rvc, 2.U, 4.U),
+               Mux(uop.ctrl.op2_sel === OP2_VS1,     io.req.bits.rs1_data,
+               Mux(uop.ctrl.op2_sel === OP2_INV_VS1, ~io.req.bits.rs1_data,
+                                                     0.U))))))
   }
 
   val alu = Module(new freechips.rocketchip.rocket.ALU())
@@ -496,6 +499,20 @@ class ALUUnit(
   val r_pred = Reg(Vec(numStages, Bool()))
   val isVMerge: Bool = io.req.bits.uop.is_rvv && io.req.bits.uop.uopc === uopMERGE
   val v_inactive = io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active
+
+  val vl = io.req.bits.uop.vconfig.vl
+  val vstart = io.req.bits.uop.vstart
+  val byteWidth = 3.U
+  val vsew64bit = 3.U
+  val is_multiple_of_64 = vl(5,0) === 0.U
+  val vmlogic_vl = (vl(0) || vl(1) || vl(2) || vl(3) || vl(4) || vl(5)) +& (vl>>(byteWidth +& vsew64bit))
+  val is_vmlogic_last_split = vstart === (vmlogic_vl-1.U)
+
+  val vmlogic_mask = boom.util.MaskGen(0.U, vl(5,0), 64)
+  val vmlogic_alu_result = Mux(io.req.bits.uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR), ~alu.io.out, alu.io.out)
+  val vmlogic_last_result = (vmlogic_alu_result & vmlogic_mask) | (io.req.bits.rs3_data & (~vmlogic_mask))
+  val vmlogic_result = Mux(is_vmlogic_last_split & (~is_multiple_of_64), vmlogic_last_result, vmlogic_alu_result)
+
   val alu_out = Mux(io.req.bits.uop.is_sfb_shadow && io.req.bits.pred_data,
     Mux(io.req.bits.uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
     Mux(io.req.bits.uop.uopc === uopMOV, io.req.bits.rs2_data,
@@ -503,7 +520,8 @@ class ALUUnit(
         Mux(io.req.bits.uop.uopc.isOneOf(uopVMAX, uopVMAXU) && !v_inactive, Mux(alu.io.out(0), io.req.bits.rs1_data, io.req.bits.rs2_data),
         Mux(io.req.bits.uop.rt(RD, isReduceV) && v_inactive, io.req.bits.rs1_data,
         Mux(io.req.bits.uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA) || v_inactive, io.req.bits.rs3_data,
-            alu.io.out))))))
+        Mux(io.req.bits.uop.rt(RD, isMaskV), vmlogic_result,
+            alu.io.out)))))))
   r_val (0) := io.req.valid
   r_data(0) := Mux(io.req.bits.uop.is_sfb_br, pc_sel === PC_BRJMP,
     Mux(isVMerge,
@@ -560,7 +578,6 @@ class MemAddrCalcUnit(implicit p: Parameters)
   val op1 = io.req.bits.rs1_data.asSInt
   // TODO: optimize multiplications here
   val op2 = Mux(vec_us_ls, ((uop.vstart * uop.v_seg_nf + uop.v_seg_f) << v_ls_ew).asSInt,
-            // TODO: any better way instead of multiplication?
             Mux(vec_cs_ls, io.req.bits.rs2_data.asSInt * uop.vstart.asUInt + Cat(0.U(1.W), uop.v_seg_f << v_ls_ew).asSInt,
             Mux(vec_idx_ls, uop.v_xls_offset.asSInt + Cat(0.U(1.W), uop.v_seg_f << uop_sew).asSInt,
                 uop.imm_packed(19,8).asSInt)))
@@ -674,7 +691,7 @@ class FPUUnit(vector: Boolean = false)(implicit p: Parameters)
  *
  * @param latency the amount of stages to delay by
  */
-class IntToFPUnit(latency: Int)(implicit p: Parameters)
+class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
   extends PipelinedFunctionalUnit(
     numStages = latency,
     numBypassStages = 0,
@@ -683,22 +700,48 @@ class IntToFPUnit(latency: Int)(implicit p: Parameters)
     needsFcsr = true)
   with tile.HasFPUParameters
 {
-  val fp_decoder = Module(new UOPCodeFPUDecoder) // TODO use a simpler decoder
+  val fp_decoder = Module(new UOPCodeFPUDecoder(vector)) // TODO use a simpler decoder
   val io_req = io.req.bits
   fp_decoder.io.uopc := io_req.uop.uopc
-  val fp_ctrl = fp_decoder.io.sigs
-  val fp_rm = Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U, io.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
+  val fp_ctrl = WireInit(fp_decoder.io.sigs)
+  val fp_rm = Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U || io_req.uop.is_rvv, io.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
+  val vd_widen = io_req.uop.rt(RD , isWidenV)
+  val vs2_widen= io_req.uop.rt(RS2, isWidenV)
+  if (vector) {
+    val vsew = io_req.uop.vconfig.vtype.vsew
+    val vd_sew  = Mux(vd_widen, vsew+1.U, vsew)
+    val vs2_sew = Mux(vs2_widen, vsew+1.U, vsew)
+    val vd_fmt  = Mux(vd_sew  === 3.U, D, Mux(vd_sew  === 2.U, S, H))
+    val vs1_fmt = Mux(vsew    === 3.U, D, Mux(vsew    === 2.U, S, H))
+    val vs2_fmt = Mux(vs2_sew === 3.U, D, Mux(vs2_sew === 2.U, S, H))
+    when (io.req.valid && io_req.uop.is_rvv) {
+      assert(io_req.uop.fp_val, "unexpected fp_val")
+      assert(io_req.uop.v_active, "unexpected inactive split")
+      assert(vsew >= 1.U && vsew <= 3.U, "unsupported vsew")
+      assert(vd_sew >= 1.U && vd_sew <= 3.U, "unsupported vd_sew")
+    }
+   
+    when (io_req.uop.is_rvv) {
+      // TODO considering widening and narrowing operations
+      fp_ctrl.typeTagIn := vs2_fmt
+      fp_ctrl.typeTagOut:= vd_fmt
+    }
+  }
   val req = Wire(new tile.FPInput)
   val tag = fp_ctrl.typeTagIn
 
   req <> fp_ctrl
 
   req.rm := fp_rm
-  req.in1 := unbox(io_req.rs1_data, tag, None)
+  req.in1 := Mux(fp_ctrl.swap12, unbox(io_req.rs2_data, tag, None), unbox(io_req.rs1_data, tag, None))
   req.in2 := unbox(io_req.rs2_data, tag, None)
   req.in3 := DontCare
-  req.typ := ImmGenTyp(io_req.uop.imm_packed)
-  req.fmt := DontCare // FIXME: this may not be the right thing to do here
+  when(fp_ctrl.wflags) {
+    req.typeTagIn := fp_ctrl.typeTagOut      // IntToFP typeTagIn, based on float width, not integer
+  }
+  val typ1 = Mux(tag === D, 1.U(1.W), 0.U(1.W))
+  req.typ := Mux(io_req.uop.is_rvv, ImmGenTypRVV(typ1, io_req.uop.imm_packed), ImmGenTyp(io_req.uop.imm_packed))
+  req.fmt := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
   req.fmaCmd := DontCare
 
   assert (!(io.req.valid && fp_ctrl.fromint && req.in1(xLen).asBool),
@@ -707,14 +750,16 @@ class IntToFPUnit(latency: Int)(implicit p: Parameters)
   assert (!(io.req.valid && !fp_ctrl.fromint),
     "[func] Only support fromInt micro-ops.")
 
-  val ifpu = Module(new tile.IntToFP(intToFpLatency))
+  val ifpu = Module(new tile.IntToFP(latency))
   ifpu.io.in.valid := io.req.valid
   ifpu.io.in.bits := req
-  ifpu.io.in.bits.in1 := io_req.rs1_data
-  val out_double = Pipe(io.req.valid, fp_ctrl.typeTagOut === D, intToFpLatency).bits
+  ifpu.io.in.bits.in1 := Mux(fp_ctrl.swap12, io_req.rs2_data, io_req.rs1_data)
+  val outTypeTag = Pipe(io.req.valid, fp_ctrl.typeTagOut, latency).bits
+  val outRVV     = Pipe(io.req.valid, io_req.uop.is_rvv,  latency).bits
 
 //io.resp.bits.data              := box(ifpu.io.out.bits.data, !io.resp.bits.uop.fp_single)
-  io.resp.bits.data              := box(ifpu.io.out.bits.data, out_double)
+  io.resp.bits.data              := Mux(outRVV, ieee(box(ifpu.io.out.bits.data, outTypeTag)),
+                                        box(ifpu.io.out.bits.data, outTypeTag))
   io.resp.bits.fflags.valid      := ifpu.io.out.valid
   io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
   io.resp.bits.fflags.bits.flags := ifpu.io.out.bits.exc
