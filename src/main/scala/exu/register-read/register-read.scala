@@ -313,16 +313,21 @@ class RegisterRead(
         val is_active  = Mux(vmlogic_insn, vmlogic_active, exe_reg_rvm_data(w) && vstart < vl)
         io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w))
         io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
-        val isVFMV: Bool = exe_reg_uops(w).uopc === uopVFMV_S_F || exe_reg_uops(w).uopc === uopVFMV_F_S
+        val isVMV: Bool = VecInit(Seq(exe_reg_uops(w).uopc === uopVFMV_S_F,
+          exe_reg_uops(w).uopc === uopVFMV_F_S,
+          exe_reg_uops(w).uopc === uopVMV_X_S,
+          exe_reg_uops(w).uopc === uopVMV_S_X
+        )).asUInt().orR()
+
         io.vmupdate(w).bits     := exe_reg_uops(w)
         io.vmupdate(w).bits.v_active := is_active
         io.vmupdate(w).bits.v_xls_offset := exe_reg_rs2_data(w)
-        io.exe_reqs(w).bits.uop.v_active := Mux(isVFMV, !vstart.orR(), is_active)
+        io.exe_reqs(w).bits.uop.v_active := Mux(isVMV, !vstart.orR(), is_active)
         val uopc_fdiv = (io.exe_reqs(w).bits.uop.uopc === uopVFDIV)  ||
                         (io.exe_reqs(w).bits.uop.uopc === uopVFRDIV) ||
                         (io.exe_reqs(w).bits.uop.uopc === uopVFSQRT)
         // forward inactive ops to ALU
-        when ((io.exe_reqs(w).bits.uop.is_rvv && !is_active && !uopc_fdiv) || (isVFMV && vstart.orR())) {
+        when ((io.exe_reqs(w).bits.uop.is_rvv && !is_active && !uopc_fdiv) || (isVMV && vstart.orR())) {
           io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
           io.exe_reqs(w).bits.uop.ctrl.op_fcn := freechips.rocketchip.rocket.ALU.FN_ADD
         }
