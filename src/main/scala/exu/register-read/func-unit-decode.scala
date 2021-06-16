@@ -23,6 +23,7 @@ import freechips.rocketchip.rocket.CSR
 
 import boom.common._
 import boom.common.MicroOpcodes._
+import boom.exu.VMaskUnit._
 
 /**
  * Control signal bundle for register renaming
@@ -168,6 +169,13 @@ object VecRRdDecode extends RRdDecodeConstants
         ,BitPat(uopVMNOR)    -> List(BR_N, Y, N, N, FN_OR,    DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMORNOT)  -> List(BR_N, Y, N, N, FN_OR,    DW_XPR, OP1_VS2,     OP2_INV_VS1, IS_X, REN_1, CSR.N)
         ,BitPat(uopVMXNOR)   -> List(BR_N, Y, N, N, FN_XOR,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVPOPC)    -> List(BR_N, Y, N, N, FN_POPC,  DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopVFIRST)   -> List(BR_N, Y, N, N, FN_FIRST, DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSBF)    -> List(BR_N, Y, N, N, FN_SBF,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSIF)    -> List(BR_N, Y, N, N, FN_SIF,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSOF)    -> List(BR_N, Y, N, N, FN_SOF,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopVIOTA)    -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopVID)      -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
   )
 }
 

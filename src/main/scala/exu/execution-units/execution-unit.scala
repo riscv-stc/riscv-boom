@@ -74,6 +74,7 @@ class FFlagsResp(implicit p: Parameters) extends BoomBundle
  * @param hasFpu does the exe unit have a fpu
  * @param hasMul does the exe unit have a multiplier
  * @param hasMacc does the exe unit have a multiply-accumulator
+ * @param hasVMaskUnit does the exe unit have a VMaskUnit
  * @param hasDiv does the exe unit have a divider
  * @param hasFdiv does the exe unit have a FP divider
  * @param hasIfpu does the exe unit have a int to FP unit
@@ -100,6 +101,7 @@ abstract class ExecutionUnit(
   val hasFpu           : Boolean       = false,
   val hasMul           : Boolean       = false,
   val hasMacc          : Boolean       = false,
+  val hasVMaskUnit     : Boolean       = false,
   val hasDiv           : Boolean       = false,
   val hasFdiv          : Boolean       = false,
   val hasIfpu          : Boolean       = false,
@@ -602,6 +604,7 @@ class VecExeUnit(
   hasVMX         : Boolean = false,
   hasAlu         : Boolean = true,
   hasMacc        : Boolean = true,
+  hasVMaskUnit   : Boolean = true,
   hasDiv         : Boolean = true,
   hasIfpu        : Boolean = false,
   hasFpu         : Boolean = false,
@@ -617,6 +620,7 @@ class VecExeUnit(
     alwaysBypassable = false,
     hasAlu           = hasAlu,
     hasMacc          = hasMacc,
+    hasVMaskUnit     = hasVMaskUnit,
     hasDiv           = hasDiv,
     hasIfpu          = hasIfpu,
     hasFpu           = hasFpu,
@@ -647,6 +651,7 @@ class VecExeUnit(
 
   io.fu_types := Mux(hasAlu.B,                FU_ALU, 0.U) |
                  Mux(hasMacc.B,               FU_MAC, 0.U) |
+                 Mux(hasVMaskUnit.B,          FU_VMASKU, 0.U) |
                  Mux(!div_busy && hasDiv.B,   FU_DIV, 0.U) |
                  Mux(hasIfpu.B,               FU_I2F, 0.U) |
                  Mux(hasFpu.B,       FU_FPU | FU_F2I, 0.U) |
@@ -671,6 +676,15 @@ class VecExeUnit(
     imacc.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_MAC)
     vec_fu_units += imacc
     //vresp_fu_units += imacc
+  }
+
+  // Pipelined, VMaskUnit ------------------
+  var vmaskunit: PipelinedVMaskUnit = null
+  if (hasVMaskUnit) {
+    vmaskunit = Module(new PipelinedVMaskUnit(numStages, eLen))
+    vmaskunit.io <> DontCare
+    vmaskunit.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMASKU)
+    vec_fu_units += vmaskunit
   }
 
   // Div/Rem Unit -----------------------

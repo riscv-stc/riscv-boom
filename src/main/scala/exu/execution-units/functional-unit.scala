@@ -37,7 +37,7 @@ import boom.util._
 object FUConstants
 {
   // bit mask, since a given execution pipeline may support multiple functional units
-  val FUC_SZ = 12
+  val FUC_SZ = 13
   val FU_X   = BitPat.dontCare(FUC_SZ)
   val FU_ALU_ID = 0
   val FU_JMP_ID = 1
@@ -51,6 +51,7 @@ object FUConstants
   val FU_F2I_ID = 9
   val FU_VMX_ID = 10  // vec load /store index vec store data
   val FU_MAC_ID = 11
+  val FU_VMASKU_ID = 12
   val FU_ALU = (1<<FU_ALU_ID).U(FUC_SZ.W)
   val FU_JMP = (1<<FU_JMP_ID).U(FUC_SZ.W)
   val FU_MEM = (1<<FU_MEM_ID).U(FUC_SZ.W)
@@ -63,6 +64,7 @@ object FUConstants
   val FU_F2I = (1<<FU_F2I_ID).U(FUC_SZ.W)
   val FU_VMX = (1<<FU_VMX_ID).U(FUC_SZ.W)
   val FU_MAC = (1<<FU_MAC_ID).U(FUC_SZ.W)
+  val FU_VMASKU = (1<<FU_VMASKU_ID).U(FUC_SZ.W)
 
   // FP stores generate data through FP F2I, and generate address through MemAddrCalc
   def FU_F2IMEM = ((1 << FU_MEM_ID) | (1 << FU_F2I_ID)).U(FUC_SZ.W)
@@ -909,4 +911,60 @@ class IntMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val resp = Pipe(in, numStages-1)
   io.resp.valid := resp.valid
   io.resp.bits.data := Pipe(in.valid, muxed, numStages-1).bits
+}
+
+/**
+  * Pipelined vmask computing functional unit that wraps around the VMaskUnit
+  *
+  * @param numStages number of pipeline stages
+  * @param dataWidth size of the data being passed into the functional unit
+  */
+@chiselName
+class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
+  extends PipelinedFunctionalUnit(
+    numStages = numStages,
+    numBypassStages = 0,
+    earliestBypassStage = 0,
+    dataWidth = dataWidth)
+{
+  val uop = io.req.bits.uop
+
+  // immediate generation
+  val rs1_data = io.req.bits.rs1_data
+  val rs2_data = io.req.bits.rs2_data
+
+  // operand 1 select
+  var op1_data: UInt = null
+    op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data,
+               Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , rs2_data,
+                   0.U))
+
+  // operand 2 select
+  val op2_data = WireInit(0.U(xLen.W))
+  op2_data:= Mux(uop.ctrl.op2_sel === OP2_RS2 , rs2_data,
+             Mux(uop.ctrl.op2_sel === OP2_VS1,  rs1_data, 0.U))
+
+  val vmaskUnit = Module(new VMaskUnit())
+
+  vmaskUnit.io.in := op1_data.asUInt
+  vmaskUnit.io.in_addend := op2_data.asUInt
+  vmaskUnit.io.fn  := uop.ctrl.op_fcn
+
+  // Response
+  val r_val  = RegInit(VecInit(Seq.fill(numStages) { false.B }))
+  val r_data = Reg(Vec(numStages, UInt(xLen.W)))
+
+  val vmaskUnit_out = vmaskUnit.io.out
+
+  r_val(0) := io.req.valid
+  r_data(0) := vmaskUnit_out
+
+  for (i <- 1 until numStages) {
+    r_val(i)  := r_val(i-1)
+    r_data(i) := r_data(i-1)
+  }
+  io.resp.bits.data := r_data(numStages-1)
+
+  // Exceptions
+  io.resp.bits.fflags.valid := false.B
 }
