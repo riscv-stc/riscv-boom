@@ -153,7 +153,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // TODO: should this be a multi-arb?
   val ll_wbarb         = Module(new Arbiter(new ExeUnitResp(xLen), 1 +
                                                                    (if (usingFPU) 1 else 0) +
-                                                                   (if (usingRoCC) 1 else 0)))
+                                                                   (if (usingRoCC) 1 else 0) +
+                                                                   (if (usingVector) vecWidth else 0)))
   val iregister_read   = Module(new RegisterRead(
                            issue_units.map(_.issueWidth).sum,
                            exe_units.withFilter(_.readsIrf).map(_.supportedFuncUnits),
@@ -1391,10 +1392,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     // FIXME
     v_pipeline.io.from_int.valid := false.B
     v_pipeline.io.from_int.bits := DontCare
-    v_pipeline.io.to_int.ready := true.B
+    //v_pipeline.io.to_int.ready := true.B
     v_pipeline.io.from_fp.valid := false.B
     v_pipeline.io.from_fp.bits := DontCare
     fp_pipeline.io.fromVec <> v_pipeline.io.to_fp
+    Seq.tabulate(vecWidth)(i => i).foreach { i =>
+      val attachBase: Int = 2 + (if(usingRoCC) 1 else 0)
+      ll_wbarb.io.in(attachBase + i) <> v_pipeline.io.to_int(i)
+    }
     //v_pipeline.io.to_fp.ready := true.B
     v_pipeline.io.ll_wports  <> exe_units.memory_units.map(_.io.ll_vresp)
   }

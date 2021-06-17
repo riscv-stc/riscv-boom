@@ -154,7 +154,7 @@ abstract class ExecutionUnit(
   if (writesIrf)   {
     io.iresp.bits.fflags.valid := false.B
     io.iresp.bits.predicated := false.B
-    assert(io.iresp.ready)
+    //assert(io.iresp.ready)
   }
   if (writesLlIrf) {
     io.ll_iresp.bits.fflags.valid := false.B
@@ -613,6 +613,7 @@ class VecExeUnit(
   extends ExecutionUnit(
     readsVrf         = true,
     writesVrf        = true,
+    writesIrf        = true,
     writesFrf        = true,
     numBypassStages  = if (hasMacc) 3 else 1,
     dataWidth        = p(tile.TileKey).core.eLen,
@@ -663,7 +664,8 @@ class VecExeUnit(
   if (hasAlu) {
     alu = Module(new ALUUnit(numStages = numStages, dataWidth = eLen))
     alu.io.req.valid := io.req.valid && (io.req.bits.uop.fu_code === FU_ALU || io.req.bits.uop.fu_code_is(FU_VMX)) &&
-      (io.req.bits.uop.uopc =/= uopVFMV_F_S)
+      (io.req.bits.uop.uopc =/= uopVFMV_F_S) &&
+      (io.req.bits.uop.uopc =/= uopVMV_X_S)
     vec_fu_units += alu
     //vresp_fu_units += alu
   }
@@ -804,6 +806,19 @@ class VecExeUnit(
     assert(!(vecToFPQueue.io.enq.valid && !vecToFPQueue.io.enq.ready))
   }
 
+  if (writesIrf){
+    val vecToIntQueue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth), numStages))
+    vecToIntQueue.io.enq.valid := io.req.valid && (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
+    vecToIntQueue.io.enq.bits.uop := io.req.bits.uop
+    vecToIntQueue.io.enq.bits.data := io.req.bits.rs2_data
+    vecToIntQueue.io.enq.bits.uop.v_is_last := (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
+    vecToIntQueue.io.enq.bits.predicated := false.B
+    vecToIntQueue.io.enq.bits.fflags := DontCare
+    vecToIntQueue.io.brupdate := io.brupdate
+    vecToIntQueue.io.flush := io.req.bits.kill
+    io.iresp <> vecToIntQueue.io.deq
+    assert(!(vecToIntQueue.io.enq.valid && !vecToIntQueue.io.enq.ready))
+  }
 
   /*
   no more guaranteed as div and fdiv are both unpipelined

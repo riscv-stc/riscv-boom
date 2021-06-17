@@ -6,7 +6,16 @@ build:
   script: |
     cd ~/chipyard
     git pull
-    ./scripts/init-submodules-no-riscv-tools.sh
+    if [ -d generators/boom.tmp ]; then
+        mv -f generators/boom generators/boom.working
+        mv -f generators/boom.tmp generators/boom
+        ./scripts/init-submodules-no-riscv-tools.sh
+        mv -f generators/boom generators/boom.tmp
+        mv -f generators/boom.working generators/boom
+    else
+        ./scripts/init-submodules-no-riscv-tools.sh
+        mv -f generators/boom generators/boom.tmp
+    fi
     rsync -az $CI_PROJECT_DIR/* generators/boom
     module load chipyard
     bsub -J ci -Ip make -C sims/vcs CONFIG=StcBoomConfig -j
@@ -18,8 +27,8 @@ build:
   timeout: 5h
   artifacts:
     paths:
-      - chipyard/sims/vcs
-    name: vcs
+      - chipyard/sims/vcs/simv-chipyard-StcBoomConfig
+    name: simv
   tags:
     - lsf
 
