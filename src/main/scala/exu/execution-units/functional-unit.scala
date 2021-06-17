@@ -939,10 +939,12 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
                Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , rs2_data,
                    0.U))
 
+  val init_result = Mux(uop.vstart === 0.U, 0.U, 1.U)
   // operand 2 select
   val op2_data = WireInit(0.U(xLen.W))
   op2_data:= Mux(uop.ctrl.op2_sel === OP2_RS2 , rs2_data,
-             Mux(uop.ctrl.op2_sel === OP2_VS1,  rs1_data, 0.U))
+             Mux(uop.uopc.isOneOf(uopVPOPC, uopVFIRST), init_result,
+             Mux(uop.ctrl.op2_sel === OP2_VS1,  rs1_data, 0.U)))
 
   val vmaskUnit = Module(new VMaskUnit())
 
@@ -950,21 +952,8 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   vmaskUnit.io.in_addend := op2_data.asUInt
   vmaskUnit.io.fn  := uop.ctrl.op_fcn
 
-  // Response
-  val r_val  = RegInit(VecInit(Seq.fill(numStages) { false.B }))
-  val r_data = Reg(Vec(numStages, UInt(xLen.W)))
-
   val vmaskUnit_out = vmaskUnit.io.out
 
-  r_val(0) := io.req.valid
-  r_data(0) := vmaskUnit_out
-
-  for (i <- 1 until numStages) {
-    r_val(i)  := r_val(i-1)
-    r_data(i) := r_data(i-1)
-  }
-  io.resp.bits.data := r_data(numStages-1)
-
-  // Exceptions
-  io.resp.bits.fflags.valid := false.B
+  // vl => last
+  io.resp.bits.data := vmaskUnit_out
 }
