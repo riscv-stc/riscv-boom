@@ -685,8 +685,9 @@ class VecExeUnit(
   if (hasVMaskUnit) {
     vmaskunit = Module(new PipelinedVMaskUnit(numStages, eLen))
     vmaskunit.io <> DontCare
-    vmaskunit.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMASKU)
-    vec_fu_units += vmaskunit
+    vmaskunit.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMASKU)
+
+    // vec_fu_units += vmaskunit
   }
 
   // Div/Rem Unit -----------------------
@@ -808,10 +809,17 @@ class VecExeUnit(
 
   if (writesIrf){
     val vecToIntQueue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth), numStages))
-    vecToIntQueue.io.enq.valid := io.req.valid && (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
+
+    val vmv_valid = io.req.valid && (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
+    val vmv_is_last = (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
+    val vpopc_is_last = io.req.bits.uop.v_is_last
+    val vpopc_valid = vmaskunit.io.resp.valid && vpopc_is_last
+    val vpopc_result = vmaskunit.io.resp.bits.data
+
+    vecToIntQueue.io.enq.valid := vmv_valid | vpopc_valid
     vecToIntQueue.io.enq.bits.uop := io.req.bits.uop
-    vecToIntQueue.io.enq.bits.data := io.req.bits.rs2_data
-    vecToIntQueue.io.enq.bits.uop.v_is_last := (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
+    vecToIntQueue.io.enq.bits.data := Mux(vmv_valid, io.req.bits.rs2_data, Mux(vpopc_valid, vpopc_result, 0.U))
+    vecToIntQueue.io.enq.bits.uop.v_is_last := vmv_is_last
     vecToIntQueue.io.enq.bits.predicated := false.B
     vecToIntQueue.io.enq.bits.fflags := DontCare
     vecToIntQueue.io.brupdate := io.brupdate
