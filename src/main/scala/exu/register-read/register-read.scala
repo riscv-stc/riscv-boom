@@ -306,7 +306,7 @@ class RegisterRead(
         val vstart     = exe_reg_uops(w).vstart
         val vl         = exe_reg_uops(w).vconfig.vl
         val vmlogic_insn = exe_reg_uops(w).uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
-        val is_v_popc_m = cs.uopc.isOneOf(uopVPOPC)
+        val is_v_popc_m = exe_reg_uops(w).uopc.isOneOf(uopVPOPC)
         val is_v_mask_insn = vmlogic_insn || is_v_popc_m
         val byteWidth = 3.U
         val vsew64bit = 3.U
