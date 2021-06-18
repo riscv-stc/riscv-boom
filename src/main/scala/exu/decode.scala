@@ -1010,7 +1010,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vstart  = RegInit(0.U((vLenSz+1).W))
     val vseg_finc = RegInit(0.U(3.W))
     val vseg_gidx = RegInit(0.U(3.W))
-    val vlmax = Mux(is_v_ls_ustride || is_v_ls_stride, ls_vlmax, io.csr_vconfig.vtype.vlMax)
+    val vlmax = Mux(is_v_mask_ls, vLen.U >> 3, Mux(is_v_ls_ustride || is_v_ls_stride, ls_vlmax, io.csr_vconfig.vtype.vlMax))
     val vsew = io.csr_vconfig.vtype.vsew
     val vlmul_sign = io.csr_vconfig.vtype.vlmul_sign
     val vlmul = Mux(vlmul_sign, 0.U(2.W), io.csr_vconfig.vtype.vlmul_mag)
@@ -1049,7 +1049,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val split_ecnt = Mux(is_v_ls, 1.U, Mux(vmlogic_insn, vmlogic_split_ecnt, vLen_ecnt))
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     // for fractional lmul, we need visit at least one entire vreg
-    val total_ecnt = Mux(cs.uses_stq, Mux(is_v_mask_ls, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl), Mux(vlmul_sign, vLen_ecnt, Mux(vmlogic_insn, vmlogic_tolal_ecnt, vlmax)))
+    val total_ecnt = Mux(cs.uses_stq, Mux(is_v_mask_ls, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl), Mux(vlmul_sign && !is_v_mask_ls, vLen_ecnt, Mux(vmlogic_insn, vmlogic_tolal_ecnt, vlmax)))
     val vseg_flast = vseg_finc === vseg_nf
     val elem_last  = vstart + split_ecnt === total_ecnt
     val split_last = elem_last && Mux(is_v_ls_seg, vseg_flast, true.B)
