@@ -1149,7 +1149,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.frs3_en := true.B
     }
 
-    val red_op  = cs.is_rvv && isReduceV(cs.dst_type) || is_v_popc_m
+    val red_op  = cs.is_rvv && isReduceV(cs.dst_type)
     val red_act = RegInit(false.B)
 
     when (io.kill) {

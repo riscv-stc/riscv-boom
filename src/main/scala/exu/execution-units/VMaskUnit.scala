@@ -47,7 +47,7 @@ class VMaskUnit(implicit p: Parameters) extends BoomModule{
   val set_before_first = set_only_first - 1.U
   val set_including_first = set_only_first | set_before_first
 
-  val out = Mux((io.fn === FN_POPC) || (io.fn === FN_FIRST), index_added,
+  val out = Mux((io.fn === FN_POPC) || (io.fn === FN_FIRST), index_result,
             Mux(io.fn === FN_SOF, set_only_first, 
             Mux(io.fn === FN_SBF, set_before_first,
             Mux(io.fn === FN_SIF, set_including_first, 0.U(xLen.W)))))

@@ -919,7 +919,6 @@ class IntMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   * @param numStages number of pipeline stages
   * @param dataWidth size of the data being passed into the functional unit
   */
-@chiselName
 class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   extends PipelinedFunctionalUnit(
     numStages = numStages,
