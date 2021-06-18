@@ -813,7 +813,7 @@ class VecExeUnit(
     val vmv_valid = io.req.valid && (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
     val vmv_is_last = (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
     val vpopc_is_last = io.req.bits.uop.v_is_last
-    val vpopc_valid = vmaskunit.io.resp.valid && vpopc_is_last
+    val vpopc_valid = vmaskunit.io.resp.valid
     val vpopc_result = vmaskunit.io.resp.bits.data
 
     vecToIntQueue.io.enq.valid := vmv_valid | vpopc_valid

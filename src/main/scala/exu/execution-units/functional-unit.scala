@@ -921,7 +921,7 @@ class IntMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   */
 class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   extends PipelinedFunctionalUnit(
-    numStages = numStages,
+    numStages = 0,
     numBypassStages = 0,
     earliestBypassStage = 0,
     dataWidth = dataWidth)
@@ -938,7 +938,7 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
                Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , rs2_data,
                    0.U))
 
-  val init_result = Mux(uop.vstart === 0.U, 0.U, 1.U)
+  val init_result = Mux(uop.vstart === 0.U, 0.U, 0.U)
   // operand 2 select
   val op2_data = WireInit(0.U(xLen.W))
   op2_data:= Mux(uop.ctrl.op2_sel === OP2_RS2 , rs2_data,

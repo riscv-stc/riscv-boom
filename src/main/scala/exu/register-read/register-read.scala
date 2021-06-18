@@ -306,11 +306,13 @@ class RegisterRead(
         val vstart     = exe_reg_uops(w).vstart
         val vl         = exe_reg_uops(w).vconfig.vl
         val vmlogic_insn = exe_reg_uops(w).uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
+        val is_v_popc_m = cs.uopc.isOneOf(uopVPOPC)
+        val is_v_mask_insn = vmlogic_insn || is_v_popc_m
         val byteWidth = 3.U
         val vsew64bit = 3.U
         val vmlogic_vl = (vl(0) || vl(1) || vl(2) || vl(3) || vl(4) || vl(5)) +& (vl>>(byteWidth +& vsew64bit))
         val vmlogic_active = exe_reg_rvm_data(w) && vstart < vmlogic_vl
-        val is_active  = Mux(vmlogic_insn, vmlogic_active, exe_reg_rvm_data(w) && vstart < vl)
+        val is_active  = Mux(is_v_mask_insn, vmlogic_active, exe_reg_rvm_data(w) && vstart < vl)
         io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w))
         io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
         val isVMV: Bool = VecInit(Seq(exe_reg_uops(w).uopc === uopVFMV_S_F,
