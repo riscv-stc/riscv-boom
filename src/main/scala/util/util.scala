@@ -698,6 +698,9 @@ object MaskGen {
 }
 
 object VRegMask {
+  /**
+   * Get byte level mask for vreg
+   */
   def apply(vstart: UInt, vsew: UInt, ecnt: UInt, elenb: Int): UInt = {
     val lsb = (vstart << vsew)(2, 0)
     val len = ecnt << vsew

@@ -75,6 +75,10 @@ trait ScalarOpConstants
   val X = BitPat("b?")
   val Y = BitPat("b1")
   val N = BitPat("b0")
+  val U_0 = 0.U(2.W)
+  val U_1 = 1.U(2.W)
+  val U_2 = 2.U(2.W)
+  val U_3 = 3.U(2.W)
 
   //************************************
   // Extra Constants
@@ -194,7 +198,7 @@ trait ScalarOpConstants
   def isRvvSImm5 (rt: UInt): Bool = (rt === RT_VI)
   def isRvvUImm5 (rt: UInt): Bool = (rt === RT_VIU)
   def isRvvImm5  (rt: UInt): Bool = (rt === RT_VI || rt === RT_VIU)
-  def isMaskV    (rt: UInt): Bool = (rt === RT_VM)
+  //def isMaskV    (rt: UInt): Bool = (rt === RT_VM)
 
   val uopX    = BitPat.dontCare(boom.common.MicroOpcodes.UOPC_SZ)
   // The Bubble Instruction (Machine generated NOP)

@@ -208,7 +208,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
  *
  * TODO REFACTOR this, as this should no longer be true, as bypass occurs in stage before branch resolution
  */
-class CtrlSignals extends Bundle()
+class CtrlSignals(implicit p: Parameters) extends BoomBundle()
 {
   val br_type     = UInt(BR_N.getWidth.W)
   val op1_sel     = UInt(OP1_X.getWidth.W)
@@ -220,6 +220,9 @@ class CtrlSignals extends Bundle()
   val is_load     = Bool()   // will invoke TLB address lookup
   val is_sta      = Bool()   // will invoke TLB address lookup
   val is_std      = Bool()
+  val is_vmlogic  = if (usingVector) Bool() else null
+  val is_vmscmp   = if (usingVector) Bool() else null
+  //val is_vmfscmp   = if (usingVector) Bool() else null
 }
 
 /**
@@ -682,36 +685,48 @@ object MicroOpcodes extends Enumeration {
   val uopVMV_V          = uopVMV_V_enum.id.U(UOPC_SZ.W)
   // VMV_V_*
   // 13.1. single-width saturating add/sub
+  val uopVSADDU_enum    = Value
+  val uopVSADDU         = uopVSADDU_enum.id.U(UOPC_SZ.W)
+  // VSADDU_V*
   val uopVSADD_enum     = Value
   val uopVSADD          = uopVSADD_enum.id.U(UOPC_SZ.W)
-  // VSADDU_V*
   // VSADD_V*
+  val uopVSSUBU_enum    = Value
+  val uopVSSUBU         = uopVSSUBU_enum.id.U(UOPC_SZ.W)
+  // VSSUBU_V*
   val uopVSSUB_enum     = Value
   val uopVSSUB          = uopVSSUB_enum.id.U(UOPC_SZ.W)
-  // VSSUBU_V*
   // VSSUB_V*
   // 13.2. single-width averaging add/sub
+  val uopVAADDU_enum    = Value
+  val uopVAADDU         = uopVAADDU_enum.id.U(UOPC_SZ.W)
+  // VAADDU_V*
   val uopVAADD_enum     = Value
   val uopVAADD          = uopVAADD_enum.id.U(UOPC_SZ.W)
-  // VAADDU_V*
   // VAADD_V*
+  val uopVASUBU_enum    = Value
+  val uopVASUBU         = uopVASUBU_enum.id.U(UOPC_SZ.W)
+  // VASUBU_V*
   val uopVASUB_enum     = Value
   val uopVASUB          = uopVASUB_enum.id.U(UOPC_SZ.W)
-  // VASUBU_V*
   // VASUB_V*
   // 13.3. single-width fractional multiply with rounding and saturation
   val uopVSMUL_enum     = Value
   val uopVSMUL          = uopVSMUL_enum.id.U(UOPC_SZ.W)
   // VSMUL_V*
   // 13.4. single-width scaling shift instruction
-  val uopVSSR_enum      = Value
-  val uopVSSR           = uopVSSR_enum.id.U(UOPC_SZ.W)
+  val uopVSSRL_enum     = Value
+  val uopVSSRL          = uopVSSRL_enum.id.U(UOPC_SZ.W)
   // VSSRL_V*
+  val uopVSSRA_enum     = Value
+  val uopVSSRA          = uopVSSRA_enum.id.U(UOPC_SZ.W)
   // VSSRA_V*
   // 13.5. narrowing fixed-point clip
+  val uopVNCLIPU_enum   = Value
+  val uopVNCLIPU        = uopVNCLIPU_enum.id.U(UOPC_SZ.W)
+  // VNCLIPU_W*
   val uopVNCLIP_enum    = Value
   val uopVNCLIP         = uopVNCLIP_enum.id.U(UOPC_SZ.W)
-  // VNCLIPU_W*
   // VNCLIP_W*
   // 15.1. single-width INT reduction, reuse corresponding uopc
 //val uopVRED_enum      = Value

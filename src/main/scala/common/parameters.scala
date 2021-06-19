@@ -270,6 +270,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   def vLenSz = log2Ceil(vLen)
   def eLenSelSz = log2Ceil(numELENinVLEN)
   def eLenb = eLen/8
+  def eLenSz = log2Ceil(eLen)
   //val minFLen = boomParams.minFLen
 
   //************************************

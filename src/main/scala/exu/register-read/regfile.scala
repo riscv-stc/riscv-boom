@@ -43,7 +43,7 @@ class RegisterFileWritePort(val addrWidth: Int, val dataWidth: Int, val vector: 
 {
   val addr = UInt(addrWidth.W)
   val data = UInt(dataWidth.W)
-  val mask = if (vector) UInt(eLenb.W) else null
+  val mask = if (vector) UInt(dataWidth.W) else null
 }
 
 /**
@@ -62,12 +62,18 @@ object WritePort
     val enq_uop = enq.bits.uop
     wport.valid := enq.valid && enq_uop.rt(RD, rtype)
     if (vector) {
+      val eLen: Int = eLenb * 8 // FIXME howto get it through p?
+      val eLenSz = log2Ceil(eLen)
       val vstart = enq_uop.vstart
       val ecnt   = enq_uop.v_split_ecnt
       val (rsel, rmsk) = VRegSel(vstart, enq_uop.vd_eew, ecnt, eLenb, eLenSelSz)
-      wport.bits.addr := Cat(enq_uop.pdst, rsel)
-      wport.bits.mask := rmsk
-      wport.bits.data := VDataFill(enq.bits.data, enq_uop.vd_eew, eLenb*8)
+      val exp_rmsk = Cat((0 until 8).map(b => Fill(8, rmsk(b))).reverse)
+      val maskvd = enq_uop.rt(RD, isMaskVD)
+      val maskvd_rsel = (vstart >> eLenSz)(eLenSelSz-1, 0)
+      val maskvd_rmsk = UIntToOH(vstart(eLenSz-1, 0), eLen)
+      wport.bits.addr := Cat(enq_uop.pdst, Mux(maskvd, maskvd_rsel, rsel))
+      wport.bits.mask := Mux(maskvd, maskvd_rmsk, exp_rmsk)
+      wport.bits.data := Mux(maskvd, Fill(eLen, enq.bits.data(0)), VDataFill(enq.bits.data, enq_uop.vd_eew, eLenb*8))
       when (wport.valid) { assert(enq_uop.vd_eew <= 3.U) }
     } else {
       wport.bits.addr := enq_uop.pdst
@@ -195,12 +201,12 @@ class RegisterFileSynthesizable(
     for (r <- 0 until numRegisters) {
       when (io.write_ports.map(w => w.valid && r.U === w.bits.addr).reduce(_|_)) {
         val old_data = regfile(r)
-        val new_data = Wire(Vec(eLenb, UInt(8.W)))
-        (0 until eLenb).map(x => new_data(x) := old_data(x*8+7, x*8))
+        val new_data = Wire(Vec(eLen, UInt(1.W)))
+        (0 until eLen).map(x => new_data(x) := old_data(x))
         for (wport <- io.write_ports) {
-          for (i <- 0 until eLenb) {
+          for (i <- 0 until eLen) {
             when (wport.valid && r.U === wport.bits.addr && wport.bits.mask(i)) {
-              new_data(i) := wport.bits.data(i*8+7,i*8)
+              new_data(i) := wport.bits.data(i)
             }
           }
         }
