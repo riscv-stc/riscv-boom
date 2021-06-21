@@ -23,6 +23,7 @@ import freechips.rocketchip.rocket.CSR
 
 import boom.common._
 import boom.common.MicroOpcodes._
+import boom.util._
 
 /**
  * Control signal bundle for register renaming
@@ -42,7 +43,8 @@ class RRdCtrlSigs(implicit p: Parameters) extends BoomBundle
   val csr_cmd     = Bits(CSR.SZ.W)
 
   def decode(uopc: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
-    val decoder = freechips.rocketchip.rocket.DecodeLogic(uopc, AluRRdDecode.default, table)
+    //val decoder = freechips.rocketchip.rocket.DecodeLogic(uopc, AluRRdDecode.default, table)
+    val decoder = BoomDecoder(uopc, AluRRdDecode.default, table)
     val sigs = Seq(br_type, use_alupipe, use_muldivpipe, use_mempipe, op_fcn,
                    fcn_dw, op1_sel, op2_sel, imm_sel, rf_wen, csr_cmd)
     sigs zip decoder map {case(s,d) => s := d}
