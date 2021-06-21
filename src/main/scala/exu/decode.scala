@@ -441,6 +441,8 @@ object VectorLSDecode extends DecodeConstants
  ,VSE16_V     ->List(Y, N, X, uopVSA,         IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_1)
  ,VSE32_V     ->List(Y, N, X, uopVSA,         IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_2)
  ,VSE64_V     ->List(Y, N, X, uopVSA,         IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_3)
+ ,VLM_V       ->List(Y, N, X, uopVLM,         IQT_MEM, FU_MEM, RT_VEC, RT_FIX, RT_X,   N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, N, U_0)
+ ,VSM_V       ->List(Y, N, X, uopVSMA,        IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, N, U_0)
  ,VLSE8_V     ->List(Y, N, X, uopVLS,         IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_FIX, N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_0)
  ,VLSE16_V    ->List(Y, N, X, uopVLS,         IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_FIX, N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_1)
  ,VLSE32_V    ->List(Y, N, X, uopVLS,         IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_FIX, N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_2)
@@ -621,6 +623,8 @@ object VectorIntDecode extends DecodeConstants
  ,VMV_V_V     ->List(Y, N, X, uopVMV_V,       IQT_VEC ,FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VMV_V_X     ->List(Y, N, X, uopVMV_V,       IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VMV_V_I     ->List(Y, N, X, uopVMV_V,       IQT_VEC, FU_ALU ,RT_VEC, RT_VI,  RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMV_X_S     ->List(Y, N, X, uopVMV_X_S,     IQT_VEC, FU_ALU ,RT_FIX, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMV_S_X     ->List(Y, N, X, uopVMV_S_X,     IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VMERGE_VVM  ->List(Y, N, X, uopMERGE,       IQT_VEC ,FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VMERGE_VXM  ->List(Y, N, X, uopMERGE,       IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VMERGE_VIM  ->List(Y, N, X, uopMERGE,       IQT_VEC ,FU_ALU ,RT_VEC, RT_VI , RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
@@ -1019,12 +1023,13 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_v_ls_ustride = cs.uopc.isOneOf(uopVL, uopVSA)
     val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
     val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+    val is_v_mask_ls = cs.uopc.isOneOf(uopVLM, uopVSMA)
     val vseg_nf = inst(NF_MSB, NF_LSB)
     val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) // FIXME: exclude whole register load/store
     val vstart  = RegInit(0.U((vLenSz+1).W))
     val vseg_finc = RegInit(0.U(3.W))
     val vseg_gidx = RegInit(0.U(3.W))
-    val vlmax = Mux(is_v_ls_ustride || is_v_ls_stride, ls_vlmax, io.csr_vconfig.vtype.vlMax)
+    val vlmax = Mux(is_v_mask_ls, vLen.U >> 3, Mux(is_v_ls_ustride || is_v_ls_stride, ls_vlmax, io.csr_vconfig.vtype.vlMax))
     val vsew = io.csr_vconfig.vtype.vsew
     val vlmul_sign = io.csr_vconfig.vtype.vlmul_sign
     val vlmul = Mux(vlmul_sign, 0.U(2.W), io.csr_vconfig.vtype.vlmul_mag)
@@ -1063,7 +1068,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val split_ecnt = Mux(is_v_ls, 1.U, Mux(vmlogic_insn, vmlogic_split_ecnt, vLen_ecnt))
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     // for fractional lmul, we need visit at least one entire vreg
-    val total_ecnt = Mux(cs.uses_stq, io.csr_vconfig.vl, Mux(vlmul_sign, vLen_ecnt, Mux(vmlogic_insn, vmlogic_tolal_ecnt, vlmax)))
+    val total_ecnt = Mux(cs.uses_stq, Mux(is_v_mask_ls, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl), Mux(vlmul_sign && !is_v_mask_ls, vLen_ecnt, Mux(vmlogic_insn, vmlogic_tolal_ecnt, vlmax)))
     val vseg_flast = vseg_finc === vseg_nf
     val elem_last  = vstart + split_ecnt === total_ecnt
     val split_last = elem_last && Mux(is_v_ls_seg, vseg_flast, true.B)
@@ -1136,6 +1141,16 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     }
 
     uop.v_idx_ls     := is_v_ls_index
+
+    when (cs.is_rvv && cs.uopc === uopVLM) {
+      uop.uopc := uopVL
+      // make elements >= ceil(vl/8) inactive
+      uop.vconfig.vl := (io.csr_vconfig.vl + 7.U) >> 3.U
+    }
+    when (cs.is_rvv && cs.uopc === uopVSMA) {
+      uop.uopc := uopVSA
+    }
+
     uop.v_xls_offset := 0.U
 
     uop.v_seg_ls  := false.B

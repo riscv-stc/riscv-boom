@@ -46,7 +46,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val from_fp          = Flipped(Decoupled(new ExeUnitResp(eLen)))
 //  val to_int_iss       = Decoupled(new ExeUnitResp(eLen))
     val to_sdq           = Decoupled(new ExeUnitResp(eLen))
-    val to_int           = Decoupled(new ExeUnitResp(eLen))
+    val to_int           = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
     val to_fp            = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
     val vmupdate         = Output(Vec(vecWidth, Valid(new MicroOp)))
     val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
@@ -179,6 +179,10 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     case (to_fp, vec) => to_fp <> vec
   }
 
+  (io.to_int zip exe_units.map(_.io.iresp)).foreach {
+    case (to_int, vec) => to_int <> vec
+  }
+
   val ll_wbarb = Module(new Arbiter(new ExeUnitResp(eLen), 3))
 
 
@@ -232,8 +236,8 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   io.to_sdq.valid := vmx_resp.valid && vmx_resp.bits.uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
   io.to_sdq.bits  := vmx_resp.bits
-  io.to_int.valid := false.B // FIXME
-  io.to_int.bits  := DontCare
+  //io.to_int.valid := false.B // FIXME
+  //io.to_int.bits  := DontCare
   //io.to_fp.valid := false.B // FIXME
   //io.to_fp.bits  := DontCare
 

@@ -500,6 +500,10 @@ object MicroOpcodes extends Enumeration {
   val uopVLOX           = uopVLOX_enum.id.U(UOPC_SZ.W)
   val uopVSOXA_enum     = Value
   val uopVSOXA          = uopVSOXA_enum.id.U(UOPC_SZ.W)
+  val uopVLM_enum       = Value
+  val uopVLM            = uopVLM_enum.id.U(UOPC_SZ.W)
+  val uopVSMA_enum      = Value
+  val uopVSMA           = uopVSMA_enum.id.U(UOPC_SZ.W)
 //val uopVLR_enum       = Value
 //val uopVLR            = uopVLR_enum.id.U(UOPC_SZ.W) // sub to uopVL
 //val uopVSR_enum       = Value

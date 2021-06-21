@@ -308,7 +308,7 @@ class RegisterRead(
         val is_idx_ls  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).v_idx_ls
         val vstart     = exe_reg_uops(w).vstart
         val vl         = exe_reg_uops(w).vconfig.vl
-        val vmlogic_insn = exe_reg_uops(w).ctrl.is_vmlogic
+        val vmlogic    = exe_reg_uops(w).ctrl.is_vmlogic
         val byteWidth  = 3.U
         val vsew64bit  = 3.U
         val vmlogic_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
@@ -316,22 +316,23 @@ class RegisterRead(
         val is_active  = Mux(is_masked, exe_reg_rvm_data(w), true.B) && vstart < vl
         io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w))
         io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
-        val isVFMV: Bool = exe_reg_uops(w).uopc === uopVFMV_S_F || exe_reg_uops(w).uopc === uopVFMV_F_S
+        val vmove: Bool = VecInit(Seq(exe_reg_uops(w).uopc === uopVFMV_S_F,
+          exe_reg_uops(w).uopc === uopVFMV_F_S,
+          exe_reg_uops(w).uopc === uopVMV_X_S,
+          exe_reg_uops(w).uopc === uopVMV_S_X
+        )).asUInt().orR()
+
         io.vmupdate(w).bits     := exe_reg_uops(w)
         io.vmupdate(w).bits.v_active := is_active
         io.vmupdate(w).bits.v_xls_offset := exe_reg_rs2_data(w)
-        io.exe_reqs(w).bits.uop.v_active := Mux(isVFMV, !vstart.orR(),
-                                            Mux(vmlogic_insn, vmlogic_active, is_active))
+        io.exe_reqs(w).bits.uop.v_active := Mux(vmove, !vstart.orR(),
+                                            Mux(vmlogic, vmlogic_active, is_active))
         val vfdiv_sqrt = (io.exe_reqs(w).bits.uop.uopc === uopVFDIV)  ||
                          (io.exe_reqs(w).bits.uop.uopc === uopVFRDIV) ||
                          (io.exe_reqs(w).bits.uop.uopc === uopVFSQRT)
         // forward inactive ops to ALU
-        val vadc       = io.exe_reqs(w).bits.uop.uopc === uopVADC
-        val vsbc       = io.exe_reqs(w).bits.uop.uopc === uopVSBC
-        val vmadc      = io.exe_reqs(w).bits.uop.uopc === uopVMADC
-        val vmsbc      = io.exe_reqs(w).bits.uop.uopc === uopVMSBC
-        val withCarry  = vadc || vsbc || vmadc || vmsbc
-        when ((io.exe_reqs(w).bits.uop.is_rvv && !is_active && !vfdiv_sqrt && !withCarry) || (isVFMV && vstart.orR())) {
+        val withCarry  = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVADC, uopVSBC, uopVMADC, uopVMSBC)
+        when ((io.exe_reqs(w).bits.uop.is_rvv && !is_active && !vfdiv_sqrt && !withCarry) || (vmove && vstart.orR())) {
           io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
           io.exe_reqs(w).bits.uop.ctrl.op_fcn := freechips.rocketchip.rocket.ALU.FN_ADD
         }
