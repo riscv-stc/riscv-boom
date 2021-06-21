@@ -539,7 +539,7 @@ class ALUUnit(
                Mux(vmlogic_insn,   vmlogic_result,
                Mux(vadc  || vsbc,  Mux(v_tail, io.req.bits.rs3_data, alu.io.out),
                Mux(vmadc || vmsbc, Cat(0.U((eLen-1).W), Mux(v_tail, io.req.bits.rs3_data(0), alu_co)),
-               Mux(vmscmp,         Cat(0.U((eLen-1).W), Mux(v_tail, io.req.bits.rs3_data(0), alu.io.cmp_out)),
+               Mux(vmscmp,         Cat(0.U((eLen-1).W), Mux(v_tail || v_inactive, io.req.bits.rs3_data(0), alu.io.cmp_out)),
                Mux(uop.is_rvv && (uop.ctrl.is_load || uop.ctrl.is_sta) || v_inactive, io.req.bits.rs3_data,
                    alu.io.out)))))))))))
   } else {

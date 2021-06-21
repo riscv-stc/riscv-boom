@@ -332,7 +332,8 @@ class RegisterRead(
                          (io.exe_reqs(w).bits.uop.uopc === uopVFSQRT)
         // forward inactive ops to ALU
         val withCarry  = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVADC, uopVSBC, uopVMADC, uopVMSBC)
-        when ((io.exe_reqs(w).bits.uop.is_rvv && !is_active && !vfdiv_sqrt && !withCarry) || (vmove && vstart.orR())) {
+        val vmscmp     = io.exe_reqs(w).bits.uop.ctrl.is_vmscmp
+        when ((io.exe_reqs(w).bits.uop.is_rvv && !is_active && !vfdiv_sqrt && !withCarry && !vmscmp) || (vmove && vstart.orR())) {
           io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
           io.exe_reqs(w).bits.uop.ctrl.op_fcn := freechips.rocketchip.rocket.ALU.FN_ADD
         }
