@@ -887,8 +887,8 @@ object MicroOpcodes extends Enumeration {
   val uopVFSQRT         = uopVFSQRT_enum.id.U(UOPC_SZ.W)
   // VFSQRT_V
   // 14.9. FP reciprocal sqrt estimate to 7 bits
-  val uopVFSQRT7_enum   = Value
-  val uopVFSQRT7        = uopVFSQRT7_enum.id.U(UOPC_SZ.W)
+  val uopVFRSQRT7_enum   = Value
+  val uopVFRSQRT7        = uopVFRSQRT7_enum.id.U(UOPC_SZ.W)
   // VFRSQRT7_V
   // 14.10. FP reciprocal estimate
   val uopVFREC7_enum    = Value
