@@ -662,7 +662,7 @@ class VecExeUnit(
   // ALU Unit -------------------------------
   var alu: ALUUnit = null
   if (hasAlu) {
-    alu = Module(new ALUUnit(numStages = numStages, dataWidth = eLen))
+    alu = Module(new ALUUnit(numStages = numStages, dataWidth = eLen, hasVMX = hasVMX, vector = hasVector))
     alu.io.req.valid := io.req.valid && (io.req.bits.uop.fu_code === FU_ALU || io.req.bits.uop.fu_code_is(FU_VMX)) &&
       (io.req.bits.uop.uopc =/= uopVFMV_F_S) &&
       (io.req.bits.uop.uopc =/= uopVMV_X_S)

@@ -24,6 +24,7 @@ import freechips.rocketchip.rocket.CSR
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.exu.VMaskUnit._
+import boom.util._
 
 /**
  * Control signal bundle for register renaming
@@ -43,7 +44,8 @@ class RRdCtrlSigs(implicit p: Parameters) extends BoomBundle
   val csr_cmd     = Bits(CSR.SZ.W)
 
   def decode(uopc: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
-    val decoder = freechips.rocketchip.rocket.DecodeLogic(uopc, AluRRdDecode.default, table)
+    //val decoder = freechips.rocketchip.rocket.DecodeLogic(uopc, AluRRdDecode.default, table)
+    val decoder = BoomDecoder(uopc, AluRRdDecode.default, table)
     val sigs = Seq(br_type, use_alupipe, use_muldivpipe, use_mempipe, op_fcn,
                    fcn_dw, op1_sel, op2_sel, imm_sel, rf_wen, csr_cmd)
     sigs zip decoder map {case(s,d) => s := d}
@@ -132,12 +134,24 @@ object VecRRdDecode extends RRdDecodeConstants
         ,BitPat(uopVEXT2)    -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
         ,BitPat(uopVEXT4)    -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
         ,BitPat(uopVEXT8)    -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopVADC)     -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVSBC)     -> List(BR_N, Y, N, N, FN_SUB,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMADC)    -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSBC)    -> List(BR_N, Y, N, N, FN_SUB,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVAND)     -> List(BR_N, Y, N, N, FN_AND,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVOR )     -> List(BR_N, Y, N, N, FN_OR ,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVXOR)     -> List(BR_N, Y, N, N, FN_XOR,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVSLL)     -> List(BR_N, Y, N, N, FN_SL ,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVSRL)     -> List(BR_N, Y, N, N, FN_SR ,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVSRA)     -> List(BR_N, Y, N, N, FN_SRA,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSEQ)    -> List(BR_N, Y, N, N, FN_SEQ,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSNE)    -> List(BR_N, Y, N, N, FN_SNE,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSLTU)   -> List(BR_N, Y, N, N, FN_SLTU,  DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSLT)    -> List(BR_N, Y, N, N, FN_SLT,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSLEU)   -> List(BR_N, Y, N, N, FN_SGEU,  DW_XPR, OP1_RS1,     OP2_RS2,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSLE)    -> List(BR_N, Y, N, N, FN_SGE,   DW_XPR, OP1_RS1,     OP2_RS2,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSGTU)   -> List(BR_N, Y, N, N, FN_SLTU,  DW_XPR, OP1_RS1,     OP2_RS2,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSGT)    -> List(BR_N, Y, N, N, FN_SLT,   DW_XPR, OP1_RS1,     OP2_RS2,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMINU)    -> List(BR_N, Y, N, N, FN_SLTU,  DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMIN )    -> List(BR_N, Y, N, N, FN_SLT,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMAXU)    -> List(BR_N, Y, N, N, FN_SLTU,  DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
@@ -414,9 +428,17 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
   io.rrd_uop.ctrl.imm_sel := rrd_cs.imm_sel
   io.rrd_uop.ctrl.op_fcn  := rrd_cs.op_fcn.asUInt
   io.rrd_uop.ctrl.fcn_dw  := rrd_cs.fcn_dw.asBool
-  io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD, uopVL, uopVLS, uopVLUX, uopVLOX)
-  io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopVSA, uopVSSA, uopVSUXA, uopVSOXA, uopAMO_AG)
-  io.rrd_uop.ctrl.is_std  := io.rrd_uop.uopc === uopSTD || (io.rrd_uop.ctrl.is_sta && io.rrd_uop.rt(RS2, isInt) && !io.rrd_uop.is_rvv)
+  if (usingVector) {
+    io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD, uopVL, uopVLS, uopVLUX, uopVLOX)
+    io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopVSA, uopVSSA, uopVSUXA, uopVSOXA, uopAMO_AG)
+    io.rrd_uop.ctrl.is_std  := io.rrd_uop.uopc === uopSTD || (io.rrd_uop.ctrl.is_sta && io.rrd_uop.rt(RS2, isInt) && !io.rrd_uop.is_rvv)
+    io.rrd_uop.ctrl.is_vmlogic  := io.rrd_uop.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
+    io.rrd_uop.ctrl.is_vmscmp   := io.rrd_uop.uopc.isOneOf(uopVMSEQ, uopVMSNE, uopVMSLTU, uopVMSLT, uopVMSLEU, uopVMSLE, uopVMSGTU, uopVMSGT)
+  } else {
+    io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD)
+    io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopAMO_AG)
+    io.rrd_uop.ctrl.is_std  := io.rrd_uop.uopc === uopSTD || (io.rrd_uop.ctrl.is_sta && io.rrd_uop.rt(RS2, isInt))
+  }
 
   when (io.rrd_uop.uopc === uopAMO_AG || (io.rrd_uop.uopc === uopLD && io.rrd_uop.mem_cmd === M_XLR)) {
     io.rrd_uop.imm_packed := 0.U
