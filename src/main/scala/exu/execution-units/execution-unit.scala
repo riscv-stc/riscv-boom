@@ -782,7 +782,7 @@ class VecExeUnit(
 
   // Outputs (Write Port #0)  ---------------
   if (writesVrf) {
-    io.vresp.valid     := vec_fu_units.map(_.io.resp.valid).reduce(_|_) && (io.req.bits.uop.uopc =/= uopVPOPC)
+    io.vresp.valid     := vec_fu_units.map(_.io.resp.valid).reduce(_|_) && vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVPOPC).foldLeft(true.B)(_ && _)
     io.vresp.bits.uop  := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.uop)))
     io.vresp.bits.data := PriorityMux(vec_fu_units.map(f =>
