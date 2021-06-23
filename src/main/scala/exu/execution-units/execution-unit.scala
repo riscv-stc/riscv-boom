@@ -816,7 +816,7 @@ class VecExeUnit(
     val byteWidth  = 3.U
     val vsew64bit  = 3.U
     val v_mask_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
-    val vpopc_is_last = io.req.bits.uop.vstart === v_mask_vl
+    val vpopc_is_last = io.req.bits.uop.vstart === (v_mask_vl-1.U)
     val vpopc_valid = vmaskunit.io.resp.valid & vpopc_is_last
     val vpopc_result = vmaskunit.io.resp.bits.data
 
