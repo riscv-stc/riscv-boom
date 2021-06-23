@@ -137,6 +137,7 @@ abstract class ExecutionUnit(
 
     // only used by the fpu unit
     val fcsr_rm = if (hasFcsr) Input(Bits(tile.FPConstants.RM_SZ.W)) else null
+    val vxrm    = if (hasVxrm) Input(UInt(2.W)) else null
     val vconfig = if (hasVConfig) Input(new VConfig) else null
 
     // only used by the mem unit
@@ -183,6 +184,7 @@ abstract class ExecutionUnit(
   //require ((hasFpu || hasFdiv) ^ (hasAlu || hasMul || hasMem || hasIfpu),
     //"[execute] we no longer support mixing FP and Integer functional units in the same exe unit.")
   def hasFcsr = hasIfpu || hasFpu || hasFdiv
+  def hasVxrm = hasMacc
   def hasVConfig = usingVector && hasCSR
 
   require (bypassable || !alwaysBypassable,
@@ -665,14 +667,14 @@ class VecExeUnit(
     //vresp_fu_units += alu
   }
 
-  // Pipelined, IMul Unit ------------------
-  var imacc: IntMulAcc = null
+  // Pipelined, FixMulAcc Unit ------------------
+  var xmacc: FixMulAcc = null
   if (hasMacc) {
-    imacc = Module(new IntMulAcc(numStages, eLen))
-    imacc.io <> DontCare
-    imacc.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_MAC)
-    vec_fu_units += imacc
-    //vresp_fu_units += imacc
+    xmacc = Module(new FixMulAcc(numStages, eLen))
+    xmacc.io <> DontCare
+    xmacc.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_MAC)
+    vec_fu_units += xmacc
+    //vresp_fu_units += xmacc
   }
 
   // Div/Rem Unit -----------------------

@@ -671,12 +671,12 @@ object VectorFixDecode extends DecodeConstants
  ,VSSRA_VV    ->List(Y, N, X, uopVSSRA,       IQT_VEC ,FU_MAC ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VSSRA_VX    ->List(Y, N, X, uopVSSRA,       IQT_IVEC,FU_MAC ,RT_VEC, RT_FIXU,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VSSRA_VI    ->List(Y, N, X, uopVSSRA,       IQT_VEC ,FU_MAC ,RT_VEC, RT_VIU, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
- ,VNCLIPU_WV  ->List(Y, N, X, uopVNCLIPU,     IQT_VEC ,FU_MAC ,RT_VU , RT_VU , RT_VU , N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
- ,VNCLIPU_WX  ->List(Y, N, X, uopVNCLIPU,     IQT_IVEC,FU_MAC ,RT_VU , RT_FIXU,RT_VU , N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
- ,VNCLIPU_WI  ->List(Y, N, X, uopVNCLIPU,     IQT_VEC ,FU_MAC ,RT_VU , RT_VIU, RT_VU , N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
- ,VNCLIP_WV   ->List(Y, N, X, uopVNCLIP,      IQT_VEC ,FU_MAC ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
- ,VNCLIP_WX   ->List(Y, N, X, uopVNCLIP,      IQT_IVEC,FU_MAC ,RT_VEC, RT_FIXU,RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
- ,VNCLIP_WI   ->List(Y, N, X, uopVNCLIP,      IQT_VEC ,FU_MAC ,RT_VEC, RT_VIU, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VNCLIPU_WV  ->List(Y, N, X, uopVNCLIPU,     IQT_VEC ,FU_MAC ,RT_VU , RT_VU , RT_VWU, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VNCLIPU_WX  ->List(Y, N, X, uopVNCLIPU,     IQT_IVEC,FU_MAC ,RT_VU , RT_FIXU,RT_VWU, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VNCLIPU_WI  ->List(Y, N, X, uopVNCLIPU,     IQT_VEC ,FU_MAC ,RT_VU , RT_VIU, RT_VWU, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VNCLIP_WV   ->List(Y, N, X, uopVNCLIP,      IQT_VEC ,FU_MAC ,RT_VEC, RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VNCLIP_WX   ->List(Y, N, X, uopVNCLIP,      IQT_IVEC,FU_MAC ,RT_VEC, RT_FIXU,RT_VW , N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VNCLIP_WI   ->List(Y, N, X, uopVNCLIP,      IQT_VEC ,FU_MAC ,RT_VEC, RT_VIU, RT_VW , N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  )
 }
 

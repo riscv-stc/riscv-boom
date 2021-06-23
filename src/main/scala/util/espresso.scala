@@ -325,7 +325,7 @@ object EspressoMinimizer extends Minimizer with LazyLogging {
                     |$input
                     |""".stripMargin)
     val f = os.temp(input)
-    println("Calling Espresso heuristic logic minimizer with " + f.toString)
+    println("Calling Espresso heuristic minimizer with " + f.toString + s" (${table.outputWidth}.W)")
     val o = os.proc("espresso", f).call().out.chunks.mkString
     logger.trace(s"""espresso output table:
                     |$o

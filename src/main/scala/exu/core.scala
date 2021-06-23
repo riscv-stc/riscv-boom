@@ -1241,6 +1241,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     csr.io.vector.get.set_vstart.bits := csr_uop.vstart
     csr.io.vector.get.set_vxsat := false.B
     v_pipeline.io.fcsr_rm := csr.io.fcsr_rm
+    v_pipeline.io.vxrm := csr.io.vector.get.vxrm
 
     csr_exe_unit.io.vconfig := csr.io.vector.get.vconfig
   }
