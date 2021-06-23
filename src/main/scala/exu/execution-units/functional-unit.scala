@@ -954,9 +954,9 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
 
   // operand 1 select
   var op1_data: UInt = null
-    op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data,
-               Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , rs2_data,
-                   0.U))
+  op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data,
+             Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , rs2_data,
+                 0.U))
 
   val init_result = Mux(uop.vstart === 0.U, 0.U, 0.U)
   // operand 2 select

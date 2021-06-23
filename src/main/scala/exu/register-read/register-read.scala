@@ -313,8 +313,8 @@ class RegisterRead(
         val is_v_mask_insn = vmlogic || is_v_popc_m
         val byteWidth  = 3.U
         val vsew64bit  = 3.U
-        val v_mask_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
-        val v_mask_active = exe_reg_rvm_data(w) && vstart < v_mask_vl
+        val v_maskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
+        val v_maskInsn_active = vstart < v_maskInsn_vl
         val is_active  = Mux(is_masked, exe_reg_rvm_data(w), true.B) && vstart < vl
 
         io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w))
@@ -329,7 +329,7 @@ class RegisterRead(
         io.vmupdate(w).bits.v_active := is_active
         io.vmupdate(w).bits.v_xls_offset := exe_reg_rs2_data(w)
         io.exe_reqs(w).bits.uop.v_active := Mux(vmove, !vstart.orR(),
-                                            Mux(is_v_mask_insn, v_mask_active, is_active))
+                                            Mux(is_v_mask_insn, v_maskInsn_active, is_active))
         val vfdiv_sqrt = (io.exe_reqs(w).bits.uop.uopc === uopVFDIV)  ||
                          (io.exe_reqs(w).bits.uop.uopc === uopVFRDIV) ||
                          (io.exe_reqs(w).bits.uop.uopc === uopVFSQRT)
