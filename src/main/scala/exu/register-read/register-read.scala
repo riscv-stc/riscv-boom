@@ -81,6 +81,7 @@ class RegisterRead(
   val exe_reg_rs2_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
   val exe_reg_rs3_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
   val exe_reg_rvm_data = if (vector) Reg(Vec(issueWidth, Bool())) else null
+  val exe_reg_vmaskInsn_rvm_data = if (vector) Reg(Vec(issueWidth, Bits(registerWidth.W))) else null
   val exe_reg_pred_data = Reg(Vec(issueWidth, Bool()))
 
   //-------------------------------------------------------------
@@ -106,11 +107,13 @@ class RegisterRead(
   val rrd_rs3_data   = Wire(Vec(issueWidth, Bits(registerWidth.W)))
   val rrd_rvm_data   = Wire(Vec(issueWidth, Bool()))
   val rrd_pred_data  = Wire(Vec(issueWidth, Bool()))
+  val rrd_vmaskInsn_rvm_data   = Wire(Vec(issueWidth, Bits(registerWidth.W)))
   rrd_rs1_data := DontCare
   rrd_rs2_data := DontCare
   rrd_rs3_data := DontCare
   rrd_rvm_data := DontCare
   rrd_pred_data := DontCare
+  rrd_vmaskInsn_rvm_data := DontCare
 
   io.prf_read_ports := DontCare
 
@@ -181,6 +184,7 @@ class RegisterRead(
       if (numReadPorts > 3) { // handle vector mask
         io.rf_read_ports(idx+3).addr := Cat(rvm_addr, vstart >> log2Ceil(eLen))
         rrd_rvm_data(w) := io.rf_read_ports(idx+3).data(RegNext(vstart(log2Ceil(eLen)-1,0)))
+        rrd_vmaskInsn_rvm_data(w) := io.rf_read_ports(idx+3).data
         assert(!(io.iss_valids(w) && io.iss_uops(w).uopc.isOneOf(uopVL, uopVLS) && io.iss_uops(w).v_unmasked &&
                io.iss_uops(w).vstart < io.iss_uops(w).vconfig.vl), "unmasked vecotr load (except indexed load) should not come here.")
       }
@@ -268,6 +272,7 @@ class RegisterRead(
     if (numReadPorts > 1) exe_reg_rs2_data(w) := bypassed_rs2_data(w)
     if (numReadPorts > 2) exe_reg_rs3_data(w) := rrd_rs3_data(w)
     if (numReadPorts > 3 && vector) exe_reg_rvm_data(w) := rrd_rvm_data(w)
+    if (numReadPorts > 3 && vector) exe_reg_vmaskInsn_rvm_data(w) := rrd_vmaskInsn_rvm_data(w)
     if (enableSFBOpt)     exe_reg_pred_data(w) := bypassed_pred_data(w)
     // ASSUMPTION: rs3 is FPU which is NOT bypassed
   }
@@ -309,13 +314,15 @@ class RegisterRead(
         val vstart     = exe_reg_uops(w).vstart
         val vl         = exe_reg_uops(w).vconfig.vl
         val vmlogic    = exe_reg_uops(w).ctrl.is_vmlogic
-        val is_v_popc_m = exe_reg_uops(w).uopc.isOneOf(uopVPOPC)
-        val is_v_mask_insn = vmlogic || is_v_popc_m
+        val is_vpopc_m = exe_reg_uops(w).uopc.isOneOf(uopVPOPC)
+        val is_vmaskInsn = vmlogic || is_vpopc_m
         val byteWidth  = 3.U
         val vsew64bit  = 3.U
-        val v_maskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
-        val v_maskInsn_active = vstart < v_maskInsn_vl
-        val is_active  = Mux(is_v_mask_insn, v_maskInsn_active, Mux(is_masked, exe_reg_rvm_data(w), true.B)) && vstart < vl
+        val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
+        val vmaskInsn_active = vstart < vmaskInsn_vl
+        val is_active  = Mux(is_vmaskInsn, vmaskInsn_active, Mux(is_masked, exe_reg_rvm_data(w), true.B)) && vstart < vl
+        val vmaskInsn_rs2_data = exe_reg_rs2_data(w) | exe_reg_vmaskInsn_rvm_data(w)
+        io.exe_reqs(w).bits.rs3_data    := Mux(is_vpopc_m, vmaskInsn_rs2_data(w), exe_reg_rs2_data(w))
 
         io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w))
         io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
