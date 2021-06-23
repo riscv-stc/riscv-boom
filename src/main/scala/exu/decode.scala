@@ -1065,8 +1065,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vmlogic_tolal_ecnt = vLen.U >> (byteWidth +& vsew64bit)
 
     //val eLen_ecnt = eLen.U >> (vsew+3.U)
-    val vLen_ecnt = vLen.U >> (vd_sew+3.U)
-    //val vLen_ecnt = Mux(vs2_sew > vd_sew, vLen.U >> (vs2_sew+3.U), vLen.U >> (vd_sew+3.U))
+    //val vLen_ecnt = vLen.U >> (vd_sew+3.U)
+    val vLen_ecnt  = Mux(!is_v_ls && vs2_sew > vd_sew, vLen.U >> (vs2_sew+3.U), vLen.U >> (vd_sew+3.U))
     val split_ecnt = Mux(is_v_ls, 1.U, Mux(vmlogic_insn, vmlogic_split_ecnt, vLen_ecnt))
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     // for fractional lmul, we need visit at least one entire vreg

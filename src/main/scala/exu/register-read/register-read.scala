@@ -314,7 +314,7 @@ class RegisterRead(
         val vmlogic_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
         val vmlogic_active = exe_reg_rvm_data(w) && vstart < vmlogic_vl
         val is_active  = Mux(is_masked, exe_reg_rvm_data(w), true.B) && vstart < vl
-        io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w))
+        io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w)) && !(uses_ldq && exe_reg_uops(w).v_unmasked)
         io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
         val vmove: Bool = VecInit(Seq(exe_reg_uops(w).uopc === uopVFMV_S_F,
           exe_reg_uops(w).uopc === uopVFMV_F_S,

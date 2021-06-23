@@ -634,7 +634,7 @@ class VecExeUnit(
     (if (hasDiv)  BoomCoreStringPrefix(" - DIV") else "") +
     (if (hasIfpu) BoomCoreStringPrefix(" - IFPU") else "") +
     (if (hasFpu)  BoomCoreStringPrefix(" - FPU/FPIU (Latency: " + dfmaLatency + ")") else "") +
-    (if (hasIfpu) BoomCoreStringPrefix(" - FDIV/FR7") else "")
+    (if (hasDiv)  BoomCoreStringPrefix(" - FDIV/FR7") else "")
 
   val numStages = dfmaLatency
 
@@ -831,6 +831,7 @@ class VecExeUnit(
       csr = hasCSR,
       fdiv = hasFdiv,
       ifpu = hasIfpu,
+      fr7  = hasFdiv,
       vector = true
     )
   }
