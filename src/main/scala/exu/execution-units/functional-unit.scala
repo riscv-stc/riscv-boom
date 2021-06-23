@@ -952,20 +952,20 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val rs1_data = io.req.bits.rs1_data
   val rs2_data = io.req.bits.rs2_data
 
+  val vmaskUnit = Module(new VMaskUnit())
+
   // operand 1 select
   var op1_data: UInt = null
   op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data,
              Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , rs2_data,
                  0.U))
 
-  val init_result = Mux(uop.vstart === 0.U, 0.U, 0.U)
+  val init_result = Mux(uop.vstart === 0.U, 0.U, RegNext(vmaskUnit.io.out))
   // operand 2 select
   val op2_data = WireInit(0.U(xLen.W))
   op2_data:= Mux(uop.ctrl.op2_sel === OP2_RS2 , rs2_data,
              Mux(uop.uopc.isOneOf(uopVPOPC, uopVFIRST), init_result,
              Mux(uop.ctrl.op2_sel === OP2_VS1,  rs1_data, 0.U)))
-
-  val vmaskUnit = Module(new VMaskUnit())
 
   vmaskUnit.io.in := op1_data.asUInt
   vmaskUnit.io.in_addend := op2_data.asUInt
