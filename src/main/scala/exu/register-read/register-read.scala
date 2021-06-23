@@ -322,7 +322,7 @@ class RegisterRead(
         val vmaskInsn_active = vstart < vmaskInsn_vl
         val is_active  = Mux(is_vmaskInsn, vmaskInsn_active, Mux(is_masked, exe_reg_rvm_data(w), true.B)) && vstart < vl
         val vmaskInsn_rs2_data = exe_reg_rs2_data(w) & exe_reg_vmaskInsn_rvm_data(w)
-        io.exe_reqs(w).bits.rs3_data    := Mux(is_vpopc_m, vmaskInsn_rs2_data(w), exe_reg_rs2_data(w))
+        io.exe_reqs(w).bits.rs2_data    := Mux(is_vpopc_m, vmaskInsn_rs2_data, exe_reg_rs2_data(w))
 
         io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w))
         io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
