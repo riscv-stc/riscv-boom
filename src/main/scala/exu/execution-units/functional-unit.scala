@@ -947,6 +947,7 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
     dataWidth = dataWidth)
 {
   val uop = io.req.bits.uop
+  val vl = uop.vconfig.vl
 
   // immediate generation
   val rs1_data = io.req.bits.rs1_data
@@ -954,10 +955,18 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
 
   val vmaskUnit = Module(new VMaskUnit())
 
+  val byteWidth = 3.U
+  val vsew64bit = 3.U
+  val is_multiple_of_64 = vl(5,0) === 0.U
+  val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
+  val is_vmaskInsn_last_split = uop.vstart === (vmaskInsn_vl-1.U)
+  val vmaskInsn_mask = boom.util.MaskGen(0.U, vl(5,0), 64)
+  val vmaskInsn_rs2_data = Mux(is_vmaskInsn_last_split & (~is_multiple_of_64), (rs2_data & vmaskInsn_mask), rs2_data)
+
   // operand 1 select
   var op1_data: UInt = null
   op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data,
-             Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , rs2_data,
+             Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , vmaskInsn_rs2_data,
                  0.U))
 
   val init_result = Mux(uop.vstart === 0.U, 0.U, RegNext(vmaskUnit.io.out))
