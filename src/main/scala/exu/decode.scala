@@ -1069,8 +1069,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     // vsew => element num
     val vmlogic_tolal_ecnt = vLen.U >> (byteWidth +& vsew64bit)
 
-    val is_v_popc_m = cs.uopc.isOneOf(uopVPOPC)
-    val is_v_mask_insn = vmlogic_insn || is_v_popc_m
+    val is_vmask_cnt_m = cs.uopc.isOneOf(uopVPOPC, uopVFIRST)
+    val is_vmask_set_m = cs.uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
+    val is_v_mask_insn = vmlogic_insn || is_vmask_cnt_m || is_vmask_set_m
 
     //val eLen_ecnt = eLen.U >> (vsew+3.U)
     val vLen_ecnt = vLen.U >> (vd_sew+3.U)
