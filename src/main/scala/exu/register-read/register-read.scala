@@ -182,9 +182,9 @@ class RegisterRead(
                                                                Mux(RegNext(io.iss_uops(w).rt(RD, isUnsignedV)), rf_data3, signext3)))
       }
       if (numReadPorts > 3) { // handle vector mask
-        val is_vpopc_m = io.iss_uops(w).uopc.isOneOf(uopVPOPC)
+        val is_vmask_cnt_m = io.iss_uops(w).uopc.isOneOf(uopVPOPC, uopVFIRST)
         val vmaskInsn_mask_addr = Cat(rvm_addr, vstart(3,0))
-        io.rf_read_ports(idx+3).addr := Mux(is_vpopc_m, vmaskInsn_mask_addr, Cat(rvm_addr, vstart >> log2Ceil(eLen)))
+        io.rf_read_ports(idx+3).addr := Mux(is_vmask_cnt_m, vmaskInsn_mask_addr, Cat(rvm_addr, vstart >> log2Ceil(eLen)))
 
         rrd_rvm_data(w) := io.rf_read_ports(idx+3).data(RegNext(vstart(log2Ceil(eLen)-1,0)))
         rrd_vmaskInsn_rvm_data(w) := io.rf_read_ports(idx+3).data
@@ -317,15 +317,15 @@ class RegisterRead(
         val vstart     = exe_reg_uops(w).vstart
         val vl         = exe_reg_uops(w).vconfig.vl
         val vmlogic    = exe_reg_uops(w).ctrl.is_vmlogic
-        val is_vpopc_m = exe_reg_uops(w).uopc.isOneOf(uopVPOPC)
-        val is_vmaskInsn = vmlogic || is_vpopc_m
+        val is_vmask_cnt_m = exe_reg_uops(w).uopc.isOneOf(uopVPOPC, uopVFIRST)
+        val is_vmaskInsn = vmlogic || is_vmask_cnt_m
         val byteWidth  = 3.U
         val vsew64bit  = 3.U
         val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
         val vmaskInsn_active = vstart < vmaskInsn_vl
         val is_active  = Mux(is_vmaskInsn, vmaskInsn_active, Mux(is_masked, exe_reg_rvm_data(w), true.B)) && vstart < vl
         val vmaskInsn_rs2_data = Mux(is_masked, exe_reg_rs2_data(w) & exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs2_data(w))
-        io.exe_reqs(w).bits.rs2_data    := Mux(is_vpopc_m, vmaskInsn_rs2_data, exe_reg_rs2_data(w))
+        io.exe_reqs(w).bits.rs2_data    := Mux(is_vmask_cnt_m, vmaskInsn_rs2_data, exe_reg_rs2_data(w))
 
         io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w))
         io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
