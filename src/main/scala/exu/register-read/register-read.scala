@@ -182,7 +182,10 @@ class RegisterRead(
                                                                Mux(RegNext(io.iss_uops(w).rt(RD, isUnsignedV)), rf_data3, signext3)))
       }
       if (numReadPorts > 3) { // handle vector mask
-        io.rf_read_ports(idx+3).addr := Cat(rvm_addr, vstart >> log2Ceil(eLen))
+        val is_vpopc_m = io.iss_uops(w).uopc.isOneOf(uopVPOPC)
+        val vmaskInsn_mask_addr = Cat(rvm_addr, vstart(3,0))
+        io.rf_read_ports(idx+3).addr := Mux(is_vpopc_m, vmaskInsn_mask_addr, Cat(rvm_addr, vstart >> log2Ceil(eLen)))
+
         rrd_rvm_data(w) := io.rf_read_ports(idx+3).data(RegNext(vstart(log2Ceil(eLen)-1,0)))
         rrd_vmaskInsn_rvm_data(w) := io.rf_read_ports(idx+3).data
         assert(!(io.iss_valids(w) && io.iss_uops(w).uopc.isOneOf(uopVL, uopVLS) && io.iss_uops(w).v_unmasked &&
