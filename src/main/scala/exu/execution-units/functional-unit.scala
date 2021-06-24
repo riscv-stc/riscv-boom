@@ -983,7 +983,8 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   vmaskUnit.io.in_addend := op2_data.asUInt
   vmaskUnit.io.fn  := uop.ctrl.op_fcn
 
-  val firstIdx_result = Mux(is_vmaskInsn_last_split & (vmaskUnit.io.firstIdx_out === 0.U), ~0.U(xLen.W), vmaskUnit.io.out)
+  val is_0_op_num = (vmaskInsn_mask & op1_data) === 0.U
+  val firstIdx_result = Mux(is_vmaskInsn_last_split & is_0_op_num , ~0.U(xLen.W), vmaskUnit.io.out)
 
   val vmaskUnit_out = Mux(uop.uopc.isOneOf(uopVFIRST), firstIdx_result, vmaskUnit.io.out)
 
