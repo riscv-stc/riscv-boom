@@ -24,6 +24,7 @@ import freechips.rocketchip.config.{Parameters}
 import freechips.rocketchip.rocket.{BP, VConfig}
 import freechips.rocketchip.tile.{XLen, RoCCCoreIO}
 import freechips.rocketchip.tile
+import freechips.rocketchip.util.{UIntIsOneOf}
 
 import FUConstants._
 import boom.common._
@@ -782,7 +783,9 @@ class VecExeUnit(
 
   // Outputs (Write Port #0)  ---------------
   if (writesVrf) {
-    io.vresp.valid     := vec_fu_units.map(_.io.resp.valid).reduce(_|_) && vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVPOPC).foldLeft(true.B)(_ && _)
+    val is_not_vpopc = vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVPOPC).foldLeft(true.B)(_ && _)
+    val is_not_vfirst = vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVFIRST).foldLeft(true.B)(_ && _)
+    io.vresp.valid     := vec_fu_units.map(_.io.resp.valid).reduce(_|_) && is_not_vpopc && is_not_vfirst
     io.vresp.bits.uop  := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.uop)))
     io.vresp.bits.data := PriorityMux(vec_fu_units.map(f =>
@@ -817,7 +820,7 @@ class VecExeUnit(
     val vsew64bit  = 3.U
     val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
     val vmaskInsn_is_last = io.req.bits.uop.vstart === (vmaskInsn_vl-1.U)
-    val vmaskInsn_valid = vmaskunit.io.resp.valid & vmaskInsn_is_last
+    val vmaskInsn_valid = vmaskunit.io.resp.valid & io.req.bits.uop.uopc.isOneOf(uopVPOPC, uopVFIRST) & vmaskInsn_is_last
     val vmaskInsn_result = vmaskunit.io.resp.bits.data
 
     vecToIntQueue.io.enq.valid := vmv_valid | vmaskInsn_valid
