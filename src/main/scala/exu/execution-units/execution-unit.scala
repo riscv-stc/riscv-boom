@@ -671,8 +671,10 @@ class VecExeUnit(
   var xmacc: FixMulAcc = null
   if (hasMacc) {
     xmacc = Module(new FixMulAcc(numStages, eLen))
-    xmacc.io <> DontCare
-    xmacc.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_MAC)
+    xmacc.suggestName("xmacc")
+    xmacc.io           <> DontCare
+    xmacc.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_MAC)
+    xmacc.io.vxrm      := io.vxrm
     vec_fu_units += xmacc
     //vresp_fu_units += xmacc
   }
