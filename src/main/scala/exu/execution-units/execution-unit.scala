@@ -635,7 +635,8 @@ class VecExeUnit(
     (if (hasMacc) BoomCoreStringPrefix(" - MACC") else "") +
     (if (hasDiv)  BoomCoreStringPrefix(" - DIV") else "") +
     (if (hasIfpu) BoomCoreStringPrefix(" - IFPU") else "") +
-    (if (hasFpu)  BoomCoreStringPrefix(" - FPU/FPIU (Latency: " + dfmaLatency + ")") else "")
+    (if (hasFpu)  BoomCoreStringPrefix(" - FPU/FPIU (Latency: " + dfmaLatency + ")") else "") +
+    (if (hasDiv)  BoomCoreStringPrefix(" - FDIV/FR7") else "")
 
   val numStages = dfmaLatency
 
@@ -654,7 +655,8 @@ class VecExeUnit(
                  Mux(hasIfpu.B,               FU_I2F, 0.U) |
                  Mux(hasFpu.B,       FU_FPU | FU_F2I, 0.U) |
                  Mux(hasVMX.B,                FU_VMX, 0.U) |
-                 Mux(!fdiv_busy && hasFdiv.B, FU_FDV, 0.U)
+                 Mux(!fdiv_busy && hasFdiv.B, FU_FDV, 0.U) |
+                 Mux(hasFdiv.B,               FU_FR7, 0.U)
 
   // ALU Unit -------------------------------
   var alu: ALUUnit = null
@@ -664,7 +666,6 @@ class VecExeUnit(
       (io.req.bits.uop.uopc =/= uopVFMV_F_S) &&
       (io.req.bits.uop.uopc =/= uopVMV_X_S)
     vec_fu_units += alu
-    //vresp_fu_units += alu
   }
 
   // Pipelined, FixMulAcc Unit ------------------
@@ -676,7 +677,6 @@ class VecExeUnit(
     xmacc.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_MAC)
     xmacc.io.vxrm      := io.vxrm
     vec_fu_units += xmacc
-    //vresp_fu_units += xmacc
   }
 
   // Div/Rem Unit -----------------------
@@ -695,7 +695,6 @@ class VecExeUnit(
                     (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV))
 
     vec_fu_units += div
-    //vresp_fu_units += div
   }
 
   var ifpu: IntToFPUnit = null
@@ -705,7 +704,6 @@ class VecExeUnit(
     ifpu.io.fcsr_rm    := io.fcsr_rm
     ifpu.io.resp.ready := DontCare
     vec_fu_units += ifpu
-    //vresp_fu_units += ifpu
   }
 
   // FPU Unit -----------------------
@@ -725,7 +723,17 @@ class VecExeUnit(
     fpu_resp_fflags          := fpu.io.resp.bits.fflags
 
     vec_fu_units += fpu
-    //vresp_fu_units += fpu
+  }
+
+  // FR7 Unit
+  var fr7: FR7Unit = null
+  if(hasFdiv) {
+    fr7 = Module(new FR7Unit(latency=numStages))
+    fr7.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_FR7)
+    fr7.io.fcsr_rm    := io.fcsr_rm
+    fr7.io.resp.ready := DontCare
+
+    vec_fu_units += fr7
   }
 
   // FDiv/FSqrt Unit -----------------------
@@ -827,6 +835,7 @@ class VecExeUnit(
       csr = hasCSR,
       fdiv = hasFdiv,
       ifpu = hasIfpu,
+      fr7  = hasFdiv,
       vector = true
     )
   }
