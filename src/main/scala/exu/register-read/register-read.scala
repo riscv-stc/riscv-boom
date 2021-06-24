@@ -318,14 +318,15 @@ class RegisterRead(
         val vl         = exe_reg_uops(w).vconfig.vl
         val vmlogic    = exe_reg_uops(w).ctrl.is_vmlogic
         val is_vmask_cnt_m = exe_reg_uops(w).uopc.isOneOf(uopVPOPC, uopVFIRST)
-        val is_vmaskInsn = vmlogic || is_vmask_cnt_m
+        val is_vmask_set_m = exe_reg_uops(w).uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
+        val is_vmaskInsn = vmlogic || is_vmask_cnt_m || is_vmask_set_m
         val byteWidth  = 3.U
         val vsew64bit  = 3.U
         val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
         val vmaskInsn_active = vstart < vmaskInsn_vl
         val is_active  = Mux(is_vmaskInsn, vmaskInsn_active, Mux(is_masked, exe_reg_rvm_data(w), true.B)) && vstart < vl
         val vmaskInsn_rs2_data = Mux(is_masked, exe_reg_rs2_data(w) & exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs2_data(w))
-        io.exe_reqs(w).bits.rs2_data    := Mux(is_vmask_cnt_m, vmaskInsn_rs2_data, exe_reg_rs2_data(w))
+        io.exe_reqs(w).bits.rs2_data    := Mux(is_vmask_cnt_m | is_vmask_set_m, vmaskInsn_rs2_data, exe_reg_rs2_data(w))
 
         io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w))
         io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
