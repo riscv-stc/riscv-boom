@@ -815,15 +815,15 @@ class VecExeUnit(
     val vl         = io.req.bits.uop.vconfig.vl
     val byteWidth  = 3.U
     val vsew64bit  = 3.U
-    val v_mask_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
-    val vpopc_is_last = io.req.bits.uop.vstart === (v_mask_vl-1.U)
-    val vpopc_valid = vmaskunit.io.resp.valid & vpopc_is_last
-    val vpopc_result = vmaskunit.io.resp.bits.data
+    val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
+    val vmaskInsn_is_last = io.req.bits.uop.vstart === (vmaskInsn_vl-1.U)
+    val vmaskInsn_valid = vmaskunit.io.resp.valid & vmaskInsn_is_last
+    val vmaskInsn_result = vmaskunit.io.resp.bits.data
 
-    vecToIntQueue.io.enq.valid := vmv_valid | vpopc_valid
+    vecToIntQueue.io.enq.valid := vmv_valid | vmaskInsn_valid
     vecToIntQueue.io.enq.bits.uop := io.req.bits.uop
-    vecToIntQueue.io.enq.bits.data := Mux(vmv_valid, io.req.bits.rs2_data, Mux(vpopc_valid, vpopc_result, 0.U))
-    vecToIntQueue.io.enq.bits.uop.v_is_last := Mux(vmv_valid, vmv_is_last, Mux(vpopc_valid, vpopc_is_last, false.B))
+    vecToIntQueue.io.enq.bits.data := Mux(vmv_valid, io.req.bits.rs2_data, Mux(vmaskInsn_valid, vmaskInsn_result, 0.U))
+    vecToIntQueue.io.enq.bits.uop.v_is_last := Mux(vmv_valid, vmv_is_last, Mux(vmaskInsn_valid, vmaskInsn_is_last, false.B))
     vecToIntQueue.io.enq.bits.predicated := false.B
     vecToIntQueue.io.enq.bits.fflags := DontCare
     vecToIntQueue.io.brupdate := io.brupdate

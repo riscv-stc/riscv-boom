@@ -969,18 +969,23 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
              Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , vmaskInsn_rs2_data,
                  0.U))
 
-  val init_result = Mux(uop.vstart === 0.U, 0.U, RegNext(vmaskUnit.io.out))
+  val init_popc = Mux(uop.vstart === 0.U, 0.U, RegNext(vmaskUnit.io.out))
+  val init_first_idx = Mux(uop.vstart === 0.U, 0.U, 64.U)
+
   // operand 2 select
   val op2_data = WireInit(0.U(xLen.W))
   op2_data:= Mux(uop.ctrl.op2_sel === OP2_RS2 , rs2_data,
-             Mux(uop.uopc.isOneOf(uopVPOPC, uopVFIRST), init_result,
-             Mux(uop.ctrl.op2_sel === OP2_VS1,  rs1_data, 0.U)))
+             Mux(uop.uopc.isOneOf(uopVPOPC), init_popc,
+             Mux(uop.uopc.isOneOf(uopVFIRST), init_first_idx,
+             Mux(uop.ctrl.op2_sel === OP2_VS1,  rs1_data, 0.U))))
 
   vmaskUnit.io.in := op1_data.asUInt
   vmaskUnit.io.in_addend := op2_data.asUInt
   vmaskUnit.io.fn  := uop.ctrl.op_fcn
 
-  val vmaskUnit_out = vmaskUnit.io.out
+  val firstIdx_result = Mux(is_vmaskInsn_last_split & (vmaskUnit.io.firstIdx_out === 0.U), ~0.U(xLen.W), vmaskUnit.io.out)
+
+  val vmaskUnit_out = Mux(uop.uopc.isOneOf(uopVFIRST), firstIdx_result, vmaskUnit.io.out)
 
   // vl => last
   io.resp.bits.data := vmaskUnit_out

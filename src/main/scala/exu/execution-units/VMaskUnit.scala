@@ -31,12 +31,14 @@ class VMaskUnit(implicit p: Parameters) extends BoomModule{
     val in = Input(UInt(xLen.W))
     val in_addend = Input(UInt(xLen.W))
     val out = Output(UInt(xLen.W))
+    val firstIdx_out = Output(UInt(xLen.W))
   })
 
   // popc
   val popc = PopCount(io.in)
 
   val find_first_set = PriorityEncoder(io.in)
+  io.firstIdx_out := find_first_set
 
   val index_added = Mux(io.fn === FN_POPC, popc,
                     Mux(io.fn === FN_FIRST, find_first_set, 0.U(xLen.W)))
