@@ -987,12 +987,12 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val is_0_op_num = (op1_data === 0.U) || (is_vmaskInsn_last_split & ~is_multiple_of_64 & ((vmaskInsn_mask & op1_data) === 0.U))
   val has_find_1_r = RegInit(false.B)
   val firstIdx_r = RegInit(0.U(xLen.W))
-  when(uop.vstart === 0.U){
-    has_find_1_r := false.B
-    firstIdx_r := 0.U(xLen.W)
-  }.elsewhen(~is_0_op_num & ~has_find_1_r){
+  when(~is_0_op_num & ~has_find_1_r){
     has_find_1_r := true.B
     firstIdx_r := vmaskUnit.io.out
+  }.elsewhen(uop.vstart === 0.U){
+    has_find_1_r := false.B
+    firstIdx_r := 0.U(xLen.W)
   }
 
   val firstIdx_result = Mux(is_vmaskInsn_last_split & is_0_op_num & ~has_find_1_r , ~0.U(xLen.W),
