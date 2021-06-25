@@ -1014,11 +1014,12 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
     Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data, 0.U(xLen.W)),
     Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data | vmaskUnit.io.out, Mux(is_0_op_num, ~0.U(xLen.W), vmaskUnit.io.out)))
 
+  val is_masked  = !uop.v_unmasked
   val vmaskUnit_out = Mux(uop.uopc.isOneOf(uopVFIRST), firstIdx_result,
     Mux(uop.uopc.isOneOf(uopVMSOF), sof_result,
-    Mux(uop.uopc.isOneOf(uopVMSBF), sbf_result,
-    Mux(uop.uopc.isOneOf(uopVMSIF), sif_result,
-          vmaskUnit.io.out))))
+    Mux(uop.uopc.isOneOf(uopVMSBF), Mux(is_masked, sbf_result & rs1_data, sbf_result),
+    Mux(uop.uopc.isOneOf(uopVMSIF), Mux(is_masked, sif_result & rs1_data, sif_result),
+    vmaskUnit.io.out))))
 
   // vl => last
   io.resp.bits.data := vmaskUnit_out
