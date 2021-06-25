@@ -173,7 +173,7 @@ class RegisterRead(
         val signext3 = Mux1H(UIntToOH(RegNext(vd_sew(1,0))), Seq(rf_data3(7,0).sextTo(eLen), rf_data3(15,0).sextTo(eLen), rf_data3(31,0).sextTo(eLen), rf_data3(63,0)))
         val maskvd = io.iss_uops(w).rt(RD, isMaskVD)
         val maskvd_rsel = (vstart >> eLenSz)(eLenSelSz-1, 0)
-        val maskvd_data = Cat(0.U((eLen-1).W), io.rf_read_ports(idx+2).data(vstart(eLenSz-1, 0)))
+        val maskvd_data = Cat(0.U((eLen-1).W), io.rf_read_ports(idx+2).data(RegNext(vstart(eLenSz-1, 0))))
         io.rf_read_ports(idx+2).addr := Cat(rs3_addr, Mux(maskvd, maskvd_rsel, rdsel))
         rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, Mux(RegNext(maskvd), maskvd_data,
                                                                Mux(RegNext(io.iss_uops(w).rt(RD, isUnsignedV)), rf_data3, signext3)))
@@ -314,7 +314,7 @@ class RegisterRead(
         val vmlogic_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
         val vmlogic_active = exe_reg_rvm_data(w) && vstart < vmlogic_vl
         val is_active  = Mux(is_masked, exe_reg_rvm_data(w), true.B) && vstart < vl
-        io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && exe_reg_rvm_data(w)) && !(uses_ldq && exe_reg_uops(w).v_unmasked)
+        io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && is_active)
         io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
         val vmove: Bool = VecInit(Seq(exe_reg_uops(w).uopc === uopVFMV_S_F,
           exe_reg_uops(w).uopc === uopVFMV_F_S,

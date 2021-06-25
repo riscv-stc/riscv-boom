@@ -322,6 +322,16 @@ class IssueSlot(
         wake_p2(i) := Fill(vLenb, (wk_rs2 && wk_act && wk_last).asUInt)
         wake_p3(i) := Fill(vLenb, (wk_rs3 && wk_act && wk_last).asUInt)
         wake_pm(i) := Fill(vLenb, (wk_rvm && wk_act && wk_last).asUInt)
+      } .elsewhen(wk_uop.rt(RD, isMaskVD)) {
+        val rsel_mvd     = wk_vstart(eLenSelSz+5, 6)
+        val is_last_mvd  = (wk_vstart + 1.U) === wk_uop.vconfig.vl
+        val is_eLast_mvd = wk_vstart(5, 0) === "h_3f".U
+        val emask_mvd    = Fill(eLenb, is_eLast_mvd)
+        val mask_mvd     = Fill(vLenb, is_last_mvd) | (emask_mvd << Cat(rsel_mvd, 0.U(3.W)))
+        wake_p1(i) := mask_mvd & Fill(vLenb, wk_rs1.asUInt)
+        wake_p2(i) := mask_mvd & Fill(vLenb, wk_rs2.asUInt)
+        wake_p3(i) := mask_mvd & Fill(vLenb, wk_rs3.asUInt)
+        wake_pm(i) := mask_mvd & Fill(vLenb, wk_rvm.asUInt)
       }
     } else {
       when (wk_valid && (wk_pdst === next_uop.prs1)) {
