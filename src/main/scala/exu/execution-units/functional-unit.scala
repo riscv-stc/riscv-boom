@@ -983,15 +983,33 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   vmaskUnit.io.in_addend := op2_data.asUInt
   vmaskUnit.io.fn  := uop.ctrl.op_fcn
 
-  val is_0_op_num = (op1_data === 0.U) || (~is_multiple_of_64 & ((vmaskInsn_mask & op1_data) === 0.U))
-  val firstIdx_result = Mux(is_vmaskInsn_last_split & is_0_op_num , ~0.U(xLen.W), vmaskUnit.io.out)
-  val has_set_first = RegNext(~is_0_op_num)
-  val sof_result = Mux(has_set_first.asBool(),
+  val is_0_op_num = (op1_data === 0.U) || (is_vmaskInsn_last_split & ~is_multiple_of_64 & ((vmaskInsn_mask & op1_data) === 0.U))
+  val has_find_1_r = RegInit(false.B)
+  val firstIdx_r = RegInit(0.U(xLen.W))
+  when(uop.vstart === 0.U){
+    has_find_1_r := false.B
+    firstIdx_r := 0.U(xLen.W)
+  }.elsewhen(~is_0_op_num & ~has_find_1_r){
+    has_find_1_r := true.B
+    firstIdx_r := vmaskUnit.io.out
+  }
+
+  val firstIdx_result = Mux(is_vmaskInsn_last_split & is_0_op_num & ~has_find_1_r , ~0.U(xLen.W),
+    Mux(is_vmaskInsn_last_split & ~is_0_op_num, vmaskUnit.io.out,
+    Mux(is_vmaskInsn_last_split & is_0_op_num, firstIdx_r, 0.U(xLen.U))))
+
+  val sof_result = Mux(has_find_1_r,
     Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data, 0.U(xLen.W)), // has_set_first
     Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data | vmaskUnit.io.out, Mux(is_0_op_num, 0.U(xLen.W), vmaskUnit.io.out)))
 
+  val sbf_result = vmaskUnit.io.out
+  val sif_result = vmaskUnit.io.out
+
   val vmaskUnit_out = Mux(uop.uopc.isOneOf(uopVFIRST), firstIdx_result,
-    Mux(uop.uopc.isOneOf(uopVMSOF), sof_result, vmaskUnit.io.out))
+    Mux(uop.uopc.isOneOf(uopVMSOF), sof_result,
+    Mux(uop.uopc.isOneOf(uopVMSBF), sbf_result,
+    Mux(uop.uopc.isOneOf(uopVMSIF), sif_result,
+          vmaskUnit.io.out))))
 
   // vl => last
   io.resp.bits.data := vmaskUnit_out
