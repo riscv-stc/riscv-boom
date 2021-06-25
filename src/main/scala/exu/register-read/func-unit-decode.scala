@@ -189,7 +189,7 @@ object VecRRdDecode extends RRdDecodeConstants
         ,BitPat(uopVMSIF)    -> List(BR_N, Y, N, N, FN_SIF,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
         ,BitPat(uopVMSOF)    -> List(BR_N, Y, N, N, FN_SOF,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
         ,BitPat(uopVIOTA)    -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopVID)      -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopVID)      -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_ZERO,    OP2_ZERO,    IS_X, REN_1, CSR.N)
   )
 }
 
