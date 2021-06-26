@@ -1080,15 +1080,29 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
     Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data, 0.U(xLen.W)),
     Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data | vmaskUnit.io.out, Mux(is_0_op_num, ~0.U(xLen.W), vmaskUnit.io.out)))
 
-  val iota_result = WireInit(0.U(eLen.W))
-  when(rs1_data(uop.vstart) === 1.U){ // mask = 1
-    iota_result := RegNext(iota_result) + rs2_data(uop.vstart-1.U)
-  }.elsewhen(rs1_data(uop.vstart) === 0.U){
-    iota_result := RegNext(RegNext(iota_result))
-  }
-
   val is_masked  = !uop.v_unmasked
   val v_inactive = uop.is_rvv && !uop.v_active
+
+  val iota_r = RegInit(0.U(eLen.W))
+  when(uop.vstart === 0.U){
+    iota_r := 0.U
+  }.elsewhen(uop.v_is_last){
+    iota_r := 0.U
+  }.otherwise{
+    iota_r := RegNext(iota_r) + rs2_data(uop.vstart-1.U)
+  }
+
+  val iota_result = WireInit(0.U(eLen.W))
+  when(uop.vstart === 0.U){
+    iota_result := 0.U
+  }.elsewhen(is_masked & (rs1_data(uop.vstart) === 0.U)) {
+    iota_result := io.req.bits.rs3_data(0)
+  }.elsewhen(is_masked & (rs1_data(uop.vstart) === 1.U)) {
+    iota_result := iota_r
+  }.otherwise{
+    iota_result := iota_r
+  }
+
   val vmaskUnit_out = Mux(uop.uopc.isOneOf(uopVFIRST), firstIdx_result,
     Mux(uop.uopc.isOneOf(uopVMSOF), sof_result,
     Mux(uop.uopc.isOneOf(uopVMSBF), Mux(is_masked, sbf_result & rs1_data, sbf_result),
