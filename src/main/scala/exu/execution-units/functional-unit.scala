@@ -23,9 +23,13 @@ import chisel3.experimental.chiselName
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.ALU._
 import freechips.rocketchip.util._
+import freechips.rocketchip.tile.FPConstants._
+import freechips.rocketchip.tile.{FPUCtrlSigs, HasFPUParameters}
 import freechips.rocketchip.tile
+import freechips.rocketchip.rocket
 import freechips.rocketchip.rocket.{DecodeLogic,PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR,VConfig,VType}
 
+import FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.ifu._
@@ -37,7 +41,7 @@ import boom.util._
 object FUConstants
 {
   // bit mask, since a given execution pipeline may support multiple functional units
-  val FUC_SZ = 13
+  val FUC_SZ = 14
   val FU_X   = BitPat.dontCare(FUC_SZ)
   val FU_ALU_ID = 0
   val FU_JMP_ID = 1
@@ -51,7 +55,8 @@ object FUConstants
   val FU_F2I_ID = 9
   val FU_VMX_ID = 10  // vec load /store index vec store data
   val FU_MAC_ID = 11
-  val FU_VMASKU_ID = 12
+  val FU_FR7_ID = 12  // vfrsqrt7 / vfrec7
+  val FU_VMASKU_ID = 13
   val FU_ALU = (1<<FU_ALU_ID).U(FUC_SZ.W)
   val FU_JMP = (1<<FU_JMP_ID).U(FUC_SZ.W)
   val FU_MEM = (1<<FU_MEM_ID).U(FUC_SZ.W)
@@ -64,6 +69,7 @@ object FUConstants
   val FU_F2I = (1<<FU_F2I_ID).U(FUC_SZ.W)
   val FU_VMX = (1<<FU_VMX_ID).U(FUC_SZ.W)
   val FU_MAC = (1<<FU_MAC_ID).U(FUC_SZ.W)
+  val FU_FR7 = (1<<FU_FR7_ID).U(FUC_SZ.W)
   val FU_VMASKU = (1<<FU_VMASKU_ID).U(FUC_SZ.W)
 
   // FP stores generate data through FP F2I, and generate address through MemAddrCalc
@@ -94,6 +100,7 @@ class SupportedFuncUnits(
   val csr: Boolean  = false,
   val fdiv: Boolean = false,
   val ifpu: Boolean = false,
+  val fr7:  Boolean = false,
   val vector: Boolean = false)
 {
 }
@@ -932,6 +939,65 @@ class IntMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val resp = Pipe(in, numStages-1)
   io.resp.valid := resp.valid
   io.resp.bits.data := Pipe(in.valid, muxed, numStages-1).bits
+}
+
+/**
+ * frsqrt7/frec7 unit returns an estimate results accurate to 7 bits.
+ *
+ * @param isPipelined is the functional unit pipelined
+ * @param numStages number of stages for the functional unit
+ * @param numBypassStages number of bypass stages
+ * @param dataWidth width of the data out of the functional unit
+ */
+
+class FR7Unit(latency: Int)(implicit p: Parameters) 
+  extends PipelinedFunctionalUnit(
+  numStages = latency,
+  numBypassStages = 0,
+  earliestBypassStage = 0,
+  dataWidth = 65,
+  needsFcsr = true
+) with tile.HasFPUParameters
+{
+  val io_req = io.req.bits
+  val vsew = io_req.uop.vconfig.vtype.vsew
+  val req = Wire(new tile.FPInput)
+  val tag = Mux(vsew === 3.U, D, Mux(vsew === 2.U, S, H))
+  val fp_ctrl = Wire(new FPUCtrlSigs())
+  fp_ctrl.typeTagIn := tag
+  fp_ctrl.typeTagOut:= tag
+  fp_ctrl.ldst      := DontCare
+  fp_ctrl.wen       := DontCare
+  fp_ctrl.ren1      := DontCare
+  fp_ctrl.ren2      := DontCare
+  fp_ctrl.ren3      := DontCare
+  fp_ctrl.swap12    := DontCare
+  fp_ctrl.swap23    := DontCare
+  fp_ctrl.fromint   := DontCare
+  fp_ctrl.toint     := DontCare
+  fp_ctrl.fastpipe  := DontCare
+  fp_ctrl.fma       := DontCare
+  fp_ctrl.div       := DontCare
+  fp_ctrl.sqrt      := DontCare
+  fp_ctrl.wflags    := DontCare
+
+  req <> fp_ctrl
+  req.in1    := unbox(recode(io_req.rs2_data, tag), tag, None)
+  req.in2    := io_req.rs2_data
+  req.in3    := DontCare
+  req.rm     := io.fcsr_rm
+  req.typ    := Mux(io_req.uop.uopc === uopVFRSQRT7, 0.U, 1.U)
+  req.fmt    := DontCare
+  req.fmaCmd := DontCare
+
+  val fr7 = Module(new tile.FR7(latency))
+  fr7.io.in.valid := io.req.valid
+  fr7.io.in.bits := req
+
+  io.resp.bits.data              := fr7.io.out.bits.data
+  io.resp.bits.fflags.valid      := fr7.io.out.valid
+  io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
+  io.resp.bits.fflags.bits.flags := fr7.io.out.bits.exc
 }
 
 /**
