@@ -162,7 +162,11 @@ class RegisterRead(
         val r2_bit_mask = Cat((0 until eLenb).map(i => Fill(8, r2msk(i).asUInt)).reverse)
         val rf_data2 = (io.rf_read_ports(idx+1).data & RegNext(r2_bit_mask)) >> RegNext(r2_sh)
         val signext2 = Mux1H(UIntToOH(RegNext(vs2_sew(1,0))), Seq(rf_data2(7,0).sextTo(eLen), rf_data2(15,0).sextTo(eLen), rf_data2(31,0).sextTo(eLen), rf_data2(63,0)))
-        io.rf_read_ports(idx+1).addr := Cat(rs2_addr, r2sel)
+
+        val is_vmask_iota_m = io.iss_uops(w).uopc.isOneOf(uopVIOTA)
+        val vmask_iota_addr = Cat(rs2_addr, vstart >> log2Ceil(eLen))
+
+        io.rf_read_ports(idx+1).addr := Mux(is_vmask_iota_m, vmask_iota_addr, Cat(rs2_addr, r2sel))
         rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, Mux(RegNext(io.iss_uops(w).rt(RS2, isUnsignedV)), rf_data2, signext2))
       }
       if (numReadPorts > 2) {
@@ -183,8 +187,9 @@ class RegisterRead(
       }
       if (numReadPorts > 3) { // handle vector mask
         val is_vmask_cnt_m = io.iss_uops(w).uopc.isOneOf(uopVPOPC, uopVFIRST)
+        val is_vmask_set_m = io.iss_uops(w).uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
         val vmaskInsn_mask_addr = Cat(rvm_addr, vstart(3,0))
-        io.rf_read_ports(idx+3).addr := Mux(is_vmask_cnt_m, vmaskInsn_mask_addr, Cat(rvm_addr, vstart >> log2Ceil(eLen)))
+        io.rf_read_ports(idx+3).addr := Mux(is_vmask_cnt_m | is_vmask_set_m, vmaskInsn_mask_addr, Cat(rvm_addr, vstart >> log2Ceil(eLen)))
 
         rrd_rvm_data(w) := io.rf_read_ports(idx+3).data(RegNext(vstart(log2Ceil(eLen)-1,0)))
         rrd_vmaskInsn_rvm_data(w) := io.rf_read_ports(idx+3).data
