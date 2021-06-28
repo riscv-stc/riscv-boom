@@ -1083,8 +1083,9 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val is_masked  = !uop.v_unmasked
   val v_inactive = uop.is_rvv && !uop.v_active
 
+  val is_viotaInsn_last = uop.vstart === vl
   val iota_r = RegInit(0.U(eLen.W))
-  when(uop.v_is_last){
+  when(is_viotaInsn_last){
     iota_r := 0.U
   }.otherwise{
     iota_r := iota_r + rs2_data(uop.vstart(log2Ceil(eLen)-1,0))

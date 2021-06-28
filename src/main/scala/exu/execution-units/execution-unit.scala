@@ -684,7 +684,7 @@ class VecExeUnit(
   // Pipelined, VMaskUnit ------------------
   var vmaskunit: PipelinedVMaskUnit = null
   if (hasVMaskUnit) {
-    vmaskunit = Module(new PipelinedVMaskUnit(numStages, eLen)).suggestName("pipelinedvmaskunit")
+    vmaskunit = Module(new PipelinedVMaskUnit(numStages, eLen)).suggestName("vmaskunit")
     vmaskunit.io <> DontCare
     vmaskunit.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMASKU)
 
