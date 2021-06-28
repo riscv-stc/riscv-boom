@@ -1089,7 +1089,7 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   }.elsewhen(uop.v_is_last){
     iota_r := 0.U
   }.otherwise{
-    iota_r := RegNext(iota_r) + rs2_data(uop.vstart-1.U)
+    iota_r := iota_r + rs2_data(uop.vstart-1.U)
   }
 
   val iota_result = WireInit(0.U(eLen.W))
