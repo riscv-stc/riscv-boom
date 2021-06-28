@@ -167,7 +167,7 @@ class RegisterRead(
         val vmask_iota_addr = Cat(rs2_addr, vstart >> log2Ceil(eLen))
 
         io.rf_read_ports(idx+1).addr := Mux(is_vmask_iota_m, vmask_iota_addr, Cat(rs2_addr, r2sel))
-        rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, Mux(RegNext(io.iss_uops(w).rt(RS2, isUnsignedV)), rf_data2, signext2))
+        rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, Mux(is_vmask_iota_m, io.rf_read_ports(idx+1).data, Mux(RegNext(io.iss_uops(w).rt(RS2, isUnsignedV)), rf_data2, signext2)))
       }
       if (numReadPorts > 2) {
         val vd_sew  = Mux(io.iss_uops(w).uses_v_ls_ew, io.iss_uops(w).v_ls_ew,
@@ -188,8 +188,7 @@ class RegisterRead(
       if (numReadPorts > 3) { // handle vector mask
         val is_vmask_cnt_m = io.iss_uops(w).uopc.isOneOf(uopVPOPC, uopVFIRST)
         val is_vmask_set_m = io.iss_uops(w).uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
-        val vmaskInsn_mask_addr = Cat(rvm_addr, vstart(3,0))
-        io.rf_read_ports(idx+3).addr := Mux(is_vmask_cnt_m | is_vmask_set_m, vmaskInsn_mask_addr, Cat(rvm_addr, vstart >> log2Ceil(eLen)))
+        io.rf_read_ports(idx+3).addr := Cat(rvm_addr, vstart >> log2Ceil(eLen))
 
         rrd_rvm_data(w) := io.rf_read_ports(idx+3).data(RegNext(vstart(log2Ceil(eLen)-1,0)))
         rrd_vmaskInsn_rvm_data(w) := io.rf_read_ports(idx+3).data
@@ -324,6 +323,7 @@ class RegisterRead(
         val vmlogic    = exe_reg_uops(w).ctrl.is_vmlogic
         val is_vmask_cnt_m = exe_reg_uops(w).uopc.isOneOf(uopVPOPC, uopVFIRST)
         val is_vmask_set_m = exe_reg_uops(w).uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
+        val is_vmask_iota_m = exe_reg_uops(w).uopc.isOneOf(uopVIOTA)
         val is_vmaskInsn = vmlogic || is_vmask_cnt_m || is_vmask_set_m
         val byteWidth  = 3.U
         val vsew64bit  = 3.U
@@ -333,7 +333,7 @@ class RegisterRead(
         val vmaskInsn_rs2_data = Mux(is_masked, exe_reg_rs2_data(w) & exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs2_data(w))
 
         io.exe_reqs(w).bits.rs2_data    := Mux(is_vmask_cnt_m | is_vmask_set_m, vmaskInsn_rs2_data, exe_reg_rs2_data(w))
-        io.exe_reqs(w).bits.rs1_data    := Mux(is_vmask_set_m, exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs1_data(w))
+        io.exe_reqs(w).bits.rs1_data    := Mux(is_vmask_set_m | is_vmask_iota_m, exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs1_data(w))
 
         io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && is_active)
 
