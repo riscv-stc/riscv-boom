@@ -1084,9 +1084,7 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val v_inactive = uop.is_rvv && !uop.v_active
 
   val iota_r = RegInit(0.U(eLen.W))
-  when(uop.vstart === 0.U){
-    iota_r := 0.U
-  }.elsewhen(uop.v_is_last){
+  when(uop.v_is_last){
     iota_r := 0.U
   }.otherwise{
     iota_r := iota_r + rs2_data(uop.vstart)
