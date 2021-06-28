@@ -4,7 +4,7 @@ stages:
 build:
   stage : build
   script: |
-    cd ~/chipyard
+    cd ~/runners/$CI_RUNNER_ID/chipyard
     git pull
     if [ -d generators/boom.tmp ]; then
         mv -f generators/boom generators/boom.working
