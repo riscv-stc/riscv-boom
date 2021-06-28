@@ -758,6 +758,16 @@ object VectorFPDecode extends DecodeConstants
  ,VFSGNJN_VF       ->List(Y, Y, X, uopVFSGNJ,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VFSGNJX_VV       ->List(Y, Y, X, uopVFSGNJ,      IQT_VEC ,FU_FPU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VFSGNJX_VF       ->List(Y, Y, X, uopVFSGNJ,      IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMFEQ_VV         ->List(Y, Y, X, uopVMFEQ,       IQT_VEC ,FU_F2I ,RT_VM , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMFEQ_VF         ->List(Y, Y, X, uopVMFEQ,       IQT_FVEC,FU_F2I ,RT_VM , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMFNE_VV         ->List(Y, Y, X, uopVMFNE,       IQT_VEC ,FU_F2I ,RT_VM , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMFNE_VF         ->List(Y, Y, X, uopVMFNE,       IQT_FVEC,FU_F2I ,RT_VM , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMFLT_VV         ->List(Y, Y, X, uopVMFLT,       IQT_VEC ,FU_F2I ,RT_VM , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMFLT_VF         ->List(Y, Y, X, uopVMFLT,       IQT_FVEC,FU_F2I ,RT_VM , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMFLE_VV         ->List(Y, Y, X, uopVMFLE,       IQT_VEC ,FU_F2I ,RT_VM , RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMFLE_VF         ->List(Y, Y, X, uopVMFLE,       IQT_FVEC,FU_F2I ,RT_VM , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMFGT_VF         ->List(Y, Y, X, uopVMFGT,       IQT_FVEC,FU_F2I ,RT_VM , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMFGE_VF         ->List(Y, Y, X, uopVMFGE,       IQT_FVEC,FU_F2I ,RT_VM , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VFCLASS_V        ->List(Y, Y, X, uopVFCLASS,     IQT_VEC ,FU_F2I ,RT_VEC, RT_X  , RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VFMV_V_F         ->List(Y, Y, X, uopVFMV_V_F,    IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VFMV_F_S         ->List(Y, Y, X, uopVFMV_F_S,    IQT_VEC ,FU_ALU ,RT_FLT, RT_X  , RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, N, Y, DC2)
@@ -1126,7 +1136,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val ren_mask = ~(Fill(vLenSz,1.U) << (7.U - vd_sew))
     val vs1_mask = ~(Fill(vLenSz,1.U) << (7.U - vsew))
     val vs2_mask = ~(Fill(vLenSz,1.U) << (7.U - vs2_sew))
-    uop.v_re_alloc  := (vstart & ren_mask(vLenSz,0)) === 0.U
+    uop.v_re_alloc  := Mux(uop.rt(RD, isMaskVD), vstart === 0.U, (vstart & ren_mask(vLenSz,0)) === 0.U)
     uop.v_re_vs1    := (vstart & vs1_mask(vLenSz,0)) === 0.U
     uop.v_re_vs2    := (vstart & vs2_mask(vLenSz,0)) === 0.U
 

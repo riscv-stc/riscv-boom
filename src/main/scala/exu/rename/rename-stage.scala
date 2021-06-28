@@ -437,6 +437,12 @@ class RenameStage(
         val is_act = wk.bits.uop.rt(RD, isReduceV)
         val is_fin = (vstart + 1.U === wk.bits.uop.vconfig.vl)
         bs := Fill(vLenb, (is_act && is_fin).asUInt)
+      } .elsewhen(wk.bits.uop.rt(RD, isMaskVD)) {
+        val rsel_mvd     = vstart(eLenSelSz+5, 6)
+        val is_last_mvd  = (vstart + 1.U === wk.bits.uop.vconfig.vl)
+        val is_eLast_mvd = vstart(5, 0) === "h_3f".U
+        val emask_mvd    = Fill(eLenb, is_eLast_mvd) 
+        bs := Fill(vLenb, is_last_mvd) | (emask_mvd << Cat(rsel_mvd, 0.U(3.W)))
       }
     }
   }
