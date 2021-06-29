@@ -1085,12 +1085,22 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_vmask_set_m = cs.uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
     val is_v_mask_insn = vmlogic_insn || is_vmask_cnt_m || is_vmask_set_m
 
+    val is_viota_m = cs.uopc.isOneOf(uopVIOTA)
+    val viotaInsn_split_ecnt = vLen.U >> (byteWidth - vlmul)
+    val viotaInsn_tolal_ecnt = vLen.U >> (byteWidth - vlmul)
+
+
     //val eLen_ecnt = eLen.U >> (vsew+3.U)
     val vLen_ecnt  = Mux(!is_v_ls && vs2_sew > vd_sew, vLen.U >> (vs2_sew+3.U), vLen.U >> (vd_sew+3.U))
-    val split_ecnt = Mux(is_v_ls, 1.U, Mux(is_v_mask_insn, vmlogic_split_ecnt, vLen_ecnt))
+    val split_ecnt = Mux(is_v_ls, 1.U,
+      Mux(is_viota_m, viotaInsn_split_ecnt,
+      Mux(is_v_mask_insn, vmlogic_split_ecnt, vLen_ecnt)))
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     // for fractional lmul, we need visit at least one entire vreg
-    val total_ecnt = Mux(cs.uses_stq, Mux(is_v_mask_ls, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl), Mux(vlmul_sign && !is_v_mask_ls, vLen_ecnt, Mux(is_v_mask_insn, vmlogic_tolal_ecnt, vlmax)))
+    val total_ecnt = Mux(cs.uses_stq, Mux(is_v_mask_ls, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl),
+      Mux(vlmul_sign && !is_v_mask_ls, vLen_ecnt,
+      Mux(is_viota_m, viotaInsn_tolal_ecnt,
+      Mux(is_v_mask_insn, vmlogic_tolal_ecnt, vlmax))))
     val vseg_flast = vseg_finc === vseg_nf
     val elem_last  = vstart + split_ecnt === total_ecnt
     val split_last = elem_last && Mux(is_v_ls_seg, vseg_flast, true.B)
