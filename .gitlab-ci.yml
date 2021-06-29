@@ -18,11 +18,11 @@ build:
     fi
     rsync -az $CI_PROJECT_DIR/* generators/boom
     module load chipyard
-    bsub -J ci -Ip make -C sims/vcs CONFIG=StcBoomConfig -j
-    bsub -J ci -Ip make -C sims/vcs CONFIG=StcBoomConfig -j run-asm-tests
-    bsub -J ci -Ip make -C sims/vcs CONFIG=StcBoomConfig -j run-bmark-tests
+    make -C sims/vcs CONFIG=StcBoomConfig -j
+    make -C sims/vcs CONFIG=StcBoomConfig -j run-asm-tests
+    make -C sims/vcs CONFIG=StcBoomConfig -j run-bmark-tests
     cd toolchains/llvm/riscv-testsuite
-    bsub -J ci -Ip ./scripts/run-test.sh --vcs=../../../sims/vcs/simv-chipyard-StcBoomConfig --cases=sanity.list
+    ./scripts/run-basic.sh --vcs=../../../sims/vcs/simv-chipyard-StcBoomConfig --cases=sanity.list
     cd ../../..
   timeout: 5h
   artifacts:
