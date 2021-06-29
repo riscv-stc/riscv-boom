@@ -1063,11 +1063,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
     val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     val is_v_mask_ls = cs.uopc.isOneOf(uopVLM, uopVSMA)
-<<<<<<< HEAD
     val is_viota_m = cs.uopc.isOneOf(uopVIOTA)
-=======
     val is_v_reg_ls = cs.uopc.isOneOf(uopVLR, uopVSR)
->>>>>>> master
     val vseg_nf = inst(NF_MSB, NF_LSB)
     val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) && !is_v_reg_ls
     val vstart  = RegInit(0.U((vLenSz+1).W))
