@@ -1043,6 +1043,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
     val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     val is_v_mask_ls = cs.uopc.isOneOf(uopVLM, uopVSMA)
+    val is_viota_m = cs.uopc.isOneOf(uopVIOTA)
     val vseg_nf = inst(NF_MSB, NF_LSB)
     val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) // FIXME: exclude whole register load/store
     val vstart  = RegInit(0.U((vLenSz+1).W))
@@ -1065,8 +1066,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(uop.rt(RS2, isWidenV ), vsew + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), vsew - vs2_nfactor,vsew)))
     val vd_inc     = vstart >> (vLenSz.U - 3.U - vd_sew)
-    val vs2_inc    = vstart >> (vLenSz.U - 3.U - vs2_sew)
-    val vs1_inc    = vstart >> (vLenSz.U - 3.U - vsew)
+    val vs2_inc    = Mux(is_viota_m, 0.U, vstart >> (vLenSz.U - 3.U - vs2_sew))
+    val vs1_inc    = Mux(is_viota_m, 0.U, vstart >> (vLenSz.U - 3.U - vsew))
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
       //assert(vsew >= vd_nfactor  && vsew + vd_wfactor  <= 3.U, "Unsupported vd_sew")
