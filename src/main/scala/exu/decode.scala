@@ -1086,8 +1086,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_v_mask_insn = vmlogic_insn || is_vmask_cnt_m || is_vmask_set_m
 
     val is_viota_m = cs.uopc.isOneOf(uopVIOTA)
-    val viotaInsn_split_ecnt = vLen.U >> (byteWidth - vlmul)
-    val viotaInsn_tolal_ecnt = vLen.U >> (byteWidth - vlmul)
+    val viotaInsn_split_ecnt = vLen.U >> (byteWidth +& vsew - vlmul)
+    val viotaInsn_tolal_ecnt = vLen.U >> (byteWidth +& vsew - vlmul)
 
 
     //val eLen_ecnt = eLen.U >> (vsew+3.U)
