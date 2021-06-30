@@ -130,6 +130,12 @@ class UOPCodeFPUDecoder(vector: Boolean = false)(implicit p: Parameters) extends
    ,BitPat(uopVFMAX)    -> List(X,X,Y,Y,N, N,N,D,D,N,N,Y, N,N,N,Y)
    ,BitPat(uopVFMV_V_F) -> List(X,X,Y,N,N, N,Y,D,D,N,N,N, Y,N,N,N)
    ,BitPat(uopVFSGNJ)   -> List(X,X,Y,Y,N, Y,N,D,D,N,N,Y, N,N,N,N)
+   ,BitPat(uopVMFEQ)    -> List(X,X,Y,Y,N, N,N,D,D,N,Y,N, N,N,N,Y)
+   ,BitPat(uopVMFNE)    -> List(X,X,Y,Y,N, N,N,D,D,N,Y,N, N,N,N,Y)
+   ,BitPat(uopVMFLT)    -> List(X,X,Y,Y,N, Y,N,D,D,N,Y,N, N,N,N,Y)
+   ,BitPat(uopVMFLE)    -> List(X,X,Y,Y,N, Y,N,D,D,N,Y,N, N,N,N,Y)
+   ,BitPat(uopVMFGT)    -> List(X,X,Y,Y,N, N,N,D,D,N,Y,N, N,N,N,Y)
+   ,BitPat(uopVMFGE)    -> List(X,X,Y,Y,N, N,N,D,D,N,Y,N, N,N,N,Y)
    ,BitPat(uopVFCLASS)  -> List(X,X,Y,N,N, Y,X,D,D,N,Y,N, N,N,N,N)
    ,BitPat(uopVFCVT_F2I)-> List(X,X,Y,N,N, Y,X,D,D,N,Y,N, N,N,N,Y)
    ,BitPat(uopVFCVT_I2F)-> List(X,X,N,N,N, Y,X,D,D,Y,N,N, N,N,N,Y)
@@ -271,12 +277,13 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     val vs2_tag = Mux(vector.B && (vd_widen ^ vs2_widen), tagIn, tag)
     req <> fp_ctrl
     req.rm := Mux(~io_req.uop.is_rvv, fp_rm, 
-              Mux(io_req.uop.fu_code_is(FU_F2I) && CheckF2IRm(io_req.uop.imm_packed), 1.U, 
-              Mux(io_req.uop.uopc === uopVFCLASS || io_req.uop.uopc === uopVFMAX, 1.U,
-              Mux(io_req.uop.uopc === uopVFMIN, 0.U,
+              Mux(io_req.uop.uopc.isOneOf(uopVFCLASS, uopVFMAX, uopVMFLT, uopVMFGT), 1.U,
+              Mux(io_req.uop.uopc.isOneOf(uopVFMIN, uopVMFLE, uopVMFGE), 0.U,
+              Mux(io_req.uop.uopc.isOneOf(uopVMFEQ, uopVMFNE), 2.U,
               Mux(io_req.uop.uopc === uopVFSGNJ,  ImmGenRmVSGN(io_req.uop.imm_packed),
               Mux(io_req.uop.uopc === uopVFCVT_F2F && CheckF2FRm(io_req.uop.imm_packed), 6.U,
-              io_req.fcsr_rm))))))
+              Mux(io_req.uop.fu_code_is(FU_F2I) && CheckF2IRm(io_req.uop.imm_packed), 1.U, 
+              io_req.fcsr_rm)))))))
     val unbox_rs1 = Mux(vector.B && vd_widen,               unbox(rs1_data, tagIn,   None), unbox(rs1_data, tag, minT))
     val unbox_rs2 = Mux(vector.B && (vd_widen ^ vs2_widen), unbox(rs2_data, vs2_tag, None), unbox(rs2_data, tag, minT))
     val unbox_rs3 = unbox(rs3_data, tag,      minT)
@@ -328,8 +335,9 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
 
   val fpiu_out = Pipe(RegNext(fpiu.io.in.valid && !fp_ctrl.fastpipe),
                               fpiu.io.out.bits, fpu_latency-1)
+  val fpiu_invert = Pipe(io.req.valid, io_req.uop.uopc === uopVMFNE, fpu_latency).bits
   val fpiu_result  = Wire(new tile.FPResult)
-  fpiu_result.data := fpiu_out.bits.toint
+  fpiu_result.data := Mux(fpiu_invert, ~fpiu_out.bits.toint, fpiu_out.bits.toint)
   fpiu_result.exc  := fpiu_out.bits.exc
 
   val fpmu = Module(new tile.FPToFP(fpu_latency)) // latency 2 for rocket

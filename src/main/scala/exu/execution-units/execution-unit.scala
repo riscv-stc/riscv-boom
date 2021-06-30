@@ -24,6 +24,7 @@ import freechips.rocketchip.config.{Parameters}
 import freechips.rocketchip.rocket.{BP, VConfig}
 import freechips.rocketchip.tile.{XLen, RoCCCoreIO}
 import freechips.rocketchip.tile
+import freechips.rocketchip.util.{UIntIsOneOf}
 
 import FUConstants._
 import boom.common._
@@ -74,6 +75,7 @@ class FFlagsResp(implicit p: Parameters) extends BoomBundle
  * @param hasFpu does the exe unit have a fpu
  * @param hasMul does the exe unit have a multiplier
  * @param hasMacc does the exe unit have a multiply-accumulator
+ * @param hasVMaskUnit does the exe unit have a VMaskUnit
  * @param hasDiv does the exe unit have a divider
  * @param hasFdiv does the exe unit have a FP divider
  * @param hasIfpu does the exe unit have a int to FP unit
@@ -100,6 +102,7 @@ abstract class ExecutionUnit(
   val hasFpu           : Boolean       = false,
   val hasMul           : Boolean       = false,
   val hasMacc          : Boolean       = false,
+  val hasVMaskUnit     : Boolean       = false,
   val hasDiv           : Boolean       = false,
   val hasFdiv          : Boolean       = false,
   val hasIfpu          : Boolean       = false,
@@ -604,6 +607,7 @@ class VecExeUnit(
   hasVMX         : Boolean = false,
   hasAlu         : Boolean = true,
   hasMacc        : Boolean = true,
+  hasVMaskUnit   : Boolean = true,
   hasDiv         : Boolean = true,
   hasIfpu        : Boolean = false,
   hasFpu         : Boolean = false,
@@ -620,6 +624,7 @@ class VecExeUnit(
     alwaysBypassable = false,
     hasAlu           = hasAlu,
     hasMacc          = hasMacc,
+    hasVMaskUnit     = hasVMaskUnit,
     hasDiv           = hasDiv,
     hasIfpu          = hasIfpu,
     hasFpu           = hasFpu,
@@ -651,6 +656,7 @@ class VecExeUnit(
 
   io.fu_types := Mux(hasAlu.B,                FU_ALU, 0.U) |
                  Mux(hasMacc.B,               FU_MAC, 0.U) |
+                 Mux(hasVMaskUnit.B,          FU_VMASKU, 0.U) |
                  Mux(!div_busy && hasDiv.B,   FU_DIV, 0.U) |
                  Mux(hasIfpu.B,               FU_I2F, 0.U) |
                  Mux(hasFpu.B,       FU_FPU | FU_F2I, 0.U) |
@@ -677,6 +683,16 @@ class VecExeUnit(
     xmacc.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_MAC)
     xmacc.io.vxrm      := io.vxrm
     vec_fu_units += xmacc
+  }
+
+  // Pipelined, VMaskUnit ------------------
+  var vmaskunit: PipelinedVMaskUnit = null
+  if (hasVMaskUnit) {
+    vmaskunit = Module(new PipelinedVMaskUnit(numStages, eLen)).suggestName("vmaskUnit")
+    vmaskunit.io <> DontCare
+    vmaskunit.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMASKU)
+
+    vec_fu_units += vmaskunit
   }
 
   // Div/Rem Unit -----------------------
@@ -779,7 +795,9 @@ class VecExeUnit(
 
   // Outputs (Write Port #0)  ---------------
   if (writesVrf) {
-    io.vresp.valid     := vec_fu_units.map(_.io.resp.valid).reduce(_|_)
+    val is_not_vpopc = vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVPOPC).foldLeft(true.B)(_ && _)
+    val is_not_vfirst = vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVFIRST).foldLeft(true.B)(_ && _)
+    io.vresp.valid     := vec_fu_units.map(_.io.resp.valid).reduce(_|_) && is_not_vpopc && is_not_vfirst
     io.vresp.bits.uop  := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.uop)))
     io.vresp.bits.data := PriorityMux(vec_fu_units.map(f =>
@@ -806,10 +824,21 @@ class VecExeUnit(
 
   if (writesIrf){
     val vecToIntQueue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth), numStages))
-    vecToIntQueue.io.enq.valid := io.req.valid && (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
+
+    val vmv_valid = io.req.valid && (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
+    val vmv_is_last = (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
+    val vl         = io.req.bits.uop.vconfig.vl
+    val byteWidth  = 3.U
+    val vsew64bit  = 3.U
+    val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
+    val vmaskInsn_is_last = io.req.bits.uop.vstart === (vmaskInsn_vl-1.U)
+    val vmaskInsn_valid = vmaskunit.io.resp.valid & io.req.bits.uop.uopc.isOneOf(uopVPOPC, uopVFIRST) & vmaskInsn_is_last
+    val vmaskInsn_result = vmaskunit.io.resp.bits.data
+
+    vecToIntQueue.io.enq.valid := vmv_valid | vmaskInsn_valid
     vecToIntQueue.io.enq.bits.uop := io.req.bits.uop
-    vecToIntQueue.io.enq.bits.data := io.req.bits.rs2_data
-    vecToIntQueue.io.enq.bits.uop.v_is_last := (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
+    vecToIntQueue.io.enq.bits.data := Mux(vmv_valid, io.req.bits.rs2_data, Mux(vmaskInsn_valid, vmaskInsn_result, 0.U))
+    vecToIntQueue.io.enq.bits.uop.v_is_last := Mux(vmv_valid, vmv_is_last, Mux(vmaskInsn_valid, vmaskInsn_is_last, false.B))
     vecToIntQueue.io.enq.bits.predicated := false.B
     vecToIntQueue.io.enq.bits.fflags := DontCare
     vecToIntQueue.io.brupdate := io.brupdate

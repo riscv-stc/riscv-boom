@@ -41,7 +41,7 @@ import boom.util._
 object FUConstants
 {
   // bit mask, since a given execution pipeline may support multiple functional units
-  val FUC_SZ = 13
+  val FUC_SZ = 14
   val FU_X   = BitPat.dontCare(FUC_SZ)
   val FU_ALU_ID = 0
   val FU_JMP_ID = 1
@@ -56,6 +56,7 @@ object FUConstants
   val FU_VMX_ID = 10  // vec load /store index vec store data
   val FU_MAC_ID = 11
   val FU_FR7_ID = 12  // vfrsqrt7 / vfrec7
+  val FU_VMASKU_ID = 13
   val FU_ALU = (1<<FU_ALU_ID).U(FUC_SZ.W)
   val FU_JMP = (1<<FU_JMP_ID).U(FUC_SZ.W)
   val FU_MEM = (1<<FU_MEM_ID).U(FUC_SZ.W)
@@ -69,6 +70,7 @@ object FUConstants
   val FU_VMX = (1<<FU_VMX_ID).U(FUC_SZ.W)
   val FU_MAC = (1<<FU_MAC_ID).U(FUC_SZ.W)
   val FU_FR7 = (1<<FU_FR7_ID).U(FUC_SZ.W)
+  val FU_VMASKU = (1<<FU_VMASKU_ID).U(FUC_SZ.W)
 
   // FP stores generate data through FP F2I, and generate address through MemAddrCalc
   def FU_F2IMEM = ((1 << FU_MEM_ID) | (1 << FU_F2I_ID)).U(FUC_SZ.W)
@@ -550,11 +552,12 @@ class ALUUnit(
                Mux(uop.uopc.isOneOf(uopVMAX, uopVMAXU) && !v_inactive, Mux(alu.io.out(0), io.req.bits.rs1_data, io.req.bits.rs2_data),
                Mux(uop.rt(RD, isReduceV) && v_inactive, io.req.bits.rs1_data,
                Mux(vmlogic_insn,   vmlogic_result,
+               Mux(uop.uopc === uopVID, uop.vstart,
                Mux(vadc  || vsbc,  Mux(v_tail, io.req.bits.rs3_data, alu.io.out),
                Mux(vmadc || vmsbc, Cat(0.U((eLen-1).W), Mux(v_tail, io.req.bits.rs3_data(0), alu_co)),
                Mux(vmscmp,         Cat(0.U((eLen-1).W), Mux(v_tail || v_inactive, io.req.bits.rs3_data(0), alu.io.cmp_out)),
                Mux(uop.is_rvv && (uop.ctrl.is_load || uop.ctrl.is_sta) || v_inactive, io.req.bits.rs3_data,
-                   alu.io.out)))))))))))
+                   alu.io.out))))))))))))
   } else {
     alu_out := Mux(uop.is_sfb_shadow && io.req.bits.pred_data, Mux(uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
                Mux(uop.uopc === uopMOV, io.req.bits.rs2_data,
@@ -1016,7 +1019,6 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   io.resp.bits.data := Pipe(in.valid, muxed, numStages-1).bits
 }
 
-
 /**
  * frsqrt7/frec7 unit returns an estimate results accurate to 7 bits.
  *
@@ -1074,4 +1076,118 @@ class FR7Unit(latency: Int)(implicit p: Parameters)
   io.resp.bits.fflags.valid      := fr7.io.out.valid
   io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
   io.resp.bits.fflags.bits.flags := fr7.io.out.bits.exc
+}
+
+/**
+  * Pipelined vmask computing functional unit that wraps around the VMaskUnit
+  *
+  * @param numStages number of pipeline stages
+  * @param dataWidth size of the data being passed into the functional unit
+  */
+class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
+  extends PipelinedFunctionalUnit(
+    numStages = 0,
+    numBypassStages = 0,
+    earliestBypassStage = 0,
+    dataWidth = dataWidth)
+{
+  val uop = io.req.bits.uop
+  val vl = uop.vconfig.vl
+
+  // immediate generation
+  val rs1_data = io.req.bits.rs1_data
+  val rs2_data = io.req.bits.rs2_data
+
+  val vmaskUnit = Module(new VMaskUnit())
+
+  val byteWidth = 3.U
+  val vsew64bit = 3.U
+  val is_multiple_of_64 = vl(5,0) === 0.U
+  val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
+  val is_vmaskInsn_last_split = uop.vstart === (vmaskInsn_vl-1.U)
+  val vmaskInsn_mask = boom.util.MaskGen(0.U, vl(5,0), 64)
+  val vmaskInsn_rs2_data = Mux(is_vmaskInsn_last_split & (~is_multiple_of_64), (rs2_data & vmaskInsn_mask), rs2_data)
+
+  // operand 1 select
+  var op1_data: UInt = null
+  op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data,
+             Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , vmaskInsn_rs2_data,
+                 0.U))
+
+  val init_popc = Mux(uop.vstart === 0.U, 0.U, RegNext(vmaskUnit.io.out))
+  val init_first_idx = Mux(uop.vstart === 0.U, 0.U, 64.U)
+
+  // operand 2 select
+  val op2_data = WireInit(0.U(xLen.W))
+  op2_data:= Mux(uop.ctrl.op2_sel === OP2_RS2 , rs2_data,
+             Mux(uop.uopc.isOneOf(uopVPOPC), init_popc,
+             Mux(uop.uopc.isOneOf(uopVFIRST), init_first_idx,
+             Mux(uop.ctrl.op2_sel === OP2_VS1,  rs1_data, 0.U))))
+
+  vmaskUnit.io.in := op1_data.asUInt
+  vmaskUnit.io.in_addend := op2_data.asUInt
+  vmaskUnit.io.fn  := uop.ctrl.op_fcn
+
+  val is_0_op_num = (op1_data === 0.U) || (is_vmaskInsn_last_split & ~is_multiple_of_64 & ((vmaskInsn_mask & op1_data) === 0.U))
+  val has_find_1_r = RegInit(false.B)
+  val firstIdx_r = RegInit(0.U(xLen.W))
+  when(is_vmaskInsn_last_split) {
+    has_find_1_r := false.B
+    firstIdx_r := 0.U(xLen.W)
+  }.elsewhen(~is_0_op_num & ~has_find_1_r){
+    has_find_1_r := true.B
+    firstIdx_r := vmaskUnit.io.out
+  }.elsewhen(uop.vstart === 0.U){
+    has_find_1_r := false.B
+    firstIdx_r := 0.U(xLen.W)
+  }
+
+  val firstIdx_result = Mux(is_vmaskInsn_last_split & is_0_op_num & ~has_find_1_r , ~0.U(xLen.W),
+    Mux(is_vmaskInsn_last_split & ~is_0_op_num & ~has_find_1_r, vmaskUnit.io.out,
+    Mux(is_vmaskInsn_last_split, firstIdx_r, 0.U(xLen.U))))
+
+  val sof_result = Mux(has_find_1_r,
+    Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data, 0.U(xLen.W)),
+    Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data | vmaskUnit.io.out, Mux(is_0_op_num, 0.U(xLen.W), vmaskUnit.io.out)))
+
+  val sbf_result = Mux(has_find_1_r,
+    Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data, 0.U(xLen.W)),
+    Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data | vmaskUnit.io.out, Mux(is_0_op_num, ~0.U(xLen.W), vmaskUnit.io.out)))
+
+  val sif_result = Mux(has_find_1_r,
+    Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data, 0.U(xLen.W)),
+    Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data | vmaskUnit.io.out, Mux(is_0_op_num, ~0.U(xLen.W), vmaskUnit.io.out)))
+
+  val is_masked  = !uop.v_unmasked
+  val v_inactive = uop.is_rvv && !uop.v_active
+
+  val iota_r = RegInit(0.U(eLen.W))
+  when(uop.vstart === 0.U){
+    iota_r := 0.U
+  }.elsewhen(uop.v_is_last){
+    iota_r := 0.U
+  }.otherwise{
+    iota_r := RegNext(iota_r) + rs2_data(uop.vstart-1.U)
+  }
+
+  val iota_result = WireInit(0.U(eLen.W))
+  when(uop.vstart === 0.U){
+    iota_result := 0.U
+  }.elsewhen(is_masked & (rs1_data(uop.vstart) === 0.U)) {
+    iota_result := io.req.bits.rs3_data(0)
+  }.elsewhen(is_masked & (rs1_data(uop.vstart) === 1.U)) {
+    iota_result := iota_r
+  }.otherwise{
+    iota_result := iota_r
+  }
+
+  val vmaskUnit_out = Mux(uop.uopc.isOneOf(uopVFIRST), firstIdx_result,
+    Mux(uop.uopc.isOneOf(uopVMSOF), sof_result,
+    Mux(uop.uopc.isOneOf(uopVMSBF), Mux(is_masked, sbf_result & rs1_data, sbf_result),
+    Mux(uop.uopc.isOneOf(uopVMSIF), Mux(is_masked, sif_result & rs1_data, sif_result),
+    Mux(uop.uopc.isOneOf(uopVIOTA), Mux(v_inactive, io.req.bits.rs3_data(0), iota_result),
+    vmaskUnit.io.out)))))
+
+  // vl => last
+  io.resp.bits.data := vmaskUnit_out
 }
