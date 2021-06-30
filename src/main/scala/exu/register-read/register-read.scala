@@ -190,6 +190,10 @@ class RegisterRead(
         val is_vmask_set_m = io.iss_uops(w).uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
         io.rf_read_ports(idx+3).addr := Cat(rvm_addr, vstart >> log2Ceil(eLen))
 
+        // need make mask and element sync
+        val vmask_cnt_set_insn_mask_addr = Cat(rvm_addr, vstart(3,0))
+        io.rf_read_ports(idx+3).addr := Mux(is_vmask_cnt_m | is_vmask_set_m, vmask_cnt_set_insn_mask_addr,Cat(rvm_addr, vstart >> log2Ceil(eLen)))
+
         rrd_rvm_data(w) := io.rf_read_ports(idx+3).data(RegNext(vstart(log2Ceil(eLen)-1,0)))
         rrd_vmaskInsn_rvm_data(w) := io.rf_read_ports(idx+3).data
         assert(!(io.iss_valids(w) && io.iss_uops(w).uopc.isOneOf(uopVL, uopVLS) && io.iss_uops(w).v_unmasked &&
