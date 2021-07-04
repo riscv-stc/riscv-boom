@@ -896,7 +896,8 @@ class FixMulAccCtrlSigs extends Bundle
   val cmdHi     = Bool() // use Hi part
   val lhsSigned = Bool() // lhs of mul is signed
   val rhsSigned = Bool() // rhs of mul is signed
-  val doAcc     = Bool() // do add after mul
+  val doAcc     = Bool() // do accumulation after mul
+  val negAcc    = Bool() // acc is subtraction
   val accSigned = Bool() // addend is signed
   val lhsOne    = Bool() // rhs of mul is one
   val doRO      = Bool() // need rounding
@@ -906,7 +907,7 @@ class FixMulAccCtrlSigs extends Bundle
 
   def decoder(uopc: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     val DC2     = BitPat.dontCare(2)
-    val decoder = DecodeLogic(uopc, List(X, X, X, X, X, X, X, X, DC2, X), table)
+    val decoder = DecodeLogic(uopc, List(X, X, X, X, X, X, X, X, X, DC2, X), table)
     val sigs    = Seq(cmdHi, lhsSigned, rhsSigned, doAcc, accSigned, lhsOne, doRO, roSigned, srType, doClip)
     sigs zip decoder map {case(s,d) => s := d}
     this
@@ -941,46 +942,45 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val in = Pipe(in_req.valid, in_req.bits)
   val DC2 = BitPat.dontCare(2)
   val table: List[(BitPat, List[BitPat])] = List(
-    //                          cmdHi       accSigned   srType (0, 1, SEW-1, RS1)
-    //                          |  lhsSigned|  lhsOne   |    doClip
+    //                          cmdHi   negAcc accSigned   srType (0, 1, SEW-1, RS1)
+    //                          |  lhsSigned|  |  lhsOne   |    doClip
     //                          |  |  rhsSigned|  doRO  |    |
-    //                          |  |  |  doACC |  |  roSigned|
-    //                          |  |  |  |  |  |  |  |  |    |
-    BitPat(uopVMUL)     -> List(N, Y, Y, N, X, N, N, X, DC2, N)
-   ,BitPat(uopVMULH)    -> List(Y, Y, Y, N, X, N, N, X, DC2, N)
-   ,BitPat(uopVMULHU)   -> List(Y, N, N, N, X, N, N, X, DC2, N)
-   ,BitPat(uopVMULHSU)  -> List(Y, Y, N, N, X, N, N, X, DC2, N)
-   ,BitPat(uopVWMULU)   -> List(N, N, N, N, X, N, N, X, DC2, N)
-   ,BitPat(uopVWMULSU)  -> List(N, Y, N, N, X, N, N, X, DC2, N)
-   ,BitPat(uopVMACC)    -> List(N, Y, Y, Y, Y, N, N, X, DC2, N)
-   ,BitPat(uopVNMSAC)   -> List(N, Y, Y, Y, Y, N, N, X, DC2, N)
-   ,BitPat(uopVMADD)    -> List(N, Y, Y, Y, Y, N, N, X, DC2, N)
-   ,BitPat(uopVNMSUB)   -> List(N, Y, Y, Y, Y, N, N, X, DC2, N)
-   ,BitPat(uopVWMACCU)  -> List(N, N, N, Y, N, N, N, X, DC2, N)
-   ,BitPat(uopVWMACCSU) -> List(N, Y, N, Y, Y, N, N, X, DC2, N)
-   ,BitPat(uopVWMACCUS) -> List(N, N, Y, Y, Y, N, N, X, DC2, N)
-   ,BitPat(uopVSADDU)   -> List(N, X, N, Y, N, Y, Y, N, U_0, Y) // vs2 + rs1
-   ,BitPat(uopVSADD)    -> List(N, X, Y, Y, Y, Y, Y, Y, U_0, Y)
-   ,BitPat(uopVSSUBU)   -> List(N, X, N, Y, N, Y, Y, N, U_0, Y)
-   ,BitPat(uopVSSUB)    -> List(N, X, Y, Y, Y, Y, Y, Y, U_0, Y)
-   ,BitPat(uopVAADDU)   -> List(N, X, N, Y, N, Y, Y, N, U_1, N)
-   ,BitPat(uopVAADD)    -> List(N, X, Y, Y, Y, Y, Y, Y, U_1, N)
-   ,BitPat(uopVASUBU)   -> List(N, X, N, Y, N, Y, Y, N, U_1, N)
-   ,BitPat(uopVASUB)    -> List(N, X, Y, Y, Y, Y, Y, Y, U_1, N)
-   ,BitPat(uopVSMUL)    -> List(N, Y, Y, N, X, N, Y, Y, U_2, Y)
-   ,BitPat(uopVSSRL)    -> List(N, X, N, N, X, Y, Y, N, U_3, N)
-   ,BitPat(uopVSSRA)    -> List(N, X, Y, N, X, Y, Y, Y, U_3, N)
-   ,BitPat(uopVNCLIPU)  -> List(N, X, N, N, X, Y, Y, N, U_3, Y)
-   ,BitPat(uopVNCLIP)   -> List(N, X, Y, N, X, Y, Y, Y, U_3, Y)
+    //                          |  |  |  doAcc | |  |  roSigned|
+    //                          |  |  |  |  |  |  |  |  |  |    |
+    BitPat(uopVMUL)     -> List(N, Y, Y, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVMULH)    -> List(Y, Y, Y, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVMULHU)   -> List(Y, N, N, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVMULHSU)  -> List(Y, Y, N, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVWMULU)   -> List(N, N, N, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVWMULSU)  -> List(N, Y, N, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVMACC)    -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
+   ,BitPat(uopVNMSAC)   -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
+   ,BitPat(uopVMADD)    -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
+   ,BitPat(uopVNMSUB)   -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
+   ,BitPat(uopVWMACCU)  -> List(N, N, N, Y, N, N, N, N, X, DC2, N)
+   ,BitPat(uopVWMACCSU) -> List(N, Y, N, Y, N, Y, N, N, X, DC2, N)
+   ,BitPat(uopVWMACCUS) -> List(N, N, Y, Y, N, Y, N, N, X, DC2, N)
+   ,BitPat(uopVSADDU)   -> List(N, X, N, Y, N, N, Y, Y, N, U_0, Y) // vs2 + rs1
+   ,BitPat(uopVSADD)    -> List(N, X, Y, Y, N, Y, Y, Y, Y, U_0, Y)
+   ,BitPat(uopVSSUBU)   -> List(N, X, N, Y, Y, N, Y, Y, N, U_0, Y)
+   ,BitPat(uopVSSUB)    -> List(N, X, Y, Y, Y, Y, Y, Y, Y, U_0, Y)
+   ,BitPat(uopVAADDU)   -> List(N, X, N, Y, N, N, Y, Y, N, U_1, N)
+   ,BitPat(uopVAADD)    -> List(N, X, Y, Y, N, Y, Y, Y, Y, U_1, N)
+   ,BitPat(uopVASUBU)   -> List(N, X, N, Y, Y, N, Y, Y, N, U_1, N)
+   ,BitPat(uopVASUB)    -> List(N, X, Y, Y, Y, Y, Y, Y, Y, U_1, N)
+   ,BitPat(uopVSMUL)    -> List(N, Y, Y, N, X, X, N, Y, Y, U_2, Y)
+   ,BitPat(uopVSSRL)    -> List(N, X, N, N, X, X, Y, Y, N, U_3, N)
+   ,BitPat(uopVSSRA)    -> List(N, X, Y, N, X, X, Y, Y, Y, U_3, N)
+   ,BitPat(uopVNCLIPU)  -> List(N, X, N, N, X, X, Y, Y, N, U_3, Y)
+   ,BitPat(uopVNCLIP)   -> List(N, X, Y, N, X, X, Y, Y, Y, U_3, Y)
   )
   val cs = Wire(new FixMulAccCtrlSigs()).decoder(in.bits.uop.uopc, table)
 
   val lhs = Mux(cs.lhsOne, 1.S, Cat(cs.lhsSigned && in.bits.rs1_data(dataWidth-1), in.bits.rs1_data).asSInt)
   val rhs = Cat(cs.rhsSigned && in.bits.rs2_data(dataWidth-1), in.bits.rs2_data).asSInt
-  val doSub  = in.bits.uop.uopc.isOneOf(uopVSSUBU, uopVSSUB, uopVASUBU, uopVASUB)
   val sext_rs3 = Cat(cs.accSigned && in.bits.rs3_data(dataWidth-1), in.bits.rs3_data)
   val sub_rs3  = (~sext_rs3 + 1.U(1.W)).asSInt
-  val acc = Mux(cs.doAcc, Mux(doSub, sub_rs3, sext_rs3.asSInt), 0.S)
+  val acc = Mux(cs.doAcc, Mux(cs.negAcc, sub_rs3, sext_rs3.asSInt), 0.S)
   when (in.valid && cs.doAcc) { assert(in.bits.uop.frs3_en, "Incorrect frs3_en") }
   val macc = lhs * rhs +& acc
   val macc_msk = ~(0.U((dataWidth*2+3).W))
