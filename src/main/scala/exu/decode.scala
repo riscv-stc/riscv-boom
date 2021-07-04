@@ -1063,6 +1063,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
     val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     val is_v_mask_ls = cs.uopc.isOneOf(uopVLM, uopVSMA)
+    val is_viota_m = cs.uopc.isOneOf(uopVIOTA)
     val is_v_reg_ls = cs.uopc.isOneOf(uopVLR, uopVSR)
     val vseg_nf = inst(NF_MSB, NF_LSB)
     val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) && !is_v_reg_ls
@@ -1090,8 +1091,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(uop.rt(RS2, isWidenV ), vsew + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), vsew - vs2_nfactor,vsew)))
     val vd_inc     = vstart >> (vLenSz.U - 3.U - vd_sew)
-    val vs2_inc    = vstart >> (vLenSz.U - 3.U - vs2_sew)
-    val vs1_inc    = vstart >> (vLenSz.U - 3.U - vsew)
+    val vs2_inc    = Mux(is_viota_m, 0.U, vstart >> (vLenSz.U - 3.U - vs2_sew))
+    val vs1_inc    = Mux(is_viota_m, 0.U, vstart >> (vLenSz.U - 3.U - vsew))
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
       //assert(vsew >= vd_nfactor  && vsew + vd_wfactor  <= 3.U, "Unsupported vd_sew")
@@ -1112,7 +1113,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     //val eLen_ecnt = eLen.U >> (vsew+3.U)
     val vLen_ecnt  = Mux(!is_v_ls && vs2_sew > vd_sew, vLen.U >> (vs2_sew+3.U), vLen.U >> (vd_sew+3.U))
-    val split_ecnt = Mux(is_v_ls, 1.U, Mux(is_v_mask_insn, vmlogic_split_ecnt, vLen_ecnt))
+    val split_ecnt = Mux(is_v_ls, 1.U,
+      Mux(is_v_mask_insn, vmlogic_split_ecnt, vLen_ecnt))
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     // for fractional lmul, we need visit at least one entire vreg
     val total_ecnt = Mux(is_v_reg_ls, vlmax,

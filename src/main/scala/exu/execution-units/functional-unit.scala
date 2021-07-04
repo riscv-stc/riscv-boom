@@ -1170,21 +1170,27 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val is_masked  = !uop.v_unmasked
   val v_inactive = uop.is_rvv && !uop.v_active
 
+  val is_viota_m = uop.uopc.isOneOf(uopVIOTA)
+  val is_viotaInsn_last = is_viota_m && (uop.vstart === vl)
   val iota_r = RegInit(0.U(eLen.W))
-  when(uop.vstart === 0.U){
-    iota_r := 0.U
-  }.elsewhen(uop.v_is_last){
-    iota_r := 0.U
-  }.otherwise{
-    iota_r := RegNext(iota_r) + rs2_data(uop.vstart-1.U)
+  when(is_viota_m){
+    when(is_viotaInsn_last){
+      iota_r := 0.U
+    }.elsewhen(is_masked & rs1_data(uop.vstart(log2Ceil(eLen)-1,0))) {
+      iota_r := iota_r + rs2_data(uop.vstart(log2Ceil(eLen)-1,0))
+    }.elsewhen(is_masked & (~rs1_data(uop.vstart(log2Ceil(eLen)-1,0)))) {
+      iota_r := iota_r
+    }.otherwise{
+      iota_r := iota_r + rs2_data(uop.vstart(log2Ceil(eLen)-1,0))
+    }
   }
 
   val iota_result = WireInit(0.U(eLen.W))
-  when(uop.vstart === 0.U){
+  when(is_masked & (~rs1_data(uop.vstart(log2Ceil(eLen)-1,0)))) {
+    iota_result := io.req.bits.rs3_data
+  }.elsewhen(uop.vstart === 0.U){
     iota_result := 0.U
-  }.elsewhen(is_masked & (rs1_data(uop.vstart) === 0.U)) {
-    iota_result := io.req.bits.rs3_data(0)
-  }.elsewhen(is_masked & (rs1_data(uop.vstart) === 1.U)) {
+  }.elsewhen(is_masked & rs1_data(uop.vstart(log2Ceil(eLen)-1,0))) {
     iota_result := iota_r
   }.otherwise{
     iota_result := iota_r
