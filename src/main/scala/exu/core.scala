@@ -1233,13 +1233,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     val csr_vld = csr_exe_unit.io.iresp.valid
     val csr_uop = csr_exe_unit.io.iresp.bits.uop
     val vsetvl = csr_uop.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
-    csr.io.vector.get.set_vs_dirty := csr_vld & vsetvl
+    csr.io.vector.get.set_vs_dirty := (0 until coreParams.retireWidth).map{i => rob.io.commit.arch_valids(i) & rob.io.commit.uops(i).is_rvv}.reduce(_ || _)
     csr.io.vector.get.set_vconfig.valid := csr_vld & vsetvl
     csr.io.vector.get.set_vconfig.bits := csr_uop.vconfig
     csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
     csr.io.vector.get.set_vstart.valid := false.B
     csr.io.vector.get.set_vstart.bits := csr_uop.vstart
-    csr.io.vector.get.set_vxsat := false.B
+    csr.io.vector.get.set_vxsat := (0 until coreParams.retireWidth).map{i => rob.io.commit.arch_valids(i) & rob.io.commit.uops(i).is_rvv & rob.io.commit.uops(i).vxsat}.reduce(_ || _)
     v_pipeline.io.fcsr_rm := csr.io.fcsr_rm
     v_pipeline.io.vxrm := csr.io.vector.get.vxrm
 

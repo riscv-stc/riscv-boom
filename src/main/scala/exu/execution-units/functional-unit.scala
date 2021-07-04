@@ -935,10 +935,8 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   when (io.req.bits.uop.uopc.isOneOf(uopVNMSAC, uopVNMSUB)) {
     in_req.bits.rs1_data := ~io.req.bits.rs1_data + 1.U
   }
-  when (io.req.bits.uop.uopc.isOneOf(uopVSADDU, uopVSADD, uopVAADDU, uopVAADD)) {
+  when (io.req.bits.uop.uopc.isOneOf(uopVSADDU, uopVSADD, uopVAADDU, uopVAADD, uopVSSUBU, uopVSSUB, uopVASUBU, uopVASUB)) {
     in_req.bits.rs3_data := io.req.bits.rs1_data
-  } .elsewhen (io.req.bits.uop.uopc.isOneOf(uopVSSUBU, uopVSSUB, uopVASUBU, uopVASUB)) {
-    in_req.bits.rs3_data := ~io.req.bits.rs1_data + 1.U
   }
   val in = Pipe(in_req.valid, in_req.bits)
   val DC2 = BitPat.dontCare(2)
@@ -963,11 +961,11 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
    ,BitPat(uopVWMACCUS) -> List(N, N, Y, Y, Y, N, N, X, DC2, N)
    ,BitPat(uopVSADDU)   -> List(N, X, N, Y, N, Y, Y, N, U_0, Y) // vs2 + rs1
    ,BitPat(uopVSADD)    -> List(N, X, Y, Y, Y, Y, Y, Y, U_0, Y)
-   ,BitPat(uopVSSUBU)   -> List(N, X, N, Y, Y, Y, Y, N, U_0, Y)
+   ,BitPat(uopVSSUBU)   -> List(N, X, N, Y, N, Y, Y, N, U_0, Y)
    ,BitPat(uopVSSUB)    -> List(N, X, Y, Y, Y, Y, Y, Y, U_0, Y)
    ,BitPat(uopVAADDU)   -> List(N, X, N, Y, N, Y, Y, N, U_1, N)
    ,BitPat(uopVAADD)    -> List(N, X, Y, Y, Y, Y, Y, Y, U_1, N)
-   ,BitPat(uopVASUBU)   -> List(N, X, N, Y, Y, Y, Y, N, U_1, N)
+   ,BitPat(uopVASUBU)   -> List(N, X, N, Y, N, Y, Y, N, U_1, N)
    ,BitPat(uopVASUB)    -> List(N, X, Y, Y, Y, Y, Y, Y, U_1, N)
    ,BitPat(uopVSMUL)    -> List(N, Y, Y, N, X, N, Y, Y, U_2, Y)
    ,BitPat(uopVSSRL)    -> List(N, X, N, N, X, Y, Y, N, U_3, N)
@@ -979,7 +977,10 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
 
   val lhs = Mux(cs.lhsOne, 1.S, Cat(cs.lhsSigned && in.bits.rs1_data(dataWidth-1), in.bits.rs1_data).asSInt)
   val rhs = Cat(cs.rhsSigned && in.bits.rs2_data(dataWidth-1), in.bits.rs2_data).asSInt
-  val acc = Mux(cs.doAcc, Cat(cs.accSigned && in.bits.rs3_data(dataWidth-1), in.bits.rs3_data).asSInt, 0.S)
+  val doSub  = in.bits.uop.uopc.isOneOf(uopVSSUBU, uopVSSUB, uopVASUBU, uopVASUB)
+  val sext_rs3 = Cat(cs.accSigned && in.bits.rs3_data(dataWidth-1), in.bits.rs3_data)
+  val sub_rs3  = (~sext_rs3 + 1.U(1.W)).asSInt
+  val acc = Mux(cs.doAcc, Mux(doSub, sub_rs3, sext_rs3.asSInt), 0.S)
   when (in.valid && cs.doAcc) { assert(in.bits.uop.frs3_en, "Incorrect frs3_en") }
   val macc = lhs * rhs +& acc
   val macc_msk = ~(0.U((dataWidth*2+3).W))
@@ -999,11 +1000,18 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
                                                 0.U(1.W),
                                                 ~srres(0) & sroff.orR))
   val rores = srres + Cat(0.U, roinc).asSInt
-  val u_max = Mux1H(UIntToOH(vd_eew(1,0)), Seq(0xFF.U(dataWidth.W), 0xFFFF.U(dataWidth.W), 0xFFFFFFFFL.U(dataWidth.W), Fill(dataWidth, 1.U(1.W))))
-  val uclip_max = rores.asUInt > u_max
-  val uclip = Mux(uclip_max, u_max, rores.asUInt)
+  val u_max = Cat(0.U(1.W), Mux1H(UIntToOH(vd_eew(1,0)), Seq(0xFF.U(dataWidth.W),
+                                                         0xFFFF.U(dataWidth.W),
+                                                         0xFFFFFFFFL.U(dataWidth.W),
+                                                         Fill(dataWidth, 1.U(1.W)))))
+  val uclip_max = rores > u_max.asSInt
+  val uclip_min = rores < 0.S
+  val uclip = Mux(uclip_max, u_max, Mux(uclip_min, 0.U, rores.asUInt))
   val s_max = Mux1H(UIntToOH(vd_eew(1,0)), Seq(0x7F.U(dataWidth.W), 0x7FFF.U(dataWidth.W), 0x7FFFFFFF.U(dataWidth.W), 0x7FFFFFFFFFFFFFFFL.U(dataWidth.W)))
-  val s_min = Mux1H(UIntToOH(vd_eew(1,0)), Seq(0x80.U(dataWidth.W), 0x8000.U(dataWidth.W), 0x80000000L.U(dataWidth.W), Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))))
+  val s_min = Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Fill(dataWidth-8,  1.U(1.W)), 0x80.U(8.W)),
+                                               Cat(Fill(dataWidth-16, 1.U(1.W)), 0x8000.U(16.W)),
+                                               Cat(Fill(dataWidth-32, 1.U(1.W)), 0x80000000L.U(32.W)),
+                                               Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))))
   val sclip_max = rores > s_max.asSInt
   val sclip_min = rores < s_min.asSInt
   val sclip = Mux(sclip_max, s_max, Mux(sclip_min, s_min, rores.asUInt))
@@ -1013,10 +1021,11 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
                               macc(dataWidth-1, 0))))
 
   val out  = WireInit(in)
-  out.bits.uop.vxsat := cs.doClip && Mux(cs.roSigned, sclip_max || sclip_min, uclip_max)
+  out.bits.uop.vxsat := cs.doClip && Mux(cs.roSigned, sclip_max || sclip_min, uclip_max || uclip_min)
   val resp = Pipe(out, numStages-1)
   io.resp.valid := resp.valid
-  io.resp.bits.data := Pipe(in.valid, muxed, numStages-1).bits
+  io.resp.bits.uop.vxsat := resp.bits.uop.vxsat
+  io.resp.bits.data := Pipe(out.valid, muxed, numStages-1).bits
 }
 
 /**
