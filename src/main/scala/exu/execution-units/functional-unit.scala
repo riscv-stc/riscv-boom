@@ -908,7 +908,7 @@ class FixMulAccCtrlSigs extends Bundle
   def decoder(uopc: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     val DC2     = BitPat.dontCare(2)
     val decoder = DecodeLogic(uopc, List(X, X, X, X, X, X, X, X, X, DC2, X), table)
-    val sigs    = Seq(cmdHi, lhsSigned, rhsSigned, doAcc, accSigned, lhsOne, doRO, roSigned, srType, doClip)
+    val sigs    = Seq(cmdHi, lhsSigned, rhsSigned, doAcc, negAcc, accSigned, lhsOne, doRO, roSigned, srType, doClip)
     sigs zip decoder map {case(s,d) => s := d}
     this
   }
