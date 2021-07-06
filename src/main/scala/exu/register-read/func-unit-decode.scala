@@ -161,6 +161,7 @@ object VecRRdDecode extends RRdDecodeConstants
         ,BitPat(uopVREM)     -> List(BR_N, N, Y, N, FN_REM,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVREMU)    -> List(BR_N, N, Y, N, FN_REMU,  DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMV_V)    -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_RS1,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMVR)     -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_ZERO,    OP2_RS2,     IS_X, REN_1, CSR.N)
         ,BitPat(uopMERGE)    -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMAND)    -> List(BR_N, Y, N, N, FN_AND,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMNAND)   -> List(BR_N, Y, N, N, FN_AND,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)

@@ -652,6 +652,10 @@ object VectorIntDecode extends DecodeConstants
  ,VMV_V_I     ->List(Y, N, X, uopVMV_V,       IQT_VEC, FU_ALU ,RT_VEC, RT_VI,  RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VMV_X_S     ->List(Y, N, X, uopVMV_X_S,     IQT_VEC, FU_ALU ,RT_FIX, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VMV_S_X     ->List(Y, N, X, uopVMV_S_X,     IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMV1R_V     ->List(Y, N, X, uopVMVR,        IQT_VEC ,FU_ALU ,RT_VEC, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMV2R_V     ->List(Y, N, X, uopVMVR,        IQT_VEC ,FU_ALU ,RT_VEC, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMV4R_V     ->List(Y, N, X, uopVMVR,        IQT_VEC ,FU_ALU ,RT_VEC, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+ ,VMV8R_V     ->List(Y, N, X, uopVMVR,        IQT_VEC ,FU_ALU ,RT_VEC, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VMERGE_VVM  ->List(Y, N, X, uopMERGE,       IQT_VEC ,FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VMERGE_VXM  ->List(Y, N, X, uopMERGE,       IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  ,VMERGE_VIM  ->List(Y, N, X, uopMERGE,       IQT_VEC ,FU_ALU ,RT_VEC, RT_VI , RT_VEC, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
@@ -1061,6 +1065,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
     val is_v_ls_ustride = cs.uopc.isOneOf(uopVL, uopVSA)
     val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
+    val isVMVR: Bool = cs.uopc.isOneOf(uopVMVR)
     val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     val is_v_mask_ls = cs.uopc.isOneOf(uopVLM, uopVSMA)
     val is_viota_m = cs.uopc.isOneOf(uopVIOTA)
@@ -1068,6 +1073,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vseg_nf = inst(NF_MSB, NF_LSB)
     val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) && !is_v_reg_ls
     val vstart  = RegInit(0.U((vLenSz+1).W))
+    val vMVRCounter = RegInit(0.U(3.W))
     val vseg_finc = RegInit(0.U(3.W))
     val vseg_gidx = RegInit(0.U(3.W))
 
@@ -1090,8 +1096,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vs2_sew    = Mux(is_v_ls_index, Cat(0.U(1.W), cs.v_ls_ew),
                      Mux(uop.rt(RS2, isWidenV ), vsew + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), vsew - vs2_nfactor,vsew)))
-    val vd_inc     = vstart >> (vLenSz.U - 3.U - vd_sew)
-    val vs2_inc    = Mux(is_viota_m, 0.U, vstart >> (vLenSz.U - 3.U - vs2_sew))
+    val vd_inc     = Mux(isVMVR, vMVRCounter,
+                     vstart >> (vLenSz.U - 3.U - vd_sew))
+    val vs2_inc    = Mux(is_viota_m, 0.U,
+                     Mux(isVMVR, vMVRCounter,
+                     vstart >> (vLenSz.U - 3.U - vs2_sew)))
     val vs1_inc    = Mux(is_viota_m, 0.U, vstart >> (vLenSz.U - 3.U - vsew))
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
@@ -1121,21 +1130,27 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       Mux(cs.uses_stq, Mux(is_v_mask_ls, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl),
       Mux(vlmul_sign && !is_v_mask_ls, vLen_ecnt, Mux(is_v_mask_insn, vmlogic_tolal_ecnt, vlmax))))
     val vseg_flast = vseg_finc === vseg_nf
-    val elem_last  = vstart + split_ecnt === total_ecnt
+    val vMVRCount: UInt = inst(RS1_MSB,RS1_LSB)
+    val elem_last  = Mux(isVMVR, vMVRCounter === vMVRCount, vstart + split_ecnt === total_ecnt)
     val split_last = elem_last && Mux(is_v_ls_seg, vseg_flast, true.B)
     when (io.kill) {
       vstart    := 0.U
       vseg_finc := 0.U
       vseg_gidx := 0.U
+      vMVRCounter := 0.U
     } .elsewhen (~cs.can_be_split | split_last & io.deq_fire) {
       vstart    := 0.U
       vseg_finc := 0.U
       vseg_gidx := 0.U
+      vMVRCounter := 0.U
     } .elsewhen (cs.can_be_split & ~split_last & io.deq_fire) {
       when (is_v_ls_seg) {
         vseg_finc := Mux(vseg_flast, 0.U, vseg_finc + 1.U)
         vstart    := vstart    + Mux(vseg_flast, 1.U, 0.U)
         vseg_gidx := vseg_gidx + Mux((vseg_flast) && uop.v_re_alloc, 1.U, 0.U)
+      }.elsewhen(isVMVR){
+        vstart := 0.U
+        vMVRCounter := vMVRCounter + 1.U
       } .otherwise {
         vstart    := vstart + split_ecnt
       }
