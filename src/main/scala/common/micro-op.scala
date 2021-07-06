@@ -816,6 +816,8 @@ object MicroOpcodes extends Enumeration {
   val uopVRGATHER_enum  = Value
   val uopVRGATHER       = uopVRGATHER_enum.id.U(UOPC_SZ.W)
   // VRGATHER_V*
+  val uopVRGATHEREI16_enum = Value
+  val uopVRGATHEREI16   = uopVRGATHEREI16_enum.id.U(UOPC_SZ.W)
   // VRGATHEREI16_VV
   // 17.5. compress
   val uopVCOMPRESS_enum = Value
