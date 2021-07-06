@@ -854,6 +854,15 @@ class DivUnit(dataWidth: Int)(implicit p: Parameters)
   div.io.req.bits.fn  := io.req.bits.uop.ctrl.op_fcn
   div.io.req.bits.in1 := io.req.bits.rs1_data
   div.io.req.bits.in2 := io.req.bits.rs2_data
+  if(usingVector) {
+    when(io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active) {
+      div.io.req.bits.in1 := io.req.bits.rs3_data
+      div.io.req.bits.in2 := 1.U
+    } .elsewhen(io.req.bits.uop.is_rvv) {
+      div.io.req.bits.in1 := io.req.bits.rs2_data
+      div.io.req.bits.in2 := io.req.bits.rs1_data
+    }
+  }
   div.io.req.bits.tag := DontCare
   io.req.ready        := div.io.req.ready
 

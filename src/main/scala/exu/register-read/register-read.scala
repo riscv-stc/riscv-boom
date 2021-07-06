@@ -352,13 +352,11 @@ class RegisterRead(
         io.vmupdate(w).bits.v_active := is_active
         io.vmupdate(w).bits.v_xls_offset := exe_reg_rs2_data(w)
         io.exe_reqs(w).bits.uop.v_active := Mux(vmove, !vstart.orR(), is_active)
-        val vfdiv_sqrt = (io.exe_reqs(w).bits.uop.uopc === uopVFDIV)  ||
-                         (io.exe_reqs(w).bits.uop.uopc === uopVFRDIV) ||
-                         (io.exe_reqs(w).bits.uop.uopc === uopVFSQRT)
+        val vdiv_sqrt = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVFDIV, uopVFRDIV, uopVFSQRT, uopVDIV, uopVDIV, uopVREM, uopVREMU)
         // forward inactive ops to ALU
         val withCarry  = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVADC, uopVSBC, uopVMADC, uopVMSBC)
         val vmscmp     = io.exe_reqs(w).bits.uop.ctrl.is_vmscmp
-        when ((io.exe_reqs(w).bits.uop.is_rvv && !is_active && !vfdiv_sqrt && !withCarry && !vmscmp && !is_vmask_iota_m) || (vmove && vstart.orR())) {
+        when ((io.exe_reqs(w).bits.uop.is_rvv && !is_active && !vdiv_sqrt && !withCarry && !vmscmp && !is_vmask_iota_m) || (vmove && vstart.orR())) {
           io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
           io.exe_reqs(w).bits.uop.ctrl.op_fcn := freechips.rocketchip.rocket.ALU.FN_ADD
         }

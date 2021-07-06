@@ -649,6 +649,7 @@ class VecExeUnit(
 
   val div_busy  = WireInit(false.B)
   val fdiv_busy = WireInit(false.B)
+  val div_busy_dly = RegNext(div_busy)
 
   // The Functional Units --------------------
   val vec_fu_units   = ArrayBuffer[FunctionalUnit]()
@@ -695,24 +696,6 @@ class VecExeUnit(
     vec_fu_units += vmaskunit
   }
 
-  // Div/Rem Unit -----------------------
-  var div: DivUnit = null
-  val div_resp_val = WireInit(false.B)
-  if (hasDiv) {
-    div = Module(new DivUnit(xLen))
-    div.io <> DontCare
-    div.io.req.valid           := io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV) && hasDiv.B
-
-    // share write port with the pipelined units
-    div.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
-
-    div_resp_val := div.io.resp.valid
-    div_busy     := !div.io.req.ready ||
-                    (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV))
-
-    vec_fu_units += div
-  }
-
   var ifpu: IntToFPUnit = null
   if (hasIfpu) {
     ifpu = Module(new IntToFPUnit(latency=numStages, vector = true))
@@ -752,6 +735,22 @@ class VecExeUnit(
     vec_fu_units += fr7
   }
 
+  // Div/Rem Unit -----------------------
+  var div: DivUnit = null
+  val div_resp_val = WireInit(false.B)
+  if (hasDiv) {
+    div = Module(new DivUnit(xLen))
+    div.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)
+
+    // share write port with the pipelined units
+    div.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
+
+    div_resp_val := div.io.resp.valid
+    div_busy     := !div.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)) || !div_busy_dly
+
+    vec_fu_units += div
+  }
+
   // FDiv/FSqrt Unit -----------------------
   var fdivsqrt: FDivSqrtUnit = null
   val fdiv_resp_fflags = Wire(new ValidIO(new FFlagsResp()))
@@ -759,20 +758,11 @@ class VecExeUnit(
   fdiv_resp_fflags.valid := false.B
   if (hasFdiv) {
     fdivsqrt = Module(new FDivSqrtUnit(vector = true))
-    fdivsqrt.io.req.valid         := io.req.valid && io.req.bits.uop.fu_code_is(FU_FDV)
-    fdivsqrt.io.req.bits.uop      := io.req.bits.uop
-    fdivsqrt.io.req.bits.rs1_data := io.req.bits.rs1_data
-    fdivsqrt.io.req.bits.rs2_data := io.req.bits.rs2_data
-    fdivsqrt.io.req.bits.rs3_data := DontCare
-    fdivsqrt.io.req.bits.pred_data := false.B
-    fdivsqrt.io.req.bits.kill     := io.req.bits.kill
-    fdivsqrt.io.fcsr_rm           := io.fcsr_rm
-    fdivsqrt.io.brupdate          := io.brupdate
+    fdivsqrt.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_FDV)
+    fdivsqrt.io.fcsr_rm   := io.fcsr_rm
 
     // share write port with the pipelined units
-    //fdivsqrt.io.resp.ready := !(vresp_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready  // TODO PERF will get blocked by fpiu.
     fdivsqrt.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready  // TODO PERF will get blocked by fpiu.
-
 
     fdiv_busy := !fdivsqrt.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_FDV))
 
@@ -783,13 +773,13 @@ class VecExeUnit(
   }
 
   vec_fu_units.map(f => {
-    f.io.req.bits.uop := io.req.bits.uop
-    f.io.req.bits.rs1_data := io.req.bits.rs1_data
-    f.io.req.bits.rs2_data := io.req.bits.rs2_data
-    f.io.req.bits.rs3_data := io.req.bits.rs3_data
+    f.io.req.bits.uop       := io.req.bits.uop
+    f.io.req.bits.rs1_data  := io.req.bits.rs1_data
+    f.io.req.bits.rs2_data  := io.req.bits.rs2_data
+    f.io.req.bits.rs3_data  := io.req.bits.rs3_data
     f.io.req.bits.pred_data := io.req.bits.pred_data
-    f.io.req.bits.kill := io.req.bits.kill
-    f.io.brupdate := io.brupdate
+    f.io.req.bits.kill      := io.req.bits.kill
+    f.io.brupdate           := io.brupdate
     if (f != div && f != fdivsqrt) f.io.resp.ready := io.vresp.ready
   })
 

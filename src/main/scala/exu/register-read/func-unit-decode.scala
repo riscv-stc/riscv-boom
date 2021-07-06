@@ -422,6 +422,10 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
     io.rrd_uop.ctrl.is_std  := io.rrd_uop.uopc === uopSTD || (io.rrd_uop.ctrl.is_sta && io.rrd_uop.rt(RS2, isInt) && !io.rrd_uop.is_rvv)
     io.rrd_uop.ctrl.is_vmlogic  := io.rrd_uop.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
     io.rrd_uop.ctrl.is_vmscmp   := io.rrd_uop.uopc.isOneOf(uopVMSEQ, uopVMSNE, uopVMSLTU, uopVMSLT, uopVMSLEU, uopVMSLE, uopVMSGTU, uopVMSGT)
+    when(io.rrd_uop.uopc.isOneOf(uopVDIV, uopVDIVU, uopVREM, uopVREMU)) {
+      io.rrd_uop.ctrl.fcn_dw := Mux(io.rrd_uop.vconfig.vtype.vsew === 3.U, true.B, false.B)
+      assert(io.rrd_uop.vconfig.vtype.vsew === 3.U || io.rrd_uop.vconfig.vtype.vsew === 2.U, "vdiv/vrem only support 32 or 64 bits")
+    }
   } else {
     io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD)
     io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopAMO_AG)
