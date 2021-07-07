@@ -170,6 +170,10 @@ abstract class IssueUnit(
         dis_uops(w).prvm_busy := 0.U
         when (dis_uops(w).rt(RS2, isVector)) { dis_uops(w).prs2_busy := 0.U }
         when (dis_uops(w).is_rvv )           { dis_uops(w).prs3_busy := 0.U }
+        // hack fu_code if the instruction is merge.
+        when (io.dis_uops(w).bits.is_rvv && io.dis_uops(w).bits.uopc.isOneOf(uopMERGE)){
+          dis_uops(w).fu_code := FU_FPU
+        }
       }
     } else if (iqType == IQT_VEC.litValue) {
       // VEC "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
