@@ -262,7 +262,8 @@ class RenameStage(
   val freelist = Module(new RenameFreeList(
     plWidth,
     numPhysRegs,
-    if (float | vector) 32 else 31))
+    if (float | vector) 32 else 31,
+    vector))
   val busytable = Module(new RenameBusyTable(
     plWidth,
     numPhysRegs,
@@ -344,7 +345,14 @@ class RenameStage(
   // Free List
 
   // Freelist inputs.
-  freelist.io.reqs := ren2_alloc_reqs
+  for (w <- 0 until plWidth) {
+    if (vector) {
+      freelist.io.reqs(w).valid := ren2_alloc_reqs(w) && ren2_uops(w).v_is_first
+    } else {
+      freelist.io.reqs(w).valid := ren2_alloc_reqs(w)
+    }
+    freelist.io.reqs(w).bits  := ren2_uops(w)
+  }
   freelist.io.dealloc_pregs zip com_valids zip rbk_valids map
     {case ((d,c),r) => d.valid := c || r}
   freelist.io.dealloc_pregs zip io.com_uops map
@@ -359,8 +367,17 @@ class RenameStage(
   //val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(plWidth, UInt(maxPregSz.W)))
   // Freelist outputs.
   for ((uop, w) <- ren2_uops.zipWithIndex) {
-    val preg = freelist.io.alloc_pregs(w).bits
-    uop.pdst := Mux(uop.ldst =/= 0.U || float.B || vector.B, preg, 0.U)
+    if (vector) {
+      val emul = uop.vd_emul
+      val fl_preg = freelist.io.alloc_pregs(w).bits
+      val preg = Mux(emul === 1.U, Cat(fl_preg(fl_preg.getWidth-1, 1), uop.ldst(0)),
+                 Mux(emul === 2.U, Cat(fl_preg(fl_preg.getWidth-1, 2), uop.ldst(1,0)),
+                 Mux(emul === 3.U, Cat(fl_preg(fl_preg.getWidth-1, 3), uop.ldst(2,0)), fl_preg)))
+      uop.pdst := Mux(uop.ldst =/= 0.U || float.B || vector.B, preg, 0.U)
+    } else {
+      val preg = freelist.io.alloc_pregs(w).bits
+      uop.pdst := Mux(uop.ldst =/= 0.U || float.B || vector.B, preg, 0.U)
+    }
 
     if (usingVector) {
       val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(8, UInt(maxPregSz.W)))
@@ -378,8 +395,18 @@ class RenameStage(
             when(~uop.v_unmasked)    { uop.prvm := prvm(0) }
           } .otherwise {
             // handle seg ls, latch for different v_seg_f's
+            when(uop.ldst_val && uop.rt(RD, rtype))     {
+              pdst(uop.v_seg_f) := io.ren2_uops(w).pdst
+              val emul = uop.vd_emul
+              when (!uop.v_is_first && emul > 0.U) {
+                val prev_pdst = pdst(uop.v_seg_f)
+                val next_pdst = Mux(emul === 1.U, Cat(prev_pdst(prev_pdst.getWidth-1, 1), uop.ldst(0)),
+                                Mux(emul === 2.U, Cat(prev_pdst(prev_pdst.getWidth-1, 2), uop.ldst(1,0)),
+                                                  Cat(prev_pdst(prev_pdst.getWidth-1, 3), uop.ldst(2,0))))
+                uop.pdst := next_pdst
+              }
+            }
             when(uop.ldst_val && uop.rt(RD, rtype))     { stale_pdst(uop.v_seg_f) := io.ren2_uops(w).stale_pdst }
-            when(uop.ldst_val && uop.rt(RD, rtype))     { pdst(uop.v_seg_f)       := io.ren2_uops(w).pdst }
             when(~uop.v_unmasked)                       { prvm(uop.v_seg_f)       := io.ren2_uops(w).prvm }
             when(uop.frs3_en && (float.B || vector.B))  { prs3(uop.v_seg_f)       := io.ren2_uops(w).prs3 }
           }
