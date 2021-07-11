@@ -363,7 +363,7 @@ class RenameStage(
     uop.pdst := Mux(uop.ldst =/= 0.U || float.B || vector.B, preg, 0.U)
 
     if (usingVector) {
-      val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(8, UInt(maxPregSz.W)))
+      val prs1, prs2, prs3, stale_pdst, pdst, prvm = RegInit(VecInit(Seq.fill(8){0.U(maxPregSz.W)}))
       // record physical names of first split
       // for reduction, vs1, vd, vm should be consistent through vrgroup
       // NOTE: for reduction vd may overlap vs1, vs2, or vm
