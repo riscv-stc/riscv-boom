@@ -189,6 +189,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   def uses_v_uimm5     = is_rvv && lrs1_rtype === RT_VIU
   def is_v_ls          = is_rvv && (uses_ldq || uses_stq)
   def uses_v_ls_ew     = uopc.isOneOf(MicroOpcodes.uopVL,
+                                      MicroOpcodes.uopVLFF,
                                       MicroOpcodes.uopVSA,
                                       MicroOpcodes.uopVLS,
                                       MicroOpcodes.uopVSSA)
@@ -508,8 +509,8 @@ object MicroOpcodes extends Enumeration {
   val uopVLR            = uopVLR_enum.id.U(UOPC_SZ.W) // sub to uopVL
   val uopVSR_enum       = Value
   val uopVSR            = uopVSR_enum.id.U(UOPC_SZ.W) // sub to uopVL
-//val uopVLFF_enum      = Value
-//val uopVLFF           = uopVLFF_enum.id.U(UOPC_SZ.W) // sub to uopVL
+  val uopVLFF_enum      = Value
+  val uopVLFF           = uopVLFF_enum.id.U(UOPC_SZ.W) // sub to uopVL
   val uopVAMO_enum      = Value
   val uopVAMO           = uopVAMO_enum.id.U(UOPC_SZ.W)
   // 12.1. single-width integer add/sub

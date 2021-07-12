@@ -178,7 +178,7 @@ abstract class IssueUnit(
     } else if (iqType == IQT_VEC.litValue) {
       // VEC "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
       // VEC Load that arrives here are tail splits, prs3 holds stale register name, read in RRD
-      when (io.dis_uops(w).bits.uopc.isOneOf(uopVSA, uopVL, uopVLS, uopVSSA)) {
+      when (io.dis_uops(w).bits.uopc.isOneOf(uopVSA, uopVL, uopVLFF, uopVLS, uopVSSA)) {
         //dis_uops(w).lrs1_rtype := RT_FIX
         dis_uops(w).prs1_busy  := 0.U
         dis_uops(w).prs2_busy  := 0.U

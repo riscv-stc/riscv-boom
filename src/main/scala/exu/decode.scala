@@ -437,6 +437,10 @@ object VectorLSDecode extends DecodeConstants
  ,VLE16_V     ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_1)
  ,VLE32_V     ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_2)
  ,VLE64_V     ->List(Y, N, X, uopVL,          IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_3)
+ ,VLE8FF_V    ->List(Y, N, X, uopVLFF,        IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_0)
+ ,VLE16FF_V   ->List(Y, N, X, uopVLFF,        IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_1)
+ ,VLE32FF_V   ->List(Y, N, X, uopVLFF,        IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_2)
+ ,VLE64FF_V   ->List(Y, N, X, uopVLFF,        IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_3)
  ,VSE8_V      ->List(Y, N, X, uopVSA,         IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_0)
  ,VSE16_V     ->List(Y, N, X, uopVSA,         IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_1)
  ,VSE32_V     ->List(Y, N, X, uopVSA,         IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_2)
@@ -1064,7 +1068,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     ls_vconfig.vtype.vsew := cs.v_ls_ew
     val ls_vlmax = ls_vconfig.vtype.vlMax
     val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
-    val is_v_ls_ustride = cs.uopc.isOneOf(uopVL, uopVSA)
+    val is_v_ls_ustride = cs.uopc.isOneOf(uopVL, uopVLFF, uopVSA)
     val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
     val isVMVR: Bool = cs.uopc.isOneOf(uopVMVR)
     val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
