@@ -24,17 +24,15 @@
 package boom.exu
 
 import scala.math.ceil
-
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.chiselName
-
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util.{Str, UIntIsOneOf}
-
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
+import freechips.rocketchip.rocket.VConfig
 
 /**
  * IO bundle to interact with the ROB
@@ -95,7 +93,8 @@ class RobIo(
 
   // Communicate exceptions to the CSRFile
   val com_xcpt = Valid(new CommitExceptionSignals())
-
+  val setVL = if(usingVector) Valid(UInt((log2Ceil(maxVLMax) + 1).W)) else null
+  val csrVConfig = Input(new VConfig())
   // Let the CSRFile stall us (e.g., wfi).
   val csr_stall = Input(Bool())
 
@@ -253,6 +252,7 @@ class Rob(
   val rob_head_uses_ldq   = Wire(Vec(coreWidth, Bool()))
   val rob_head_fflags     = Wire(Vec(coreWidth, UInt(freechips.rocketchip.tile.FPConstants.FLAGS_SZ.W)))
 
+  val robSetVL = if(usingVector) Wire(Vec(coreWidth, Valid(UInt((log2Ceil(maxVLMax) + 1).W)))) else null
   val exception_thrown = Wire(Bool())
 
   // exception info
@@ -312,6 +312,7 @@ class Rob(
     val rob_uop       = Reg(Vec(numRobRows, new MicroOp()))
     val rob_exception = Reg(Vec(numRobRows, Bool()))
     val rob_predicated = Reg(Vec(numRobRows, Bool())) // Was this instruction predicated out?
+    val rob_vleff_exception = Reg(Vec(numRobRows, Bool()))
     val rob_fflags    = Mem(numRobRows, Bits(freechips.rocketchip.tile.FPConstants.FLAGS_SZ.W))
 
     val rob_debug_wdata = Mem(numRobRows, UInt(xLen.W))
@@ -330,6 +331,7 @@ class Rob(
       rob_uop(rob_tail)       := io.enq_uops(w)
       rob_exception(rob_tail) := io.enq_uops(w).exception
       rob_predicated(rob_tail)   := false.B
+      rob_vleff_exception(rob_tail) := false.B
       rob_fflags(rob_tail)    := 0.U
 
       assert (rob_val(rob_tail) === false.B, "[rob] overwriting a valid entry.")
@@ -414,8 +416,15 @@ class Rob(
     // (the cause bits are compressed and stored elsewhere)
 
     when (io.lxcpt.valid && MatchBank(GetBankIdx(io.lxcpt.bits.uop.rob_idx))) {
+      // Mask false exception for vleff, decide if update vl later at commit stage.
+      val isVleFalseException = io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) &&
+        io.lxcpt.bits.uop.vstart.orR()
       rob_exception(GetRowIdx(io.lxcpt.bits.uop.rob_idx)) := true.B
-      when (io.lxcpt.bits.cause =/= MINI_EXCEPTION_MEM_ORDERING) {
+      when(isVleFalseException){
+        rob_vleff_exception(GetRowIdx(io.lxcpt.bits.uop.rob_idx)) := true.B
+        rob_exception(GetRowIdx(io.lxcpt.bits.uop.rob_idx)) := false.B
+      }
+      when(io.lxcpt.bits.cause =/= MINI_EXCEPTION_MEM_ORDERING) {
         // In the case of a mem-ordering failure, the failing load will have been marked safe already.
         assert(rob_unsafe(GetRowIdx(io.lxcpt.bits.uop.rob_idx)),
           "An instruction marked as safe is causing an exception")
@@ -562,6 +571,9 @@ class Rob(
                "[rob] writeback (" + i + ") occurred to the wrong pdst.")
     }
     io.commit.debug_wdata(w) := rob_debug_wdata(rob_head)
+    robSetVL(w).valid := will_commit(w) && rob_vleff_exception(rob_head) &&
+      rob_uop(rob_head).vstart < io.csrVConfig.vl
+    robSetVL(w).bits := rob_uop(rob_head).vstart
 
   } //for (w <- 0 until coreWidth)
 
@@ -589,6 +601,8 @@ class Rob(
                            (!can_commit(w) || can_throw_exception(w))) || block_commit
     block_xcpt           = will_commit(w)
   }
+  io.setVL.valid := VecInit(robSetVL.map(_.valid)).asUInt().orR()
+  io.setVL.bits := Mux1H(robSetVL.map(_.valid), robSetVL.map(_.bits))
 
   // Note: exception must be in the commit bundle.
   // Note: exception must be the first valid instruction in the commit bundle.
@@ -668,8 +682,9 @@ class Rob(
     enq_xcpts(i) := io.enq_valids(i) && io.enq_uops(i).exception
   }
 
+  val realLxcpt = io.lxcpt.valid && !(io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.vstart.orR())
   when (!(io.flush.valid || exception_thrown) && rob_state =/= s_rollback) {
-    when (io.lxcpt.valid) {
+    when (realLxcpt) {
       val new_xcpt_uop = io.lxcpt.bits.uop
 
       when (!r_xcpt_val || IsOlder(new_xcpt_uop.rob_idx, r_xcpt_uop.rob_idx, rob_head_idx)) {

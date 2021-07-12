@@ -28,19 +28,15 @@
 
 package boom.exu
 
-import java.nio.file.{Paths}
-
+import java.nio.file.Paths
 import chisel3._
 import chisel3.util._
-
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
-import freechips.rocketchip.rocket.{CSR, Causes, PRV}
-import freechips.rocketchip.util.{Str, UIntIsOneOf, CoreMonitorBundle}
-import freechips.rocketchip.devices.tilelink.{PLICConsts, CLINTConsts}
-
-import testchipip.{ExtendedTracedInstruction}
-
+import freechips.rocketchip.rocket.{CSR, Causes, PRV, VConfig}
+import freechips.rocketchip.util.{CoreMonitorBundle, Str, UIntIsOneOf}
+import freechips.rocketchip.devices.tilelink.{CLINTConsts, PLICConsts}
+import testchipip.ExtendedTracedInstruction
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.ifu.{GlobalHistory, HasBoomFrontendParameters}
@@ -674,6 +670,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   xcpt_pc_req.bits     := dec_uops(xcpt_idx).ftq_idx
   //rob.io.xcpt_fetch_pc := RegEnable(io.ifu.get_pc.fetch_pc, dis_ready)
   rob.io.xcpt_fetch_pc := io.ifu.get_pc(0).pc
+  rob.io.csrVConfig := csr.io.vector.get.vconfig
 
   flush_pc_req.valid   := rob.io.flush.valid
   flush_pc_req.bits    := rob.io.flush.bits.ftq_idx
@@ -1233,9 +1230,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     val csr_vld = csr_exe_unit.io.iresp.valid
     val csr_uop = csr_exe_unit.io.iresp.bits.uop
     val vsetvl = csr_uop.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
+    val vleffSetVL = rob.io.setVL
+    assert(!(vsetvl && csr_vld && vleffSetVL.valid), "vsetvl and vleff setvl should not happen at same time!")
     csr.io.vector.get.set_vs_dirty := (0 until coreParams.retireWidth).map{i => rob.io.commit.arch_valids(i) & rob.io.commit.uops(i).is_rvv}.reduce(_ || _)
-    csr.io.vector.get.set_vconfig.valid := csr_vld & vsetvl
-    csr.io.vector.get.set_vconfig.bits := csr_uop.vconfig
+    csr.io.vector.get.set_vconfig.valid := csr_vld && vsetvl || vleffSetVL.valid
+    csr.io.vector.get.set_vconfig.bits := Mux(csr_vld && vsetvl, csr_uop.vconfig, csr.io.vector.get.vconfig)
+    csr.io.vector.get.set_vconfig.bits.vl := Mux(csr_vld && vsetvl, csr_uop.vconfig.vl,
+                                             Mux(vleffSetVL.valid, vleffSetVL.bits,
+                                             csr.io.vector.get.vconfig.vl))
     csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
     csr.io.vector.get.set_vstart.valid := false.B
     csr.io.vector.get.set_vstart.bits := csr_uop.vstart

@@ -1136,7 +1136,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       Mux(vlmul_sign && !is_v_mask_ls, vLen_ecnt, Mux(is_v_mask_insn, vmlogic_tolal_ecnt, vlmax))))
     val vseg_flast = vseg_finc === vseg_nf
     val vMVRCount: UInt = inst(RS1_MSB,RS1_LSB)
-    val elem_last  = Mux(isVMVR, vMVRCounter === vMVRCount, vstart + split_ecnt === total_ecnt)
+    val elem_last  = Mux(isVMVR, vMVRCounter === vMVRCount, (vstart + split_ecnt) >= total_ecnt)
     val split_last = elem_last && Mux(is_v_ls_seg, vseg_flast, true.B)
     when (io.kill) {
       vstart    := 0.U
