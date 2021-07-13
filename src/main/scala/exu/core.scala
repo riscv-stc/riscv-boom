@@ -776,9 +776,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
    */
   for (w <- 0 until coreWidth) {
     val i_uop   = rename_stage.io.ren2_uops(w)
-    val f_uop   = if (usingFPU) fp_rename_stage.io.ren2_uops(w) else NullMicroOp
-    val v_uop   = if (usingVector) v_rename_stage.io.ren2_uops(w) else NullMicroOp
-    val p_uop   = if (enableSFBOpt) pred_rename_stage.io.ren2_uops(w) else NullMicroOp
+    val f_uop   = if (usingFPU) fp_rename_stage.io.ren2_uops(w) else NullMicroOp()
+    val v_uop   = if (usingVector) v_rename_stage.io.ren2_uops(w) else NullMicroOp()
+    val p_uop   = if (enableSFBOpt) pred_rename_stage.io.ren2_uops(w) else NullMicroOp()
     val f_stall = if (usingFPU) fp_rename_stage.io.ren_stalls(w) else false.B
     val v_stall = if (usingVector) v_rename_stage.io.ren_stalls(w) else false.B
     val p_stall = if (enableSFBOpt) pred_rename_stage.io.ren_stalls(w) else false.B

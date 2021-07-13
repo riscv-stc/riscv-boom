@@ -617,8 +617,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                         will_fire_sfence        (w)  , exe_req(w).bits.uop,
                     Mux(will_fire_load_retry    (w)  , ldq_retry_e.bits.uop,
                     Mux(will_fire_sta_retry     (w)  , stq_retry_e.bits.uop,
-                    Mux(will_fire_hella_incoming(w)  , NullMicroOp,
-                                                       NullMicroOp)))))
+                    Mux(will_fire_hella_incoming(w)  , NullMicroOp(),
+                                                       NullMicroOp())))))
 
   val exe_tlb_vaddr = widthMap(w =>
                     Mux(will_fire_load_incoming (w) ||
@@ -773,7 +773,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   for (w <- 0 until memWidth) {
     dmem_req(w).valid := false.B
-    dmem_req(w).bits.uop   := NullMicroOp
+    dmem_req(w).bits.uop   := NullMicroOp()
     dmem_req(w).bits.addr  := 0.U
     dmem_req(w).bits.data  := 0.U
     dmem_req(w).bits.is_hella := false.B
@@ -1069,7 +1069,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                      Mux(fired_release(w), RegNext(io.dmem.release.bits.address),
                                          mem_paddr(w))))
   val lcam_uop   = widthMap(w => Mux(do_st_search(w), mem_stq_e(w).bits.uop,
-                                 Mux(do_ld_search(w), mem_ldq_e(w).bits.uop, NullMicroOp)))
+                                 Mux(do_ld_search(w), mem_ldq_e(w).bits.uop, NullMicroOp())))
 
   val lcam_mask  = widthMap(w => GenByteMask(lcam_addr(w), lcam_uop(w).mem_size))
   val lcam_st_dep_mask = widthMap(w => mem_ldq_e(w).bits.st_dep_mask)
@@ -1673,7 +1673,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         stq(i).valid           := false.B
         stq(i).bits.addr.valid := false.B
         stq(i).bits.data.valid := false.B
-        stq(i).bits.uop        := NullMicroOp
+        stq(i).bits.uop        := NullMicroOp()
       }
     }
       .otherwise // exception

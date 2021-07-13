@@ -515,7 +515,7 @@ class BoomNonBlockingDCacheModule(outer: BoomNonBlockingDCache) extends LazyModu
   // MSHR Meta read
   val mshr_read_req = Wire(Vec(memWidth, new BoomDCacheReq))
   mshr_read_req             := DontCare
-  mshr_read_req(0).uop      := NullMicroOp
+  mshr_read_req(0).uop      := NullMicroOp()
   mshr_read_req(0).addr     := Cat(mshrs.io.meta_read.bits.tag, mshrs.io.meta_read.bits.idx) << blockOffBits
   mshr_read_req(0).data     := DontCare
   mshr_read_req(0).is_hella := false.B
@@ -530,7 +530,7 @@ class BoomNonBlockingDCacheModule(outer: BoomNonBlockingDCache) extends LazyModu
   val wb_fire = wb.io.meta_read.fire() && wb.io.data_req.fire()
   val wb_req = Wire(Vec(memWidth, new BoomDCacheReq))
   wb_req             := DontCare
-  wb_req(0).uop      := NullMicroOp
+  wb_req(0).uop      := NullMicroOp()
   wb_req(0).addr     := Cat(wb.io.meta_read.bits.tag, wb.io.data_req.bits.addr)
   wb_req(0).data     := DontCare
   wb_req(0).is_hella := false.B
@@ -551,7 +551,7 @@ class BoomNonBlockingDCacheModule(outer: BoomNonBlockingDCache) extends LazyModu
   val prober_fire  = prober.io.meta_read.fire()
   val prober_req   = Wire(Vec(memWidth, new BoomDCacheReq))
   prober_req             := DontCare
-  prober_req(0).uop      := NullMicroOp
+  prober_req(0).uop      := NullMicroOp()
   prober_req(0).addr     := Cat(prober.io.meta_read.bits.tag, prober.io.meta_read.bits.idx) << blockOffBits
   prober_req(0).data     := DontCare
   prober_req(0).is_hella := false.B

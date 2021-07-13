@@ -133,9 +133,10 @@ class IssueSlot(
   }
 
   def rs1check(ecnt: UInt = 1.U): Bool = {
-    val ret, ret_common = Wire(Bool())
+    val ret = Wire(Bool())
     val uop = slot_uop
     if (vector) {
+      val ret_common = Wire(Bool())
       val vstart  = Mux(uop.rt(RS1, isReduceV), 0.U, uop.vstart + uop.voffset)
       val tail    = vstart > uop.vconfig.vl
       val eew     = Mux(uop.uses_v_ls_ew, uop.v_ls_ew,

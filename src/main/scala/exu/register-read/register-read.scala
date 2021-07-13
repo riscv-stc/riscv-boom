@@ -245,7 +245,7 @@ class RegisterRead(
 
     exe_reg_valids(w) := Mux(rrd_kill, false.B, rrd_valids(w))
     // TODO use only the valids signal, don't require us to set nullUop
-    exe_reg_uops(w)   := Mux(rrd_kill, NullMicroOp, rrd_uops(w))
+    exe_reg_uops(w)   := Mux(rrd_kill, NullMicroOp(), rrd_uops(w))
 
     exe_reg_uops(w).br_mask := GetNewBrMask(io.brupdate, rrd_uops(w))
 
