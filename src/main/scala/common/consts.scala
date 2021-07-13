@@ -170,6 +170,7 @@ trait ScalarOpConstants
   val RT_FIXU  = 0x04.U(5.W) // RS1 used as unsigned for vector
   val RT_VIU   = 0x06.U(5.W) // RS1 as uimm5 (vop.vi), TODO: move to OP selection
   val RT_X     = 0x07.U(5.W) // not-a-register (but shouldn't get a busy-bit, etc.)
+  val RT_PERM  = 0x0F.U(5.W) // special mark for permutation VADD
   val RT_VEC   = 0x10.U(5.W) // vector, signed width vsew
   val RT_VN    = 0x11.U(5.W) // vector, signed width vsew/2
   val RT_VW    = 0x12.U(5.W) // vector, signed width vsew*2 (for v*ext, maybe *4 *8)
@@ -193,7 +194,7 @@ trait ScalarOpConstants
   def isUnsignedV(rt: UInt): Bool = (rt === RT_VU || rt === RT_VWU || rt === RT_VNU || rt === RT_VIU || rt === RT_VRU || rt === RT_VRWU)
   def isReduceV  (rt: UInt): Bool = (rt(4,3) === 3.U)
   def isMaskVD   (rt: UInt): Bool = (rt === RT_VM)
-  def isNotReg   (rt: UInt): Bool = (rt === RT_X  || rt === RT_VI  || rt === RT_VIU)
+  def isNotReg   (rt: UInt): Bool = (rt === RT_X  || rt === RT_VI  || rt === RT_VIU || rt === RT_PERM)
   def isSomeReg  (rt: UInt): Bool = !isNotReg(rt)
   def isRvvSImm5 (rt: UInt): Bool = (rt === RT_VI)
   def isRvvUImm5 (rt: UInt): Bool = (rt === RT_VIU)
@@ -208,7 +209,7 @@ trait ScalarOpConstants
   // between software NOPs and machine-generated Bubbles in the pipeline.
   val BUBBLE  = (0x4033).U(32.W)
 
-  def NullMicroOp()(implicit p: Parameters): boom.common.MicroOp = {
+  def NullMicroOp(usingVector: Boolean = false)(implicit p: Parameters): boom.common.MicroOp = {
     val uop = Wire(new boom.common.MicroOp)
     uop            := DontCare // Overridden in the following lines
     // maybe not required, but helps on asserts that try to catch spurious behavior
@@ -218,6 +219,12 @@ trait ScalarOpConstants
     uop.uses_stq   := false.B
     uop.uses_ldq   := false.B
     uop.pdst       := 0.U
+    uop.prs1       := 0.U
+    uop.prs2       := 0.U
+    uop.prs3       := 0.U
+    if (usingVector) {
+      uop.pvm        := 0.U
+    }
     uop.dst_rtype  := RT_X
 
     val cs = Wire(new boom.common.CtrlSignals())

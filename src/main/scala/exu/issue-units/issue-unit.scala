@@ -88,8 +88,9 @@ class IssueUnitIO(
 
   val brupdate         = Input(new BrUpdateInfo())
   val vmupdate         = if (usingVector && !vector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
-  val intupdate        = if (usingVector && vector) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
-  val fpupdate         = if (usingVector && vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val intupdate        = if (vector) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val fpupdate         = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val vecUpdate        = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
   val flush_pipeline   = Input(Bool())
   val ld_miss          = Input(Bool())
 
@@ -181,6 +182,7 @@ abstract class IssueUnit(
       } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
         dis_uops(w).prs1_busy  := 0.U
       }
+      dis_uops(w).v_perm_busy  := io.dis_uops(w).bits.uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS)
     }
 
     if (iqType != IQT_INT.litValue) {
@@ -197,6 +199,11 @@ abstract class IssueUnit(
     slot
   }
   val issue_slots = VecInit(slots.map(_.io))
+  val agg_vs2_busy, agg_vs3_busy = Wire(UInt(vpregSz.W))
+  if (vector) {
+    agg_vs2_busy := issue_slots.map(_.cur_vs2_busy).reduce(_|_)
+    agg_vs3_busy := issue_slots.map(_.cur_vs3_busy).reduce(_|_)
+  }
 
   for (i <- 0 until numIssueSlots) {
     issue_slots(i).wakeup_ports     := io.wakeup_ports
@@ -209,6 +216,9 @@ abstract class IssueUnit(
       if (vector) {
         issue_slots(i).intupdate      := io.intupdate
         issue_slots(i).fpupdate       := io.fpupdate
+        issue_slots(i).vecUpdate      := io.vecUpdate
+        issue_slots(i).agg_vs2_busy   := agg_vs2_busy
+        issue_slots(i).agg_vs3_busy   := agg_vs3_busy
       } else {
         issue_slots(i).vmupdate       := io.vmupdate
       }

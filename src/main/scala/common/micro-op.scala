@@ -162,6 +162,8 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_seg_nf         = if (usingVector) UInt(4.W) else null         // number of fields
   val v_idx_ls         = if (usingVector) Bool() else null            // indexed load/store indicator
   val v_xls_offset     = if (usingVector) UInt(eLen.W) else null      // address offset for indexed load/store
+  val v_perm_busy      = if (usingVector) Bool() else null            // for vrgather/vslide/vcompress
+  val v_perm_idx       = if (usingVector) UInt(16.W) else null        // maximum VLMAX is 65536
 
   // purely debug information
   val debug_wdata      = UInt(xLen.W)
@@ -196,10 +198,24 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
 
   def vd_eew: UInt = {
     val vsew   = vconfig.vtype.vsew
-    val vd_sew = Mux(rt(RD, isWidenV ), vsew + 1.U,
-                 Mux(rt(RD, isNarrowV), vsew - 1.U, vsew))
+    val vd_sew = Mux(rt(RD, isWidenV ), vsew + 1.U, vsew)
+    //           Mux(rt(RD, isNarrowV), vsew - 1.U, vsew)), no narrow case in VD
     val eew    = Mux(uses_v_ls_ew, v_ls_ew, vd_sew)
     eew
+  }
+
+  def vd_emul: UInt = {
+    val emul = Wire(UInt(2.W))
+    val vlmul_sign = vconfig.vtype.vlmul_sign
+    val vlmul_mag  = vconfig.vtype.vlmul_mag
+    emul := Mux(vlmul_sign, 0.U, Mux(rt(RD, isWidenV), vlmul_mag + 1.U, vlmul_mag))(1,0)
+    emul
+  }
+
+  def match_group(prd: UInt): Bool = {
+    val ret = Wire(Bool())
+    ret := ((pdst ^ prd) >> vd_emul) === 0.U
+    ret
   }
 }
 
@@ -222,6 +238,7 @@ class CtrlSignals(implicit p: Parameters) extends BoomBundle()
   val is_std      = Bool()
   val is_vmlogic  = if (usingVector) Bool() else null
   val is_vmscmp   = if (usingVector) Bool() else null
+  val perm_on_vd  = if (usingVector) Bool() else null
   //val is_vmfscmp   = if (usingVector) Bool() else null
 }
 
@@ -935,9 +952,9 @@ object MicroOpcodes extends Enumeration {
   // 14.14. FP classify
   val uopVFCLASS_enum   = Value
   val uopVFCLASS        = uopVFCLASS_enum.id.U(UOPC_SZ.W)
-  // 14.15. FP merge
-  val uopVFMERGE_enum   = Value
-  val uopVFMERGE        = uopVFMERGE_enum.id.U(UOPC_SZ.W)
+  // 14.15. FP merge, share with uopVMERGE
+  //val uopVFMERGE_enum   = Value
+  //val uopVFMERGE        = uopVFMERGE_enum.id.U(UOPC_SZ.W)
   // VFMERGE_VFM
   // 14.16. FP move
   val uopVFMV_V_F_enum  = Value

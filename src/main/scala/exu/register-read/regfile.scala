@@ -56,22 +56,35 @@ object WritePort
     addrWidth: Int,
     dataWidth: Int,
     rtype: UInt => Bool,
-    vector: Boolean = false, eLenb: Int = 8, eLenSelSz: Int = 4
+    vector: Boolean = false
   ) (implicit p: Parameters): Valid[RegisterFileWritePort] = {
     val wport = Wire(Valid(new RegisterFileWritePort(addrWidth, dataWidth, vector)))
     val enq_uop = enq.bits.uop
     wport.valid := enq.valid && enq_uop.rt(RD, rtype)
     if (vector) {
-      val eLen: Int = eLenb * 8 // FIXME howto get it through p?
+      val eLen = p(freechips.rocketchip.tile.TileKey).core.eLen
+      val vLen = p(freechips.rocketchip.tile.TileKey).core.vLen
+      val eLenb = eLen/8
       val eLenSz = log2Ceil(eLen)
+      val vLenSz = log2Ceil(vLen)
+      val eLenSelSz = log2Ceil(vLen/eLen)
+      val perm_on_vd = enq_uop.ctrl.perm_on_vd
+      val vd_emul    = enq_uop.vd_emul
+      val perm_idx   = enq_uop.v_perm_idx
+      val perm_rinc  = perm_idx >> (vLenSz.U - 3.U - enq_uop.vconfig.vtype.vsew)
+      val pdst       = enq_uop.pdst
+      val perm_ridx  = Mux(vd_emul === 1.U, Cat(pdst(pdst.getWidth-1, 1), perm_rinc(0)),
+                       Mux(vd_emul === 2.U, Cat(pdst(pdst.getWidth-1, 2), perm_rinc(1,0)),
+                       Mux(vd_emul === 3.U, Cat(pdst(pdst.getWidth-1, 3), perm_rinc(2,0)), pdst)))
       val vstart = enq_uop.vstart
       val ecnt   = enq_uop.v_split_ecnt
-      val (rsel, rmsk) = VRegSel(vstart, enq_uop.vd_eew, ecnt, eLenb, eLenSelSz)
+      val eidx   = Mux(perm_on_vd, perm_idx, vstart)
+      val (rsel, rmsk) = VRegSel(eidx, enq_uop.vd_eew, ecnt, eLenb, eLenSelSz)
       val exp_rmsk = Cat((0 until 8).map(b => Fill(8, rmsk(b))).reverse)
       val maskvd = enq_uop.rt(RD, isMaskVD)
       val maskvd_rsel = (vstart >> eLenSz)(eLenSelSz-1, 0)
       val maskvd_rmsk = UIntToOH(vstart(eLenSz-1, 0), eLen)
-      wport.bits.addr := Cat(enq_uop.pdst, Mux(maskvd, maskvd_rsel, rsel))
+      wport.bits.addr := Cat(Mux(perm_on_vd, perm_ridx, enq_uop.pdst), Mux(maskvd, maskvd_rsel, rsel))
       wport.bits.mask := Mux(maskvd, maskvd_rmsk, exp_rmsk)
       wport.bits.data := Mux(maskvd, Fill(eLen, enq.bits.data(0)), VDataFill(enq.bits.data, enq_uop.vd_eew, eLenb*8))
       when (wport.valid) { assert(enq_uop.vd_eew <= 3.U) }

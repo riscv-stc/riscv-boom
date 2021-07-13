@@ -264,6 +264,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   // vector stuff
   require (issueParams.count(_.iqType == IQT_VEC.litValue) == 1 || !usingVector)
   val numVecPhysRegs = boomParams.numVecPhysRegisters
+  require (numVecPhysRegs % 8 == 0, "Number of vector physical register must be multiple of 8")
   def numELENinVLEN = vLen/eLen
   def numVecPhysElens= boomParams.numVecPhysRegisters * numELENinVLEN
   def vLenb = vLen/8

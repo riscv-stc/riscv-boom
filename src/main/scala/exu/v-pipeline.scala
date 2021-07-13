@@ -98,6 +98,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   issue_unit.io.flush_pipeline := io.flush_pipeline
   issue_unit.io.intupdate := io.intupdate
   issue_unit.io.fpupdate  := io.fpupdate
+  issue_unit.io.vecUpdate := vregister_read.io.vecUpdate
   // Don't support ld-hit speculation to VEC window.
   for (w <- 0 until memWidth) {
     issue_unit.io.spec_ld_wakeup(w).valid := false.B
@@ -197,7 +198,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   // Cut up critical path by delaying the write by a cycle.
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
-  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vElenSz, eLen, isVector, true, eLenb, eLenSelSz))
+  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vElenSz, eLen, isVector, true))
 
   assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
   when (io.from_int.valid) { assert (io.from_int.bits.uop.rf_wen && io.from_int.bits.uop.rt(RD, isVector)) }
@@ -205,7 +206,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   var w_cnt = 1
   for (i <- 1 until memWidth) {
-    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), vElenSz, eLen, isVector, true, eLenb, eLenSelSz))
+    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), vElenSz, eLen, isVector, true))
     w_cnt += 1
   }
   for (eu <- exe_units) {
@@ -220,7 +221,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       } else {
         eu_vresp.valid := eu.io.vresp.valid && eu_vresp_uop.rf_wen
       }
-      vregfile.io.write_ports(w_cnt) := WritePort(eu_vresp, vElenSz, eLen, isVector, true, eLenb, eLenSelSz)
+      vregfile.io.write_ports(w_cnt) := WritePort(eu_vresp, vElenSz, eLen, isVector, true)
       eu.io.vresp.ready              := true.B
       when (eu_vresp.valid && !(eu_vresp_uop.is_rvv && eu_vresp_uop.ctrl.is_sta)) {
         //assert(eu.io.vresp.ready, "No backpressuring the Vec EUs")
