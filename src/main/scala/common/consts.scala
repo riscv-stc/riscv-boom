@@ -170,7 +170,7 @@ trait ScalarOpConstants
   val RT_FIXU  = 0x04.U(5.W) // RS1 used as unsigned for vector
   val RT_VIU   = 0x06.U(5.W) // RS1 as uimm5 (vop.vi), TODO: move to OP selection
   val RT_X     = 0x07.U(5.W) // not-a-register (but shouldn't get a busy-bit, etc.)
-  val RT_PERM  = 0x0F.U(5.W) // special mark for permutation VADD
+  //val RT_PERM  = 0x0F.U(5.W) // special mark for permutation VADD
   val RT_VEC   = 0x10.U(5.W) // vector, signed width vsew
   val RT_VN    = 0x11.U(5.W) // vector, signed width vsew/2
   val RT_VW    = 0x12.U(5.W) // vector, signed width vsew*2 (for v*ext, maybe *4 *8)
@@ -194,7 +194,7 @@ trait ScalarOpConstants
   def isUnsignedV(rt: UInt): Bool = (rt === RT_VU || rt === RT_VWU || rt === RT_VNU || rt === RT_VIU || rt === RT_VRU || rt === RT_VRWU)
   def isReduceV  (rt: UInt): Bool = (rt(4,3) === 3.U)
   def isMaskVD   (rt: UInt): Bool = (rt === RT_VM)
-  def isNotReg   (rt: UInt): Bool = (rt === RT_X  || rt === RT_VI  || rt === RT_VIU || rt === RT_PERM)
+  def isNotReg   (rt: UInt): Bool = (rt === RT_X  || rt === RT_VI  || rt === RT_VIU)
   def isSomeReg  (rt: UInt): Bool = !isNotReg(rt)
   def isRvvSImm5 (rt: UInt): Bool = (rt === RT_VI)
   def isRvvUImm5 (rt: UInt): Bool = (rt === RT_VIU)

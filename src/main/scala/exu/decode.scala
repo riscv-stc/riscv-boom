@@ -1143,7 +1143,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                 Mux(is_v_ls_ustride || is_v_ls_stride, ls_vlmax, io.csr_vconfig.vtype.vlMax)))
     val vsew = Mux(is_v_reg_ls, cs.v_ls_ew, io.csr_vconfig.vtype.vsew)
     val vlmul_sign = io.csr_vconfig.vtype.vlmul_sign
-    val vlmul = Mux(vlmul_sign, 0.U(2.W), io.csr_vconfig.vtype.vlmul_mag)
+    val vlmul_mag  = io.csr_vconfig.vtype.vlmul_mag
+    val vlmul = Mux(vlmul_sign, 0.U(2.W), vlmul_mag)
     val vd_wfactor = Mux(uop.rt(RD,  isWidenV ), 1.U, 0.U)
     val vd_nfactor = Mux(uop.rt(RD,  isNarrowV), 1.U, 0.U)
     val vs2_wfactor= Mux(uop.rt(RS2, isWidenV ), 1.U, 0.U)
@@ -1297,7 +1298,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.frs3_en := true.B
     }
 
-    val do_perm_insert = uop.vd_emul =/= 0.U
+    val vd_emul = Mux(vlmul_sign, 0.U(2.W), Mux(isWidenV(cs.dst_type), vlmul_mag + 1.U, vlmul_mag))(1,0)
+    val do_perm_insert = vd_emul =/= 0.U
     when (io.kill) {
       redperm_act := false.B
     } .elsewhen (io.deq_fire && split_last && redperm_act && (is_red_op || is_perm_op && do_perm_insert)) {
@@ -1331,7 +1333,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
           uop.uopc        := uopVADD
           uop.iq_type     := IQT_VEC
           uop.lrs1        := 0.U
-          uop.lrs1_rtype  := RT_PERM // special mark for such op
+          uop.lrs1_rtype  := RT_VI // special mark for such op
+          //uop.lrs1_rtype  := RT_PERM // special mark for such op
           when (!uop.uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP, uopVCOMPRESS)) {
             // vslide*up/vcompress must tidy stale_pdst, or VS3 in this case
             uop.ldst        := uop.lrs2 // vadd vs2, vs2, vs1

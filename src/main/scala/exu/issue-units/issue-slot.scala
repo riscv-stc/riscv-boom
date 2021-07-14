@@ -296,7 +296,7 @@ class IssueSlot(
   } .elsewhen (io.grant && (state === s_valid_2)) {
     when (!(io.ldspec_miss && (p1_poisoned || p2_poisoned))) {
       next_state := s_valid_1
-      when (rs2check()) {
+      when (rs1check()) {
         slot_uop.uopc := uopSTD
         next_uopc := uopSTD
         slot_uop.lrs1_rtype := RT_X
