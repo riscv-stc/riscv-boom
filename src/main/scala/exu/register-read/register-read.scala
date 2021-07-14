@@ -169,7 +169,7 @@ class RegisterRead(
         when (perm_on_vs2) {
           rs2_addr := perm_ridx
         }
-        val eidx = Mux(perm_on_vs2, perm_idx, vstart)
+        val eidx = Mux(perm_on_vs2, perm_idx(vLenSz-1,0), vstart)
         val r2_sh = Mux1H(UIntToOH(vs2_sew(1,0)), Seq(Cat(eidx(2,0),0.U(3.W)), Cat(eidx(1,0),0.U(4.W)), Cat(eidx(0),0.U(5.W)), 0.U(6.W)))
         val (r2sel,r2msk) = VRegSel(eidx, vs2_sew, ecnt, eLenb, eLenSelSz)
         val r2_bit_mask = Cat((0 until eLenb).map(i => Fill(8, r2msk(i).asUInt)).reverse)
@@ -197,7 +197,7 @@ class RegisterRead(
         when (perm_on_vd) {
           rs3_addr := perm_ridx
         }
-        val eidx = Mux(perm_on_vd, perm_idx, vstart)
+        val eidx = Mux(perm_on_vd, perm_idx(vLenSz-1,0), vstart)
         val rd_sh = Mux1H(UIntToOH(vd_sew(1,0)),  Seq(Cat(eidx(2,0),0.U(3.W)), Cat(eidx(1,0),0.U(4.W)), Cat(eidx(0),0.U(5.W)), 0.U(6.W)))
         val (rdsel,rdmsk) = VRegSel(eidx, vd_sew,  ecnt, eLenb, eLenSelSz)
         val rd_bit_mask = Cat((0 until eLenb).map(i => Fill(8, rdmsk(i).asUInt)).reverse)
@@ -215,13 +215,11 @@ class RegisterRead(
         val is_vmask_set_m = io.iss_uops(w).uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
         val perm_on_vd     = io.iss_uops(w).uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP)
         val perm_idx       = io.iss_uops(w).v_perm_idx
-        val eidx           = Mux(perm_on_vd, perm_idx, vstart)
-        io.rf_read_ports(idx+3).addr := Cat(rvm_addr, eidx >> log2Ceil(eLen))
-
+        val eidx           = Mux(perm_on_vd, perm_idx(vLenSz-1,0), vstart)
         // need make mask and element sync
         val vmask_cnt_set_insn_mask_addr = Cat(rvm_addr, vstart(3,0))
-        io.rf_read_ports(idx+3).addr := Mux(is_vmask_cnt_m | is_vmask_set_m, vmask_cnt_set_insn_mask_addr,Cat(rvm_addr, eidx >> log2Ceil(eLen)))
-
+        io.rf_read_ports(idx+3).addr := Mux(is_vmask_cnt_m | is_vmask_set_m, vmask_cnt_set_insn_mask_addr,
+                                        Cat(rvm_addr, eidx >> log2Ceil(eLen)))
         rrd_rvm_data(w) := io.rf_read_ports(idx+3).data(RegNext(eidx(log2Ceil(eLen)-1,0)))
         rrd_vmaskInsn_rvm_data(w) := io.rf_read_ports(idx+3).data
         assert(!(io.iss_valids(w) && io.iss_uops(w).uopc.isOneOf(uopVL, uopVLS) && io.iss_uops(w).v_unmasked &&

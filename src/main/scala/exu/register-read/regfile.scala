@@ -78,7 +78,7 @@ object WritePort
                        Mux(vd_emul === 3.U, Cat(pdst(pdst.getWidth-1, 3), perm_rinc(2,0)), pdst)))
       val vstart = enq_uop.vstart
       val ecnt   = enq_uop.v_split_ecnt
-      val eidx   = Mux(perm_on_vd, perm_idx, vstart)
+      val eidx   = Mux(perm_on_vd, perm_idx(vLenSz-1,0), vstart)
       val (rsel, rmsk) = VRegSel(eidx, enq_uop.vd_eew, ecnt, eLenb, eLenSelSz)
       val exp_rmsk = Cat((0 until 8).map(b => Fill(8, rmsk(b))).reverse)
       val maskvd = enq_uop.rt(RD, isMaskVD)

@@ -583,8 +583,13 @@ class IssueSlot(
           slot_uop.prs1_busy := ~(0.U(vLenb.W))
         }
         val need_vecupdate = slot_uop.rt(RS1, isVector) && slot_uop.uopc === uopVRGATHER || slot_uop.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
-        when (need_vecupdate && perm_ready) {
-          next_perm_ready := false.B
+        when (need_vecupdate) {
+          when (perm_ready) {
+            next_perm_ready := false.B
+          } .otherwise {
+            io.out_uop.voffset:= slot_uop.voffset
+            slot_uop.voffset  := slot_uop.voffset
+          }
         }
       }
       // merge input busy status and wake-up status
