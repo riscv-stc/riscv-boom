@@ -154,6 +154,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
 
   fregister_read.io.iss_valids <> iss_valids
   fregister_read.io.iss_uops := iss_uops
+  fregister_read.io.vstart := DontCare
 
   fregister_read.io.brupdate := io.brupdate
   fregister_read.io.kill := io.flush_pipeline

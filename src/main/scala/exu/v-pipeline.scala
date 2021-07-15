@@ -37,6 +37,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val brupdate         = Input(new BrUpdateInfo())
     val flush_pipeline   = Input(Bool())
     val fcsr_rm          = Input(UInt(width=FPConstants.RM_SZ.W))
+    val vstart           = Input(UInt(vLenSz.W))
     val vxrm             = Input(UInt(2.W))
     val status           = Input(new MStatus())
 
@@ -155,6 +156,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   vregister_read.io.iss_valids <> iss_valids
   vregister_read.io.iss_uops := iss_uops
+  vregister_read.io.vstart   := io.vstart
 
   vregister_read.io.brupdate := io.brupdate
   vregister_read.io.kill := io.flush_pipeline

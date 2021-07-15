@@ -1147,6 +1147,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
   iregister_read.io.iss_uops := iss_uops
   iregister_read.io.iss_uops map { u => u.iw_p1_poisoned := false.B; u.iw_p2_poisoned := false.B }
+  iregister_read.io.vstart := DontCare
 
   iregister_read.io.brupdate := brupdate
   iregister_read.io.kill   := RegNext(rob.io.flush.valid)
@@ -1239,11 +1240,12 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
                                              Mux(vleffSetVL.valid, vleffSetVL.bits,
                                              csr.io.vector.get.vconfig.vl))
     csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
-    csr.io.vector.get.set_vstart.valid := false.B
-    csr.io.vector.get.set_vstart.bits := csr_uop.vstart
+    csr.io.vector.get.set_vstart.valid := (0 until coreParams.retireWidth).map{i => rob.io.commit.arch_valids(i) & rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).v_is_last}.reduce(_ || _)
+    csr.io.vector.get.set_vstart.bits := 0.U
     csr.io.vector.get.set_vxsat := (0 until coreParams.retireWidth).map{i => rob.io.commit.arch_valids(i) & rob.io.commit.uops(i).is_rvv & rob.io.commit.uops(i).vxsat}.reduce(_ || _)
     v_pipeline.io.fcsr_rm := csr.io.fcsr_rm
-    v_pipeline.io.vxrm := csr.io.vector.get.vxrm
+    v_pipeline.io.vstart  := csr.io.vector.get.vstart
+    v_pipeline.io.vxrm    := csr.io.vector.get.vxrm
 
     csr_exe_unit.io.vconfig := csr.io.vector.get.vconfig
   }

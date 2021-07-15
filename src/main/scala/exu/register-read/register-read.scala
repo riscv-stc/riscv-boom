@@ -53,6 +53,7 @@ class RegisterRead(
     // issued micro-ops
     val iss_valids = Input(Vec(issueWidth, Bool()))
     val iss_uops   = Input(Vec(issueWidth, new MicroOp()))
+    val vstart     = Input(UInt(vLenSz.W))
 
     // interface with register file's read ports
     val rf_read_ports = Flipped(Vec(numTotalReadPorts, new RegisterFileReadPortIO(maxPregSz, registerWidth)))
@@ -333,7 +334,7 @@ class RegisterRead(
         val vsew64bit  = 3.U
         val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
         val vmaskInsn_active = vstart < vmaskInsn_vl
-        val is_active  = Mux(is_vmaskInsn, vmaskInsn_active, Mux(is_masked, exe_reg_rvm_data(w), true.B)) && vstart < vl
+        val is_active  = Mux(is_vmaskInsn, vmaskInsn_active, Mux(is_masked, exe_reg_rvm_data(w), true.B)) && vstart < vl && vstart >= io.vstart
         val vmaskInsn_rs2_data = Mux(is_masked, exe_reg_rs2_data(w) & exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs2_data(w))
 
         io.exe_reqs(w).bits.rs2_data    := Mux(is_vmask_cnt_m | is_vmask_set_m, vmaskInsn_rs2_data, exe_reg_rs2_data(w))
