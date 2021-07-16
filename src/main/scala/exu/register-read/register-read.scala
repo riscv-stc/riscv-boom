@@ -154,6 +154,7 @@ class RegisterRead(
       if (numReadPorts > 1) {
         // Note: v_ls_ew records index sew for index load/store
         val perm_on_vs2 = io.iss_uops(w).uopc.isOneOf(uopVSLIDEDOWN, uopVSLIDE1DOWN, uopVRGATHER, uopVRGATHEREI16)
+        val vslide1down = io.iss_uops(w).uopc === uopVSLIDE1DOWN
         val vs2_sew = Mux(io.iss_uops(w).rt(RS2, isWidenV),  vsew+1.U,
                       Mux(io.iss_uops(w).uopc === uopVEXT8,  vsew-3.U,
                       Mux(io.iss_uops(w).uopc === uopVEXT4,  vsew-2.U,
@@ -180,10 +181,14 @@ class RegisterRead(
         val vmask_iota_addr = Cat(rs2_addr, vstart >> log2Ceil(eLen))
 
         io.rf_read_ports(idx+1).addr := Mux(is_vmask_iota_m, vmask_iota_addr, Cat(rs2_addr, r2sel))
-        rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, Mux(is_vmask_iota_m, io.rf_read_ports(idx+1).data, Mux(RegNext(io.iss_uops(w).rt(RS2, isUnsignedV)), rf_data2, signext2)))
+        rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U) || RegNext(perm_on_vs2 && perm_idx >= io.iss_uops(w).vconfig.vtype.vlMax), 0.U,
+                           Mux(RegNext(is_vmask_iota_m), io.rf_read_ports(idx+1).data,
+                           Mux(RegNext(vslide1down && perm_idx+1.U === io.iss_uops(w).vconfig.vl), RegNext(io.iss_uops(w).v_scalar_data),
+                           Mux(RegNext(io.iss_uops(w).rt(RS2, isUnsignedV)), rf_data2, signext2))))
       }
       if (numReadPorts > 2) {
         val perm_on_vd = io.iss_uops(w).uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP, uopVCOMPRESS)
+        val vslide1up  = io.iss_uops(w).uopc === uopVSLIDE1UP
         val vd_sew  = Mux(io.iss_uops(w).uses_v_ls_ew, io.iss_uops(w).v_ls_ew,
                       Mux(io.iss_uops(w).rt(RD, isWidenV ), vsew + 1.U,
                       Mux(io.iss_uops(w).rt(RD, isNarrowV), vsew - 1.U, vsew)))
@@ -207,8 +212,10 @@ class RegisterRead(
         val maskvd_rsel = (vstart >> eLenSz)(eLenSelSz-1, 0)
         val maskvd_data = Cat(0.U((eLen-1).W), io.rf_read_ports(idx+2).data(RegNext(vstart(eLenSz-1, 0))))
         io.rf_read_ports(idx+2).addr := Cat(rs3_addr, Mux(maskvd, maskvd_rsel, rdsel))
-        rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, Mux(RegNext(maskvd), maskvd_data,
-                                                               Mux(RegNext(io.iss_uops(w).rt(RD, isUnsignedV)), rf_data3, signext3)))
+        rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U,
+                           Mux(RegNext(maskvd), maskvd_data,
+                           Mux(RegNext(vslide1up && perm_idx === 0.U), RegNext(io.iss_uops(w).v_scalar_data),
+                           Mux(RegNext(io.iss_uops(w).rt(RD, isUnsignedV)), rf_data3, signext3))))
       }
       if (numReadPorts > 3) { // handle vector mask
         val is_vmask_cnt_m = io.iss_uops(w).uopc.isOneOf(uopVPOPC, uopVFIRST)

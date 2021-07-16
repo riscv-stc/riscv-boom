@@ -163,7 +163,8 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_idx_ls         = if (usingVector) Bool() else null            // indexed load/store indicator
   val v_xls_offset     = if (usingVector) UInt(eLen.W) else null      // address offset for indexed load/store
   val v_perm_busy      = if (usingVector) Bool() else null            // for vrgather/vslide/vcompress
-  val v_perm_idx       = if (usingVector) UInt(16.W) else null        // maximum VLMAX is 65536
+  val v_perm_wait      = if (usingVector) Bool() else null            // wait vecUpdate
+  val v_perm_idx       = if (usingVector) UInt(eLen.W) else null      // maximum VLMAX is 65536
 
   // purely debug information
   val debug_wdata      = UInt(xLen.W)

@@ -54,10 +54,10 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false)
   val intupdate     = if (vector) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
   val fpupdate      = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   val vecUpdate     = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
-  val cur_vs2_busy  = if (vector) Output(UInt(vpregSz.W)) else null
-  val agg_vs2_busy  = if (vector) Input(UInt(vpregSz.W)) else null
-  val cur_vs3_busy  = if (vector) Output(UInt(vpregSz.W)) else null
-  val agg_vs3_busy  = if (vector) Input(UInt(vpregSz.W)) else null
+  val cur_vs2_busy  = if (vector) Output(UInt(numVecPhysRegs.W)) else null
+  val agg_vs2_busy  = if (vector) Input(UInt(numVecPhysRegs.W)) else null
+  val cur_vs3_busy  = if (vector) Output(UInt(numVecPhysRegs.W)) else null
+  val agg_vs3_busy  = if (vector) Input(UInt(numVecPhysRegs.W)) else null
 
   val debug = {
     val result = new Bundle {
@@ -91,6 +91,7 @@ class IssueSlot(
   // slot is valid, holds 2 uops (like a store)
   def is_invalid = state === s_invalid
   def is_valid = state =/= s_invalid
+  val io_fire = io.request && io.grant
 
   val next_state      = Wire(UInt()) // the next state of this slot (which might then get moved to a new slot)
   val next_uopc       = Wire(UInt()) // the next uopc of this slot (which might then get moved to a new slot)
@@ -106,7 +107,8 @@ class IssueSlot(
   val sdata = if(vector) RegInit(0.U(eLen.W)) else null
   val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val perm_ready = if (vector) RegInit(false.B) else null
-  val perm_idx   = if (vector) Reg(UInt(16.W)) else null
+  val perm_wait  = if (vector) RegInit(false.B) else null
+  val perm_idx   = if (vector) Reg(UInt(eLen.W)) else null
   val ppred = RegInit(false.B)
 
   // Poison if woken up by speculative load.
@@ -121,11 +123,14 @@ class IssueSlot(
 
   val slot_uop = RegInit(NullMicroOp(usingVector))
   val next_uop = WireInit(Mux(io.in_uop.valid, io.in_uop.bits, slot_uop))
+  val has_vecupdate = slot_uop.rt(RS1, isVector) && slot_uop.uopc === uopVRGATHER || slot_uop.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
 
   def last_check: Bool = {
     val ret = Wire(Bool())
     if (vector) {
-      ret := io.uop.v_is_last && perm_ready || io.uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+      val need_vecupdate = io.uop.rt(RS1, isVector) && io.uop.uopc === uopVRGATHER || io.uop.uopc === uopVRGATHEREI16
+      ret := io.uop.v_is_last && (!need_vecupdate || perm_ready) ||
+             io.uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     } else {
       ret := true.B
     }
@@ -147,9 +152,9 @@ class IssueSlot(
       ret_common  := Mux(uop.rt(RS1, isVector), tail || mask === rmsk,
                      Mux(uop.uses_scalar, ps, true.B))
       when (uop.uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16)) {
-        ret := Mux(perm_ready, true.B, ret_common) // requires feedback from vecupdate
+        ret := Mux(perm_ready, true.B, !perm_wait && ret_common) // requires feedback from vecupdate
       } .elsewhen (uop.uopc === uopVCOMPRESS) {
-        ret := Mux(perm_ready, true.B, p1(perm_idx >> 3.U))
+        ret := Mux(perm_ready, true.B, !perm_wait && p1(perm_idx(vLenSz-1,0) >> 3.U))
       } .otherwise {
         ret := ret_common
       }
@@ -317,16 +322,22 @@ class IssueSlot(
   val next_p3 = WireInit(p3)
   val next_pm = if (vector || usingVector && iqType == IQT_MEM.litValue) WireInit(pm) else null
   val next_perm_ready = if (vector) WireInit(perm_ready) else null
+  val next_perm_wait  = if (vector) WireInit(perm_wait)  else null
+  val next_perm_idx   = if (vector) WireInit(perm_idx)   else null
   val in_p1 = if (vector) WireInit(p1) else null
   val in_p2 = if (vector) WireInit(p2) else null
   val in_p3 = if (vector) WireInit(p3) else null
   val in_pm = if (vector || usingVector && iqType == IQT_MEM.litValue) WireInit(pm) else null
-  val in_perm_ready = if (vector) WireInit(false.B) else null
+  val in_perm_ready = if (vector) WireInit(false.B)  else null
+  val in_perm_wait  = if (vector) WireInit(false.B)  else null
+  val in_perm_idx   = if (vector) WireInit(0.U(eLen.W)) else null
   val wake_p1 = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
   val wake_p2 = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
   val wake_p3 = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
   val wake_pm = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
   val next_ppred = WireInit(ppred)
+  val vupd_perm_hit = if (vector) WireInit(false.B) else null
+  val vupd_perm_idx = if (vector) WireInit(0.U(eLen.W)) else null
 
   when (io.in_uop.valid) {
     if (usingVector) {
@@ -340,7 +351,8 @@ class IssueSlot(
         ps    := ~io.in_uop.bits.v_scalar_busy
         sdata := io.in_uop.bits.v_scalar_data
         in_perm_ready := ~io.in_uop.bits.v_perm_busy
-        perm_idx := io.in_uop.bits.v_perm_idx
+        in_perm_wait  := io.in_uop.bits.v_perm_wait
+        in_perm_idx := io.in_uop.bits.v_perm_idx
       } else {
         next_p1 := !io.in_uop.bits.prs1_busy(0)
         next_p2 := !io.in_uop.bits.prs2_busy(0)
@@ -497,13 +509,15 @@ class IssueSlot(
     }
 
     val vm_sel = io.vecUpdate.map(v => v.valid && v.bits.uop.match_group(next_uop.pdst))
-    when (io.vecUpdate.map(_.valid).reduce(_||_)) {
+    when (is_valid && io.vecUpdate.map(_.valid).reduce(_||_)) {
       val vm_rs1 = io.vecUpdate.map(v => v.bits.data)
       val vm_actv= io.vecUpdate.map(v => v.valid && v.bits.uop.v_active).reduce(_||_)
-      next_perm_ready := vm_sel.reduce(_||_)
-      perm_idx := Mux(next_uop.uopc === uopVCOMPRESS, perm_idx+vm_actv, Mux1H(vm_sel, vm_rs1))
-      assert(io.vecUpdate.map(v => v.valid && v.bits.uop.uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16)).reduce(_||_))
-      assert(perm_ready || next_uop.uopc.isOneOf(uopVRGATHER) && next_uop.rt(RS1, isVector) || next_uop.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS))
+      vupd_perm_hit := vm_sel.reduce(_||_)
+      vupd_perm_idx := Mux(next_uop.uopc === uopVCOMPRESS, perm_idx+vm_actv, Mux1H(vm_sel, vm_rs1))
+      assert(io.vecUpdate.map(v => v.valid && v.bits.uop.uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS)).reduce(_||_))
+      when (vupd_perm_hit) {
+        assert(!perm_ready && has_vecupdate)
+      }
     }
   }
 
@@ -550,13 +564,15 @@ class IssueSlot(
       io.out_uop.prvm_busy  := ~pm
       io.out_uop.v_scalar_busy := ~ps
       io.out_uop.v_scalar_data := sdata
-      io.out_uop.v_perm_busy := ~perm_ready
-      io.out_uop.v_perm_idx  := perm_idx
+      io.out_uop.v_perm_busy := ~next_perm_ready
+      io.out_uop.v_perm_idx  := next_perm_idx
+      io.out_uop.v_perm_wait := next_perm_wait
       io.cur_vs2_busy       := UIntToOH(slot_uop.prs2)(vpregSz-1,0) & Fill(vpregSz, !(p2.andR) && is_valid)
       io.cur_vs3_busy       := UIntToOH(slot_uop.prs3)(vpregSz-1,0) & Fill(vpregSz, !(p3.andR) && is_valid)
       // handle VOP_VI, prs1 records the value of lrs1, and is used as simm5
       io.uop.v_scalar_data  := Mux(io.uop.rt(RS1, isRvvSImm5), Cat(Fill(eLen-5, io.uop.prs1(4).asUInt), io.uop.prs1(4,0)),
                                Mux(io.uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), io.uop.prs1(4,0)), sdata))
+      io.uop.v_perm_busy    := ~perm_ready
       io.uop.v_perm_idx     := Mux(slot_uop.uopc.isOneOf(uopVSLIDEUP, uopVSLIDEDOWN),   io.uop.vstart + Mux(slot_uop.rt(RS1, isInt), sdata, slot_uop.prs1(4,0)),
                                Mux(slot_uop.uopc.isOneOf(uopVSLIDE1UP, uopVSLIDE1DOWN), io.uop.vstart + 1.U,
                                                                                         perm_idx))
@@ -582,11 +598,8 @@ class IssueSlot(
           io.out_uop.prs1_busy := ~(0.U(vLenb.W))
           slot_uop.prs1_busy := ~(0.U(vLenb.W))
         }
-        val need_vecupdate = slot_uop.rt(RS1, isVector) && slot_uop.uopc === uopVRGATHER || slot_uop.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
-        when (need_vecupdate) {
-          when (perm_ready) {
-            next_perm_ready := false.B
-          } .otherwise {
+        when (has_vecupdate) {
+          when (!perm_ready) {
             io.out_uop.voffset:= slot_uop.voffset
             slot_uop.voffset  := slot_uop.voffset
           }
@@ -641,7 +654,15 @@ class IssueSlot(
   ppred := next_ppred
   if (vector) {
     pm := next_pm
-    perm_ready := in_perm_ready || next_perm_ready
+    next_perm_ready := Mux(io.in_uop.valid, in_perm_ready, //||vupd_perm_hit,
+                                            Mux(perm_ready&&has_vecupdate, !io_fire, vupd_perm_hit))
+    next_perm_wait  := Mux(io.in_uop.valid, in_perm_wait, //&& !vupd_perm_hit,
+                                            Mux(perm_wait, !vupd_perm_hit, io_fire&&has_vecupdate&& !perm_ready))
+    next_perm_idx   := Mux(io.in_uop.valid, in_perm_idx,
+                                            Mux(vupd_perm_hit, vupd_perm_idx, perm_idx))
+    perm_ready := next_perm_ready
+    perm_wait  := next_perm_wait
+    perm_idx   := next_perm_idx
   } else if (usingVector && iqType == IQT_MEM.litValue) {
     pm := Mux(io.in_uop.valid, in_pm, pm) | next_pm
   }
