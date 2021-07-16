@@ -290,7 +290,7 @@ class RenameStage(
       val com_red_act = io.com_uops(w).rt(RD, isReduceV)
       val com_red_mov = com_red && !com_red_act
       com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w) &&
-                       (!io.com_uops(w).v_is_split || io.com_uops(w).v_is_last && !com_red_mov)
+                       (!io.com_uops(w).v_is_split || (io.com_uops(w).v_phys_last || io.com_uops(w).v_is_last) && !com_red_mov)
       rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w) &&
                        (!io.com_uops(w).v_is_split || io.com_uops(w).v_is_first && !com_red_act)
     } else {

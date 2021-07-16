@@ -1189,6 +1189,13 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.v_re_vs1    := (vstart & vs1_mask(vLenSz,0)) === 0.U
     uop.v_re_vs2    := (vstart & vs2_mask(vLenSz,0)) === 0.U
 
+    val phys_index = vstart + split_ecnt
+    uop.v_phys_last := Mux(uop.rt(RD, isMaskVD) || uop.rt(RD, isReduceV), elem_last,
+                       Mux(vd_sew === 3.U, phys_index(3, 0) === 0.U,
+                       Mux(vd_sew === 2.U, phys_index(4, 0) === 0.U,
+                       Mux(vd_sew === 1.U, phys_index(5, 0) === 0.U,
+                       phys_index(6, 0) === 0.U))))
+
     when (cs.is_rvv) {
       when (!uop.rt(RD, isMaskVD)) {
         uop.ldst := inst(RD_MSB,RD_LSB) + vd_inc

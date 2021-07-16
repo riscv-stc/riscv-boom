@@ -162,6 +162,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_seg_nf         = if (usingVector) UInt(4.W) else null         // number of fields
   val v_idx_ls         = if (usingVector) Bool() else null            // indexed load/store indicator
   val v_xls_offset     = if (usingVector) UInt(eLen.W) else null      // address offset for indexed load/store
+  val v_phys_last      = if (usingVector) Bool() else null            // the last element of a physical register, for freelist
 
   // purely debug information
   val debug_wdata      = UInt(xLen.W)
