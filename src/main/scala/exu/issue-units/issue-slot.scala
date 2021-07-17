@@ -175,7 +175,9 @@ class IssueSlot(
         val vs2_sew  = uop.vconfig.vtype.vsew
         val vs2_eidx = Mux(uop.uopc === uopVSLIDEDOWN,  vstart + Mux(uop.rt(RS1, isInt), sdata, uop.prs1(4,0)),
                        Mux(uop.uopc === uopVSLIDE1DOWN, vstart + 1.U,
-                                                        perm_idx))
+                       Mux(uop.uopc === uopVRGATHER && uop.rt(RS1, isInt), sdata,
+                       Mux(uop.uopc === uopVRGATHER && uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), uop.prs1(4,0)),
+                       perm_idx))))
         val vd_emul  = uop.vd_emul // vs2 and vd have identical emul/eew
         val prs2     = uop.prs2
         val vs2_rinc = vs2_eidx >> (vLenSz.U - 3.U - vs2_sew)
@@ -571,11 +573,13 @@ class IssueSlot(
       io.cur_vs3_busy       := UIntToOH(slot_uop.prs3)(vpregSz-1,0) & Fill(vpregSz, !(p3.andR) && is_valid)
       // handle VOP_VI, prs1 records the value of lrs1, and is used as simm5
       io.uop.v_scalar_data  := Mux(io.uop.rt(RS1, isRvvSImm5), Cat(Fill(eLen-5, io.uop.prs1(4).asUInt), io.uop.prs1(4,0)),
-                               Mux(io.uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), io.uop.prs1(4,0)), sdata))
+                               Mux(io.uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), slot_uop.prs1(4,0)), sdata))
       io.uop.v_perm_busy    := ~perm_ready
       io.uop.v_perm_idx     := Mux(slot_uop.uopc.isOneOf(uopVSLIDEUP, uopVSLIDEDOWN),   io.uop.vstart + Mux(slot_uop.rt(RS1, isInt), sdata, slot_uop.prs1(4,0)),
                                Mux(slot_uop.uopc.isOneOf(uopVSLIDE1UP, uopVSLIDE1DOWN), io.uop.vstart + 1.U,
-                                                                                        perm_idx))
+                               Mux(slot_uop.uopc === uopVRGATHER && slot_uop.rt(RS1, isInt), sdata,
+                               Mux(slot_uop.uopc === uopVRGATHER && slot_uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), slot_uop.prs1(4,0)),
+                               perm_idx))))
       when (slot_uop.uopc === uopVCOMPRESS) {
         io.uop.prvm := slot_uop.prs1
       }
@@ -655,7 +659,7 @@ class IssueSlot(
   if (vector) {
     pm := next_pm
     next_perm_ready := Mux(io.in_uop.valid, in_perm_ready, //||vupd_perm_hit,
-                                            Mux(perm_ready&&has_vecupdate, !io_fire, vupd_perm_hit))
+                                            Mux(perm_ready, Mux(has_vecupdate,!io_fire,true.B), vupd_perm_hit))
     next_perm_wait  := Mux(io.in_uop.valid, in_perm_wait, //&& !vupd_perm_hit,
                                             Mux(perm_wait, !vupd_perm_hit, io_fire&&has_vecupdate&& !perm_ready))
     next_perm_idx   := Mux(io.in_uop.valid, in_perm_idx,
