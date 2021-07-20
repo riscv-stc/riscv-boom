@@ -352,9 +352,9 @@ class IssueSlot(
         in_pm := ~io.in_uop.bits.prvm_busy
         ps    := ~io.in_uop.bits.v_scalar_busy
         sdata := io.in_uop.bits.v_scalar_data
-        in_perm_ready := ~io.in_uop.bits.v_perm_busy
-        in_perm_wait  := io.in_uop.bits.v_perm_wait
-        in_perm_idx := io.in_uop.bits.v_perm_idx
+        in_perm_ready := ~io.in_uop.bits.v_perm_busy || vupd_perm_hit
+        in_perm_wait  := io.in_uop.bits.v_perm_wait && ~vupd_perm_hit
+        in_perm_idx := Mux(vupd_perm_hit, vupd_perm_idx, io.in_uop.bits.v_perm_idx)
       } else {
         next_p1 := !io.in_uop.bits.prs1_busy(0)
         next_p2 := !io.in_uop.bits.prs2_busy(0)
@@ -510,12 +510,18 @@ class IssueSlot(
       assert(PopCount(int_sel++fp_sel) <= 1.U, "Multiple drivers")
     }
 
-    val vm_sel = io.vecUpdate.map(v => v.valid && v.bits.uop.match_group(next_uop.pdst))
-    when (is_valid && io.vecUpdate.map(_.valid).reduce(_||_)) {
-      val vm_rs1 = io.vecUpdate.map(v => v.bits.data)
-      val vm_actv= io.vecUpdate.map(v => v.valid && v.bits.uop.v_active).reduce(_||_)
-      vupd_perm_hit := vm_sel.reduce(_||_)
-      vupd_perm_idx := Mux(next_uop.uopc === uopVCOMPRESS, perm_idx+vm_actv, Mux1H(vm_sel, vm_rs1))
+    val vu_sel = io.vecUpdate.map(v => v.valid &&
+                                       v.bits.uop.uopc === next_uop.uopc &&
+                                       v.bits.uop.match_group(next_uop.pdst))
+    val vu_sel_rob = io.vecUpdate.map(v => v.valid &&
+                                           v.bits.uop.uopc === next_uop.uopc &&
+                                           v.bits.uop.match_group(next_uop.pdst) &&
+                                           v.bits.uop.rob_idx === next_uop.rob_idx)
+    when ((is_valid||io.in_uop.valid) && io.vecUpdate.map(_.valid).reduce(_||_)) {
+      val vu_rs1 = io.vecUpdate.map(v => v.bits.data)
+      val vu_actv= io.vecUpdate.map(v => v.valid && v.bits.uop.v_active).reduce(_||_)
+      vupd_perm_hit := Mux(next_uop.uopc === uopVCOMPRESS, vu_sel.reduce(_||_), vu_sel_rob.reduce(_||_))
+      vupd_perm_idx := Mux(next_uop.uopc === uopVCOMPRESS, perm_idx+vu_actv, Mux1H(vu_sel, vu_rs1))
       assert(io.vecUpdate.map(v => v.valid && v.bits.uop.uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS)).reduce(_||_))
       when (vupd_perm_hit) {
         assert(!perm_ready && has_vecupdate)
@@ -658,15 +664,18 @@ class IssueSlot(
   ppred := next_ppred
   if (vector) {
     pm := next_pm
-    next_perm_ready := Mux(io.in_uop.valid, in_perm_ready, //||vupd_perm_hit,
-                                            Mux(perm_ready, Mux(has_vecupdate,!io_fire,true.B), vupd_perm_hit))
-    next_perm_wait  := Mux(io.in_uop.valid, in_perm_wait, //&& !vupd_perm_hit,
-                                            Mux(perm_wait, !vupd_perm_hit, io_fire&&has_vecupdate&& !perm_ready))
-    next_perm_idx   := Mux(io.in_uop.valid, in_perm_idx,
-                                            Mux(vupd_perm_hit, vupd_perm_idx, perm_idx))
-    perm_ready := next_perm_ready
-    perm_wait  := next_perm_wait
-    perm_idx   := next_perm_idx
+    next_perm_ready := Mux(perm_ready, Mux(has_vecupdate,!io_fire,true.B), vupd_perm_hit)
+    next_perm_wait  := Mux(perm_wait, !vupd_perm_hit, io_fire&&has_vecupdate&& !perm_ready)
+    next_perm_idx   := Mux(vupd_perm_hit, vupd_perm_idx, perm_idx)
+    when (io.in_uop.valid) {
+      perm_ready := in_perm_ready
+      perm_wait  := in_perm_wait
+      perm_idx   := in_perm_idx
+    } .otherwise {
+      perm_ready := next_perm_ready
+      perm_wait  := next_perm_wait
+      perm_idx   := next_perm_idx
+    }
   } else if (usingVector && iqType == IQT_MEM.litValue) {
     pm := Mux(io.in_uop.valid, in_pm, pm) | next_pm
   }

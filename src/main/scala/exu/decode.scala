@@ -1117,6 +1117,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   // vector stuff
   //
   if (usingVector) {
+    val csr_vsew  = io.csr_vconfig.vtype.vsew
+    val csr_vlmax = io.csr_vconfig.vtype.vlMax
     val ls_vconfig = WireInit(io.csr_vconfig)
     ls_vconfig.vtype.vsew := cs.v_ls_ew
     val ls_vlmax = ls_vconfig.vtype.vlMax
@@ -1140,8 +1142,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vreg_nf = WireDefault(UInt((NF_MSB - NF_LSB + 2).W), vseg_nf)
     val vlmax = Mux(is_v_mask_ls, vLenb.U,
                 Mux(is_v_reg_ls, vLenb.U << Log2(vreg_nf + 1.U) >> cs.v_ls_ew,
-                Mux(is_v_ls_ustride || is_v_ls_stride, ls_vlmax, io.csr_vconfig.vtype.vlMax)))
-    val vsew = Mux(is_v_reg_ls, cs.v_ls_ew, io.csr_vconfig.vtype.vsew)
+                Mux(is_v_ls_ustride || is_v_ls_stride, ls_vlmax, csr_vlmax)))
+    val vsew = Mux(is_v_reg_ls, cs.v_ls_ew, csr_vsew)
     val vlmul_sign = io.csr_vconfig.vtype.vlmul_sign
     val vlmul_mag  = io.csr_vconfig.vtype.vlmul_mag
     val vlmul = Mux(vlmul_sign, 0.U(2.W), vlmul_mag)
@@ -1152,14 +1154,15 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(uop.uopc === uopVEXT4 , 2.U,
                      Mux(uop.rt(RS2, isNarrowV), 1.U, 0.U))) // uopVEXT2 is included
     val vd_sew     = Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew,
-                     Mux(uop.rt(RD,  isWidenV ), vsew + vd_wfactor,
-                     Mux(uop.rt(RD,  isNarrowV), vsew - vd_nfactor, vsew)))
+                     Mux(uop.rt(RD,  isWidenV ), csr_vsew + vd_wfactor,
+                     Mux(uop.rt(RD,  isNarrowV), csr_vsew - vd_nfactor, csr_vsew)))
+    val vs1_sew    = Mux(cs.uopc === uopVRGATHEREI16, 1.U, vsew)
     val vs2_sew    = Mux(is_v_ls_index, Cat(0.U(1.W), cs.v_ls_ew),
-                     Mux(uop.rt(RS2, isWidenV ), vsew + vs2_wfactor,
-                     Mux(uop.rt(RS2, isNarrowV), vsew - vs2_nfactor,vsew)))
+                     Mux(uop.rt(RS2, isWidenV ), csr_vsew + vs2_wfactor,
+                     Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew)))
     val vd_inc     = vstart >> (vLenSz.U - 3.U - vd_sew)
     val vs2_inc    = Mux(is_viota_m, 0.U, vstart >> (vLenSz.U - 3.U - vs2_sew))
-    val vs1_inc    = Mux(is_viota_m, 0.U, vstart >> (vLenSz.U - 3.U - vsew))
+    val vs1_inc    = Mux(is_viota_m, 0.U, vstart >> (vLenSz.U - 3.U - vs1_sew))
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
       //assert(vsew >= vd_nfactor  && vsew + vd_wfactor  <= 3.U, "Unsupported vd_sew")
@@ -1213,7 +1216,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.is_rvv      := cs.is_rvv
     uop.v_ls_ew     := cs.v_ls_ew
     when (is_v_ls) {
-      uop.mem_size  := Mux(is_v_ls_index, vsew, cs.v_ls_ew)
+      uop.mem_size  := Mux(is_v_ls_index, csr_vsew, cs.v_ls_ew)
       uop.mem_signed:= false.B
     }
     uop.v_unmasked  := !cs.uses_vm || inst(VM_BIT)
@@ -1230,12 +1233,12 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     }
     uop.v_is_first  := (vstart === 0.U)
     uop.v_is_last   := elem_last
-    val ren_mask = ~(Fill(vLenSz,1.U) << (7.U - vd_sew))
-    val vs1_mask = ~(Fill(vLenSz,1.U) << (7.U - vsew))
-    val vs2_mask = ~(Fill(vLenSz,1.U) << (7.U - vs2_sew))
-    uop.v_re_alloc  := Mux(uop.rt(RD, isMaskVD), vstart === 0.U, (vstart & ren_mask(vLenSz,0)) === 0.U)
-    uop.v_re_vs1    := (vstart & vs1_mask(vLenSz,0)) === 0.U
-    uop.v_re_vs2    := (vstart & vs2_mask(vLenSz,0)) === 0.U
+    val ren_re_mask = ~(Fill(vLenSz,1.U) << (7.U - vd_sew))
+    val vs1_re_mask = ~(Fill(vLenSz,1.U) << (7.U - vs1_sew))
+    val vs2_re_mask = ~(Fill(vLenSz,1.U) << (7.U - vs2_sew))
+    uop.v_re_alloc  := Mux(uop.rt(RD, isMaskVD), vstart === 0.U, (vstart & ren_re_mask(vLenSz,0)) === 0.U)
+    uop.v_re_vs1    := (vstart & vs1_re_mask(vLenSz,0)) === 0.U
+    uop.v_re_vs2    := (vstart & vs2_re_mask(vLenSz,0)) === 0.U
 
     when (cs.is_rvv) {
       when (!uop.rt(RD, isMaskVD)) {

@@ -140,7 +140,8 @@ class RegisterRead(
       val vsew = io.iss_uops(w).vconfig.vtype.vsew
       if (numReadPorts > 0) {
         val is_reduce = io.iss_uops(w).rt(RD, isReduceV)
-        val vs1_sew = vsew + io.iss_uops(w).rt(RS1, isWidenV).asUInt
+        val vs1_sew = Mux(io.iss_uops(w).rt(RS1,isWidenV), vsew + 1.U,
+                      Mux(io.iss_uops(w).uopc === uopVRGATHEREI16, 1.U, vsew))
         val vs1_vstart = Mux(is_reduce, 0.U, vstart)
         val r1_sh = Mux1H(UIntToOH(vs1_sew(1,0)), Seq(Cat(vs1_vstart(2,0),0.U(3.W)), Cat(vs1_vstart(1,0),0.U(4.W)), Cat(vs1_vstart(0),0.U(5.W)), 0.U(6.W)))
         val (r1sel,r1msk) = VRegSel(vs1_vstart, vs1_sew, ecnt, eLenb, eLenSelSz)
