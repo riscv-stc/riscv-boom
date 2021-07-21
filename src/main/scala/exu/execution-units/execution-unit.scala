@@ -648,6 +648,7 @@ class VecExeUnit(
   override def toString: String = out_str.toString
 
   val div_busy  = WireInit(false.B)
+  val vmx_busy  = WireInit(false.B)
   val fdiv_busy = WireInit(false.B)
   val div_busy_dly = RegNext(div_busy)
 
@@ -661,17 +662,16 @@ class VecExeUnit(
                  Mux(!div_busy && hasDiv.B,   FU_DIV, 0.U) |
                  Mux(hasIfpu.B,               FU_I2F, 0.U) |
                  Mux(hasFpu.B,       FU_FPU | FU_F2I, 0.U) |
-                 Mux(hasVMX.B,                FU_VMX, 0.U) |
+                 Mux(!vmx_busy && hasVMX.B,   FU_VMX, 0.U) |
                  Mux(!fdiv_busy && hasFdiv.B, FU_FDV, 0.U) |
                  Mux(hasFdiv.B,               FU_FR7, 0.U)
 
   // ALU Unit -------------------------------
   var alu: ALUUnit = null
   if (hasAlu) {
-    alu = Module(new ALUUnit(numStages = numStages, dataWidth = eLen, hasVMX = hasVMX, vector = hasVector))
-    alu.io.req.valid := io.req.valid && (io.req.bits.uop.fu_code === FU_ALU || io.req.bits.uop.fu_code_is(FU_VMX)) &&
-      (io.req.bits.uop.uopc =/= uopVFMV_F_S) &&
-      (io.req.bits.uop.uopc =/= uopVMV_X_S)
+    alu = Module(new ALUUnit(numStages = numStages, dataWidth = eLen, vector = hasVector))
+    alu.io.req.valid := io.req.valid && io.req.bits.uop.fu_code === FU_ALU && 
+                        (io.req.bits.uop.uopc =/= uopVFMV_F_S) && (io.req.bits.uop.uopc =/= uopVMV_X_S)
     vec_fu_units += alu
   }
 
@@ -735,6 +735,20 @@ class VecExeUnit(
     vec_fu_units += fr7
   }
 
+  // VMX Unit -------------------------------
+  var vmx: VMXUnit = null
+  if (hasVMX) {
+    vmx = Module(new VMXUnit(xLen))
+    vmx.suggestName("vmx")
+    vmx.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMX)
+
+    // share write port with the pipelined units
+    vmx.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
+    vmx_busy := !vmx.io.req.ready
+
+    vec_fu_units += vmx
+  }
+
   // Div/Rem Unit -----------------------
   var div: DivUnit = null
   val div_resp_val = WireInit(false.B)
@@ -780,7 +794,8 @@ class VecExeUnit(
     f.io.req.bits.pred_data := io.req.bits.pred_data
     f.io.req.bits.kill      := io.req.bits.kill
     f.io.brupdate           := io.brupdate
-    if (f != div && f != fdivsqrt) f.io.resp.ready := io.vresp.ready
+    if (f != div && f != fdivsqrt && f!= vmx) 
+      f.io.resp.ready := io.vresp.ready
   })
 
   // Outputs (Write Port #0)  ---------------
@@ -846,15 +861,16 @@ class VecExeUnit(
 
   override def supportedFuncUnits = {
     new SupportedFuncUnits(
-      alu = hasAlu,
-      jmp = hasJmpUnit,
-      mem = hasMem,
-      muld = hasMul || hasDiv,
-      fpu = hasFpu,
-      csr = hasCSR,
-      fdiv = hasFdiv,
-      ifpu = hasIfpu,
-      fr7  = hasFdiv,
+      alu    = hasAlu,
+      jmp    = hasJmpUnit,
+      mem    = hasMem,
+      muld   = hasMul || hasDiv,
+      fpu    = hasFpu,
+      csr    = hasCSR,
+      fdiv   = hasFdiv,
+      ifpu   = hasIfpu,
+      fr7    = hasFdiv,
+      vmx    = hasVMX,
       vector = true
     )
   }
