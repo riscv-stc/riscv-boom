@@ -16,6 +16,7 @@ import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util._
+import freechips.rocketchip.rocket.{VConfig}
 
 import FUConstants._
 import boom.common._
@@ -71,6 +72,7 @@ class RegisterRead(
 
     val kill   = Input(Bool())
     val brupdate = Input(new BrUpdateInfo())
+    val csr_vstart = if (vector) Input(UInt(vLenSz.W)) else null
   })
 
   val rrd_valids       = Wire(Vec(issueWidth, Bool()))
@@ -154,7 +156,8 @@ class RegisterRead(
       }
       if (numReadPorts > 1) {
         // Note: v_ls_ew records index sew for index load/store
-        val perm_on_vs2 = io.iss_uops(w).uopc.isOneOf(uopVSLIDEDOWN, uopVSLIDE1DOWN, uopVRGATHER, uopVRGATHEREI16)
+        val perm_on_vs2 = io.iss_uops(w).uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP, uopVSLIDEDOWN, uopVSLIDE1DOWN, uopVRGATHER, uopVRGATHEREI16)
+        val vslide1up  = io.iss_uops(w).uopc === uopVSLIDE1UP
         val vslide1down = io.iss_uops(w).uopc === uopVSLIDE1DOWN
         val vs2_sew = Mux(io.iss_uops(w).rt(RS2, isWidenV),  vsew+1.U,
                       Mux(io.iss_uops(w).uopc === uopVEXT8,  vsew-3.U,
@@ -184,12 +187,12 @@ class RegisterRead(
         io.rf_read_ports(idx+1).addr := Mux(is_vmask_iota_m, vmask_iota_addr, Cat(rs2_addr, r2sel))
         rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U) || RegNext(perm_on_vs2 && perm_idx >= io.iss_uops(w).vconfig.vtype.vlMax), 0.U,
                            Mux(RegNext(is_vmask_iota_m), io.rf_read_ports(idx+1).data,
-                           Mux(RegNext(vslide1down && perm_idx+1.U === io.iss_uops(w).vconfig.vl), RegNext(io.iss_uops(w).v_scalar_data),
+                           Mux(RegNext(vslide1down && vstart+1.U === io.iss_uops(w).vconfig.vl ||
+                                       vslide1up && vstart === 0.U), RegNext(io.iss_uops(w).v_scalar_data),
                            Mux(RegNext(io.iss_uops(w).rt(RS2, isUnsignedV)), rf_data2, signext2))))
       }
       if (numReadPorts > 2) {
-        val perm_on_vd = io.iss_uops(w).uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP, uopVCOMPRESS)
-        val vslide1up  = io.iss_uops(w).uopc === uopVSLIDE1UP
+        val perm_on_vd = io.iss_uops(w).uopc === uopVCOMPRESS
         val vd_sew  = Mux(io.iss_uops(w).uses_v_ls_ew, io.iss_uops(w).v_ls_ew,
                       Mux(io.iss_uops(w).rt(RD, isWidenV ), vsew + 1.U,
                       Mux(io.iss_uops(w).rt(RD, isNarrowV), vsew - 1.U, vsew)))
@@ -215,15 +218,12 @@ class RegisterRead(
         io.rf_read_ports(idx+2).addr := Cat(rs3_addr, Mux(maskvd, maskvd_rsel, rdsel))
         rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U,
                            Mux(RegNext(maskvd), maskvd_data,
-                           Mux(RegNext(vslide1up && perm_idx === 0.U), RegNext(io.iss_uops(w).v_scalar_data),
-                           Mux(RegNext(io.iss_uops(w).rt(RD, isUnsignedV)), rf_data3, signext3))))
+                           Mux(RegNext(io.iss_uops(w).rt(RD, isUnsignedV)), rf_data3, signext3)))
       }
       if (numReadPorts > 3) { // handle vector mask
         val is_vmask_cnt_m = io.iss_uops(w).uopc.isOneOf(uopVPOPC, uopVFIRST)
         val is_vmask_set_m = io.iss_uops(w).uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
-        val perm_on_vd     = io.iss_uops(w).uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP)
-        val perm_idx       = io.iss_uops(w).v_perm_idx
-        val eidx           = Mux(perm_on_vd, perm_idx(vLenSz-1,0), vstart)
+        val eidx           = vstart
         // need make mask and element sync
         val vmask_cnt_set_insn_mask_addr = Cat(rvm_addr, vstart(3,0))
         io.rf_read_ports(idx+3).addr := Mux(is_vmask_cnt_m | is_vmask_set_m, vmask_cnt_set_insn_mask_addr,
@@ -367,7 +367,10 @@ class RegisterRead(
         val vsew64bit          = 3.U
         val vmaskInsn_vl       = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
         val vmaskInsn_active   = vstart < vmaskInsn_vl
-        val is_active          = Mux(is_vmaskInsn, vmaskInsn_active, Mux(is_masked, exe_reg_rvm_data(w), true.B)) && vstart < vl
+        val vslideup   = exe_reg_uops(w).uopc === uopVSLIDEUP
+        val is_active          = Mux(is_vmaskInsn, vmaskInsn_active,
+                                 Mux(vslideup,  exe_reg_uops(w).vstart >= exe_reg_uops(w).v_scalar_data && (exe_reg_rvm_data(w) || !is_masked),
+                                 Mux(is_masked, exe_reg_rvm_data(w), true.B))) && vstart < vl && vstart >= io.csr_vstart
         val vmaskInsn_rs2_data = Mux(is_masked, exe_reg_rs2_data(w) & exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs2_data(w))
         val is_perm_fdbk       = exe_reg_uops(w).uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS) && exe_reg_uops(w).v_perm_busy
 

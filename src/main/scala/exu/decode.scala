@@ -1338,7 +1338,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
           uop.lrs1        := 0.U
           uop.lrs1_rtype  := RT_VI // special mark for such op
           //uop.lrs1_rtype  := RT_PERM // special mark for such op
-          when (!uop.uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP, uopVCOMPRESS)) {
+          when (!uop.uopc.isOneOf(uopVCOMPRESS)) {
             // vslide*up/vcompress must tidy stale_pdst, or VS3 in this case
             uop.ldst        := uop.lrs2 // vadd vs2, vs2, vs1
           }

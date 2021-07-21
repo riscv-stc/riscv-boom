@@ -38,6 +38,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val flush_pipeline   = Input(Bool())
     val fcsr_rm          = Input(UInt(width=FPConstants.RM_SZ.W))
     val vxrm             = Input(UInt(2.W))
+    val csr_vstart       = Input(UInt(vLenSz.W))
     val status           = Input(new MStatus())
 
     val dis_uops         = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
@@ -159,6 +160,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   vregister_read.io.brupdate := io.brupdate
   vregister_read.io.kill := io.flush_pipeline
+  vregister_read.io.csr_vstart := io.csr_vstart
   io.vmupdate := vregister_read.io.vmupdate
 
   //-------------------------------------------------------------

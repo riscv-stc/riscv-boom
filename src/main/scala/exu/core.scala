@@ -1242,6 +1242,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     csr.io.vector.get.set_vxsat := (0 until coreParams.retireWidth).map{i => rob.io.commit.arch_valids(i) & rob.io.commit.uops(i).is_rvv & rob.io.commit.uops(i).vxsat}.reduce(_ || _)
     v_pipeline.io.fcsr_rm := csr.io.fcsr_rm
     v_pipeline.io.vxrm := csr.io.vector.get.vxrm
+    v_pipeline.io.csr_vstart := csr.io.vector.get.vstart
 
     csr_exe_unit.io.vconfig := csr.io.vector.get.vconfig
   }
