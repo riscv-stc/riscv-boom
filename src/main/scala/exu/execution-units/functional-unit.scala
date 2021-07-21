@@ -1271,3 +1271,38 @@ class VMXUnit(dataWidth: Int)(implicit p: Parameters) extends FunctionalUnit(
   io.resp.bits.predicated        := queue.io.deq.bits.predicated
   io.resp.bits.fflags            := queue.io.deq.bits.fflags
 }
+
+/**
+ * Divide functional unit.
+ *
+ * @param dataWidth data to be passed into the functional unit
+ */
+class SRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFunctionalUnit(dataWidth)
+{
+  // use SRT4Divider in Xiangshan core
+  val div = Module(new SRT4DividerDataModule(len = dataWidth))
+
+  // request
+  io.req.ready      := div.io.in_ready
+  div.io.valid      := io.req.valid && !this.do_kill
+  div.io.src(0)     := io.req.bits.rs1_data
+  div.io.src(1)     := io.req.bits.rs2_data
+  div.io.sign       := io.req.bits.uop.uopc.isOneOf(uopDIV, uopREM, uopDIVW, uopREMW, uopVDIV, uopVREM)
+  div.io.kill_w     := this.do_kill
+  div.io.kill_r     := this.do_kill && !div.io.in_ready
+  div.io.isHi       := io.req.bits.uop.uopc.isOneOf(uopREM, uopREMU, uopREMW, uopREMUW, uopVREM, uopVREMU)
+  div.io.isW        := !io.req.bits.uop.ctrl.fcn_dw
+  if(usingVector) {
+    when(io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active) {
+      div.io.src(0) := io.req.bits.rs3_data
+      div.io.src(1) := 1.U
+    } .elsewhen(io.req.bits.uop.is_rvv) {
+      div.io.src(0) := io.req.bits.rs2_data
+      div.io.src(1) := io.req.bits.rs1_data
+    }
+  }
+  // response
+  div.io.out_ready  := io.resp.ready
+  io.resp.valid     := div.io.out_valid && !this.do_kill
+  io.resp.bits.data := div.io.out_data
+}

@@ -750,10 +750,28 @@ class VecExeUnit(
   }
 
   // Div/Rem Unit -----------------------
+  /*
   var div: DivUnit = null
   val div_resp_val = WireInit(false.B)
   if (hasDiv) {
     div = Module(new DivUnit(xLen))
+    div.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)
+
+    // share write port with the pipelined units
+    div.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
+
+    div_resp_val := div.io.resp.valid
+    div_busy     := !div.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)) || !div_busy_dly
+
+    vec_fu_units += div
+  }
+  */
+
+  // Div/Rem Unit with SRT4 Divider --------
+  var div: SRT4DivUnit = null
+  val div_resp_val = WireInit(false.B)
+  if (hasDiv) {
+    div = Module(new SRT4DivUnit(xLen))
     div.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)
 
     // share write port with the pipelined units
