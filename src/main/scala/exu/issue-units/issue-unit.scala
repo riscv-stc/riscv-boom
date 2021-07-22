@@ -181,6 +181,8 @@ abstract class IssueUnit(
         dis_uops(w).prs2_busy  := 0.U
       } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
         dis_uops(w).prs1_busy  := 0.U
+      } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopVSLIDE1UP, uopVSLIDE1DOWN)) {
+        dis_uops(w).fu_code    := FU_ALU
       }
       dis_uops(w).v_perm_busy  := io.dis_uops(w).bits.uopc===uopVRGATHER && io.dis_uops(w).bits.rt(RS1, isVector) ||
                                   io.dis_uops(w).bits.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
