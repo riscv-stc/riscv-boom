@@ -764,8 +764,7 @@ class VecExeUnit(
     div_busy     := !div.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)) || !div_busy_dly
 
     vec_fu_units += div
-  }
-  */
+  } */
 
   // Div/Rem Unit with SRT4 Divider --------
   var div: SRT4DivUnit = null
