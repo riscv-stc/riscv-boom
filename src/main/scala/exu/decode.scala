@@ -896,9 +896,9 @@ object VectorPermDecode extends DecodeConstants
    ,VSLIDEDOWN_VX  ->List(Y, N, X, uopVSLIDEDOWN,  IQT_IVEC,FU_ALU ,RT_VEC, RT_FIXU,RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VSLIDEDOWN_VI  ->List(Y, N, X, uopVSLIDEDOWN,  IQT_VEC ,FU_ALU ,RT_VEC, RT_VIU, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VSLIDE1UP_VX   ->List(Y, N, X, uopVSLIDE1UP,   IQT_IVEC,FU_ALU ,RT_VEC, RT_FIXU,RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
-   ,VFSLIDE1UP_VF  ->List(Y, N, X, uopVSLIDE1UP,   IQT_FVEC,FU_ALU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+   ,VFSLIDE1UP_VF  ->List(Y, N, X, uopVSLIDE1UP,   IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VSLIDE1DOWN_VX ->List(Y, N, X, uopVSLIDE1DOWN, IQT_IVEC,FU_ALU ,RT_VEC, RT_FIXU,RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
-   ,VFSLIDE1DOWN_VF->List(Y, N, X, uopVSLIDE1DOWN, IQT_FVEC,FU_ALU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+   ,VFSLIDE1DOWN_VF->List(Y, N, X, uopVSLIDE1DOWN, IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VRGATHER_VV    ->List(Y, N, X, uopVRGATHER,    IQT_VEC ,FU_ALU ,RT_VEC, RT_VU , RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VRGATHER_VX    ->List(Y, N, X, uopVRGATHER,    IQT_IVEC,FU_ALU ,RT_VEC, RT_FIXU,RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VRGATHER_VI    ->List(Y, N, X, uopVRGATHER,    IQT_VEC ,FU_ALU ,RT_VEC, RT_VIU, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
@@ -1336,7 +1336,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
           uop.uopc        := uopVADD
           uop.iq_type     := IQT_VEC
           uop.lrs1        := 0.U
-          uop.lrs1_rtype  := RT_VI // special mark for such op
+          uop.lrs1_rtype  := RT_PERM // special mark for such op
           //uop.lrs1_rtype  := RT_PERM // special mark for such op
           when (!uop.uopc.isOneOf(uopVCOMPRESS)) {
             // vslide*up/vcompress must tidy stale_pdst, or VS3 in this case

@@ -1233,13 +1233,23 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     val csr_vld = csr_exe_unit.io.iresp.valid
     val csr_uop = csr_exe_unit.io.iresp.bits.uop
     val vsetvl = csr_uop.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
-    val cmt_rvv = (0 until coreParams.retireWidth).map{i => rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv}.reduce(_ || _)
-    val cmt_sat = (0 until coreParams.retireWidth).map{i => rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat}.reduce(_ || _)
+    val cmt_rvv = (0 until coreParams.retireWidth).map{i =>
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv
+    }.reduce(_ || _)
+    val cmt_archlast_rvv = (0 until coreParams.retireWidth).map{i =>
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv &&
+        rob.io.commit.uops(i).v_is_last &&    // architectural last split
+        !rob.io.commit.uops(i).is_red_vadd && // excluding inserted VADD
+        !rob.io.commit.uops(i).is_perm_vadd
+    }.reduce(_ || _)
+    val cmt_sat = (0 until coreParams.retireWidth).map{i =>
+      rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat
+    }.reduce(_ || _)
     csr.io.vector.get.set_vs_dirty := cmt_rvv
     csr.io.vector.get.set_vconfig.valid := csr_vld & vsetvl
     csr.io.vector.get.set_vconfig.bits := csr_uop.vconfig
     csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
-    csr.io.vector.get.set_vstart.valid := cmt_rvv
+    csr.io.vector.get.set_vstart.valid := cmt_archlast_rvv
     csr.io.vector.get.set_vstart.bits := 0.U
     csr.io.vector.get.set_vxsat := cmt_sat
     v_pipeline.io.fcsr_rm := csr.io.fcsr_rm

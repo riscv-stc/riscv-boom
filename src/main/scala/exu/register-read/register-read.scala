@@ -157,7 +157,7 @@ class RegisterRead(
       if (numReadPorts > 1) {
         // Note: v_ls_ew records index sew for index load/store
         val perm_on_vs2 = io.iss_uops(w).uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP, uopVSLIDEDOWN, uopVSLIDE1DOWN, uopVRGATHER, uopVRGATHEREI16)
-        val vslide1up  = io.iss_uops(w).uopc === uopVSLIDE1UP
+        val vslide1up   = io.iss_uops(w).uopc === uopVSLIDE1UP
         val vslide1down = io.iss_uops(w).uopc === uopVSLIDE1DOWN
         val vs2_sew = Mux(io.iss_uops(w).rt(RS2, isWidenV),  vsew+1.U,
                       Mux(io.iss_uops(w).uopc === uopVEXT8,  vsew-3.U,
@@ -185,11 +185,12 @@ class RegisterRead(
         val vmask_iota_addr = Cat(rs2_addr, vstart >> log2Ceil(eLen))
 
         io.rf_read_ports(idx+1).addr := Mux(is_vmask_iota_m, vmask_iota_addr, Cat(rs2_addr, r2sel))
-        rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U) || RegNext(perm_on_vs2 && perm_idx >= io.iss_uops(w).vconfig.vtype.vlMax), 0.U,
+        rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U,
                            Mux(RegNext(is_vmask_iota_m), io.rf_read_ports(idx+1).data,
                            Mux(RegNext(vslide1down && vstart+1.U === io.iss_uops(w).vconfig.vl ||
                                        vslide1up && vstart === 0.U), RegNext(io.iss_uops(w).v_scalar_data),
-                           Mux(RegNext(io.iss_uops(w).rt(RS2, isUnsignedV)), rf_data2, signext2))))
+                           Mux(RegNext(perm_on_vs2 && perm_idx >= io.iss_uops(w).vconfig.vtype.vlMax), 0.U,
+                           Mux(RegNext(io.iss_uops(w).rt(RS2, isUnsignedV)), rf_data2, signext2)))))
       }
       if (numReadPorts > 2) {
         val perm_on_vd = io.iss_uops(w).uopc === uopVCOMPRESS

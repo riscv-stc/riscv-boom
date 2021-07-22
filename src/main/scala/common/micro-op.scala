@@ -188,8 +188,10 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   def fu_code_is(_fu: UInt) = (fu_code & _fu) =/= 0.U
 
   def uses_scalar      = is_rvv && (iq_type & (IQT_INT | IQT_FP)) =/= 0.U
-  def uses_v_simm5     = is_rvv && lrs1_rtype === RT_VI
-  def uses_v_uimm5     = is_rvv && lrs1_rtype === RT_VIU
+  def uses_v_simm5     = rt(RS1, isRvvSImm5)
+  def uses_v_uimm5     = rt(RS1, isRvvUImm5)
+  def is_perm_vadd     = rt(RS1, isPermVADD)
+  def is_red_vadd      = rt(RS1, isReduceV) && !rt(RD, isReduceV)
   def is_v_ls          = is_rvv && (uses_ldq || uses_stq)
   def uses_v_ls_ew     = uopc.isOneOf(MicroOpcodes.uopVL,
                                       MicroOpcodes.uopVSA,

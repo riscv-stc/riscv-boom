@@ -287,13 +287,16 @@ class RenameStage(
     ren2_br_tags(w).valid := ren2_fire(w) && ren2_uops(w).allocate_brtag
 
     if (usingVector && vector) {
-      val com_red     = io.com_uops(w).rt(RS1, isReduceV)
       val com_red_act = io.com_uops(w).rt(RD, isReduceV)
-      val com_red_mov = com_red && !com_red_act
+      val com_red_mov = io.com_uops(w).is_red_vadd
+      val com_rvv_ls  = io.com_uops(w).is_rvv && (io.com_uops(w).ctrl.is_load || io.com_uops(w).ctrl.is_sta)
       com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w) &&
-                       (!io.com_uops(w).v_is_split || io.com_uops(w).v_is_last && !com_red_mov)
+                       (!io.com_uops(w).v_is_split ||                  // unsplitable ops
+                         io.com_uops(w).v_re_alloc && !com_red_mov ||  // skip reduction move, free on every cmt v_re_alloc
+                         com_red_act)                                  // do free on actual reduction
       rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w) &&
-                       (!io.com_uops(w).v_is_split || io.com_uops(w).v_is_first && !com_red_act)
+                       (!io.com_uops(w).v_is_split ||
+                         io.com_uops(w).v_re_alloc)                    // rollback on every v_re_alloc
     } else {
       com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w)
       rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w)
