@@ -56,8 +56,6 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false)
   val vecUpdate     = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
   val cur_vs2_busy  = if (vector) Output(UInt(numVecPhysRegs.W)) else null
   val agg_vs2_busy  = if (vector) Input(UInt(numVecPhysRegs.W)) else null
-  val cur_vs3_busy  = if (vector) Output(UInt(numVecPhysRegs.W)) else null
-  val agg_vs3_busy  = if (vector) Input(UInt(numVecPhysRegs.W)) else null
 
   val debug = {
     val result = new Bundle {
@@ -109,6 +107,10 @@ class IssueSlot(
   val perm_ready = if (vector) RegInit(false.B) else null
   val perm_wait  = if (vector) RegInit(false.B) else null
   val perm_idx   = if (vector) Reg(UInt(eLen.W)) else null
+  val perm_ready_set, perm_ready_clr = if (vector) WireInit(false.B) else null
+  val perm_wait_set,  perm_wait_clr  = if (vector) WireInit(false.B) else null
+  val perm_ready_vrg_bsy = WireInit(false.B)
+  val perm_wait_vrg_set  = WireInit(false.B)
   val ppred = RegInit(false.B)
 
   // Poison if woken up by speculative load.
@@ -123,14 +125,16 @@ class IssueSlot(
 
   val slot_uop = RegInit(NullMicroOp(usingVector))
   val next_uop = WireInit(Mux(io.in_uop.valid, io.in_uop.bits, slot_uop))
-  val has_vecupdate = slot_uop.rt(RS1, isVector) && slot_uop.uopc === uopVRGATHER || slot_uop.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
-  val next_uop_has_vecupdate = next_uop.rt(RS1, isVector) && next_uop.uopc === uopVRGATHER || next_uop.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
+  val vcompress = slot_uop.uopc === uopVCOMPRESS
+  val vrg_has_vupd = slot_uop.rt(RS1, isVector) && slot_uop.uopc === uopVRGATHER || slot_uop.uopc === uopVRGATHEREI16
+  val next_uop_has_vupd = next_uop.rt(RS1, isVector) && next_uop.uopc === uopVRGATHER || next_uop.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
+  val next_uop_vcompress = next_uop.uopc === uopVCOMPRESS
 
   def last_check: Bool = {
     val ret = Wire(Bool())
     if (vector) {
-      val need_vecupdate = io.uop.rt(RS1, isVector) && io.uop.uopc === uopVRGATHER || io.uop.uopc === uopVRGATHEREI16
-      ret := io.uop.v_is_last && (!need_vecupdate || perm_ready) ||
+      val vrg_need_vupd = io.uop.rt(RS1, isVector) && io.uop.uopc === uopVRGATHER || io.uop.uopc === uopVRGATHEREI16
+      ret := io.uop.v_is_last && (!vrg_need_vupd || perm_ready) ||
              io.uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     } else {
       ret := true.B
@@ -155,7 +159,7 @@ class IssueSlot(
       when (uop.uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16)) {
         ret := Mux(perm_ready, true.B, !perm_wait && ret_common) // requires feedback from vecupdate
       } .elsewhen (uop.uopc === uopVCOMPRESS) {
-        ret := Mux(perm_ready, true.B, !perm_wait && p1(perm_idx(vLenSz-1,0) >> 3.U))
+        ret := !perm_wait && p1(perm_idx(vLenSz-1,0) >> 3.U) && perm_idx >= vstart || perm_ready
       } .otherwise {
         ret := ret_common
       }
@@ -170,7 +174,8 @@ class IssueSlot(
     val uop = slot_uop
     val vstart = uop.vstart + uop.voffset
     if (vector) {
-      when (uop.uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP, uopVSLIDEDOWN, uopVSLIDE1DOWN, uopVRGATHER, uopVRGATHEREI16)) {
+      when (uop.uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP, uopVSLIDEDOWN, uopVSLIDE1DOWN,
+                             uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS)) {
         // check vreg-wise, permutation ops have identical sew on vs2
         assert(!uop.rt(RS2, isNarrowV) && !uop.rt(RS2, isWidenV), "unexpected VS2 modifier")
         val vs2_sew  = uop.vconfig.vtype.vsew
@@ -189,8 +194,8 @@ class IssueSlot(
                        Mux(vd_emul === 3.U, Cat(prs2(prs2.getWidth-1, 3), vs2_rinc(2,0)), prs2)))
         val vs2_ready= !io.agg_vs2_busy(vs2_ridx) // check any busy on corresponding vreg
         // fire and get vs1[i] ASAP
-        val need_vecupdate = uop.rt(RS1, isVector) && uop.uopc === uopVRGATHER || uop.uopc === uopVRGATHEREI16
-        ret := need_vecupdate && !perm_ready || vs2_ready
+        val vrg_need_vupd = uop.rt(RS1, isVector) && uop.uopc === uopVRGATHER || uop.uopc === uopVRGATHEREI16
+        ret := vrg_need_vupd && !perm_ready || vcompress && perm_ready || vs2_ready
       } .otherwise {
         val tail    = vstart > uop.vconfig.vl
         val vsew    = uop.vconfig.vtype.vsew
@@ -215,25 +220,10 @@ class IssueSlot(
     val uop = slot_uop
     val vstart = uop.vstart + uop.voffset
     if (vector) {
-      when (uop.uopc.isOneOf(uopVCOMPRESS)) {
-        assert(!uop.rt(RD, isNarrowV) && !uop.rt(RD, isWidenV), "unexpected VD modifier")
-        val vs3_sew  = uop.vconfig.vtype.vsew
-        val vs3_eidx = perm_idx
-        val vd_emul  = uop.vd_emul
-        val prs3     = uop.prs3
-        val vs3_rinc = vs3_eidx >> (vLenSz.U - 3.U - vs3_sew)
-        val vs3_ridx = Mux(vd_emul === 1.U, Cat(prs3(prs3.getWidth-1, 1), vs3_rinc(0)),
-                       Mux(vd_emul === 2.U, Cat(prs3(prs3.getWidth-1, 2), vs3_rinc(1,0)),
-                       Mux(vd_emul === 3.U, Cat(prs3(prs3.getWidth-1, 3), vs3_rinc(2,0)), prs3)))
-        val vs3_ready= !io.agg_vs3_busy(vs3_ridx) // check any busy on corresponding vreg
-        val need_vecupdate = uop.uopc === uopVCOMPRESS
-        ret := need_vecupdate && !perm_ready || vs3_ready
-      } .otherwise {
-        val (rsel, rmsk) = VRegSel(vstart, uop.vd_eew, ecnt, vLenb, eLenSelSz)
-        val rsh     = Cat(rsel, 0.U(3.W))
-        val mask    = ((p3 >> rsh) & rmsk)
-        ret         := mask === rmsk
-      }
+      val (rsel, rmsk) = VRegSel(vstart, uop.vd_eew, ecnt, vLenb, eLenSelSz)
+      val rsh     = Cat(rsel, 0.U(3.W))
+      val mask    = ((p3 >> rsh) & rmsk)
+      ret         := mask === rmsk
     } else {
       ret := p3(0)
     }
@@ -247,7 +237,7 @@ class IssueSlot(
       val vstart = uop.vstart + uop.voffset
       val tail = vstart > uop.vconfig.vl
       // FIXME consider excluding prestart
-      // val prestart = vstart < io.csr_vconfig.vstart
+      // val prestart = vstart < io.csr.vstart
       ret := !perm_ready || uop.v_unmasked || tail || pm(vstart >> 3.U)
     } else {
       if (usingVector && iqType == IQT_MEM.litValue) {
@@ -324,16 +314,10 @@ class IssueSlot(
   val next_p2 = WireInit(p2)
   val next_p3 = WireInit(p3)
   val next_pm = if (vector || usingVector && iqType == IQT_MEM.litValue) WireInit(pm) else null
-  val next_perm_ready = if (vector) WireInit(perm_ready) else null
-  val next_perm_wait  = if (vector) WireInit(perm_wait)  else null
-  val next_perm_idx   = if (vector) WireInit(perm_idx)   else null
   val in_p1 = if (vector) WireInit(p1) else null
   val in_p2 = if (vector) WireInit(p2) else null
   val in_p3 = if (vector) WireInit(p3) else null
   val in_pm = if (vector || usingVector && iqType == IQT_MEM.litValue) WireInit(pm) else null
-  val in_perm_ready = if (vector) WireInit(false.B)  else null
-  val in_perm_wait  = if (vector) WireInit(false.B)  else null
-  val in_perm_idx   = if (vector) WireInit(0.U(eLen.W)) else null
   val wake_p1 = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
   val wake_p2 = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
   val wake_p3 = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
@@ -341,6 +325,7 @@ class IssueSlot(
   val next_ppred = WireInit(ppred)
   val vupd_perm_hit = if (vector) WireInit(false.B) else null
   val vupd_perm_idx = if (vector) WireInit(0.U(eLen.W)) else null
+  val vupd_perm_fin = if (vector) WireInit(false.B) else null
 
   when (io.in_uop.valid) {
     if (usingVector) {
@@ -353,9 +338,6 @@ class IssueSlot(
         in_pm := ~io.in_uop.bits.prvm_busy
         ps    := ~io.in_uop.bits.v_scalar_busy
         sdata := io.in_uop.bits.v_scalar_data
-        in_perm_ready := ~io.in_uop.bits.v_perm_busy || vupd_perm_hit
-        in_perm_wait  := io.in_uop.bits.v_perm_wait && ~vupd_perm_hit
-        in_perm_idx := Mux(vupd_perm_hit, vupd_perm_idx, io.in_uop.bits.v_perm_idx)
       } else {
         next_p1 := !io.in_uop.bits.prs1_busy(0)
         next_p2 := !io.in_uop.bits.prs2_busy(0)
@@ -511,21 +493,30 @@ class IssueSlot(
       assert(PopCount(int_sel++fp_sel) <= 1.U, "Multiple drivers")
     }
 
-    val vu_sel = io.vecUpdate.map(v => v.valid &&
-                                       v.bits.uop.uopc === next_uop.uopc &&
-                                       v.bits.uop.match_group(next_uop.pdst))
+    val vu_sel     = io.vecUpdate.map(v => v.valid &&
+                                           v.bits.uop.uopc === next_uop.uopc &&
+                                           v.bits.uop.match_group(next_uop.pdst))
+    val vu_sel_fin = io.vecUpdate.map(v => v.valid &&
+                                           v.bits.uop.uopc === next_uop.uopc &&
+                                           v.bits.uop.match_group(next_uop.pdst) &&
+                                           v.bits.uop.v_perm_idx === next_uop.vconfig.vl)
     val vu_sel_rob = io.vecUpdate.map(v => v.valid &&
                                            v.bits.uop.uopc === next_uop.uopc &&
                                            v.bits.uop.match_group(next_uop.pdst) &&
                                            v.bits.uop.rob_idx === next_uop.rob_idx)
     when ((is_valid||io.in_uop.valid) && io.vecUpdate.map(_.valid).reduce(_||_)) {
       val vu_rs1 = io.vecUpdate.map(v => v.bits.data)
-      val vu_actv= io.vecUpdate.map(v => v.valid && v.bits.uop.v_active).reduce(_||_)
-      vupd_perm_hit := Mux(next_uop.uopc === uopVCOMPRESS, vu_sel.reduce(_||_), vu_sel_rob.reduce(_||_))
-      vupd_perm_idx := Mux(next_uop.uopc === uopVCOMPRESS, perm_idx+vu_actv, Mux1H(vu_sel, vu_rs1))
+      val vu_pidx= io.vecUpdate.map(v => v.bits.uop.v_perm_idx)
+      val vu_actv= io.vecUpdate.map(v => v.valid && v.bits.uop.v_active)
+      vupd_perm_hit := Mux(next_uop_vcompress, vu_sel.reduce(_||_), vu_sel_rob.reduce(_||_))
+      vupd_perm_idx := Mux(next_uop_vcompress, Mux1H(vu_sel, vu_pidx), Mux1H(vu_sel_rob, vu_rs1))
+      vupd_perm_fin := vu_sel_fin.reduce(_||_)
+      when (next_uop_vcompress) {
+        slot_uop.voffset := slot_uop.voffset + vu_actv.reduce(_||_)
+      }
       assert(io.vecUpdate.map(v => v.valid && v.bits.uop.uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS)).reduce(_||_))
       when (vupd_perm_hit) {
-        assert(Mux(io.in_uop.valid, io.in_uop.bits.v_perm_busy, !perm_ready) && next_uop_has_vecupdate)
+        assert(Mux(io.in_uop.valid, io.in_uop.bits.v_perm_busy, !perm_ready) && next_uop_has_vupd)
       }
     }
   }
@@ -573,11 +564,10 @@ class IssueSlot(
       io.out_uop.prvm_busy  := ~pm
       io.out_uop.v_scalar_busy := ~ps
       io.out_uop.v_scalar_data := sdata
-      io.out_uop.v_perm_busy := !perm_ready||io_fire&&has_vecupdate //~next_perm_ready
-      io.out_uop.v_perm_wait := perm_wait||io_fire&&has_vecupdate&& !perm_ready //next_perm_wait
-      io.out_uop.v_perm_idx  := perm_idx //next_perm_idx
+      io.out_uop.v_perm_busy := !perm_ready || perm_ready_vrg_bsy
+      io.out_uop.v_perm_wait := perm_wait || perm_wait_vrg_set
+      io.out_uop.v_perm_idx  := perm_idx
       io.cur_vs2_busy       := UIntToOH(slot_uop.prs2)(vpregSz-1,0) & Fill(vpregSz, !(p2.andR) && is_valid)
-      io.cur_vs3_busy       := UIntToOH(slot_uop.prs3)(vpregSz-1,0) & Fill(vpregSz, !(p3.andR) && is_valid)
       // handle VOP_VI, prs1 records the value of lrs1, and is used as simm5
       io.uop.v_scalar_data  := Mux(io.uop.rt(RS1, isRvvSImm5), Cat(Fill(eLen-5, io.uop.prs1(4).asUInt), io.uop.prs1(4,0)),
                                Mux(io.uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), slot_uop.prs1(4,0)), sdata))
@@ -589,7 +579,7 @@ class IssueSlot(
                                Mux(slot_uop.uopc === uopVRGATHER && slot_uop.rt(RS1, isInt), sdata,
                                Mux(slot_uop.uopc === uopVRGATHER && slot_uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), slot_uop.prs1(4,0)),
                                perm_idx))))))
-      when (slot_uop.uopc === uopVCOMPRESS) {
+      when (vcompress) {
         io.uop.prvm := slot_uop.prs1
       }
       val red_iss_p1 = WireInit(p1)
@@ -611,7 +601,7 @@ class IssueSlot(
           io.out_uop.prs1_busy := ~(0.U(vLenb.W))
           slot_uop.prs1_busy := ~(0.U(vLenb.W))
         }
-        when (has_vecupdate) {
+        when (vrg_has_vupd || vcompress) {
           when (!perm_ready) {
             io.out_uop.voffset:= slot_uop.voffset
             slot_uop.voffset  := slot_uop.voffset
@@ -667,17 +657,20 @@ class IssueSlot(
   ppred := next_ppred
   if (vector) {
     pm := next_pm
-    next_perm_ready := Mux(perm_ready, Mux(has_vecupdate,!io_fire,true.B), vupd_perm_hit)
-    next_perm_wait  := Mux(perm_wait, !vupd_perm_hit, io_fire&&has_vecupdate&& !perm_ready)
-    next_perm_idx   := Mux(vupd_perm_hit, vupd_perm_idx, perm_idx)
+    perm_ready_vrg_bsy  := io_fire && vrg_has_vupd
+    perm_ready_set      := Mux(vcompress, vupd_perm_fin, vupd_perm_hit)
+    perm_ready_clr      := perm_ready_vrg_bsy
+    perm_wait_vrg_set   := io_fire && (vrg_has_vupd || vcompress) && !perm_ready
+    perm_wait_set       := perm_wait_vrg_set
+    perm_wait_clr       := vupd_perm_hit
     when (io.in_uop.valid) {
-      perm_ready := in_perm_ready
-      perm_wait  := in_perm_wait
-      perm_idx   := in_perm_idx
+      perm_ready := ~io.in_uop.bits.v_perm_busy || vupd_perm_hit
+      perm_wait  := io.in_uop.bits.v_perm_wait && ~vupd_perm_hit
+      perm_idx   := Mux(vupd_perm_hit, vupd_perm_idx, io.in_uop.bits.v_perm_idx)
     } .otherwise {
-      perm_ready := next_perm_ready
-      perm_wait  := next_perm_wait
-      perm_idx   := next_perm_idx
+      perm_ready := perm_ready && !perm_ready_clr || !perm_ready && perm_ready_set
+      perm_wait  := perm_wait  && !perm_wait_clr  || !perm_wait  && perm_wait_set
+      perm_idx   := Mux(vupd_perm_hit, vupd_perm_idx, perm_idx)
     }
   } else if (usingVector && iqType == IQT_MEM.litValue) {
     pm := Mux(io.in_uop.valid, in_pm, pm) | next_pm

@@ -187,6 +187,7 @@ abstract class IssueUnit(
       dis_uops(w).v_perm_busy  := io.dis_uops(w).bits.uopc===uopVRGATHER && io.dis_uops(w).bits.rt(RS1, isVector) ||
                                   io.dis_uops(w).bits.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
       dis_uops(w).v_perm_wait  := false.B
+      dis_uops(w).v_perm_idx   := 0.U
     }
 
     if (iqType != IQT_INT.litValue) {
@@ -203,10 +204,9 @@ abstract class IssueUnit(
     slot
   }
   val issue_slots = VecInit(slots.map(_.io))
-  val agg_vs2_busy, agg_vs3_busy = if (vector) WireInit(0.U(numVecPhysRegs.W)) else null
+  val agg_vs2_busy = if (vector) WireInit(0.U(numVecPhysRegs.W)) else null
   if (vector) {
     agg_vs2_busy := issue_slots.map(_.cur_vs2_busy).reduce(_|_)
-    agg_vs3_busy := issue_slots.map(_.cur_vs3_busy).reduce(_|_)
   }
 
   for (i <- 0 until numIssueSlots) {
@@ -222,7 +222,6 @@ abstract class IssueUnit(
         issue_slots(i).fpupdate       := io.fpupdate
         issue_slots(i).vecUpdate      := io.vecUpdate
         issue_slots(i).agg_vs2_busy   := agg_vs2_busy
-        issue_slots(i).agg_vs3_busy   := agg_vs3_busy
       } else {
         issue_slots(i).vmupdate       := io.vmupdate
       }

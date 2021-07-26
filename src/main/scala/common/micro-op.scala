@@ -241,7 +241,6 @@ class CtrlSignals(implicit p: Parameters) extends BoomBundle()
   val is_std      = Bool()
   val is_vmlogic  = if (usingVector) Bool() else null
   val is_vmscmp   = if (usingVector) Bool() else null
-  val perm_on_vd  = if (usingVector) Bool() else null
   //val is_vmfscmp   = if (usingVector) Bool() else null
 }
 

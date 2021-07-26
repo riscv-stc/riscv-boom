@@ -368,17 +368,18 @@ class RegisterRead(
         val vsew64bit          = 3.U
         val vmaskInsn_vl       = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
         val vmaskInsn_active   = vstart < vmaskInsn_vl
-        val vslideup   = exe_reg_uops(w).uopc === uopVSLIDEUP
+        val vslideup           = exe_reg_uops(w).uopc === uopVSLIDEUP
+        val vcompress          = exe_reg_uops(w).uopc === uopVCOMPRESS
         val is_active          = Mux(is_vmaskInsn, vmaskInsn_active,
                                  Mux(vslideup,  exe_reg_uops(w).vstart >= exe_reg_uops(w).v_scalar_data && (exe_reg_rvm_data(w) || !is_masked),
-                                 Mux(is_masked, exe_reg_rvm_data(w), true.B))) && vstart < vl && vstart >= io.csr_vstart
+                                 Mux(is_masked || vcompress, exe_reg_rvm_data(w), true.B))) && vstart < vl && vstart >= io.csr_vstart
         val vmaskInsn_rs2_data = Mux(is_masked, exe_reg_rs2_data(w) & exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs2_data(w))
         val is_perm_fdbk       = exe_reg_uops(w).uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS) && exe_reg_uops(w).v_perm_busy
 
         io.exe_reqs(w).bits.rs2_data    := Mux(is_vmask_cnt_m | is_vmask_set_m, vmaskInsn_rs2_data, exe_reg_rs2_data(w))
         io.exe_reqs(w).bits.rs1_data    := Mux(is_vmask_set_m | is_vmask_iota_m, exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs1_data(w))
 
-        io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && is_active) && !is_perm_fdbk
+        io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && is_active) && (!is_perm_fdbk || vcompress)
         io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
         val vmove: Bool = VecInit(Seq(exe_reg_uops(w).uopc === uopVFMV_S_F,
           exe_reg_uops(w).uopc === uopVFMV_F_S,
@@ -386,13 +387,14 @@ class RegisterRead(
           exe_reg_uops(w).uopc === uopVMV_S_X
         )).asUInt().orR()
 
-        io.vmupdate(w).bits               := exe_reg_uops(w)
-        io.vmupdate(w).bits.v_active      := is_active
-        io.vmupdate(w).bits.v_xls_offset  := exe_reg_rs2_data(w)
-        io.vecUpdate(w).valid             := exe_reg_valids(w) && is_perm_fdbk
-        io.vecUpdate(w).bits.uop          := exe_reg_uops(w)
-        io.vecUpdate(w).bits.uop.v_active := is_active
-        io.vecUpdate(w).bits.data         := exe_reg_rs1_data(w)
+        io.vmupdate(w).bits                 := exe_reg_uops(w)
+        io.vmupdate(w).bits.v_active        := is_active
+        io.vmupdate(w).bits.v_xls_offset    := exe_reg_rs2_data(w)
+        io.vecUpdate(w).valid               := exe_reg_valids(w) && is_perm_fdbk
+        io.vecUpdate(w).bits.uop            := exe_reg_uops(w)
+        io.vecUpdate(w).bits.uop.v_active   := exe_reg_rvm_data(w) && (vstart < vl)
+        io.vecUpdate(w).bits.uop.v_perm_idx := exe_reg_uops(w).v_perm_idx + (exe_reg_rvm_data(w) && vstart < vl)
+        io.vecUpdate(w).bits.data           := exe_reg_rs1_data(w)
         io.exe_reqs(w).bits.uop.v_active := Mux(vmove, !vstart.orR(), is_active)
         val vfdiv_sqrt = (io.exe_reqs(w).bits.uop.uopc === uopVFDIV)  ||
                          (io.exe_reqs(w).bits.uop.uopc === uopVFRDIV) ||

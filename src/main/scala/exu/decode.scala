@@ -1244,7 +1244,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       when (!uop.rt(RD, isMaskVD)) {
         uop.ldst := inst(RD_MSB,RD_LSB) + vd_inc
       }
-      when (uop.rt(RS1, isVector)) {
+      when (uop.rt(RS1, isVector) && cs.uopc =/= uopVCOMPRESS) {
         uop.lrs1 := inst(RS1_MSB,RS1_LSB) + vs1_inc
       }
       when (uop.rt(RS2, isVector)) {
@@ -1329,8 +1329,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
           uop.vconfig.vl  := 0.U // make all elements inactive
           io.enq_stall    := true.B
         }
-      } .elsewhen (is_perm_op && do_perm_insert) {
-        when (!redperm_act) {
+      } .elsewhen (is_perm_op) {
+        when (!redperm_act && do_perm_insert) {
           // insert an unmasked, all-inactive TIDY vadd vs2, vs2, vs1 to reassign vs2 physical names
           // so that vs2 physical names will be continuous and within a physical group
           uop.uopc        := uopVADD
@@ -1338,10 +1338,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
           uop.lrs1        := 0.U
           uop.lrs1_rtype  := RT_PERM // special mark for such op
           //uop.lrs1_rtype  := RT_PERM // special mark for such op
-          when (!uop.uopc.isOneOf(uopVCOMPRESS)) {
-            // vslide*up/vcompress must tidy stale_pdst, or VS3 in this case
-            uop.ldst        := uop.lrs2 // vadd vs2, vs2, vs1
-          }
+          uop.ldst        := uop.lrs2 // vadd vs2, vs2, vs1
           uop.v_unmasked  := true.B
           uop.vconfig.vl  := 0.U // make all elements inactive
           io.enq_stall    := true.B
