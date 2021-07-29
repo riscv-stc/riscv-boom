@@ -221,7 +221,7 @@ class RegisterRead(
                                         Cat(rvm_addr, eidx >> log2Ceil(eLen)))
         rrd_rvm_data(w) := io.rf_read_ports(idx+3).data(RegNext(eidx(log2Ceil(eLen)-1,0)))
         rrd_vmaskInsn_rvm_data(w) := io.rf_read_ports(idx+3).data
-        assert(!(io.iss_valids(w) && io.iss_uops(w).uopc.isOneOf(uopVL, uopVLS) && io.iss_uops(w).v_unmasked &&
+        assert(!(io.iss_valids(w) && io.iss_uops(w).uopc.isOneOf(uopVL, uopVLFF, uopVLS) && io.iss_uops(w).v_unmasked &&
                io.iss_uops(w).vstart < io.iss_uops(w).vconfig.vl), "unmasked vecotr load (except indexed load) should not come here.")
       }
     } else {
@@ -387,13 +387,11 @@ class RegisterRead(
         io.vecUpdate(w).bits.uop.v_perm_idx := perm_idx + (vstart < vl)
         io.vecUpdate(w).bits.data           := exe_reg_rs1_data(w)
         io.exe_reqs(w).bits.uop.v_active := Mux(vmove, !vstart.orR(), is_active)
-        val vfdiv_sqrt = (io.exe_reqs(w).bits.uop.uopc === uopVFDIV)  ||
-                         (io.exe_reqs(w).bits.uop.uopc === uopVFRDIV) ||
-                         (io.exe_reqs(w).bits.uop.uopc === uopVFSQRT)
+        val vdiv_sqrt = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVFDIV, uopVFRDIV, uopVFSQRT, uopVDIV, uopVDIV, uopVREM, uopVREMU)
         // forward inactive ops to ALU
         val withCarry  = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVADC, uopVSBC, uopVMADC, uopVMSBC)
         val vmscmp     = io.exe_reqs(w).bits.uop.ctrl.is_vmscmp
-        when ((io.exe_reqs(w).bits.uop.is_rvv && !is_active && !vfdiv_sqrt && !withCarry && !vmscmp && !is_vmask_iota_m) || (vmove && vstart.orR())) {
+        when ((io.exe_reqs(w).bits.uop.is_rvv && !is_active && !vdiv_sqrt && !withCarry && !vmscmp && !is_vmask_iota_m) || (vmove && vstart.orR())) {
           io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
           io.exe_reqs(w).bits.uop.ctrl.op_fcn := freechips.rocketchip.rocket.ALU.FN_ADD
         }

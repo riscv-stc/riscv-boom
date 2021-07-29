@@ -135,7 +135,7 @@ class IssueSlot(
     if (vector) {
       val vrg_need_vupd = io.uop.rt(RS1, isVector) && io.uop.uopc === uopVRGATHER || io.uop.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
       ret := io.uop.v_is_last && (!vrg_need_vupd || perm_ready) ||
-             io.uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+             io.uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     } else {
       ret := true.B
     }
@@ -560,7 +560,7 @@ class IssueSlot(
         io.uop.prvm := slot_uop.prs1
       }
       val red_iss_p1 = WireInit(p1)
-      when (io.request && io.grant && !io.uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
+      when (io.request && io.grant && !io.uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
         val vsew = slot_uop.vconfig.vtype.vsew(1,0)
         //val eLen_ecnt = eLen.U >> (vsew+3.U)
         val ren_mask = ~(Fill(vLenSz,1.U) << (7.U-vsew))

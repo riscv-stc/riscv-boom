@@ -294,6 +294,7 @@ class RenameStage(
                        (!io.com_uops(w).v_is_split ||                  // unsplitable ops
                          io.com_uops(w).v_re_alloc && !com_red_mov ||  // skip reduction move, free on every cmt v_re_alloc
                          com_red_act)                                  // do free on actual reduction
+                     //(!io.com_uops(w).v_is_split || (io.com_uops(w).v_phys_last || io.com_uops(w).v_is_last) && !com_red_mov)
       rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w) &&
                        (!io.com_uops(w).v_is_split ||
                          io.com_uops(w).v_re_alloc)                    // rollback on every v_re_alloc
@@ -383,7 +384,7 @@ class RenameStage(
     }
 
     if (usingVector) {
-      val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(8, UInt(maxPregSz.W)))
+      val prs1, prs2, prs3, stale_pdst, pdst, prvm = RegInit(VecInit(Seq.fill(8){0.U(maxPregSz.W)}))
       // record physical names of first split
       // for reduction, vs1, vd, vm should be consistent through vrgroup
       // NOTE: for reduction vd may overlap vs1, vs2, or vm

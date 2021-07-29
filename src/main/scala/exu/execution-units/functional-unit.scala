@@ -608,7 +608,7 @@ class MemAddrCalcUnit(implicit p: Parameters)
   val v_ls_ew = Mux(usingVector.B & uop.is_rvv, uop.v_ls_ew, 0.U)
   val uop_sew = Mux(usingVector.B & uop.is_rvv, uop.vconfig.vtype.vsew, 0.U)
   // unit stride load/store
-  val vec_us_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVL, uopVSA) // or uopVLFF
+  val vec_us_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA) // or uopVLFF
   val vec_cs_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLS, uopVSSA)
   val vec_idx_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
   val op1 = io.req.bits.rs1_data.asSInt
@@ -638,7 +638,7 @@ class MemAddrCalcUnit(implicit p: Parameters)
   }
 
   assert (!(uop.fp_val && io.req.valid && uop.uopc =/= uopLD && uop.uopc =/= uopSTA) &&
-          !(uop.is_rvv && io.req.valid && !uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)),
+          !(uop.is_rvv && io.req.valid && !uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)),
           "[maddrcalc] assert we never get store data in here.")
 
   // Handle misaligned exceptions
@@ -854,6 +854,15 @@ class DivUnit(dataWidth: Int)(implicit p: Parameters)
   div.io.req.bits.fn  := io.req.bits.uop.ctrl.op_fcn
   div.io.req.bits.in1 := io.req.bits.rs1_data
   div.io.req.bits.in2 := io.req.bits.rs2_data
+  if(usingVector) {
+    when(io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active) {
+      div.io.req.bits.in1 := io.req.bits.rs3_data
+      div.io.req.bits.in2 := 1.U
+    } .elsewhen(io.req.bits.uop.is_rvv) {
+      div.io.req.bits.in1 := io.req.bits.rs2_data
+      div.io.req.bits.in2 := io.req.bits.rs1_data
+    }
+  }
   div.io.req.bits.tag := DontCare
   io.req.ready        := div.io.req.ready
 

@@ -165,6 +165,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_perm_busy      = if (usingVector) Bool() else null            // for vrgather/vslide/vcompress
   val v_perm_wait      = if (usingVector) Bool() else null            // wait vecUpdate
   val v_perm_idx       = if (usingVector) UInt(eLen.W) else null      // maximum VLMAX is 65536
+  //val v_phys_last      = if (usingVector) Bool() else null            // the last element of a physical register, for freelist
 
   // purely debug information
   val debug_wdata      = UInt(xLen.W)
@@ -194,6 +195,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   def is_red_vadd      = rt(RS1, isReduceV) && !rt(RD, isReduceV)
   def is_v_ls          = is_rvv && (uses_ldq || uses_stq)
   def uses_v_ls_ew     = uopc.isOneOf(MicroOpcodes.uopVL,
+                                      MicroOpcodes.uopVLFF,
                                       MicroOpcodes.uopVSA,
                                       MicroOpcodes.uopVLS,
                                       MicroOpcodes.uopVSSA)
@@ -527,8 +529,8 @@ object MicroOpcodes extends Enumeration {
   val uopVLR            = uopVLR_enum.id.U(UOPC_SZ.W) // sub to uopVL
   val uopVSR_enum       = Value
   val uopVSR            = uopVSR_enum.id.U(UOPC_SZ.W) // sub to uopVL
-//val uopVLFF_enum      = Value
-//val uopVLFF           = uopVLFF_enum.id.U(UOPC_SZ.W) // sub to uopVL
+  val uopVLFF_enum      = Value
+  val uopVLFF           = uopVLFF_enum.id.U(UOPC_SZ.W) // sub to uopVL
   val uopVAMO_enum      = Value
   val uopVAMO           = uopVAMO_enum.id.U(UOPC_SZ.W)
   // 12.1. single-width integer add/sub

@@ -161,6 +161,7 @@ object VecRRdDecode extends RRdDecodeConstants
         ,BitPat(uopVREM)       -> List(BR_N, N, Y, N, FN_REM,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVREMU)      -> List(BR_N, N, Y, N, FN_REMU,  DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMV_V)      -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_RS1,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMVR)       -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_ZERO,    OP2_RS2,     IS_X, REN_1, CSR.N)
         ,BitPat(uopMERGE)      -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMAND)      -> List(BR_N, Y, N, N, FN_AND,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMNAND)     -> List(BR_N, Y, N, N, FN_AND,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
@@ -423,11 +424,15 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
   io.rrd_uop.ctrl.op_fcn  := rrd_cs.op_fcn.asUInt
   io.rrd_uop.ctrl.fcn_dw  := rrd_cs.fcn_dw.asBool
   if (usingVector) {
-    io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD, uopVL, uopVLS, uopVLUX, uopVLOX)
+    io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD, uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
     io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopVSA, uopVSSA, uopVSUXA, uopVSOXA, uopAMO_AG)
     io.rrd_uop.ctrl.is_std  := io.rrd_uop.uopc === uopSTD || (io.rrd_uop.ctrl.is_sta && io.rrd_uop.rt(RS2, isInt) && !io.rrd_uop.is_rvv)
     io.rrd_uop.ctrl.is_vmlogic  := io.rrd_uop.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
     io.rrd_uop.ctrl.is_vmscmp   := io.rrd_uop.uopc.isOneOf(uopVMSEQ, uopVMSNE, uopVMSLTU, uopVMSLT, uopVMSLEU, uopVMSLE, uopVMSGTU, uopVMSGT)
+    when(io.rrd_uop.uopc.isOneOf(uopVDIV, uopVDIVU, uopVREM, uopVREMU)) {
+      io.rrd_uop.ctrl.fcn_dw := Mux(io.rrd_uop.vconfig.vtype.vsew === 3.U, true.B, false.B)
+      assert(io.rrd_uop.vconfig.vtype.vsew === 3.U || io.rrd_uop.vconfig.vtype.vsew === 2.U, "vdiv/vrem only support 32 or 64 bits")
+    }
   } else {
     io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD)
     io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopAMO_AG)

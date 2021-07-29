@@ -448,6 +448,10 @@ object VectorLSDecode extends DecodeConstants
    ,VLE16_V   ->List(Y, N, X, uopVL,    IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_1)
    ,VLE32_V   ->List(Y, N, X, uopVL,    IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_2)
    ,VLE64_V   ->List(Y, N, X, uopVL,    IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_3)
+   ,VLE8FF_V  ->List(Y, N, X, uopVLFF,  IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_0)
+   ,VLE16FF_V ->List(Y, N, X, uopVLFF,  IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_1)
+   ,VLE32FF_V ->List(Y, N, X, uopVLFF,  IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_2)
+   ,VLE64FF_V ->List(Y, N, X, uopVLFF,  IQT_MEM ,FU_MEM, RT_VEC, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XRD, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_3)
    ,VSE8_V    ->List(Y, N, X, uopVSA,   IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_0)
    ,VSE16_V   ->List(Y, N, X, uopVSA,   IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_1)
    ,VSE32_V   ->List(Y, N, X, uopVSA,   IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, Y, U_2)
@@ -783,6 +787,7 @@ object VectorFPDecode extends DecodeConstants
    ,VMFGT_VF         ->List(Y, Y, X, uopVMFGT,    IQT_FVEC,FU_F2I ,RT_VM , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VMFGE_VF         ->List(Y, Y, X, uopVMFGE,    IQT_FVEC,FU_F2I ,RT_VM , RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VFCLASS_V        ->List(Y, Y, X, uopVFCLASS,  IQT_VEC ,FU_F2I ,RT_VEC, RT_X  , RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+   ,VFMERGE_VFM      ->List(Y, Y, X, uopMERGE,    IQT_FVEC,FU_ALU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VFMV_V_F         ->List(Y, Y, X, uopVFMV_V_F, IQT_FVEC,FU_FPU ,RT_VEC, RT_FLT, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VFCVT_XU_F_V     ->List(Y, Y, X, uopVFCVT_F2I,IQT_VEC ,FU_F2I ,RT_VEC, RT_X  , RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VFCVT_X_F_V      ->List(Y, Y, X, uopVFCVT_F2I,IQT_VEC ,FU_F2I ,RT_VEC, RT_X  , RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
@@ -904,6 +909,10 @@ object VectorPermDecode extends DecodeConstants
    ,VRGATHER_VI    ->List(Y, N, X, uopVRGATHER,    IQT_VEC ,FU_ALU ,RT_VEC, RT_VIU, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VRGATHEREI16_VV->List(Y, N, X, uopVRGATHEREI16,IQT_VEC ,FU_ALU ,RT_VEC, RT_VU , RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VCOMPRESS_VM   ->List(Y, N, X, uopVCOMPRESS,   IQT_VEC ,FU_ALU ,RT_VU , RT_VU , RT_VU , N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+   ,VMV1R_V        ->List(Y, N, X, uopVMVR,        IQT_VEC ,FU_ALU ,RT_VEC, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+   ,VMV2R_V        ->List(Y, N, X, uopVMVR,        IQT_VEC ,FU_ALU ,RT_VEC, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+   ,VMV4R_V        ->List(Y, N, X, uopVMVR,        IQT_VEC ,FU_ALU ,RT_VEC, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
+   ,VMV8R_V        ->List(Y, N, X, uopVMVR,        IQT_VEC ,FU_ALU ,RT_VEC, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
  )
 }
 //scalastyle:on
@@ -1123,8 +1132,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     ls_vconfig.vtype.vsew := cs.v_ls_ew
     val ls_vlmax = ls_vconfig.vtype.vlMax
     val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
-    val is_v_ls_ustride = cs.uopc.isOneOf(uopVL, uopVSA)
+    val is_v_ls_ustride = cs.uopc.isOneOf(uopVL, uopVLFF, uopVSA)
     val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
+    val isVMVR: Bool = cs.uopc.isOneOf(uopVMVR)
     val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     val is_v_mask_ls = cs.uopc.isOneOf(uopVLM, uopVSMA)
     val is_viota_m = cs.uopc.isOneOf(uopVIOTA)
@@ -1136,6 +1146,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) && !is_v_reg_ls
     val redperm_act = RegInit(false.B) // state for actual Reduce/Permutation operation, inverse means inserting operation
     val vstart  = RegInit(0.U((vLenSz+1).W))
+    val vMVRCounter = RegInit(0.U(3.W))
     val vseg_finc = RegInit(0.U(3.W))
     val vseg_gidx = RegInit(0.U(3.W))
 
@@ -1160,8 +1171,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vs2_sew    = Mux(is_v_ls_index, Cat(0.U(1.W), cs.v_ls_ew),
                      Mux(uop.rt(RS2, isWidenV ), csr_vsew + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew)))
-    val vd_inc     = vstart >> (vLenSz.U - 3.U - vd_sew)
-    val vs2_inc    = Mux(is_viota_m, 0.U, vstart >> (vLenSz.U - 3.U - vs2_sew))
+    val vd_inc     = Mux(isVMVR, vMVRCounter,
+                     vstart >> (vLenSz.U - 3.U - vd_sew))
+    val vs2_inc    = Mux(is_viota_m, 0.U,
+                     Mux(isVMVR, vMVRCounter,
+                     vstart >> (vLenSz.U - 3.U - vs2_sew)))
     val vs1_inc    = Mux(is_viota_m, 0.U, vstart >> (vLenSz.U - 3.U - vs1_sew))
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
@@ -1192,21 +1206,27 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(vlmul_sign && !is_v_mask_ls || is_red_op && !redperm_act, vLen_ecnt,
                      Mux(is_v_mask_insn, vmlogic_tolal_ecnt, vlmax))))
     val vseg_flast = vseg_finc === vseg_nf
-    val elem_last  = vstart + split_ecnt === total_ecnt
+    val vMVRCount: UInt = inst(RS1_MSB,RS1_LSB)
+    val elem_last  = Mux(isVMVR, vMVRCounter === vMVRCount, (vstart + split_ecnt) >= total_ecnt)
     val split_last = elem_last && Mux(is_v_ls_seg, vseg_flast, true.B)
     when (io.kill) {
       vstart    := 0.U
       vseg_finc := 0.U
       vseg_gidx := 0.U
+      vMVRCounter := 0.U
     } .elsewhen (~cs.can_be_split | split_last & io.deq_fire) {
       vstart    := 0.U
       vseg_finc := 0.U
       vseg_gidx := 0.U
+      vMVRCounter := 0.U
     } .elsewhen (cs.can_be_split & ~split_last & io.deq_fire) {
       when (is_v_ls_seg) {
         vseg_finc := Mux(vseg_flast, 0.U, vseg_finc + 1.U)
         vstart    := vstart    + Mux(vseg_flast, 1.U, 0.U)
         vseg_gidx := vseg_gidx + Mux((vseg_flast) && uop.v_re_alloc, 1.U, 0.U)
+      }.elsewhen(isVMVR){
+        vstart := 0.U
+        vMVRCounter := vMVRCounter + 1.U
       } .otherwise {
         vstart    := vstart + split_ecnt
       }
@@ -1239,6 +1259,14 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.v_re_alloc  := Mux(uop.rt(RD, isMaskVD), vstart === 0.U, (vstart & ren_re_mask(vLenSz,0)) === 0.U)
     uop.v_re_vs1    := (vstart & vs1_re_mask(vLenSz,0)) === 0.U
     uop.v_re_vs2    := (vstart & vs2_re_mask(vLenSz,0)) === 0.U
+
+    //val phys_index = vstart + split_ecnt
+    //uop.v_phys_last := Mux(uop.rt(RD, isMaskVD) || uop.rt(RD, isReduceV), elem_last,
+    //                   Mux(vd_sew === 3.U, phys_index(3, 0) === 0.U,
+    //                   Mux(vd_sew === 2.U, phys_index(4, 0) === 0.U,
+    //                   Mux(vd_sew === 1.U, phys_index(5, 0) === 0.U,
+    //                   phys_index(6, 0) === 0.U))))
+    // already handled properly
 
     when (cs.is_rvv) {
       when (!uop.rt(RD, isMaskVD)) {
