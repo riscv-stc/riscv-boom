@@ -1253,6 +1253,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     }
     uop.v_is_first  := (vstart === 0.U)
     uop.v_is_last   := elem_last
+    uop.v_is_archfirst  := (vstart === 0.U)
+    uop.v_is_archlast   := elem_last
     val ren_re_mask = ~(Fill(vLenSz,1.U) << (7.U - vd_sew))
     val vs1_re_mask = ~(Fill(vLenSz,1.U) << (7.U - vs1_sew))
     val vs2_re_mask = ~(Fill(vLenSz,1.U) << (7.U - vs2_sew))

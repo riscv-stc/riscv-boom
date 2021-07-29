@@ -152,6 +152,8 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_split_ecnt     = if (usingVector) UInt((log2Ceil(vLenb)+1).W) else null
   val v_is_first       = if (usingVector) Bool() else null
   val v_is_last        = if (usingVector) Bool() else null
+  val v_is_archfirst   = if (usingVector) Bool() else null            // arch 1st/last records since decode
+  val v_is_archlast    = if (usingVector) Bool() else null
   val v_re_alloc       = if (usingVector) Bool() else null            // do rename allocation on first split for every vreg
   val v_re_vs1         = if (usingVector) Bool() else null            // do rename mapping for narrowing ops
   val v_re_vs2         = if (usingVector) Bool() else null            // do rename mapping for indexed LS / narrowing ops
