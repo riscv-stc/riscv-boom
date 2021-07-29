@@ -197,14 +197,6 @@ class RegisterRead(
         val vd_sew  = Mux(io.iss_uops(w).uses_v_ls_ew, io.iss_uops(w).v_ls_ew,
                       Mux(io.iss_uops(w).rt(RD, isWidenV ), vsew + 1.U,
                       Mux(io.iss_uops(w).rt(RD, isNarrowV), vsew - 1.U, vsew)))
-        val perm_rinc = perm_idx >> (vLenSz.U - 3.U - vsew)
-        val prs3      = io.iss_uops(w).prs3
-        val perm_ridx = Mux(vd_emul === 1.U, Cat(prs3(prs3.getWidth-1, 1), perm_rinc(0)),
-                        Mux(vd_emul === 2.U, Cat(prs3(prs3.getWidth-1, 2), perm_rinc(1,0)),
-                        Mux(vd_emul === 3.U, Cat(prs3(prs3.getWidth-1, 3), perm_rinc(2,0)), prs3)))
-        when (vcompress) {
-          rs3_addr := perm_ridx
-        }
         val eidx = vstart
         val rd_sh = Mux1H(UIntToOH(vd_sew(1,0)),  Seq(Cat(eidx(2,0),0.U(3.W)), Cat(eidx(1,0),0.U(4.W)), Cat(eidx(0),0.U(5.W)), 0.U(6.W)))
         val (rdsel,rdmsk) = VRegSel(eidx, vd_sew,  ecnt, eLenb, eLenSelSz)
@@ -368,9 +360,10 @@ class RegisterRead(
         val vmaskInsn_active   = vstart < vmaskInsn_vl
         val vslideup           = exe_reg_uops(w).uopc === uopVSLIDEUP
         val vcompress          = exe_reg_uops(w).uopc === uopVCOMPRESS
+        val perm_idx           = exe_reg_uops(w).v_perm_idx
         val is_active          = Mux(is_vmaskInsn, vmaskInsn_active,
                                  Mux(vslideup,  exe_reg_uops(w).vstart >= exe_reg_uops(w).v_scalar_data && (exe_reg_rvm_data(w) || !is_masked),
-                                 Mux(is_masked || vcompress, exe_reg_rvm_data(w), true.B))) && vstart < vl && vstart >= io.csr_vstart
+                                 Mux(is_masked || vcompress, exe_reg_rvm_data(w), true.B))) && Mux(vcompress, perm_idx, vstart) < vl && vstart >= io.csr_vstart
         val vmaskInsn_rs2_data = Mux(is_masked, exe_reg_rs2_data(w) & exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs2_data(w))
         val is_perm_fdbk       = exe_reg_uops(w).uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS) && exe_reg_uops(w).v_perm_busy
 
@@ -391,7 +384,7 @@ class RegisterRead(
         io.vecUpdate(w).valid               := exe_reg_valids(w) && is_perm_fdbk
         io.vecUpdate(w).bits.uop            := exe_reg_uops(w)
         io.vecUpdate(w).bits.uop.v_active   := exe_reg_rvm_data(w) && (vstart < vl)
-        io.vecUpdate(w).bits.uop.v_perm_idx := exe_reg_uops(w).v_perm_idx + (vstart < vl)
+        io.vecUpdate(w).bits.uop.v_perm_idx := perm_idx + (vstart < vl)
         io.vecUpdate(w).bits.data           := exe_reg_rs1_data(w)
         io.exe_reqs(w).bits.uop.v_active := Mux(vmove, !vstart.orR(), is_active)
         val vfdiv_sqrt = (io.exe_reqs(w).bits.uop.uopc === uopVFDIV)  ||

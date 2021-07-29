@@ -133,7 +133,7 @@ class IssueSlot(
   def last_check: Bool = {
     val ret = Wire(Bool())
     if (vector) {
-      val vrg_need_vupd = io.uop.rt(RS1, isVector) && io.uop.uopc === uopVRGATHER || io.uop.uopc === uopVRGATHEREI16
+      val vrg_need_vupd = io.uop.rt(RS1, isVector) && io.uop.uopc === uopVRGATHER || io.uop.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
       ret := io.uop.v_is_last && (!vrg_need_vupd || perm_ready) ||
              io.uop.uopc.isOneOf(uopVL, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     } else {
@@ -324,8 +324,11 @@ class IssueSlot(
   val wake_pm = if (vector) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
   val next_ppred = WireInit(ppred)
   val vupd_perm_hit = if (vector) WireInit(false.B) else null
+  val vupd_perm_nxt = if (vector) WireInit(false.B) else null
+  val vupd_load_idx = if (vector) WireInit(false.B) else null
   val vupd_perm_idx = if (vector) WireInit(0.U(eLen.W)) else null
   val vupd_perm_fin = if (vector) WireInit(false.B) else null
+  val vupd_kill     = if (vector) WireInit(false.B) else null
 
   when (io.in_uop.valid) {
     if (usingVector) {
@@ -636,20 +639,34 @@ class IssueSlot(
     perm_ready_clr      := perm_ready_vrg_bsy
     perm_wait_vrg_set   := io_fire && (vrg_has_vupd || vcompress) && !perm_ready
     perm_wait_set       := perm_wait_vrg_set
-    perm_wait_clr       := vupd_perm_hit
+    perm_wait_clr       := vupd_perm_hit || vupd_perm_nxt
     when (io.in_uop.valid) {
       perm_ready := ~io.in_uop.bits.v_perm_busy || perm_ready_set
-      perm_wait  := io.in_uop.bits.v_perm_wait && ~vupd_perm_hit
-      perm_idx   := Mux(vupd_perm_hit, vupd_perm_idx, io.in_uop.bits.v_perm_idx)
+      perm_wait  := io.in_uop.bits.v_perm_wait && !perm_wait_clr
+      perm_idx   := Mux(vupd_load_idx, vupd_perm_idx, io.in_uop.bits.v_perm_idx)
     } .otherwise {
       perm_ready := perm_ready && !perm_ready_clr || !perm_ready && perm_ready_set
       perm_wait  := perm_wait  && !perm_wait_clr  || !perm_wait  && perm_wait_set
-      perm_idx   := Mux(vupd_perm_hit, vupd_perm_idx, perm_idx)
+      perm_idx   := Mux(vupd_load_idx, vupd_perm_idx, perm_idx)
     }
 
     val vu_sel     = io.vecUpdate.map(v => v.valid &&
                                            v.bits.uop.uopc === next_uop.uopc &&
                                            v.bits.uop.match_group(next_uop.pdst))
+    val vu_sel_idx = io.vecUpdate.map(v => v.valid &&
+                                           v.bits.uop.uopc === next_uop.uopc &&
+                                           v.bits.uop.match_group(next_uop.pdst) &&
+                                           v.bits.uop.vstart + 1.U > next_uop.vstart)
+    val vu_sel_nxt = io.vecUpdate.map(v => v.valid &&
+                                           v.bits.uop.uopc === next_uop.uopc &&
+                                           v.bits.uop.match_group(next_uop.pdst) &&
+                                           v.bits.uop.v_active &&
+                                           v.bits.uop.vstart + 1.U === next_uop.vstart)
+    val vu_sel_kill= io.vecUpdate.map(v => v.valid &&
+                                           v.bits.uop.uopc === next_uop.uopc &&
+                                           v.bits.uop.match_group(next_uop.pdst) &&
+                                           v.bits.uop.v_active &&
+                                           v.bits.uop.vstart + 1.U >= next_uop.vstart + next_uop.v_split_ecnt)
     val vu_sel_fin = io.vecUpdate.map(v => v.valid &&
                                            v.bits.uop.uopc === next_uop.uopc &&
                                            v.bits.uop.match_group(next_uop.pdst) &&
@@ -661,11 +678,18 @@ class IssueSlot(
     when ((is_valid||io.in_uop.valid) && io.vecUpdate.map(_.valid).reduce(_||_)) {
       val vu_rs1 = io.vecUpdate.map(v => v.bits.data)
       val vu_pidx= io.vecUpdate.map(v => v.bits.uop.v_perm_idx)
+      val vu_vstart= io.vecUpdate.map(v => v.bits.uop.vstart)
       val vu_actv= io.vecUpdate.map(v => v.bits.uop.v_active)
-      vupd_perm_hit := Mux(next_uop_vcompress, vu_sel.reduce(_||_), vu_sel_rob.reduce(_||_))
+      vupd_perm_hit := Mux(next_uop_vcompress, vu_sel_idx.reduce(_||_), vu_sel_rob.reduce(_||_))
+      vupd_perm_nxt := next_uop_vcompress && vu_sel_nxt.reduce(_||_)
+      vupd_load_idx := Mux(next_uop_vcompress, vu_sel.reduce(_||_), vu_sel_rob.reduce(_||_))
       vupd_perm_idx := Mux(next_uop_vcompress, Mux1H(vu_sel, vu_pidx), Mux1H(vu_sel_rob, vu_rs1))
       vupd_perm_fin := vu_sel_fin.reduce(_||_)
-      when (next_uop_vcompress && Mux1H(vu_sel, vu_actv) && Mux1H(vu_sel, vu_pidx) >= next_uop.vstart) {
+      vupd_kill     := next_uop_vcompress && vu_sel_kill.reduce(_||_)
+      when (vupd_kill) {
+        next_state := s_invalid
+      }
+      when (next_uop_vcompress && (Cat(vu_sel_idx) & Cat(vu_actv)).orR) {
         val vupd_voffset = next_uop.voffset + 1.U
         slot_uop.voffset   := vupd_voffset
         //io.out_uop.voffset := vupd_voffset

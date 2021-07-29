@@ -186,7 +186,7 @@ abstract class IssueUnit(
       }
       dis_uops(w).v_perm_busy  := io.dis_uops(w).bits.uopc===uopVRGATHER && io.dis_uops(w).bits.rt(RS1, isVector) ||
                                   io.dis_uops(w).bits.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
-      dis_uops(w).v_perm_wait  := false.B
+      dis_uops(w).v_perm_wait  := Mux(io.dis_uops(w).bits.uopc === uopVCOMPRESS, io.dis_uops(w).bits.vstart =/= 0.U, false.B)
       dis_uops(w).v_perm_idx   := 0.U
     }
 
