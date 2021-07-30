@@ -628,8 +628,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     decode_units(w).io.csr_decode      <> csr.io.decode(w)
     decode_units(w).io.interrupt       := csr.io.interrupt
     decode_units(w).io.interrupt_cause := csr.io.interrupt_cause
-    decode_units(w).io.csr_vconfig     := csr.io.vector.get.vconfig
-    decode_units(w).io.csr_vconfig.vtype.reserved := DontCare
+    if (usingVector) {
+      decode_units(w).io.csr_vconfig     := csr.io.vector.get.vconfig
+      decode_units(w).io.csr_vconfig.vtype.reserved := DontCare
+    }
 
     dec_uops(w) := decode_units(w).io.deq.uop
   }
@@ -670,7 +672,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   xcpt_pc_req.bits     := dec_uops(xcpt_idx).ftq_idx
   //rob.io.xcpt_fetch_pc := RegEnable(io.ifu.get_pc.fetch_pc, dis_ready)
   rob.io.xcpt_fetch_pc := io.ifu.get_pc(0).pc
-  rob.io.csrVConfig := csr.io.vector.get.vconfig
+  if (usingVector) {
+    rob.io.csrVConfig := csr.io.vector.get.vconfig
+  }
 
   flush_pc_req.valid   := rob.io.flush.valid
   flush_pc_req.bits    := rob.io.flush.bits.ftq_idx
@@ -787,7 +791,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     dis_uops(w).prs2 := Mux(dis_uops(w).rt(RS2, isVector), v_uop.prs2,
                         Mux(dis_uops(w).rt(RS2, isFloat ), f_uop.prs2,
                         Mux(dis_uops(w).rt(RS2, isInt   ), i_uop.prs2, dis_uops(w).lrs2)))
-    dis_uops(w).prs3 := Mux(dis_uops(w).is_rvv, v_uop.prs3, f_uop.prs3)
+    dis_uops(w).prs3 := f_uop.prs3
     dis_uops(w).ppred := p_uop.ppred
     dis_uops(w).pdst := Mux(dis_uops(w).rt(RD, isVector), v_uop.pdst,
                         Mux(dis_uops(w).rt(RD, isFloat ), f_uop.pdst,
@@ -796,6 +800,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
                               Mux(dis_uops(w).rt(RD, isFloat ), f_uop.stale_pdst, i_uop.stale_pdst))
 
     if (usingVector) {
+      dis_uops(w).prs3 := Mux(dis_uops(w).is_rvv, v_uop.prs3, f_uop.prs3)
       dis_uops(w).prs1_busy := Mux1H(Seq((dis_uops(w).rt(RS1, isInt   ), i_uop.prs1_busy),
                                          (dis_uops(w).rt(RS1, isFloat ), f_uop.prs1_busy),
                                          (dis_uops(w).rt(RS1, isVector), v_uop.prs1_busy)))
@@ -1051,8 +1056,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     for ((renport, vport) <- v_rename_stage.io.wakeups zip v_pipeline.io.wakeups) {
        renport <> vport
     }
-  } else {
-    v_rename_stage.io.wakeups := DontCare
   }
   if (enableSFBOpt) {
     pred_rename_stage.io.wakeups(0) := pred_wakeup
@@ -1316,7 +1319,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   // Handle Branch Mispeculations
   io.lsu.brupdate := brupdate
-  io.lsu.vmupdate := vmupdate
+  if (usingVector) {
+    io.lsu.vmupdate := vmupdate
+  }
   io.lsu.rob_head_idx := rob.io.rob_head_idx
   io.lsu.rob_pnr_idx  := rob.io.rob_pnr_idx
 
@@ -1512,7 +1517,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   // branch resolution
   rob.io.brupdate <> brupdate
-  rob.io.vmupdate <> vmupdate
+  // vector mask update
+  if (usingVector) {
+    rob.io.vmupdate <> vmupdate
+  }
 
   exe_units.map(u => u.io.status := csr.io.status)
   if (usingFPU)
@@ -1618,10 +1626,12 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
             rob.io.commit.uops(w).ldst,
             rob.io.commit.debug_wdata(w))
         } .elsewhen (rob.io.commit.uops(w).rt(RD, isVector)) {
-          printf(" v%d[%d] 0x%x\n",
-            rob.io.commit.uops(w).ldst,
-            rob.io.commit.uops(w).vstart,
-            rob.io.commit.debug_wdata(w))
+          if (usingVector) {
+            printf(" v%d[%d] 0x%x\n",
+              rob.io.commit.uops(w).ldst,
+              rob.io.commit.uops(w).vstart,
+              rob.io.commit.debug_wdata(w))
+          }
         } .otherwise {
           printf("\n")
         }

@@ -280,10 +280,14 @@ class RenameStage(
   val rbk_valids      = Wire(Vec(plWidth, Bool()))
 
   for (w <- 0 until plWidth) {
-    // NOTE: for reduction vd should be renamed only when vstart is 0
-    ren2_alloc_reqs(w)    := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_fire(w) &&
-                             (~ren2_uops(w).v_is_split ||
-                              (ren2_uops(w).v_re_alloc && !ren2_uops(w).rt(RD, isReduceV)))
+    if (usingVector) {
+      // NOTE: for reduction vd should be renamed only when vstart is 0
+      ren2_alloc_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_fire(w) &&
+                          (~ren2_uops(w).v_is_split ||
+                           (ren2_uops(w).v_re_alloc && !ren2_uops(w).rt(RD, isReduceV)))
+    } else {
+      ren2_alloc_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_fire(w)
+    }
     ren2_br_tags(w).valid := ren2_fire(w) && ren2_uops(w).allocate_brtag
 
     if (usingVector && vector) {

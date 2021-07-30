@@ -139,12 +139,15 @@ abstract class IssueUnit(
           //dis_uops(w).lrs2_rtype := RT_X
           dis_uops(w).prs2_busy := 0.U
         }
-      } .elsewhen (io.dis_uops(w).bits.is_rvv && io.dis_uops(w).bits.v_idx_ls) {
-        dis_uops(w).prs2_busy := 0.U
-        dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
       }
-      when (io.dis_uops(w).bits.is_rvv && !io.dis_uops(w).bits.v_unmasked) {
-        dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
+      if (usingVector) {
+        when (io.dis_uops(w).bits.is_rvv && io.dis_uops(w).bits.v_idx_ls) {
+          dis_uops(w).prs2_busy := 0.U
+          dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
+        }
+        when (io.dis_uops(w).bits.is_rvv && !io.dis_uops(w).bits.v_unmasked) {
+          dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
+        }
       }
       dis_uops(w).prs3_busy := 0.U
       if (iqType == IQT_INT.litValue) {
@@ -153,8 +156,6 @@ abstract class IssueUnit(
             assert(io.dis_uops(w).bits.uses_scalar, "unexpected rvv in INT pipe")
             dis_uops(w).fu_code := FU_ALU
           }
-        } else {
-          dis_uops(w).prvm_busy := 0.U
         }
       }
       if (usingVector && iqType == IQT_INT.litValue) {
@@ -190,10 +191,12 @@ abstract class IssueUnit(
       } .elsewhen (io.dis_uops(w).bits.rt(RD, isReduceV) && io.dis_uops(w).bits.vstart =/= 0.U) {
         dis_uops(w).prs1_busy  := ~(0.U(vLenb.W))
       }
-      dis_uops(w).v_perm_busy  := io.dis_uops(w).bits.uopc===uopVRGATHER && io.dis_uops(w).bits.rt(RS1, isVector) ||
-                                  io.dis_uops(w).bits.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
-      dis_uops(w).v_perm_wait  := Mux(io.dis_uops(w).bits.uopc === uopVCOMPRESS, io.dis_uops(w).bits.vstart =/= 0.U, false.B)
-      dis_uops(w).v_perm_idx   := 0.U
+      if (usingVector) {
+        dis_uops(w).v_perm_busy  := io.dis_uops(w).bits.uopc===uopVRGATHER && io.dis_uops(w).bits.rt(RS1, isVector) ||
+                                    io.dis_uops(w).bits.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
+        dis_uops(w).v_perm_wait  := Mux(io.dis_uops(w).bits.uopc === uopVCOMPRESS, io.dis_uops(w).bits.vstart =/= 0.U, false.B)
+        dis_uops(w).v_perm_idx   := 0.U
+      }
     }
 
     if (iqType != IQT_INT.litValue) {

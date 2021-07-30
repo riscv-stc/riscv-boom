@@ -604,19 +604,22 @@ class MemAddrCalcUnit(implicit p: Parameters)
   with freechips.rocketchip.rocket.constants.ScalarOpConstants
 {
   val uop = io.req.bits.uop
-  // unit stride
-  val v_ls_ew = Mux(usingVector.B & uop.is_rvv, uop.v_ls_ew, 0.U)
-  val uop_sew = Mux(usingVector.B & uop.is_rvv, uop.vconfig.vtype.vsew, 0.U)
-  // unit stride load/store
-  val vec_us_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA) // or uopVLFF
-  val vec_cs_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLS, uopVSSA)
-  val vec_idx_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
   val op1 = io.req.bits.rs1_data.asSInt
-  // TODO: optimize multiplications here
-  val op2 = Mux(vec_us_ls, ((uop.vstart * uop.v_seg_nf + uop.v_seg_f) << v_ls_ew).asSInt,
-            Mux(vec_cs_ls, io.req.bits.rs2_data.asSInt * uop.vstart.asUInt + Cat(0.U(1.W), uop.v_seg_f << v_ls_ew).asSInt,
-            Mux(vec_idx_ls, uop.v_xls_offset.asSInt + Cat(0.U(1.W), uop.v_seg_f << uop_sew).asSInt,
-                uop.imm_packed(19,8).asSInt)))
+  val op2 = WireInit(uop.imm_packed(19,8).asSInt)
+  // unit stride
+  if (usingVector) {
+    val v_ls_ew = Mux(usingVector.B & uop.is_rvv, uop.v_ls_ew, 0.U)
+    val uop_sew = Mux(usingVector.B & uop.is_rvv, uop.vconfig.vtype.vsew, 0.U)
+    // unit stride load/store
+    val vec_us_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA) // or uopVLFF
+    val vec_cs_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLS, uopVSSA)
+    val vec_idx_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+    // TODO: optimize multiplications here
+    op2 := Mux(vec_us_ls, ((uop.vstart * uop.v_seg_nf + uop.v_seg_f) << v_ls_ew).asSInt,
+           Mux(vec_cs_ls, io.req.bits.rs2_data.asSInt * uop.vstart.asUInt + Cat(0.U(1.W), uop.v_seg_f << v_ls_ew).asSInt,
+           Mux(vec_idx_ls, uop.v_xls_offset.asSInt + Cat(0.U(1.W), uop.v_seg_f << uop_sew).asSInt,
+           uop.imm_packed(19,8).asSInt)))
+  }
 
   // perform address calculation
   val sum = (op1 + op2).asUInt
@@ -637,9 +640,12 @@ class MemAddrCalcUnit(implicit p: Parameters)
       "FP store-data should now be going through a different unit.")
   }
 
-  assert (!(uop.fp_val && io.req.valid && uop.uopc =/= uopLD && uop.uopc =/= uopSTA) &&
-          !(uop.is_rvv && io.req.valid && !uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)),
+  assert (!(uop.fp_val && io.req.valid && uop.uopc =/= uopLD && uop.uopc =/= uopSTA),
           "[maddrcalc] assert we never get store data in here.")
+
+  if (usingVector) {
+    assert (!(uop.is_rvv && io.req.valid && !uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)))
+  }
 
   // Handle misaligned exceptions
   val size = uop.mem_size
@@ -740,7 +746,8 @@ class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
   val io_req = io.req.bits
   fp_decoder.io.uopc := io_req.uop.uopc
   val fp_ctrl = WireInit(fp_decoder.io.sigs)
-  val fp_rm = Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U || io_req.uop.is_rvv, io.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
+  val fp_rm = WireInit(io.fcsr_rm)
+  fp_rm := Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U, io.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
   val vd_widen = io_req.uop.rt(RD , isWidenV)
   val vs2_widen= io_req.uop.rt(RS2, isWidenV)
   if (vector) {
@@ -759,6 +766,7 @@ class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
    
     when (io_req.uop.is_rvv) {
       // TODO considering widening and narrowing operations
+      fp_rm := io.fcsr_rm
       fp_ctrl.typeTagIn := vs2_fmt
       fp_ctrl.typeTagOut:= vd_fmt
     }
@@ -776,7 +784,14 @@ class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
     req.typeTagIn := fp_ctrl.typeTagOut      // IntToFP typeTagIn, based on float width, not integer
   }
   val typ1 = Mux(tag === D, 1.U(1.W), 0.U(1.W))
-  req.typ := Mux(io_req.uop.is_rvv, ImmGenTypRVV(typ1, io_req.uop.imm_packed), ImmGenTyp(io_req.uop.imm_packed))
+  if (vector) {
+    when (io.req.valid) {
+      assert(io_req.uop.is_rvv)
+    }
+    req.typ := ImmGenTypRVV(typ1, io_req.uop.imm_packed)
+  } else {
+    req.typ := ImmGenTyp(io_req.uop.imm_packed)
+  }
   req.fmt := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
   req.fmaCmd := DontCare
 
@@ -791,7 +806,7 @@ class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
   ifpu.io.in.bits := req
   ifpu.io.in.bits.in1 := Mux(fp_ctrl.swap12, io_req.rs2_data, io_req.rs1_data)
   val outTypeTag = Pipe(io.req.valid, fp_ctrl.typeTagOut, latency).bits
-  val outRVV     = Pipe(io.req.valid, io_req.uop.is_rvv,  latency).bits
+  val outRVV     = if (vector) Pipe(io.req.valid, io_req.uop.is_rvv,  latency).bits else false.B
 
 //io.resp.bits.data              := box(ifpu.io.out.bits.data, !io.resp.bits.uop.fp_single)
   io.resp.bits.data              := Mux(outRVV, ieee(box(ifpu.io.out.bits.data, outTypeTag)),

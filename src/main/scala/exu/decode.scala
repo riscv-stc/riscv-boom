@@ -978,7 +978,7 @@ class DecodeUnitIo(implicit p: Parameters) extends BoomBundle
   // from CSRFile
   val status = Input(new freechips.rocketchip.rocket.MStatus())
   val csr_decode = Flipped(new freechips.rocketchip.rocket.CSRDecodeIO)
-  val csr_vconfig = Input(new VConfig)
+  val csr_vconfig = if (usingVector) Input(new VConfig) else null
   val interrupt = Input(Bool())
   val interrupt_cause = Input(UInt(xLen.W))
 }

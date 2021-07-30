@@ -172,8 +172,8 @@ class IssueSlot(
   def rs2check(ecnt: UInt = 1.U): Bool = {
     val ret = Wire(Bool())
     val uop = slot_uop
-    val vstart = uop.vstart + uop.voffset
     if (vector) {
+      val vstart = uop.vstart + uop.voffset
       when (uop.uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP, uopVSLIDEDOWN, uopVSLIDE1DOWN,
                              uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS)) {
         // check vreg-wise, permutation ops have identical sew on vs2
@@ -218,8 +218,8 @@ class IssueSlot(
   def rs3check(ecnt: UInt = 1.U): Bool = {
     val ret = Wire(Bool())
     val uop = slot_uop
-    val vstart = uop.vstart + uop.voffset
     if (vector) {
+      val vstart = uop.vstart + uop.voffset
       val (rsel, rmsk) = VRegSel(vstart, uop.vd_eew, ecnt, vLenb, eLenSelSz)
       val rsh     = Cat(rsel, 0.U(3.W))
       val mask    = ((p3 >> rsh) & rmsk)
@@ -515,7 +515,6 @@ class IssueSlot(
   //assign outputs
   io.valid := is_valid
   io.uop := slot_uop
-  io.uop.vstart := slot_uop.vstart + slot_uop.voffset
   io.uop.iw_p1_poisoned := p1_poisoned
   io.uop.iw_p2_poisoned := p2_poisoned
 
@@ -532,6 +531,7 @@ class IssueSlot(
   io.out_uop.lrs2_rtype := next_lrs2_rtype
   io.out_uop.br_mask    := next_br_mask
   if (usingVector) {
+    io.uop.vstart := slot_uop.vstart + slot_uop.voffset
     if (vector) {
       // value to next slot should be current latched version
       // ignore element busy masking, we keep busy status for entire v-register (i.e. p1,p2,p3,pm)

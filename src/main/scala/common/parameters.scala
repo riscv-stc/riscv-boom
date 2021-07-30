@@ -265,13 +265,13 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   require (issueParams.count(_.iqType == IQT_VEC.litValue) == 1 || !usingVector)
   val numVecPhysRegs = boomParams.numVecPhysRegisters
   require (numVecPhysRegs % 8 == 0, "Number of vector physical register must be multiple of 8")
-  def numELENinVLEN = vLen/eLen
+  def numELENinVLEN = if (usingVector) vLen/eLen else 0
   def numVecPhysElens= boomParams.numVecPhysRegisters * numELENinVLEN
   def vLenb = vLen/8
-  def vLenSz = log2Ceil(vLen)
-  def eLenSelSz = log2Ceil(numELENinVLEN)
+  def vLenSz = if (usingVector) log2Ceil(vLen) else 0
+  def eLenSelSz = if (usingVector) log2Ceil(numELENinVLEN) else 0
   def eLenb = eLen/8
-  def eLenSz = log2Ceil(eLen)
+  def eLenSz = if (usingVector) log2Ceil(eLen) else 0
   //val minFLen = boomParams.minFLen
 
   //************************************
@@ -283,8 +283,8 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val lregSz          = log2Ceil(logicalRegCount)
   val ipregSz         = log2Ceil(numIntPhysRegs)
   val fpregSz         = log2Ceil(numFpPhysRegs)
-  val vpregSz         = log2Ceil(numVecPhysRegs)
-  val vElenSz         = log2Ceil(numVecPhysElens)
+  val vpregSz         = if (usingVector) log2Ceil(numVecPhysRegs) else 0
+  val vElenSz         = if (usingVector) log2Ceil(numVecPhysElens) else 0
   val maxPregSz       = ipregSz max fpregSz max vElenSz
   val ldqAddrSz       = log2Ceil(numLdqEntries)
   val stqAddrSz       = log2Ceil(numStqEntries)

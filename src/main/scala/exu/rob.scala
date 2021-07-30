@@ -61,7 +61,7 @@ class RobIo(
 
   // Handle Branch Misspeculations
   val brupdate = Input(new BrUpdateInfo())
-  val vmupdate = Input(Vec(vecWidth, Valid(new MicroOp)))
+  val vmupdate = if (usingVector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
 
   // Write-back Stage
   // (Update of ROB)
@@ -94,7 +94,7 @@ class RobIo(
   // Communicate exceptions to the CSRFile
   val com_xcpt = Valid(new CommitExceptionSignals())
   val setVL = if(usingVector) Valid(UInt((log2Ceil(maxVLMax) + 1).W)) else null
-  val csrVConfig = Input(new VConfig())
+  val csrVConfig = if (usingVector) Input(new VConfig()) else null
   // Let the CSRFile stall us (e.g., wfi).
   val csr_stall = Input(Bool())
 
@@ -417,8 +417,8 @@ class Rob(
 
     when (io.lxcpt.valid && MatchBank(GetBankIdx(io.lxcpt.bits.uop.rob_idx))) {
       // Mask false exception for vleff, decide if update vl later at commit stage.
-      val isVleFalseException = io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) &&
-        io.lxcpt.bits.uop.vstart.orR()
+      val isVleFalseException = if (usingVector) {io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.vstart.orR()}
+                                else             false.B
       rob_exception(GetRowIdx(io.lxcpt.bits.uop.rob_idx)) := true.B
       when(isVleFalseException){
         rob_vleff_exception(GetRowIdx(io.lxcpt.bits.uop.rob_idx)) := true.B
@@ -495,17 +495,19 @@ class Rob(
         rob_uop(i).br_mask := GetNewBrMask(io.brupdate, br_mask)
       }
 
-      when (io.vmupdate.map(u =>
-          u.valid && !u.bits.v_active &&
-          GetRowIdx(u.bits.rob_idx) === i.U &&
-          MatchBank(GetBankIdx(u.bits.rob_idx))).reduce(_||_)) {
-        assert(rob_val(i), "Vmask Kill invalid entry")
-        assert(rob_uop(i).is_rvv, "Vmask Kill invalid entry")
-        assert(rob_uop(i).uses_ldq || rob_uop(i).uses_stq, "Vmask Kill non-lsu entry")
-        rob_unsafe(i) := false.B
-        rob_exception(i) := false.B
-        when (rob_uop(i).uses_stq) {
-          rob_bsy(i) := false.B
+      if (usingVector) {
+        when (io.vmupdate.map(u =>
+            u.valid && !u.bits.v_active &&
+            GetRowIdx(u.bits.rob_idx) === i.U &&
+            MatchBank(GetBankIdx(u.bits.rob_idx))).reduce(_||_)) {
+          assert(rob_val(i), "Vmask Kill invalid entry")
+          assert(rob_uop(i).is_rvv, "Vmask Kill invalid entry")
+          assert(rob_uop(i).uses_ldq || rob_uop(i).uses_stq, "Vmask Kill non-lsu entry")
+          rob_unsafe(i) := false.B
+          rob_exception(i) := false.B
+          when (rob_uop(i).uses_stq) {
+            rob_bsy(i) := false.B
+          }
         }
       }
     }
@@ -571,9 +573,11 @@ class Rob(
                "[rob] writeback (" + i + ") occurred to the wrong pdst.")
     }
     io.commit.debug_wdata(w) := rob_debug_wdata(rob_head)
-    robSetVL(w).valid := will_commit(w) && rob_vleff_exception(rob_head) &&
-      rob_uop(rob_head).vstart < io.csrVConfig.vl
-    robSetVL(w).bits := rob_uop(rob_head).vstart
+
+    if (usingVector) {
+      robSetVL(w).valid := will_commit(w) && rob_vleff_exception(rob_head) && rob_uop(rob_head).vstart < io.csrVConfig.vl
+      robSetVL(w).bits  := rob_uop(rob_head).vstart
+    }
 
   } //for (w <- 0 until coreWidth)
 
@@ -601,8 +605,10 @@ class Rob(
                            (!can_commit(w) || can_throw_exception(w))) || block_commit
     block_xcpt           = will_commit(w)
   }
-  io.setVL.valid := VecInit(robSetVL.map(_.valid)).asUInt().orR()
-  io.setVL.bits := Mux1H(robSetVL.map(_.valid), robSetVL.map(_.bits))
+  if (usingVector) {
+    io.setVL.valid := VecInit(robSetVL.map(_.valid)).asUInt().orR()
+    io.setVL.bits := Mux1H(robSetVL.map(_.valid), robSetVL.map(_.bits))
+  }
 
   // Note: exception must be in the commit bundle.
   // Note: exception must be the first valid instruction in the commit bundle.
@@ -682,7 +688,8 @@ class Rob(
     enq_xcpts(i) := io.enq_valids(i) && io.enq_uops(i).exception
   }
 
-  val realLxcpt = io.lxcpt.valid && !(io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.vstart.orR())
+  val realLxcpt = if (usingVector) {io.lxcpt.valid && !(io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.vstart.orR())}
+                  else             io.lxcpt.valid
   when (!(io.flush.valid || exception_thrown) && rob_state =/= s_rollback) {
     when (realLxcpt) {
       val new_xcpt_uop = io.lxcpt.bits.uop
@@ -706,8 +713,14 @@ class Rob(
 
   r_xcpt_uop         := next_xcpt_uop
   r_xcpt_uop.br_mask := GetNewBrMask(io.brupdate, next_xcpt_uop)
-  when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop) || IsKilledByVM(io.vmupdate, next_xcpt_uop)) {
-    r_xcpt_val := false.B
+  if (usingVector) {
+    when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop) || IsKilledByVM(io.vmupdate, next_xcpt_uop)) {
+      r_xcpt_val := false.B
+    }
+  } else {
+    when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop)) {
+      r_xcpt_val := false.B
+    }
   }
 
   assert (!(exception_thrown && !r_xcpt_val),

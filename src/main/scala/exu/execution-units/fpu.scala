@@ -276,23 +276,24 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     val tag     = fp_ctrl.typeTagOut
     val vs2_tag = Mux(vector.B && (vd_widen ^ vs2_widen), tagIn, tag)
     req <> fp_ctrl
-    req.rm := Mux(~io_req.uop.is_rvv, fp_rm, 
-              Mux(io_req.uop.uopc.isOneOf(uopVFCLASS, uopVFMAX, uopVMFLT, uopVMFGT), 1.U,
-              Mux(io_req.uop.uopc.isOneOf(uopVFMIN, uopVMFLE, uopVMFGE), 0.U,
-              Mux(io_req.uop.uopc.isOneOf(uopVMFEQ, uopVMFNE), 2.U,
-              Mux(io_req.uop.uopc === uopVFSGNJ,  ImmGenRmVSGN(io_req.uop.imm_packed),
-              Mux(io_req.uop.uopc === uopVFCVT_F2F && CheckF2FRm(io_req.uop.imm_packed), 6.U,
-              Mux(io_req.uop.fu_code_is(FU_F2I) && CheckF2IRm(io_req.uop.imm_packed), 1.U, 
-              io_req.fcsr_rm)))))))
     val unbox_rs1 = Mux(vector.B && vd_widen,               unbox(rs1_data, tagIn,   None), unbox(rs1_data, tag, minT))
     val unbox_rs2 = Mux(vector.B && (vd_widen ^ vs2_widen), unbox(rs2_data, vs2_tag, None), unbox(rs2_data, tag, minT))
     val unbox_rs3 = unbox(rs3_data, tag,      minT)
     if(vector) {
+      req.rm := Mux(~io_req.uop.is_rvv, fp_rm, 
+                Mux(io_req.uop.uopc.isOneOf(uopVFCLASS, uopVFMAX, uopVMFLT, uopVMFGT), 1.U,
+                Mux(io_req.uop.uopc.isOneOf(uopVFMIN, uopVMFLE, uopVMFGE), 0.U,
+                Mux(io_req.uop.uopc.isOneOf(uopVMFEQ, uopVMFNE), 2.U,
+                Mux(io_req.uop.uopc === uopVFSGNJ,  ImmGenRmVSGN(io_req.uop.imm_packed),
+                Mux(io_req.uop.uopc === uopVFCVT_F2F && CheckF2FRm(io_req.uop.imm_packed), 6.U,
+                Mux(io_req.uop.fu_code_is(FU_F2I) && CheckF2IRm(io_req.uop.imm_packed), 1.U, 
+                io_req.fcsr_rm)))))))
       req.in1 := unbox_rs1
       req.in2 := unbox_rs2
       req.in3 := unbox_rs3
-    }
-    else {
+    } else {
+      req.rm := Mux(io_req.uop.fu_code_is(FU_F2I) && CheckF2IRm(io_req.uop.imm_packed), 1.U,
+                io_req.fcsr_rm)
       req.in1 := unbox(io_req.rs1_data, tagIn, minT)
       req.in2 := unbox(io_req.rs2_data, tagIn, minT)
       req.in3 := unbox(io_req.rs3_data, tagIn, minT)
@@ -306,7 +307,12 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     when (fp_ctrl.swap23) { req.in3 := req.in2 }
     //req.typ := ImmGenTyp(io_req.uop.imm_packed)
     val typ1 = Mux(tag === D, 1.U(1.W), 0.U(1.W))
-    req.typ := Mux(io_req.uop.is_rvv, ImmGenTypRVV(typ1, io_req.uop.imm_packed), ImmGenTyp(io_req.uop.imm_packed)) // typ of F2I and I2F
+    // typ of F2I and I2F
+    if (vector) {
+      req.typ := ImmGenTypRVV(typ1, io_req.uop.imm_packed)
+    } else {
+      req.typ := ImmGenTyp(io_req.uop.imm_packed)
+    }
     req.fmt := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
     when (io_req.uop.uopc === uopFMV_X_S) {
       req.fmt := 0.U
