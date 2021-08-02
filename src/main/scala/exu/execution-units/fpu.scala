@@ -240,8 +240,8 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
   val fp_decoder = Module(new UOPCodeFPUDecoder(vector))
   fp_decoder.io.uopc := io_req.uop.uopc
   val fp_ctrl = WireInit(fp_decoder.io.sigs)
-  //val fp_rm = Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U || io_req.uop.is_rvv, io_req.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
-  val fp_rm = Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U, io_req.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
+  val fp_rm = if (usingVector) Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U || io_req.uop.is_rvv, io_req.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
+              else             Mux(ImmGenRm(io_req.uop.imm_packed) === 7.U, io_req.fcsr_rm, ImmGenRm(io_req.uop.imm_packed))
   val rs1_data = WireInit(io_req.rs1_data)
   val rs2_data = WireInit(io_req.rs2_data)
   val rs3_data = WireInit(io_req.rs3_data)
@@ -295,8 +295,10 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
       req.in2 := unbox_rs2
       req.in3 := unbox_rs3
     } else {
-      req.rm := Mux(io_req.uop.fu_code_is(FU_F2I) && CheckF2IRm(io_req.uop.imm_packed), 1.U,
-                io_req.fcsr_rm)
+      req.rm := Mux(io_req.uop.uopc === uopVFSGNJ,  ImmGenRmVSGN(io_req.uop.imm_packed),
+                Mux(io_req.uop.uopc === uopVFCVT_F2F && CheckF2FRm(io_req.uop.imm_packed), 6.U,
+                Mux(io_req.uop.fu_code_is(FU_F2I) && CheckF2IRm(io_req.uop.imm_packed), 1.U,
+                fp_rm)))
       req.in1 := unbox(io_req.rs1_data, tagIn, minT)
       req.in2 := unbox(io_req.rs2_data, tagIn, minT)
       req.in3 := unbox(io_req.rs3_data, tagIn, minT)

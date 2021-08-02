@@ -1128,9 +1128,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   if (usingVector) {
     val csr_vsew  = io.csr_vconfig.vtype.vsew
     val csr_vlmax = io.csr_vconfig.vtype.vlMax
-    val ls_vconfig = WireInit(io.csr_vconfig)
-    ls_vconfig.vtype.vsew := cs.v_ls_ew
-    val ls_vlmax = ls_vconfig.vtype.vlMax
+    //val ls_vconfig = WireInit(io.csr_vconfig)
+    //ls_vconfig.vtype.vsew := cs.v_ls_ew
+    val ls_vlmax = csr_vlmax //ls_vconfig.vtype.vlMax
     val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
     val is_v_ls_ustride = cs.uopc.isOneOf(uopVL, uopVLFF, uopVSA)
     val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
@@ -1167,7 +1167,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vd_sew     = Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew,
                      Mux(uop.rt(RD,  isWidenV ), csr_vsew + vd_wfactor,
                      Mux(uop.rt(RD,  isNarrowV), csr_vsew - vd_nfactor, csr_vsew)))
-    val vs1_sew    = Mux(cs.uopc === uopVRGATHEREI16, 1.U, vsew)
+    val vs1_sew    = Mux(cs.uopc === uopVRGATHEREI16, 1.U,
+                     Mux(uop.rt(RD,  isWidenV ), csr_vsew + vd_wfactor, csr_vsew))
     val vs2_sew    = Mux(is_v_ls_index, Cat(0.U(1.W), cs.v_ls_ew),
                      Mux(uop.rt(RS2, isWidenV ), csr_vsew + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew)))
@@ -1352,7 +1353,6 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
           // insert an undisturbing move before actual reduction
           vstart          := vstart // preserve vstart
           uop.uopc        := uopVADD
-          uop.v_unmasked  := true.B
           uop.dst_rtype   := RT_VEC
           // keep lrs1_rtype to distinguish this inserted mov and actual reduction
           //uop.lrs1_rtype  := RT_VEC

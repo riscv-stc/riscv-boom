@@ -150,7 +150,9 @@ class IssueSlot(
       val vstart  = Mux(uop.rt(RS1, isReduceV), 0.U, uop.vstart + uop.voffset)
       val tail    = vstart > uop.vconfig.vl
       val eew     = Mux(uop.uses_v_ls_ew, uop.v_ls_ew,
-                    Mux(uop.uopc === uopVRGATHEREI16, 1.U, uop.vconfig.vtype.vsew))
+                    Mux(uop.uopc === uopVRGATHEREI16, 1.U,
+                    Mux(uop.rt(RS1, isWidenV), uop.vconfig.vtype.vsew + 1.U,
+                    uop.vconfig.vtype.vsew)))
       val (rsel, rmsk) = VRegSel(vstart, eew, ecnt, vLenb, eLenSelSz) // TODO, consider eLen_ecnt
       val rsh     = Cat(rsel, 0.U(3.W))
       val mask    = ((p1 >> rsh) & rmsk)
@@ -398,8 +400,9 @@ class IssueSlot(
         val i_am_red= next_uop.rt(RD, isReduceV)
         val wk_rd   = wk_valid && (wk_pdst === next_uop.pdst)
         val wk_next = (wk_vstart + 1.U) === (next_uop.vstart + next_uop.voffset)
-        val wk_last = (wk_vstart + 1.U) === wk_uop.vconfig.vtype.vlMax
-        wake_p1(i) := Fill(vLenb, Mux(i_am_red, wk_rd && wk_act && wk_next, wk_rs1 && wk_last).asUInt)
+        //val wk_last = (wk_vstart + 1.U) === wk_uop.vconfig.vtype.vlMax
+        val wk_last = wk_uop.v_is_archlast && wk_uop.v_is_last
+        wake_p1(i) := Fill(vLenb, Mux(i_am_red, wk_rd && wk_act && wk_next, wk_rs1 && wk_act && wk_last).asUInt)
         wake_p2(i) := Fill(vLenb, (wk_rs2 && wk_act && wk_last).asUInt)
         wake_p3(i) := Fill(vLenb, (wk_rs3 && wk_act && wk_last).asUInt)
         wake_pm(i) := Fill(vLenb, (wk_rvm && wk_act && wk_last).asUInt)

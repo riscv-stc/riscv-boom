@@ -213,9 +213,14 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
 
   def vd_emul: UInt = {
     val emul = Wire(UInt(2.W))
+    val vsew       = vconfig.vtype.vsew
     val vlmul_sign = vconfig.vtype.vlmul_sign
     val vlmul_mag  = vconfig.vtype.vlmul_mag
-    emul := Mux(vlmul_sign, 0.U, Mux(rt(RD, isWidenV), vlmul_mag + 1.U, vlmul_mag))(1,0)
+    emul := Mux(vlmul_sign || rt(RS1, isReduceV), 0.U,
+            Mux(rt(RD, isWidenV), vlmul_mag + 1.U,
+            Mux(uses_v_ls_ew, Mux(v_ls_ew >= vsew, vlmul_mag + v_ls_ew - vsew,
+                              Mux(vlmul_mag >= vsew - v_ls_ew, vlmul_mag + v_ls_ew - vsew, 0.U)),
+            vlmul_mag)))(1,0)
     emul
   }
 
