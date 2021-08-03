@@ -1168,7 +1168,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(uop.rt(RD,  isWidenV ), csr_vsew + vd_wfactor,
                      Mux(uop.rt(RD,  isNarrowV), csr_vsew - vd_nfactor, csr_vsew)))
     val vs1_sew    = Mux(cs.uopc === uopVRGATHEREI16, 1.U,
-                     Mux(uop.rt(RD,  isWidenV ), csr_vsew + vd_wfactor, csr_vsew))
+                     Mux(uop.rt(RS1, isWidenV ), csr_vsew + vd_wfactor, csr_vsew))
     val vs2_sew    = Mux(is_v_ls_index, Cat(0.U(1.W), cs.v_ls_ew),
                      Mux(uop.rt(RS2, isWidenV ), csr_vsew + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew)))
