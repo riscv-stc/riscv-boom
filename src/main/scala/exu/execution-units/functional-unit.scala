@@ -945,13 +945,13 @@ class FixMulAccCtrlSigs extends Bundle
  * @param dataWidth size of the data being passed into the functional unit
  */
 class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
-  extends PipelinedFunctionalUnit(
+  extends PipelinedFunctionalUnit (
     numStages = numStages,
     numBypassStages = 0,
     earliestBypassStage = 0,
     dataWidth = dataWidth,
     isFixMulAcc = true
-) {
+) with ShouldBeRetimed {
   val in_req = WireInit(io.req)
   when (io.req.bits.uop.uopc.isOneOf(uopVMADD, uopVNMSUB)) {
     in_req.bits.rs2_data := io.req.bits.rs3_data
@@ -1014,7 +1014,14 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
                                              Cat(Mux(unsigned, 0.U((dataWidth-16).W), Fill(dataWidth-16, macc(31))), macc(31, 16)),
                                              Cat(Mux(unsigned, 0.U((dataWidth-32).W), Fill(dataWidth-32, macc(63))), macc(63, 32)),
                                              macc(127, 64)))
-  val sramt = Mux(!cs.doRO, 0.U, Mux1H(UIntToOH(cs.srType), Seq(0.U(6.W), 1.U(6.W), ((8.U << vd_eew) - 1.U)(5,0), in.bits.rs1_data(5,0))))
+  val sramt = Mux(!cs.doRO, 0.U,
+              Mux1H(UIntToOH(cs.srType), Seq(0.U(6.W),
+                                         1.U(6.W),
+                                         ((8.U << vd_eew) - 1.U)(5,0),
+                                         Mux1H(UIntToOH(vd_eew(1,0)), Seq(in.bits.rs1_data(2,0),
+                                                                          in.bits.rs1_data(3,0),
+                                                                          in.bits.rs1_data(4,0),
+                                                                          in.bits.rs1_data(5,0))))))
   val srres = macc >> sramt
   val sroff = (macc.asUInt & ~(macc_msk << sramt))(dataWidth-1, 0)
   val sroff_msb = Mux(sramt === 0.U, 0.U, macc(sramt-1.U))
