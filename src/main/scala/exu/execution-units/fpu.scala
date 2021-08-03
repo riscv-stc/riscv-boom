@@ -295,10 +295,7 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
       req.in2 := unbox_rs2
       req.in3 := unbox_rs3
     } else {
-      req.rm := Mux(io_req.uop.uopc === uopVFSGNJ,  ImmGenRmVSGN(io_req.uop.imm_packed),
-                Mux(io_req.uop.uopc === uopVFCVT_F2F && CheckF2FRm(io_req.uop.imm_packed), 6.U,
-                Mux(io_req.uop.fu_code_is(FU_F2I) && CheckF2IRm(io_req.uop.imm_packed), 1.U,
-                fp_rm)))
+      req.rm := fp_rm
       req.in1 := unbox(io_req.rs1_data, tagIn, minT)
       req.in2 := unbox(io_req.rs2_data, tagIn, minT)
       req.in3 := unbox(io_req.rs3_data, tagIn, minT)
