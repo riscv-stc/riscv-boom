@@ -34,9 +34,11 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.rocket.{CSR, Causes, PRV, VConfig}
+import freechips.rocketchip.rocket.{EventSet, EventSets, SuperscalarEventSets}
 import freechips.rocketchip.util.{CoreMonitorBundle, Str, UIntIsOneOf, SeqBoolBitwiseOps}
 import freechips.rocketchip.devices.tilelink.{CLINTConsts, PLICConsts}
 import testchipip.ExtendedTracedInstruction
+
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.ifu.{GlobalHistory, HasBoomFrontendParameters}
@@ -342,50 +344,80 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }
   }
 
-  val perfEvents = new freechips.rocketchip.rocket.EventSets(Seq(
+//  val perfEvents = new freechips.rocketchip.rocket.EventSets(Seq(
+//
+//    new freechips.rocketchip.rocket.EventSet((mask, hits) => (mask & hits).orR, Seq(
+//      ("exception", () => rob.io.com_xcpt.valid),
+//      ("load",      () => commit_load.reduce(_||_)),
+//      ("store",     () => commit_store.reduce(_||_)),
+//      ("amo",       () => usingAtomics.asBool() && commit_amo.reduce(_||_)),
+//      ("system",    () => commit_system.reduce(_||_)),
+//      ("arith",     () =>  is_arith.reduce(_||_)),
+//      ("branch",    () => is_branch.reduce(_||_)),
+//      ("jal",       () => is_jal.reduce(_||_)),
+//      ("jalr",      () => is_jalr.reduce(_||_)))
+//       ++ (if (!usingFPU) Seq() else Seq(
+//        ("fp load",     () => commit_fp_load.reduce(_||_)),
+//        ("fp store",    () => commit_fp_store.reduce(_||_)),
+//        ("fp add",      () => commit_fp_add.reduce(_||_)),
+//        ("fp mul",      () => commit_fp_mul.reduce(_||_)),
+//        ("fp mul-add",  () => false.B),
+//        ("fp div",      () => commit_fp_div.reduce(_||_)),
+//        ("fp other",    () => commit_fp_other.reduce(_||_))
+//        )
+//      )
+//    ), 
+//
+//    new freechips.rocketchip.rocket.EventSet((mask, hits) => (mask & hits).orR, Seq(
+//      ("I$ blocked",                        () => icache_blocked),
+//      ("nop",                               () => false.B),
+//      ("branch misprediction",              () => mispredict_val),
+//      ("control-flow target misprediction", () => mispredict_val && oldest_mispredict.cfi_type === CFI_JALR),
+//      ("flush",                             () => rob.io.flush.valid),
+//      ("branch resolved",                   () => b1.resolve_mask =/= 0.U)
+//      )),
+//    
+//    new freechips.rocketchip.rocket.EventSet((mask, hits) => (mask & hits).orR, Seq(
+//      ("I$ miss",     () => io.ifu.perf.acquire),
+//      ("D$ miss",     () => io.lsu.perf.acquire),
+//      ("D$ release",  () => io.lsu.perf.release),
+//      ("ITLB miss",   () => io.ifu.perf.tlbMiss),
+//      ("DTLB miss",   () => io.lsu.perf.tlbMiss),
+//      ("L2 TLB miss", () => io.ptw.perf.l2miss)
+//      ))
+//  ))
 
-    new freechips.rocketchip.rocket.EventSet((mask, hits) => (mask & hits).orR, Seq(
-      ("exception", () => rob.io.com_xcpt.valid),
-      ("load",      () => commit_load.reduce(_||_)),
-      ("store",     () => commit_store.reduce(_||_)),
-      ("amo",       () => usingAtomics.asBool() && commit_amo.reduce(_||_)),
-      ("system",    () => commit_system.reduce(_||_)),
-      ("arith",     () =>  is_arith.reduce(_||_)),
-      ("branch",    () => is_branch.reduce(_||_)),
-      ("jal",       () => is_jal.reduce(_||_)),
-      ("jalr",      () => is_jalr.reduce(_||_)))
-       ++ (if (!usingFPU) Seq() else Seq(
-        ("fp load",     () => commit_fp_load.reduce(_||_)),
-        ("fp store",    () => commit_fp_store.reduce(_||_)),
-        ("fp add",      () => commit_fp_add.reduce(_||_)),
-        ("fp mul",      () => commit_fp_mul.reduce(_||_)),
-        ("fp mul-add",  () => false.B),
-        ("fp div",      () => commit_fp_div.reduce(_||_)),
-        ("fp other",    () => commit_fp_other.reduce(_||_))
-        )
-      )
-    ), 
+  val recovery_stat = RegInit(false.B)
+  when(mispredict_val || rob.io.flush.valid){
+    recovery_stat := true.B
+  }.elsewhen(io.ifu.fetchpacket.valid){
+    recovery_stat := false.B
+  }
 
-    new freechips.rocketchip.rocket.EventSet((mask, hits) => (mask & hits).orR, Seq(
-      ("I$ blocked",                        () => icache_blocked),
-      ("nop",                               () => false.B),
-      ("branch misprediction",              () => mispredict_val),
-      ("control-flow target misprediction", () => mispredict_val && oldest_mispredict.cfi_type === CFI_JALR),
-      ("flush",                             () => rob.io.flush.valid),
-      ("branch resolved",                   () => b1.resolve_mask =/= 0.U)
-      )),
-    
-    new freechips.rocketchip.rocket.EventSet((mask, hits) => (mask & hits).orR, Seq(
-      ("I$ miss",     () => io.ifu.perf.acquire),
-      ("D$ miss",     () => io.lsu.perf.acquire),
-      ("D$ release",  () => io.lsu.perf.release),
-      ("ITLB miss",   () => io.ifu.perf.tlbMiss),
-      ("DTLB miss",   () => io.lsu.perf.tlbMiss),
-      ("L2 TLB miss", () => io.ptw.perf.l2miss)
-      ))
+  val topDownslotVec = dis_fire.map(dispatch => new EventSet((mask, hits) => (mask & hits).orR, Seq(
+    ("slots issued",    () => dispatch),
+    ("fetch bubbles",   () => dis_fire.reduce((m, n) => m || n) & (~dispatch)) // 0 < bubbles < issueWidth
+  )))
+
+  val dis_ldq_hazards = (0 until coreWidth).map(w => io.lsu.ldq_full(w) && dis_uops(w).uses_ldq).reduce(_||_)
+  val dis_stq_hazards = (0 until coreWidth).map(w => io.lsu.stq_full(w) && dis_uops(w).uses_stq).reduce(_||_)
+
+  val topDownCycleEvent = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+    ("recovery cycle",            () => recovery_stat),
+    ("branch mispred retired",    () => mispredict_val),
+    ("machine clears",            () => rob.io.flush.valid),
+    ("fetch latency cycle",       () => (~io.ifu.perf.fb_enq_valid && dis_ready)),      // no fetch data to fetch buffer && no stalls
+    ("few ops executed cycle",    () => !dis_fire.reduce((m, n) => m || n)),            // issue 0 insn
+    ("any load causes mem stall", () => dis_ldq_hazards),
+    ("stores mem stall",          () => dis_ldq_hazards)
   ))
-      
-  val csr = Module(new freechips.rocketchip.rocket.CSRFile(perfEvents, boomParams.customCSRs.decls))
+
+  val perfEvents = new SuperscalarEventSets(Seq(
+    (topDownslotVec,           (m, n) => m +& n),
+    (Seq(topDownCycleEvent),   (m, n) => m +& n)))
+
+
+  val csr = Module(new freechips.rocketchip.rocket.CSRFile(perfEvents.toScalarEventSets, boomParams.customCSRs.decls))
   csr.io.inst foreach { c => c := DontCare }
   csr.io.rocc_interrupt := io.rocc.interrupt
 

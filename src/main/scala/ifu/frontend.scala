@@ -252,6 +252,10 @@ class FetchBundle(implicit p: Parameters) extends BoomBundle
 }
 
 
+class IFUPerfEvents extends FrontendPerfEvents {
+  val fb_enq_valid = Bool()
+}
+
 
 /**
  * IO for the BOOM Frontend to/from the CPU
@@ -287,7 +291,7 @@ class BoomFrontendIO(implicit p: Parameters) extends BoomBundle
 
   val flush_icache = Output(Bool())
 
-  val perf = Input(new FrontendPerfEvents)
+  val perf = Input(new IFUPerfEvents)
   val tsc_reg           = Output(UInt(xLen.W))
 }
 
@@ -1032,6 +1036,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   ftq.io.debug_ftq_idx := io.cpu.debug_ftq_idx
   io.cpu.debug_fetch_pc := ftq.io.debug_fetch_pc
 
+  io.cpu.perf.fb_enq_valid := fb.io.enq.valid
 
   override def toString: String =
     (BoomCoreStringPrefix("====Overall Frontend Params====") + "\n"
