@@ -44,9 +44,47 @@ abstract trait DecodeConstants
   //     |  |  |  |         |        |        |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |      |  |  |  |
     List(N, N, X, uopX    , IQT_INT, FU_X   , RT_X  , RT_DC  ,RT_DC  ,X, IS_X, X, X, X, X, N, M_X,   DC2, X, X, N, N, X, CSR.X, N, N, N, DC2)
 
+  val definition: String = "/csv/decode-inst.csv"
   val table: Array[(BitPat, List[BitPat])]
 }
 // scalastyle:on
+
+object DecoderCSVReader {
+  def apply(csv: String, category: String): Array[(BitPat, List[BitPat])] = {
+    import scala.reflect.runtime.universe
+    import scala.tools.reflect.ToolBox
+    import scala.io.Source
+
+    println(s"Reading $category instructions from resources$csv")
+    val stream= getClass.getResourceAsStream(csv)
+    val lines = Source.fromInputStream(stream).mkString
+    val lists = lines.split("\n")
+                     .filter(_.startsWith(category))
+                     .map(_.split(" +"))
+                     .map(row => row(1) + " -> List(" + row.drop(2).mkString(",") + ")")
+                     .mkString(",\n")
+    val src = s"""
+             |{
+             |  import chisel3._
+             |  import chisel3.util._
+             |  import freechips.rocketchip.rocket.CSR
+             |  import freechips.rocketchip.rocket.Instructions._
+             |  import freechips.rocketchip.util.uintToBitPat
+             |  import boom.common._
+             |  import boom.common.MicroOpcodes._
+             |  import boom.exu.FUConstants._
+             |  object DecoderCSVHelper extends boom.exu.DecodeConstants
+             |  {
+             |    val table: Array[(BitPat, List[BitPat])] = Array($lists)
+             |  }
+             |  val ret: Array[(BitPat, List[BitPat])] = DecoderCSVHelper.table
+             |  ret
+             |}""".stripMargin
+    val tb    = universe.runtimeMirror(getClass.getClassLoader).mkToolBox()
+    val ret: Array[(BitPat, List[BitPat])] = tb.eval(tb.parse(src)).asInstanceOf[Array[(BitPat, List[BitPat])]]
+    ret
+  }
+}
 
 /**
  * Decoded control signals
@@ -104,7 +142,7 @@ class CtrlSigs extends Bundle
  */
 object X32Decode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array(
+/*val table: Array[(BitPat, List[BitPat])] = Array(
     //                                                                            frs3_en                        wakeup_delay
     //               is val inst?                                                 |  imm sel                     |    bypassable (aka, known/fixed latency)
     //               |  is fp inst?                                               |  |     uses_ldq              |    |  is_br
@@ -118,7 +156,8 @@ object X32Decode extends DecodeConstants
     SLLI_RV32-> List(Y, N, X, uopSLLI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
     SRLI_RV32-> List(Y, N, X, uopSRLI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
     SRAI_RV32-> List(Y, N, X, uopSRAI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2)
-  )
+  )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "X32")
 }
 
 /**
@@ -126,7 +165,7 @@ object X32Decode extends DecodeConstants
  */
 object X64Decode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array(
+//val table: Array[(BitPat, List[BitPat])] = Array(
     //                                                                           frs3_en                        wakeup_delay
     //              is val inst?                                                 |  imm sel                     |    bypassable (aka, known/fixed latency)
     //              |  is fp inst?                                               |  |     uses_ldq              |    |  is_br
@@ -137,25 +176,26 @@ object X64Decode extends DecodeConstants
     //              |  |  |  |         |        |        dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
     //              |  |  |  |         |        |        regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit
     //              |  |  |  |         |        |        |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd
-    LD      -> List(Y, N, X, uopLD   , IQT_MEM, FU_MEM , RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, U_3, N, N, N, N, N, CSR.N, N, N, N, DC2),
-    LWU     -> List(Y, N, X, uopLD   , IQT_MEM, FU_MEM , RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, U_3, N, N, N, N, N, CSR.N, N, N, N, DC2),
-    SD      -> List(Y, N, X, uopSTA  , IQT_MEM, FU_MEM , RT_X  , RT_FIX, RT_FIX, N, IS_S, N, Y, N, N, N, M_XWR, U_0, N, N, N, N, N, CSR.N, N, N, N, DC2),
+//  LD      -> List(Y, N, X, uopLD   , IQT_MEM, FU_MEM , RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, U_3, N, N, N, N, N, CSR.N, N, N, N, DC2),
+//  LWU     -> List(Y, N, X, uopLD   , IQT_MEM, FU_MEM , RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, U_3, N, N, N, N, N, CSR.N, N, N, N, DC2),
+//  SD      -> List(Y, N, X, uopSTA  , IQT_MEM, FU_MEM , RT_X  , RT_FIX, RT_FIX, N, IS_S, N, Y, N, N, N, M_XWR, U_0, N, N, N, N, N, CSR.N, N, N, N, DC2),
 
-    SLLI    -> List(Y, N, X, uopSLLI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
-    SRLI    -> List(Y, N, X, uopSRLI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
-    SRAI    -> List(Y, N, X, uopSRAI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
+//  SLLI    -> List(Y, N, X, uopSLLI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
+//  SRLI    -> List(Y, N, X, uopSRLI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
+//  SRAI    -> List(Y, N, X, uopSRAI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
 
-    ADDIW   -> List(Y, N, X, uopADDIW, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
-    SLLIW   -> List(Y, N, X, uopSLLIW, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
-    SRAIW   -> List(Y, N, X, uopSRAIW, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
-    SRLIW   -> List(Y, N, X, uopSRLIW, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
+//  ADDIW   -> List(Y, N, X, uopADDIW, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
+//  SLLIW   -> List(Y, N, X, uopSLLIW, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
+//  SRAIW   -> List(Y, N, X, uopSRAIW, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
+//  SRLIW   -> List(Y, N, X, uopSRLIW, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
 
-    ADDW    -> List(Y, N, X, uopADDW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
-    SUBW    -> List(Y, N, X, uopSUBW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
-    SLLW    -> List(Y, N, X, uopSLLW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
-    SRAW    -> List(Y, N, X, uopSRAW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
-    SRLW    -> List(Y, N, X, uopSRLW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2)
-  )
+//  ADDW    -> List(Y, N, X, uopADDW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
+//  SUBW    -> List(Y, N, X, uopSUBW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
+//  SLLW    -> List(Y, N, X, uopSLLW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
+//  SRAW    -> List(Y, N, X, uopSRAW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2),
+//  SRLW    -> List(Y, N, X, uopSRLW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , U_1, Y, N, N, N, N, CSR.N, N, N, N, DC2)
+//)
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "X64")
 }
 
 /**
@@ -163,7 +203,7 @@ object X64Decode extends DecodeConstants
  */
 object XDecode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array(
+/*val table: Array[(BitPat, List[BitPat])] = Array(
     //                                                                           frs3_en                        wakeup_delay
     //              is val inst?                                                 |  imm sel                     |    bypassable (aka, known/fixed latency)
     //              |  is fp inst?                                               |  |     uses_ldq              |    |  is_br
@@ -286,7 +326,8 @@ object XDecode extends DecodeConstants
     LR_D    -> List(Y, N, X, uopLD    , IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XLR   , U_0,N, N, N, Y, Y, CSR.N, N, N, N, DC2),
     SC_W    -> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XSC   , U_0,N, N, N, Y, Y, CSR.N, N, N, N, DC2),
     SC_D    -> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XSC   , U_0,N, N, N, Y, Y, CSR.N, N, N, N, DC2)
-  )
+  )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "XInt")
 }
 
 /**
@@ -294,7 +335,7 @@ object XDecode extends DecodeConstants
  */
 object FDecode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array(
+/*val table: Array[(BitPat, List[BitPat])] = Array(
     //                                                                            frs3_en                        wakeup_delay
     //                                                                            |  imm sel                     |    bypassable (aka, known/fixed latency)
     //                                                                            |  |     uses_ldq              |    |  is_br
@@ -380,7 +421,8 @@ object FDecode extends DecodeConstants
     FMSUB_D  ->List(Y, Y, N, uopFMSUB_D, IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, Y, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, N, N, N, DC2),
     FNMADD_D ->List(Y, Y, N, uopFNMADD_D,IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, Y, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, N, N, N, DC2),
     FNMSUB_D ->List(Y, Y, N, uopFNMSUB_D,IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, Y, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, N, N, N, DC2)
-  )
+  )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "Float")
 }
 
 /**
@@ -388,7 +430,7 @@ object FDecode extends DecodeConstants
  */
 object FDivSqrtDecode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array(
+/*val table: Array[(BitPat, List[BitPat])] = Array(
     //                                                                            frs3_en                        wakeup_delay
     //                                                                            |  imm sel                     |    bypassable (aka, known/fixed latency)
     //                                                                            |  |     uses_ldq              |    |  is_br
@@ -403,7 +445,8 @@ object FDivSqrtDecode extends DecodeConstants
     FDIV_D    ->List(Y, Y, N, uopFDIV_D , IQT_FP, FU_FDV, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, N, N, N, DC2),
     FSQRT_S   ->List(Y, Y, Y, uopFSQRT_S, IQT_FP, FU_FDV, RT_FLT, RT_FLT, RT_X  , N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, N, N, N, DC2),
     FSQRT_D   ->List(Y, Y, N, uopFSQRT_D, IQT_FP, FU_FDV, RT_FLT, RT_FLT, RT_X  , N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, N, N, CSR.N, N, N, N, DC2)
-  )
+  )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "FDivSqrt")
 }
 
 /**
@@ -412,7 +455,7 @@ object FDivSqrtDecode extends DecodeConstants
 // chisel complaints on single giant table, so we use multiple objects
 object VectorCfgDecode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array(
+/*val table: Array[(BitPat, List[BitPat])] = Array(
     //                                                                                   frs3_en                        wakeup_delay
     //                 is val inst?                                                      |  imm sel                     |    bypassable (aka, known/fixed latency)
     //                 |  is fp inst?                                                    |  |     uses_ldq              |    |  is_br              is vector instruction
@@ -427,12 +470,13 @@ object VectorCfgDecode extends DecodeConstants
     VSETVLI     ->List(Y, N, X, uopVSETVLI,     IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_0, N, N, N, Y, Y, CSR.W, Y, N, X, DC2)  // TODO optimize us
    ,VSETIVLI    ->List(Y, N, X, uopVSETIVLI,    IQT_INT, FU_CSR, RT_FIX, RT_X  , RT_X  , N, IS_I, N, N, N, N, N, M_X  , U_0, N, N, N, Y, Y, CSR.W, Y, N, X, DC2)
    ,VSETVL      ->List(Y, N, X, uopVSETVL,      IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , U_0, N, N, N, Y, Y, CSR.W, Y, N, X, DC2)
- )
+ )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorCfg")
 }
 
 object VectorLSDecode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array(
+/*val table: Array[(BitPat, List[BitPat])] = Array(
     //                                                                           frs3_en                        wakeup_delay
     //               is val inst?                                                |  imm sel                     |    bypassable (aka, known/fixed latency)
     //               |  is fp inst?                                              |  |     uses_ldq              |    |  is_br              is vector instruction
@@ -502,12 +546,13 @@ object VectorLSDecode extends DecodeConstants
    ,VS2R_V    ->List(Y, N, X, uopVSR,   IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, N, U_0)
    ,VS4R_V    ->List(Y, N, X, uopVSR,   IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, N, U_0)
    ,VS8R_V    ->List(Y, N, X, uopVSR,   IQT_MVEC,FU_MEMV,RT_X  , RT_FIX, RT_X  , Y, IS_X, N, Y, N, N, N, M_XWR, DC2, N, N, N, N, N, CSR.N, Y, Y, N, U_0)
- )
+ )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorMem")
 }
 
 object VectorIntDecode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array(
+/*val table: Array[(BitPat, List[BitPat])] = Array(
     //                                                                              frs3_en                      wakeup_delay
     //                is val inst?                                                  |  imm sel                   |    bypassable (aka, known/fixed latency)
     //                |  is fp inst?                                                |  |     uses_ldq            |    |  is_br              is vector instruction
@@ -653,12 +698,13 @@ object VectorIntDecode extends DecodeConstants
    ,VMV_V_V    ->List(Y, N, X, uopVMV_V,   IQT_VEC ,FU_ALU ,RT_VEC, RT_VEC, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VMV_V_X    ->List(Y, N, X, uopVMV_V,   IQT_IVEC,FU_ALU ,RT_VEC, RT_FIX, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VMV_V_I    ->List(Y, N, X, uopVMV_V,   IQT_VEC, FU_ALU ,RT_VEC, RT_VI,  RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
- )
+ )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorInt")
 }
 
 object VectorFixDecode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array(
+/*val table: Array[(BitPat, List[BitPat])] = Array(
     //                                                                            frs3_en                      wakeup_delay
     //               is val inst?                                                 |  imm sel                   |    bypassable (aka, known/fixed latency)
     //               |  is fp inst?                                               |  |     uses_ldq            |    |  is_br              is vector instruction
@@ -702,12 +748,13 @@ object VectorFixDecode extends DecodeConstants
    ,VNCLIP_WV ->List(Y, N, X, uopVNCLIP, IQT_VEC ,FU_MAC ,RT_VEC, RT_VEC, RT_VW , N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VNCLIP_WX ->List(Y, N, X, uopVNCLIP, IQT_IVEC,FU_MAC ,RT_VEC, RT_FIXU,RT_VW , N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VNCLIP_WI ->List(Y, N, X, uopVNCLIP, IQT_VEC ,FU_MAC ,RT_VEC, RT_VIU, RT_VW , N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
- )
+ )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorFix")
 }
 
 object VectorFPDecode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array (
+/*val table: Array[(BitPat, List[BitPat])] = Array (
     //                                                                                     frs3_en                      wakeup_delay
     //                      is val inst?                                                   |  imm sel                   |    bypassable (aka, known/fixed latency)
     //                      |  is fp inst?                                                 |  |     uses_ldq            |    |  is_br              is vector instruction
@@ -810,12 +857,13 @@ object VectorFPDecode extends DecodeConstants
    ,VFNCVT_ROD_F_F_W ->List(Y, Y, X, uopVFCVT_F2F,IQT_VEC ,FU_FPU ,RT_VEC, RT_X  , RT_VW , N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VFNCVT_RTZ_XU_F_W->List(Y, Y, X, uopVFCVT_F2I,IQT_VEC ,FU_F2I ,RT_VEC, RT_X  , RT_VW , N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VFNCVT_RTZ_X_F_W ->List(Y, Y, X, uopVFCVT_F2I,IQT_VEC ,FU_F2I ,RT_VEC, RT_X  , RT_VW , N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
- )
+ )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorFloat")
 }
 
 object VectorRedDecode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array (
+/*val table: Array[(BitPat, List[BitPat])] = Array (
     //                                                                              frs3_en                      wakeup_delay
     //                  is val inst?                                                |  imm sel                   |    bypassable (aka, known/fixed latency)
     //                  |  is fp inst?                                              |  |     uses_ldq            |    |  is_br              is vector instruction
@@ -843,12 +891,13 @@ object VectorRedDecode extends DecodeConstants
    ,VFREDMAX_VS  ->List(Y, Y, X, uopVFMAX, IQT_VEC ,FU_FPU ,RT_VRED,RT_VRED,RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VFWREDOSUM_VS->List(Y, Y, X, uopVFADD, IQT_VEC ,FU_FPU ,RT_VRW ,RT_VRW ,RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VFWREDSUM_VS ->List(Y, Y, X, uopVFADD, IQT_VEC ,FU_FPU ,RT_VRW ,RT_VRW ,RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
- )
+ )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorReduction")
 }
 
 object VectorMaskDecode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array (
+/*val table: Array[(BitPat, List[BitPat])] = Array (
     //                                                                              frs3_en                      wakeup_delay
     //                is val inst?                                                  |  imm sel                   |    bypassable (aka, known/fixed latency)
     //                |  is fp inst?                                                |  |     uses_ldq            |    |  is_br              is vector instruction
@@ -875,12 +924,13 @@ object VectorMaskDecode extends DecodeConstants
    ,VMSOF_M    ->List(Y, N, X, uopVMSOF,   IQT_VEC ,FU_VMASKU,RT_VEC, RT_X, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VIOTA_M    ->List(Y, N, X, uopVIOTA,   IQT_VEC ,FU_VMASKU,RT_VU,  RT_X, RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VID_V      ->List(Y, N, X, uopVID,     IQT_VEC ,FU_ALU   ,RT_VU,  RT_X, RT_X,   N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
- )
+ )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorMask")
 }
 
 object VectorPermDecode extends DecodeConstants
 {
-  val table: Array[(BitPat, List[BitPat])] = Array (
+/*val table: Array[(BitPat, List[BitPat])] = Array (
     //                                                                                      frs3_en                      wakeup_delay
     //                    is val inst?                                                      |  imm sel                   |    bypassable (aka, known/fixed latency)
     //                    |  is fp inst?                                                    |  |     uses_ldq            |    |  is_br              is vector instruction
@@ -913,7 +963,8 @@ object VectorPermDecode extends DecodeConstants
    ,VMV2R_V        ->List(Y, N, X, uopVMVR,        IQT_VEC ,FU_ALU ,RT_VEC, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VMV4R_V        ->List(Y, N, X, uopVMVR,        IQT_VEC ,FU_ALU ,RT_VEC, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
    ,VMV8R_V        ->List(Y, N, X, uopVMVR,        IQT_VEC ,FU_ALU ,RT_VEC, RT_X,   RT_VEC, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, Y, Y, Y, DC2)
- )
+ )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorPerm")
 }
 //scalastyle:on
 // TODO:
@@ -925,7 +976,7 @@ object VectorPermDecode extends DecodeConstants
 object RoCCDecode extends DecodeConstants
 {
   // Note: We use FU_CSR since CSR instructions cannot co-execute with RoCC instructions
-  val table: Array[(BitPat, List[BitPat])] = Array(
+/*val table: Array[(BitPat, List[BitPat])] = Array(
     //                                                                                   frs3_en                      wakeup_delay
     //                        is val inst?                                               |  imm sel                   |    bypassable (aka, known/fixed latency)
     //                        |  is fp inst?                                             |  |     uses_ldq            |    |  is_br
@@ -961,7 +1012,8 @@ object RoCCDecode extends DecodeConstants
     CUSTOM3_RD         ->List(Y, N, X, uopROCC, IQT_INT, FU_CSR, RT_FIX, RT_X  , RT_X  , N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, N, N, N, DC2),
     CUSTOM3_RD_RS1     ->List(Y, N, X, uopROCC, IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_X  , N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, N, N, N, DC2),
     CUSTOM3_RD_RS1_RS2 ->List(Y, N, X, uopROCC, IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X, U_0, N, N, N, N, N, CSR.N, N, N, N, DC2)
-  )
+  )*/
+  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "RoCC")
 }
 
 /**
