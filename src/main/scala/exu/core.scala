@@ -402,14 +402,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   val memStallAnyLoad = !iss_valids.reduce(_||_) && io.lsu.perf.ldq_nonempty
   val memStallStores  = !iss_valids.reduce(_||_) && io.lsu.perf.stq_nonempty
-  val dis_stq_hazards = (0 until coreWidth).map(w => io.lsu.stq_full(w) && dis_uops(w).uses_stq).reduce(_||_)
 
   val topDownCycleEvent = new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("recovery cycle",            () => recovery_stat),
     ("branch mispred retired",    () => mispredict_val),
     ("machine clears",            () => rob.io.flush.valid),
     ("fetch latency cycle",       () => (~io.ifu.perf.fb_enq_valid && dis_ready)),      // no fetch data to fetch buffer && no stalls
-    ("few ops executed cycle",    () => !dis_fire.reduce((m, n) => m || n)),            // issue 0 insn
+    ("few ops executed cycle",    () => !iss_valids.reduce((m, n) => m || n)),            // issue 0 insn
     ("any load causes mem stall", () => memStallAnyLoad),
     ("stores mem stall",          () => memStallStores)
   ))
