@@ -390,7 +390,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val recovery_stat = RegInit(false.B)
   when(mispredict_val || rob.io.flush.valid){
     recovery_stat := true.B
-  }.elsewhen(io.ifu.fetchpacket.valid){
+  // }.elsewhen(io.ifu.fetchpacket.valid){
+  }.elsewhen(dis_valids.reduce((m, n) => m || n)){
     recovery_stat := false.B
   }
 
@@ -399,7 +400,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("fetch bubbles",   () => dis_fire.reduce((m, n) => m || n) & (~dispatch)) // 0 < bubbles < issueWidth
   )))
 
-  val dis_ldq_hazards = (0 until coreWidth).map(w => io.lsu.ldq_full(w) && dis_uops(w).uses_ldq).reduce(_||_)
+  val memStallAnyLoad = !iss_valids.reduce(_||_) && io.lsu.perf.ldq_nonempty
+  val memStallStores  = !iss_valids.reduce(_||_) && io.lsu.perf.stq_nonempty
   val dis_stq_hazards = (0 until coreWidth).map(w => io.lsu.stq_full(w) && dis_uops(w).uses_stq).reduce(_||_)
 
   val topDownCycleEvent = new EventSet((mask, hits) => (mask & hits).orR, Seq(
@@ -408,8 +410,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("machine clears",            () => rob.io.flush.valid),
     ("fetch latency cycle",       () => (~io.ifu.perf.fb_enq_valid && dis_ready)),      // no fetch data to fetch buffer && no stalls
     ("few ops executed cycle",    () => !dis_fire.reduce((m, n) => m || n)),            // issue 0 insn
-    ("any load causes mem stall", () => dis_ldq_hazards),
-    ("stores mem stall",          () => dis_ldq_hazards)
+    ("any load causes mem stall", () => memStallAnyLoad),
+    ("stores mem stall",          () => memStallStores)
   ))
 
   val perfEvents = new SuperscalarEventSets(Seq(

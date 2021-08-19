@@ -158,6 +158,8 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
     val acquire = Bool()
     val release = Bool()
     val tlbMiss = Bool()
+    val ldq_nonempty = Bool()
+    val stq_nonempty = Bool()
   })
 }
 
@@ -288,7 +290,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   var ld_enq_idx = ldq_tail
   var st_enq_idx = stq_tail
 
+  val ldq_nonempty = (0 until numStqEntries).map{ i => ldq(i).valid }.reduce(_||_) =/= 0.U
+  io.core.perf.ldq_nonempty := ldq_nonempty
   val stq_nonempty = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_||_) =/= 0.U
+  io.core.perf.stq_nonempty := stq_nonempty
 
   var ldq_full = Bool()
   var stq_full = Bool()
