@@ -404,7 +404,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   val topDownCycleEvent = new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("recovery cycle",            () => recovery_stat),
-    ("fetch no Deliver cycle",    () => !io.ifu.fetchpacket.valid),
+    ("fetch no Deliver cycle",    () => ~io.ifu.perf.fb_enq_valid && ~io.ifu.perf.fb_deq_valid),
     ("branch mispred retired",    () => mispredict_val),
     ("machine clears",            () => rob.io.flush.valid),
     // ("few ops executed cycle",    () => iss_valids.map(t => t.asUInt()).reduce(_ +& _) <= 1.U),            // issue 0 insn
