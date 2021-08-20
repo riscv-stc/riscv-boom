@@ -399,8 +399,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("fetch bubbles",   () => dis_fire.reduce((m, n) => m || n) & (~dispatch))  // 0 < bubbles < issueWidth
   )))
 
-  val memStallAnyLoad = !iss_valids.reduce(_||_) && io.lsu.perf.ldq_nonempty
-  val memStallStores  = !iss_valids.reduce(_||_) && io.lsu.perf.stq_full
+  val memStallAnyLoad = !int_iss_unit.io.event_empty && !int_iss_unit.io.iss_valids.reduce(_||_) && io.lsu.perf.ldq_nonempty
+  val memStallStores  = !int_iss_unit.io.event_empty && !int_iss_unit.io.iss_valids.reduce(_||_) && io.lsu.perf.stq_full
 
   val topDownCycleEvent = new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("recovery cycle",            () => recovery_stat),
@@ -408,7 +408,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("branch mispred retired",    () => mispredict_val),
     ("machine clears",            () => rob.io.flush.valid),
     // ("few ops executed cycle",    () => iss_valids.map(t => t.asUInt()).reduce(_ +& _) <= 1.U),            // issue 0 insn
-    ("few ops executed cycle",    () => !iss_valids.reduce((m, n) => m || n)),
+    ("few ops executed cycle",    () => !int_iss_unit.io.iss_valids.reduce((m, n) => m || n)),
     ("any load causes mem stall", () => memStallAnyLoad),
     ("stores mem stall",          () => memStallStores)
   ))
