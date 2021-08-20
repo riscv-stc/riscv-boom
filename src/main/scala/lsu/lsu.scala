@@ -160,6 +160,7 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
     val tlbMiss = Bool()
     val ldq_nonempty = Bool()
     val stq_nonempty = Bool()
+    val stq_full = Bool()
   })
 }
 
@@ -360,6 +361,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   io.core.fencei_rdy    := !stq_nonempty && io.dmem.ordered
 
 
+  io.core.perf.stq_full := stq_full
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // Execute stage (access TLB, send requests to Memory)

@@ -390,25 +390,25 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val recovery_stat = RegInit(false.B)
   when(mispredict_val || rob.io.flush.valid){
     recovery_stat := true.B
-  // }.elsewhen(io.ifu.fetchpacket.valid){
   }.elsewhen(dis_valids.reduce((m, n) => m || n)){
     recovery_stat := false.B
   }
 
   val topDownslotVec = dis_fire.map(dispatch => new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("slots issued",    () => dispatch),
-    ("fetch bubbles",   () => dis_fire.reduce((m, n) => m || n) & (~dispatch)) // 0 < bubbles < issueWidth
+    ("fetch bubbles",   () => dis_fire.reduce((m, n) => m || n) & (~dispatch))  // 0 < bubbles < issueWidth
   )))
 
   val memStallAnyLoad = !iss_valids.reduce(_||_) && io.lsu.perf.ldq_nonempty
-  val memStallStores  = !iss_valids.reduce(_||_) && io.lsu.perf.stq_nonempty
+  val memStallStores  = !iss_valids.reduce(_||_) && io.lsu.perf.stq_full
 
   val topDownCycleEvent = new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("recovery cycle",            () => recovery_stat),
+    ("fetch no Deliver cycle",    () => !io.ifu.fetchpacket.valid),
     ("branch mispred retired",    () => mispredict_val),
     ("machine clears",            () => rob.io.flush.valid),
-    ("fetch latency cycle",       () => (~io.ifu.perf.fb_enq_valid && dis_ready)),      // no fetch data to fetch buffer && no stalls
-    ("few ops executed cycle",    () => !iss_valids.reduce((m, n) => m || n)),            // issue 0 insn
+    // ("few ops executed cycle",    () => iss_valids.map(t => t.asUInt()).reduce(_ +& _) <= 1.U),            // issue 0 insn
+    ("few ops executed cycle",    () => !iss_valids.reduce((m, n) => m || n)),
     ("any load causes mem stall", () => memStallAnyLoad),
     ("stores mem stall",          () => memStallStores)
   ))
