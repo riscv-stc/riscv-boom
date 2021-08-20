@@ -395,8 +395,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   val topDownslotVec = dis_fire.map(dispatch => new EventSet((mask, hits) => (mask & hits).orR, Seq(
-    ("slots issued",    () => dispatch),
-    ("fetch bubbles",   () => dis_fire.reduce((m, n) => m || n) & (~dispatch))  // 0 < bubbles < issueWidth
+    ("slots issued",     () => dispatch),
+    ("fetch bubbles",    () => dis_fire.reduce((m, n) => m || n) & (~dispatch)),  // 0 < bubbles < issueWidth
+    ("dispatch bubbles", () => (~dispatch))
   )))
 
   val memStallAnyLoad = !int_iss_unit.io.event_empty && !int_iss_unit.io.iss_valids.reduce(_||_) && io.lsu.perf.ldq_nonempty
@@ -404,7 +405,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   val topDownCycleEvent = new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("recovery cycle",            () => recovery_stat),
-    ("fetch no Deliver cycle",    () => ~io.ifu.perf.fb_enq_valid && ~io.ifu.perf.fb_deq_valid),
+    ("fetch no Deliver cycle",    () => !dis_fire.reduce((m, n) => m || n)),
     ("branch mispred retired",    () => mispredict_val),
     ("machine clears",            () => rob.io.flush.valid),
     // ("few ops executed cycle",    () => iss_valids.map(t => t.asUInt()).reduce(_ +& _) <= 1.U),            // issue 0 insn
