@@ -195,6 +195,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dis_split_cand  = Wire(Vec(coreWidth, Bool()))
   val dis_split_actv  = Wire(Vec(coreWidth, Bool()))
   val dis_prev_split_actv  = Wire(Vec(coreWidth, Bool()))
+  val wait_for_empty_pipeline = Wire(Vec(coreWidth, Bool()))
 
   // Issue Stage/Register Read
   val iss_valids = Wire(Vec(exe_units.numIrfReaders, Bool()))
@@ -387,29 +388,23 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 //      ))
 //  ))
 
-  val recovery_stat = RegInit(false.B)
-  when(mispredict_val || rob.io.flush.valid){
-    recovery_stat := true.B
-  }.elsewhen(dis_valids.reduce((m, n) => m || n)){
-    recovery_stat := false.B
-  }
+  val backEnd_nostall = int_iss_unit.io.iss_valids.reduce(_||_)
+  val backEnd_stall   = !backEnd_nostall
+  val memStallAnyLoad = !int_iss_unit.io.event_empty && backEnd_stall && io.lsu.perf.ldq_nonempty
+  val memStallStores  = !int_iss_unit.io.event_empty && backEnd_stall && io.lsu.perf.stq_full
 
   val topDownslotVec = dis_fire.map(dispatch => new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("slots issued",     () => dispatch),
-    ("fetch bubbles",    () => dis_fire.reduce((m, n) => m || n) & (~dispatch)),  // 0 < bubbles < issueWidth
-    ("dispatch bubbles", () => (~dispatch))
+    ("fetch bubbles",    () => backEnd_nostall && (~dispatch))  // 0 < bubbles < issueWidth
   )))
 
-  val memStallAnyLoad = !int_iss_unit.io.event_empty && !int_iss_unit.io.iss_valids.reduce(_||_) && io.lsu.perf.ldq_nonempty
-  val memStallStores  = !int_iss_unit.io.event_empty && !int_iss_unit.io.iss_valids.reduce(_||_) && io.lsu.perf.stq_full
-
   val topDownCycleEvent = new EventSet((mask, hits) => (mask & hits).orR, Seq(
-    ("recovery cycle",            () => recovery_stat),
-    ("fetch no Deliver cycle",    () => !dis_fire.reduce((m, n) => m || n)),
+    ("recovery cycle",            () => mispredict_val),
+    ("fetch no Deliver cycle",    () => !dis_fire.reduce(_||_) && backEnd_nostall),
     ("branch mispred retired",    () => mispredict_val),
     ("machine clears",            () => rob.io.flush.valid),
-    // ("few ops executed cycle",    () => iss_valids.map(t => t.asUInt()).reduce(_ +& _) <= 1.U),            // issue 0 insn
-    ("few ops executed cycle",    () => !int_iss_unit.io.iss_valids.reduce((m, n) => m || n)),
+    // ("few ops executed cycle",    () => iss_valids.map(t => t.asUInt()).reduce(_ +& _) <= 1.U), // issue 0 insn
+    ("few ops executed cycle",    () => backEnd_stall),
     ("any load causes mem stall", () => memStallAnyLoad),
     ("stores mem stall",          () => memStallStores)
   ))
@@ -873,7 +868,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   val dis_prior_slot_valid = dis_valids.scanLeft(false.B) ((s,v) => s || v)
   val dis_prior_slot_unique = (dis_uops zip dis_valids).scanLeft(false.B) {case (s,(u,v)) => s || v && u.is_unique}
-  val wait_for_empty_pipeline = (0 until coreWidth).map(w => (dis_uops(w).is_unique || custom_csrs.disableOOO) &&
+  wait_for_empty_pipeline := (0 until coreWidth).map(w => (dis_uops(w).is_unique || custom_csrs.disableOOO) &&
                                   (!rob.io.empty || !io.lsu.fencei_rdy || dis_prior_slot_valid(w)))
   val rocc_shim_busy = if (usingRoCC) !exe_units.rocc_unit.io.rocc.rxq_empty else false.B
   val wait_for_rocc = (0 until coreWidth).map(w =>
