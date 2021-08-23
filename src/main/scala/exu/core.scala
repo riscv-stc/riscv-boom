@@ -176,6 +176,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // Decode/Rename1 Stage
   val dec_valids = Wire(Vec(coreWidth, Bool()))  // are the decoded instruction valid? It may be held up though.
   val dec_uops   = Wire(Vec(coreWidth, new MicroOp()))
+  val dec_hazards= Wire(Vec(coreWidth, Bool()))
   val dec_fe_fire= Wire(Vec(coreWidth, Bool()))  // can the instruction pop from instruction buffer
   val dec_fire   = Wire(Vec(coreWidth, Bool()))  // can the instruction fire beyond decode?
                                                     // (can still be stopped in ren or dis)
@@ -388,23 +389,27 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 //      ))
 //  ))
 
-  val backEnd_nostall = int_iss_unit.io.iss_valids.reduce(_||_)
-  val backEnd_stall   = !backEnd_nostall
-  val memStallAnyLoad = !int_iss_unit.io.event_empty && backEnd_stall && io.lsu.perf.ldq_nonempty
-  val memStallStores  = !int_iss_unit.io.event_empty && backEnd_stall && io.lsu.perf.stq_full
+  // split at dec < - > rename
+  val backEnd_stall   = dec_hazards.reduce(_||_)
+  val backEnd_nostall = !backEnd_stall
+  val iss_nostall     = int_iss_unit.io.iss_valids.reduce(_||_) && !int_iss_unit.io.event_empty
+  val iss_stall       = !iss_nostall
+  val memStallAnyLoad = iss_stall && io.lsu.perf.ldq_nonempty
+  val memStallStores  = iss_stall && io.lsu.perf.stq_full
+  val fetch_no_deliver= !dec_fire.reduce(_||_) && backEnd_nostall
 
-  val topDownslotVec = dis_fire.map(dispatch => new EventSet((mask, hits) => (mask & hits).orR, Seq(
-    ("slots issued",     () => dispatch),
-    ("fetch bubbles",    () => backEnd_nostall && (~dispatch))  // 0 < bubbles < issueWidth
+  val topDownslotVec = dec_fire.map(dec => new EventSet((mask, hits) => (mask & hits).orR, Seq(
+    ("slots issued",     () => dec),
+    ("fetch bubbles",    () => (dec_fire.reduce(_||_) && (~dec)) || fetch_no_deliver)  // 0 < bubbles < issueWidth
   )))
 
   val topDownCycleEvent = new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("recovery cycle",            () => mispredict_val),
-    ("fetch no Deliver cycle",    () => !dis_fire.reduce(_||_) && backEnd_nostall),
+    ("fetch no Deliver cycle",    () => fetch_no_deliver),
     ("branch mispred retired",    () => mispredict_val),
     ("machine clears",            () => rob.io.flush.valid),
     // ("few ops executed cycle",    () => iss_valids.map(t => t.asUInt()).reduce(_ +& _) <= 1.U), // issue 0 insn
-    ("few ops executed cycle",    () => backEnd_stall),
+    ("few ops executed cycle",    () => iss_stall),
     ("any load causes mem stall", () => memStallAnyLoad),
     ("stores mem stall",          () => memStallStores)
   ))
@@ -735,7 +740,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   dec_prev_enq_stalls(0) := false.B
   (1 until coreWidth).map(w => dec_prev_enq_stalls(w) := dec_enq_stalls(w-1))
 
-  val dec_hazards = (0 until coreWidth).map(w =>
+  dec_hazards     := (0 until coreWidth).map(w =>
                       dec_valids(w) &&
                       (  !dis_ready
                       || dec_prev_enq_stalls(w)
