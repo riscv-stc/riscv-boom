@@ -389,18 +389,20 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 //      ))
 //  ))
 
-  // split at dec < - > rename
+  // split at ifu-fetuchBuffer < - > decode
+  val ifu_redirect_flush = io.ifu.redirect_flush
+  val fetch_valids    = (0 until coreWidth).map(w => io.ifu.fetchpacket.bits.uops(w).valid)
   val backEnd_stall   = dec_hazards.reduce(_||_)
   val backEnd_nostall = !backEnd_stall
   val iss_nostall     = int_iss_unit.io.iss_valids.reduce(_||_) && !int_iss_unit.io.event_empty
   val iss_stall       = !iss_nostall
   val memStallAnyLoad = iss_stall && io.lsu.perf.ldq_nonempty
   val memStallStores  = iss_stall && io.lsu.perf.stq_full
-  val fetch_no_deliver= !dec_fire.reduce(_||_) && backEnd_nostall
+  val fetch_no_deliver= !fetch_valids.reduce(_||_) && (backEnd_nostall && (~io.ifu.redirect_flush))
 
-  val topDownslotVec = dec_fire.map(dec => new EventSet((mask, hits) => (mask & hits).orR, Seq(
-    ("slots issued",     () => dec),
-    ("fetch bubbles",    () => (dec_fire.reduce(_||_) && (~dec)) || fetch_no_deliver)  // 0 < bubbles < issueWidth
+  val topDownslotVec = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
+    ("slots issued",     () => dec_fire(w)),
+    ("fetch bubbles",    () => (~fetch_valids(w)) && (backEnd_nostall && (~io.ifu.redirect_flush)))  // 0 < bubbles < issueWidth
   )))
 
   val topDownCycleEvent = new EventSet((mask, hits) => (mask & hits).orR, Seq(
