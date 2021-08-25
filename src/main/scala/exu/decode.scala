@@ -683,9 +683,13 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val illegal_reg_emul = !vd_emul_legal || !vs2_emul_legal
 
     //reg_num should be multiple of emul, low bit or reg_num !=0 will raise illegal
-    val illegal_dst_multiple_emul = Mux(vd_lmul(2), false.B, ((rightOR(UIntToOH(vd_lmul(1,0))) >> 1.U).asUInt & uop.ldst & (uop.dst_rtype === RT_VEC)) =/= 0.U)
-    val illegal_vs2_multiple_emul = Mux(vs2_lmul(2), false.B, ((rightOR(UIntToOH(vs2_lmul(1,0))) >> 1.U).asUInt & uop.lrs2 & (uop.lrs2_rtype === RT_VEC)) =/= 0.U)
-    val illegal_vs1_multiple_emul = Mux(vlmul_value(2), false.B, ((rightOR(UIntToOH(vlmul_value(1,0))) >> 1.U).asUInt & uop.lrs1 & (uop.lrs1_rtype === RT_VEC)) =/= 0.U)
+    val illegal_dst_multiple_emul: Bool = Mux(vd_lmul(2), false.B, (((rightOR(UIntToOH(vd_lmul(1,0))) >> 1.U).asUInt
+                                    & inst(RD_MSB,RD_LSB)) =/= 0.U) && (uop.dst_rtype === RT_VEC))
+    val illegal_vs2_multiple_emul = Mux(vs2_lmul(2), false.B, (((rightOR(UIntToOH(vs2_lmul(1,0))) >> 1.U).asUInt
+                                    & inst(RS2_MSB,RS2_LSB)) =/= 0.U) && (uop.lrs2_rtype === RT_VEC))
+    val illegal_vs1_multiple_emul = Mux(vlmul_value(2), false.B, (((rightOR(UIntToOH(vlmul_value(1,0))) >> 1.U).asUInt
+                                    & inst(RS1_MSB,RS1_LSB)) =/= 0.U) && (uop.lrs1_rtype === RT_VEC))
+
     val illegal_regnum_multiple_emul = illegal_dst_multiple_emul || illegal_vs2_multiple_emul || illegal_vs1_multiple_emul
 
     val illegal_vs2_overlap_vd_lowpart = (uop.ldst === (uop.lrs2 + vs2_lmul(1,0))) && uop.rt(RD, isNarrowV)
