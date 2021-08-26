@@ -346,66 +346,63 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }
   }
 
-//  val perfEvents = new freechips.rocketchip.rocket.EventSets(Seq(
-//
-//    new freechips.rocketchip.rocket.EventSet((mask, hits) => (mask & hits).orR, Seq(
-//      ("exception", () => rob.io.com_xcpt.valid),
-//      ("load",      () => commit_load.reduce(_||_)),
-//      ("store",     () => commit_store.reduce(_||_)),
-//      ("amo",       () => usingAtomics.asBool() && commit_amo.reduce(_||_)),
-//      ("system",    () => commit_system.reduce(_||_)),
-//      ("arith",     () =>  is_arith.reduce(_||_)),
-//      ("branch",    () => is_branch.reduce(_||_)),
-//      ("jal",       () => is_jal.reduce(_||_)),
-//      ("jalr",      () => is_jalr.reduce(_||_)))
-//       ++ (if (!usingFPU) Seq() else Seq(
-//        ("fp load",     () => commit_fp_load.reduce(_||_)),
-//        ("fp store",    () => commit_fp_store.reduce(_||_)),
-//        ("fp add",      () => commit_fp_add.reduce(_||_)),
-//        ("fp mul",      () => commit_fp_mul.reduce(_||_)),
-//        ("fp mul-add",  () => false.B),
-//        ("fp div",      () => commit_fp_div.reduce(_||_)),
-//        ("fp other",    () => commit_fp_other.reduce(_||_))
-//        )
-//      )
-//    ), 
-//
-//    new freechips.rocketchip.rocket.EventSet((mask, hits) => (mask & hits).orR, Seq(
-//      ("I$ blocked",                        () => icache_blocked),
-//      ("nop",                               () => false.B),
-//      ("branch misprediction",              () => mispredict_val),
-//      ("control-flow target misprediction", () => mispredict_val && oldest_mispredict.cfi_type === CFI_JALR),
-//      ("flush",                             () => rob.io.flush.valid),
-//      ("branch resolved",                   () => b1.resolve_mask =/= 0.U)
-//      )),
-//    
-//    new freechips.rocketchip.rocket.EventSet((mask, hits) => (mask & hits).orR, Seq(
-//      ("I$ miss",     () => io.ifu.perf.acquire),
-//      ("D$ miss",     () => io.lsu.perf.acquire),
-//      ("D$ release",  () => io.lsu.perf.release),
-//      ("ITLB miss",   () => io.ifu.perf.tlbMiss),
-//      ("DTLB miss",   () => io.lsu.perf.tlbMiss),
-//      ("L2 TLB miss", () => io.ptw.perf.l2miss)
-//      ))
-//  ))
+  val insnCommitEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+     ("exception", () => rob.io.com_xcpt.valid),
+     ("load",      () => commit_load.reduce(_||_)),
+     ("store",     () => commit_store.reduce(_||_)),
+     ("amo",       () => usingAtomics.asBool() && commit_amo.reduce(_||_)),
+     ("system",    () => commit_system.reduce(_||_)),
+     ("arith",     () => is_arith.reduce(_||_)),
+     ("branch",    () => is_branch.reduce(_||_)),
+     ("jal",       () => is_jal.reduce(_||_)),
+     ("jalr",      () => is_jalr.reduce(_||_)))
+      ++ (if (!usingFPU) Seq() else Seq(
+       ("fp load",     () => commit_fp_load.reduce(_||_)),
+       ("fp store",    () => commit_fp_store.reduce(_||_)),
+       ("fp add",      () => commit_fp_add.reduce(_||_)),
+       ("fp mul",      () => commit_fp_mul.reduce(_||_)),
+       ("fp mul-add",  () => false.B),
+       ("fp div",      () => commit_fp_div.reduce(_||_)),
+       ("fp other",    () => commit_fp_other.reduce(_||_))
+       )
+     )
+   )
+
+  val microArchEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+     ("I$ blocked",                        () => icache_blocked),
+     ("nop",                               () => false.B),
+     ("branch misprediction",              () => mispredict_val),
+     ("control-flow target misprediction", () => mispredict_val && oldest_mispredict.cfi_type === CFI_JALR),
+     ("flush",                             () => rob.io.flush.valid),
+     ("branch resolved",                   () => b1.resolve_mask =/= 0.U)
+   ))
+
+  val memorySystemEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+     ("I$ miss",     () => io.ifu.perf.acquire),
+     ("D$ miss",     () => io.lsu.perf.acquire),
+     ("D$ release",  () => io.lsu.perf.release),
+     ("ITLB miss",   () => io.ifu.perf.tlbMiss),
+     ("DTLB miss",   () => io.lsu.perf.tlbMiss),
+     ("L2 TLB miss", () => io.ptw.perf.l2miss)
+     ))
 
   // split at ifu-fetuchBuffer < - > decode
   val ifu_redirect_flush = io.ifu.redirect_flush
   val fetch_valids    = (0 until coreWidth).map(w => io.ifu.fetchpacket.bits.uops(w).valid)
   val backEnd_stall   = dec_hazards.reduce(_||_)
   val backEnd_nostall = !backEnd_stall
-  val iss_nostall     = int_iss_unit.io.iss_valids.reduce(_||_) && !int_iss_unit.io.event_empty
+  val iss_nostall     = int_iss_unit.io.iss_valids.reduce(_||_)
   val iss_stall       = !iss_nostall
-  val memStallAnyLoad = iss_stall && io.lsu.perf.ldq_nonempty
-  val memStallStores  = iss_stall && io.lsu.perf.stq_full
+  val memStallAnyLoad = iss_stall && io.lsu.perf.ldq_nonempty && !int_iss_unit.io.event_empty
+  val memStallStores  = iss_stall && io.lsu.perf.stq_full && (~memStallAnyLoad)
   val fetch_no_deliver= !fetch_valids.reduce(_||_) && (backEnd_nostall && (~io.ifu.redirect_flush))
 
   val topDownslotVec = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("slots issued",     () => dec_fire(w)),
-    ("fetch bubbles",    () => (~fetch_valids(w)) && (backEnd_nostall && (~io.ifu.redirect_flush)))  // 0 < bubbles < issueWidth
+    ("fetch bubbles",    () => (~fetch_valids(w)) && (backEnd_nostall && (~io.ifu.redirect_flush)))
   )))
 
-  val topDownCycleEvent = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+  val topDownCycleEvents0 = new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("recovery cycle",            () => mispredict_val),
     ("fetch no Deliver cycle",    () => fetch_no_deliver),
     ("branch mispred retired",    () => mispredict_val),
@@ -416,9 +413,19 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("stores mem stall",          () => memStallStores)
   ))
 
+  val topDownCycleEvents1 = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+    ("ITLB miss",   () => io.ifu.perf.tlbMiss),
+    ("DTLB miss",   () => io.lsu.perf.tlbMiss)
+  ))
+
   val perfEvents = new SuperscalarEventSets(Seq(
     (topDownslotVec,           (m, n) => m +& n),
-    (Seq(topDownCycleEvent),   (m, n) => m +& n)))
+    (Seq(topDownCycleEvents0), (m, n) => m +& n),
+    (Seq(topDownCycleEvents1), (m, n) => m +& n),
+    (Seq(insnCommitEvents),    (m, n) => m +& n),
+    (Seq(microArchEvents),     (m, n) => m +& n),
+    (Seq(memorySystemEvents),  (m, n) => m +& n)
+  ))
 
 
   val csr = Module(new freechips.rocketchip.rocket.CSRFile(perfEvents.toScalarEventSets, boomParams.customCSRs.decls))
