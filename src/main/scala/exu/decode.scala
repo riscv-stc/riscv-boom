@@ -678,8 +678,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     //register EEW > 64
     val illegal_reg_sew = cs.not_use_vtype && (vd_sew(2) || vs2_sew(2) || vs1_sew(2))
     //vd/vs2 EMUL should be illegal
-    val vd_emul_legal = Mux(vd_lmul(2), vd_lmul(1,0) =/= 0.U && vd_lmul(1,0) < 3.U - vd_sew, true.B)
-    val vs2_emul_legal = Mux(vs2_lmul(2), vs2_lmul(1,0) =/= 0.U && vs2_lmul(1,0) < 3.U - vs2_sew, true.B)
+    val vd_emul_legal = Mux(vd_lmul(2), vd_lmul(1,0) =/= 0.U && ~vd_lmul(1,0) < (3.U - vd_sew), true.B)
+    val vs2_emul_legal = Mux(vs2_lmul(2), vs2_lmul(1,0) =/= 0.U && ~vs2_lmul(1,0) < 3.U - vs2_sew, true.B)
     val illegal_reg_emul = !vd_emul_legal || !vs2_emul_legal
 
     //reg_num should be multiple of emul, low bit or reg_num !=0 will raise illegal
