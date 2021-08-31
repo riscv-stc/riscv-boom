@@ -252,7 +252,8 @@ class DecodeUnitIo(implicit p: Parameters) extends BoomBundle
   // from CSRFile
   val status = Input(new freechips.rocketchip.rocket.MStatus())
   val csr_decode = Flipped(new freechips.rocketchip.rocket.CSRDecodeIO)
-  val csr_vconfig = if (usingVector) Input(new VConfig) else null
+  val csr_vconfig = Input(new VConfig)
+  val csr_vstart = Input(UInt(vLenSz.W))
   val interrupt = Input(Bool())
   val interrupt_cause = Input(UInt(xLen.W))
 }
@@ -703,6 +704,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                                 illegal_reg_emul        ||
                                 illegal_regnum_multiple_emul ||
                                 illegal_vs2_overlap_vd_lowpart)
+    // handle vstart != 0
+    when (cs.is_rvv && io.csr_vstart =/= 0.U) {
+      uop.is_unique := true.B
+    }
+
   } // if usingvector
   io.deq.uop := uop
 

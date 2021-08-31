@@ -101,6 +101,7 @@ class SupportedFuncUnits(
   val fdiv: Boolean = false,
   val ifpu: Boolean = false,
   val fr7:  Boolean = false,
+  val vmx:  Boolean = false,
   val vector: Boolean = false)
 {
 }
@@ -322,7 +323,6 @@ class ALUUnit(
   isCsrUnit: Boolean = false,
   numStages: Int = 1,
   dataWidth: Int,
-  hasVMX: Boolean = false,
   vector: Boolean = false
   )
 (implicit p: Parameters)
@@ -556,7 +556,7 @@ class ALUUnit(
                Mux(vadc  || vsbc,  Mux(v_tail, io.req.bits.rs3_data, alu.io.out),
                Mux(vmadc || vmsbc, Cat(0.U((eLen-1).W), Mux(v_tail, io.req.bits.rs3_data(0), alu_co)),
                Mux(vmscmp,         Cat(0.U((eLen-1).W), Mux(v_tail || v_inactive, io.req.bits.rs3_data(0), alu.io.cmp_out)),
-               Mux(uop.is_rvv && (uop.ctrl.is_load || uop.ctrl.is_sta) || v_inactive, io.req.bits.rs3_data,
+               Mux(uop.is_rvv && (uop.ctrl.is_load || v_inactive), io.req.bits.rs3_data,
                    alu.io.out))))))))))))
   } else {
     alu_out := Mux(uop.is_sfb_shadow && io.req.bits.pred_data, Mux(uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
@@ -1236,4 +1236,73 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
 
   // vl => last
   io.resp.bits.data := vmaskUnit_out
+}
+
+/**
+ * VMX functional unit with back-pressure machanism.
+ *
+ * @param dataWidth data to be passed into the functional unit
+ */
+// implemented with BranchKillableQueue
+class VMXUnit(dataWidth: Int)(implicit p: Parameters) extends FunctionalUnit(
+    isPipelined = false,
+    numStages = 4,
+    numBypassStages = 0,
+    dataWidth = dataWidth)
+{
+  // buffer up results since we share write-port on integer regfile.
+  val queue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth), entries = numStages))
+  // enque
+  io.req.ready                   := queue.io.enq.ready && (queue.io.count < (numStages-2).asUInt)
+  queue.io.enq.valid             := io.req.valid && !IsKilledByBranch(io.brupdate, io.req.bits.uop) && !io.req.bits.kill
+  queue.io.enq.bits.uop          := io.req.bits.uop
+  queue.io.enq.bits.data         := io.req.bits.rs3_data
+  queue.io.enq.bits.predicated   := false.B
+  queue.io.enq.bits.fflags.valid := false.B
+  queue.io.enq.bits.fflags.bits  := DontCare
+  queue.io.brupdate              := io.brupdate
+  queue.io.flush                 := io.req.bits.kill
+  // deque
+  queue.io.deq.ready             := io.resp.ready
+  io.resp.valid                  := queue.io.deq.valid && !IsKilledByBranch(io.brupdate, queue.io.deq.bits.uop)
+  io.resp.bits.uop               := queue.io.deq.bits.uop
+  io.resp.bits.uop.br_mask       := GetNewBrMask(io.brupdate, queue.io.deq.bits.uop)
+  io.resp.bits.data              := queue.io.deq.bits.data
+  io.resp.bits.predicated        := queue.io.deq.bits.predicated
+  io.resp.bits.fflags            := queue.io.deq.bits.fflags
+}
+
+/**
+ * Divide functional unit.
+ *
+ * @param dataWidth data to be passed into the functional unit
+ */
+class SRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFunctionalUnit(dataWidth)
+{
+  // use SRT4Divider in Xiangshan core
+  val div = Module(new SRT4DividerDataModule(len = dataWidth))
+
+  // request
+  io.req.ready      := div.io.in_ready
+  div.io.valid      := io.req.valid && !this.do_kill
+  div.io.src(0)     := io.req.bits.rs1_data
+  div.io.src(1)     := io.req.bits.rs2_data
+  div.io.sign       := io.req.bits.uop.uopc.isOneOf(uopDIV, uopREM, uopDIVW, uopREMW, uopVDIV, uopVREM)
+  div.io.kill_w     := this.do_kill
+  div.io.kill_r     := this.do_kill && !div.io.in_ready
+  div.io.isHi       := io.req.bits.uop.uopc.isOneOf(uopREM, uopREMU, uopREMW, uopREMUW, uopVREM, uopVREMU)
+  div.io.isW        := !io.req.bits.uop.ctrl.fcn_dw
+  if(usingVector) {
+    when(io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active) {
+      div.io.src(0) := io.req.bits.rs3_data
+      div.io.src(1) := 1.U
+    } .elsewhen(io.req.bits.uop.is_rvv) {
+      div.io.src(0) := io.req.bits.rs2_data
+      div.io.src(1) := io.req.bits.rs1_data
+    }
+  }
+  // response
+  div.io.out_ready  := io.resp.ready
+  io.resp.valid     := div.io.out_valid && !this.do_kill
+  io.resp.bits.data := div.io.out_data
 }
