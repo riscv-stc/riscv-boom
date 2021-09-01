@@ -259,7 +259,7 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     when (io.req.valid && io_req.uop.is_rvv) {
       assert(io_req.uop.fp_val, "unexpected fp_val")
       assert(io_req.uop.v_active, "unexpected inactive split")
-      assert(vsew >= 1.U && vsew <= 3.U, "unsupported vsew")
+      assert(vsew <= 3.U, "unsupported vsew")
       assert(vd_sew >= 1.U && vd_sew <= 3.U, "unsupported vd_sew")
     }
     rs1_data := recode(io_req.rs1_data, vs1_fmt)
