@@ -216,7 +216,15 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
     val vsew       = vconfig.vtype.vsew
     val vlmul_sign = vconfig.vtype.vlmul_sign
     val vlmul_mag  = vconfig.vtype.vlmul_mag
-    emul := Mux(vlmul_sign || rt(RS1, isReduceV), 0.U,
+    val vmlogic_insn = uopc.isOneOf(MicroOpcodes.uopVMAND,
+                                    MicroOpcodes.uopVMNAND,
+                                    MicroOpcodes.uopVMANDNOT,
+                                    MicroOpcodes.uopVMXOR,
+                                    MicroOpcodes.uopVMOR,
+                                    MicroOpcodes.uopVMNOR,
+                                    MicroOpcodes.uopVMORNOT,
+                                    MicroOpcodes.uopVMXNOR)
+    emul := Mux(vlmul_sign || rt(RS1, isReduceV) || rt(RD, isMaskVD) || vmlogic_insn, 0.U,
             Mux(rt(RD, isWidenV), vlmul_mag + 1.U,
             Mux(uses_v_ls_ew, Mux(v_ls_ew >= vsew, vlmul_mag + v_ls_ew - vsew,
                               Mux(vlmul_mag >= vsew - v_ls_ew, vlmul_mag + v_ls_ew - vsew, 0.U)),
