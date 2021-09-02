@@ -405,7 +405,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val csr_vlmax = io.csr_vconfig.vtype.vlMax
     //val ls_vconfig = WireInit(io.csr_vconfig)
     //ls_vconfig.vtype.vsew := cs.v_ls_ew
-    val ls_vlmax = csr_vlmax //ls_vconfig.vtype.vlMax
+    //val ls_vlmax = csr_vlmax //ls_vconfig.vtype.vlMax
     val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
     val is_v_ls_ustride = cs.uopc.isOneOf(uopVL, uopVLFF, uopVSA)
     val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
@@ -427,8 +427,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     val vreg_nf = WireDefault(UInt((NF_MSB - NF_LSB + 2).W), vseg_nf)
     val vlmax = Mux(is_v_mask_ls, vLenb.U,
-                Mux(is_v_reg_ls, vLenb.U << Log2(vreg_nf + 1.U) >> cs.v_ls_ew,
-                Mux(is_v_ls_ustride || is_v_ls_stride, ls_vlmax, csr_vlmax)))
+                Mux(is_v_reg_ls, vLenb.U << Log2(vreg_nf + 1.U) >> cs.v_ls_ew, csr_vlmax))
     val vsew = Mux(is_v_reg_ls, cs.v_ls_ew, csr_vsew)
     val vlmul_sign = io.csr_vconfig.vtype.vlmul_sign
     val vlmul_mag  = io.csr_vconfig.vtype.vlmul_mag
@@ -488,7 +487,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     // for undisturbing move before reduction, we need visit at most one vreg
     val total_ecnt = Mux(is_v_reg_ls, vlmax,
                      Mux(cs.uses_stq, Mux(is_v_mask_ls, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl),
-                     Mux(vlmul_sign && !is_v_mask_ls || is_red_op && !redperm_act, vLen_ecnt,
+                     Mux(vlmul_sign && !is_v_mask_ls || vlmax < vLen_ecnt || is_red_op && !redperm_act, vLen_ecnt,
                      Mux(is_v_mask_insn, vmlogic_tolal_ecnt, vlmax))))
     val vseg_flast = vseg_finc === vseg_nf
     val vMVRCount: UInt = inst(RS1_MSB,RS1_LSB)
