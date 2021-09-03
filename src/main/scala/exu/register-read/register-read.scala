@@ -367,8 +367,16 @@ class RegisterRead(
         val vmaskInsn_rs2_data = Mux(is_masked, exe_reg_rs2_data(w) & exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs2_data(w))
         val is_perm_fdbk       = exe_reg_uops(w).uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS) && exe_reg_uops(w).v_perm_busy
 
+        val vshift  = exe_reg_uops(w).uopc.isOneOf(uopVSLL, uopVSRL, uopVSRA)
+        val vsew    = exe_reg_uops(w).vconfig.vtype.vsew
+        val vs2_sew = Mux(exe_reg_uops(w).rt(RS2, isWidenV), vsew+1.U, vsew)
+        val vshift_rs1_data = Mux(vs2_sew(1,0) === 3.U, exe_reg_rs1_data(w)(5,0),
+                              Mux(vs2_sew(1,0) === 2.U, exe_reg_rs1_data(w)(4,0),
+                              Mux(vs2_sew(1,0) === 1.U, exe_reg_rs1_data(w)(3,0), exe_reg_rs1_data(w)(2,0))))
+
         io.exe_reqs(w).bits.rs2_data    := Mux(is_vmask_cnt_m | is_vmask_set_m, vmaskInsn_rs2_data, exe_reg_rs2_data(w))
-        io.exe_reqs(w).bits.rs1_data    := Mux(is_vmask_set_m | is_vmask_iota_m, exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs1_data(w))
+        io.exe_reqs(w).bits.rs1_data    := Mux(is_vmask_set_m | is_vmask_iota_m, exe_reg_vmaskInsn_rvm_data(w),
+                                           Mux(vshift, vshift_rs1_data, exe_reg_rs1_data(w)))
 
         io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && is_active) && (!is_perm_fdbk || vcompress && (!exe_reg_uops(w).v_perm_busy || exe_reg_rvm_data(w)))
         io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
