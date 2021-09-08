@@ -387,41 +387,69 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
      ))
 
   // split at ifu-fetuchBuffer < - > decode
-  val ifu_redirect_flush = io.ifu.redirect_flush
   val fetch_valids    = (0 until coreWidth).map(w => io.ifu.fetchpacket.bits.uops(w).valid)
+  val ifu_redirect_flush_stat = RegInit(false.B)
+  when(io.ifu.redirect_flush || io.ifu.sfence.valid){
+    ifu_redirect_flush_stat := true.B
+  } .elsewhen(io.ifu.fetchpacket.valid){
+    ifu_redirect_flush_stat := false.B
+  }
+
   val backEnd_stall   = dec_hazards.reduce(_||_)
   val backEnd_nostall = !backEnd_stall
-  val iss_nostall     = int_iss_unit.io.iss_valids.reduce(_||_)
+  val fetch_no_deliver= !fetch_valids.reduce(_||_) && backEnd_nostall && (~ifu_redirect_flush_stat)
+  val frontend_stall_itlb_miss   = false.B
+  val frontend_stall_icache_miss = false.B
+  val frontend_stall_branch_resteers = false.B
+
+  val iss_nostall     = iss_valids.reduce(_||_)
   val iss_stall       = !iss_nostall
-  val memStallAnyLoad = iss_stall && io.lsu.perf.ldq_nonempty && !int_iss_unit.io.event_empty
-  val memStallStores  = iss_stall && io.lsu.perf.stq_full && (~memStallAnyLoad)
-  val fetch_no_deliver= !fetch_valids.reduce(_||_) && (backEnd_nostall && (~io.ifu.redirect_flush))
+  val rename_excution_stall = iss_stall && ren_stalls.reduce(_||_)
+  val issue_excution_stall  = iss_stall && !dis_ready
+  val rob_excution_stall    = iss_stall && !rob.io.ready
+  val exu_port_valids   = exe_units.map(u => u.io.req.valid).padTo(10, false.B)
+
+  val mem_stall_anyload = iss_stall && !int_iss_unit.io.event_empty && (0 until coreWidth).map(w => rob.io.commit.uops(w).uses_ldq).reduce(_||_)
+  val mem_stall_stores  = iss_stall && io.lsu.perf.stq_full && (~mem_stall_anyload)
+  val mem_stall_l1_miss = false.B
 
   val topDownslotVec = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
-    ("slots issued",     () => dec_fire(w)),
-    ("fetch bubbles",    () => (~fetch_valids(w)) && (backEnd_nostall && (~io.ifu.redirect_flush)))
-  )))
-
-  val topDownCycleEvents0 = new EventSet((mask, hits) => (mask & hits).orR, Seq(
-    ("recovery cycle",            () => mispredict_val),
-    ("fetch no Deliver cycle",    () => fetch_no_deliver),
-    ("branch mispred retired",    () => mispredict_val),
-    ("machine clears",            () => rob.io.flush.valid),
-    // ("few ops executed cycle",    () => iss_valids.map(t => t.asUInt()).reduce(_ +& _) <= 1.U), // issue 0 insn
-    ("few ops executed cycle",    () => iss_stall),
-    ("any load causes mem stall", () => memStallAnyLoad),
-    ("stores mem stall",          () => memStallStores)
+    ("slots issued",                      () => dec_fire(w)),
+    ("fetch bubbles",                     () => (~fetch_valids(w)) && backEnd_nostall && (~ifu_redirect_flush_stat)),
+    ("branch instruction retired",        () => rob.io.commit.uops(w).is_br && rob.io.commit.valids(w)),
+    ("floting-point instruction retired", () => rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w)))
+    ++ (if (!usingVector) Seq() else Seq(
+      ("vector instruction retired",      () => rob.io.commit.uops(w).is_rvv && rob.io.commit.valids(w))))
   ))
 
-  val topDownCycleEvents1 = new EventSet((mask, hits) => (mask & hits).orR, Seq(
-    ("ITLB miss",   () => io.ifu.perf.tlbMiss),
-    ("DTLB miss",   () => io.lsu.perf.tlbMiss)
+  val topDownCycleEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+    ("recovery cycle",                     () => ifu_redirect_flush_stat),
+    ("fetch no Deliver cycle",             () => fetch_no_deliver),
+    ("branch mispred retired",             () => mispredict_val),
+    ("machine clears",                     () => rob.io.flush.valid),
+    ("few ops executed cycle",             () => iss_stall),
+    ("any load mem stall",                 () => mem_stall_anyload),
+    ("stores mem stall",                   () => mem_stall_stores),
+    ("ITLB miss stall",                    () => frontend_stall_itlb_miss),
+    ("ICache miss stall",                  () => frontend_stall_icache_miss),
+    ("branch resteers stall",              () => frontend_stall_branch_resteers),
+    ("reanme cause excution stall",        () => rename_excution_stall),
+    ("issue cause excution stall",         () => issue_excution_stall),
+    ("rob unit cause excution stall",      () => rob_excution_stall),
+    ("Excution unit 0 usage cycle",        () => exu_port_valids(0)),
+    ("Excution unit 1 usage cycle",        () => exu_port_valids(1)),
+    ("Excution unit 2 usage cycle",        () => exu_port_valids(2)),
+    ("Excution unit 3 usage cycle",        () => exu_port_valids(3)),
+    ("Excution unit 4 usage cycle",        () => exu_port_valids(4)),
+    ("l1 miss mem stall",                  () => mem_stall_l1_miss),
+    ("l2 miss mem stall",                  () => false.B),
+    ("l3 miss mem stall",                  () => false.B),
+    ("mem latency",                        () => false.B)
   ))
 
   val perfEvents = new SuperscalarEventSets(Seq(
     (topDownslotVec,           (m, n) => m +& n),
-    (Seq(topDownCycleEvents0), (m, n) => m +& n),
-    (Seq(topDownCycleEvents1), (m, n) => m +& n),
+    (Seq(topDownCycleEvents),  (m, n) => m +& n),
     (Seq(insnCommitEvents),    (m, n) => m +& n),
     (Seq(microArchEvents),     (m, n) => m +& n),
     (Seq(memorySystemEvents),  (m, n) => m +& n)
