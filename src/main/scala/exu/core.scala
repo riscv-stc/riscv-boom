@@ -387,7 +387,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
      ))
 
   // split at ifu-fetuchBuffer < - > decode
-  val fetch_valids    = (0 until coreWidth).map(w => io.ifu.fetchpacket.bits.uops(w).valid)
   val ifu_redirect_flush_stat = RegInit(false.B)
   when(io.ifu.redirect_flush || io.ifu.sfence.valid){
     ifu_redirect_flush_stat := true.B
@@ -395,9 +394,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ifu_redirect_flush_stat := false.B
   }
 
-  val backEnd_stall   = dec_hazards.reduce(_||_)
-  val backEnd_nostall = !backEnd_stall
-  val fetch_no_deliver= !fetch_valids.reduce(_||_) && backEnd_nostall && (~ifu_redirect_flush_stat)
+  val backend_stall   = dec_hazards.reduce(_||_)
+  val backend_nostall = !backend_stall
+  val fetch_no_deliver= (~dec_fire.reduce(_||_)) && backend_nostall && (~ifu_redirect_flush_stat)
   val frontend_stall_itlb_miss   = false.B
   val frontend_stall_icache_miss = false.B
   val frontend_stall_branch_resteers = false.B
@@ -415,7 +414,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   val topDownslotVec = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("slots issued",                      () => dec_fire(w)),
-    ("fetch bubbles",                     () => (~fetch_valids(w)) && backEnd_nostall && (~ifu_redirect_flush_stat)),
+    ("fetch bubbles",                     () => (~dec_fire(w)) && backend_nostall && (~ifu_redirect_flush_stat)),
     ("branch instruction retired",        () => rob.io.commit.uops(w).is_br && rob.io.commit.valids(w)),
     ("floting-point instruction retired", () => rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w)))
     ++ (if (!usingVector) Seq() else Seq(
