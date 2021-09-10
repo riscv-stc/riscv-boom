@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
-import freechips.rocketchip.util.{UIntIsOneOf}
+import freechips.rocketchip.util.{UIntIsOneOf, UIntToAugmentedUInt}
 
 import boom.common._
 import boom.common.MicroOpcodes._
@@ -491,7 +491,16 @@ class IssueSlot(
   if (vector) {
     when (io.intupdate.map(_.valid).reduce(_||_) || io.fpupdate.map(_.valid).reduce(_||_)) {
       val int_sel  = io.intupdate.map(u => u.valid && u.bits.uop.prs1 === next_uop.prs1 && next_uop.rt(RS1, isInt))
-      val int_data = io.intupdate.map(_.bits.data)
+      val int_data = io.intupdate.map(u => Mux(u.bits.uop.rt(RS1, isIntU), Mux1H(UIntToOH(u.bits.uop.vconfig.vtype.vsew(1,0)),
+                                                                                 Seq(u.bits.data(7,0),
+                                                                                     u.bits.data(15,0),
+                                                                                     u.bits.data(31,0),
+                                                                                     u.bits.data)),
+                                                                           Mux1H(UIntToOH(u.bits.uop.vconfig.vtype.vsew(1,0)),
+                                                                                 Seq(u.bits.data(7,0).sextTo(eLen),
+                                                                                     u.bits.data(15,0).sextTo(eLen),
+                                                                                     u.bits.data(31,0).sextTo(eLen),
+                                                                                     u.bits.data))))
       val fp_sel   = io.fpupdate.map(u => u.valid && u.bits.uop.prs1 === next_uop.prs1 && next_uop.rt(RS1, isFloat))
       val fp_data  = io.fpupdate.map(_.bits.data)
       ps := int_sel.reduce(_||_) || fp_sel.reduce(_||_)

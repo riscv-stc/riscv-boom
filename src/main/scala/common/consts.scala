@@ -186,6 +186,7 @@ trait ScalarOpConstants
                              // TODO rename RT_NAR
 
   def isInt      (rt: UInt): Bool = (rt === RT_FIX || rt === RT_FIXU)
+  def isIntU     (rt: UInt): Bool = (rt === RT_FIXU)
   def isNotInt   (rt: UInt): Bool = !isInt(rt)
   def isFloat    (rt: UInt): Bool = (rt === RT_FLT)
   def isVector   (rt: UInt): Bool = rt(4)
