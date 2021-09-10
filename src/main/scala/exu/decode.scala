@@ -487,8 +487,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     // for undisturbing move before reduction, we need visit at most one vreg
     val total_ecnt = Mux(is_v_reg_ls, vlmax,
                      Mux(cs.uses_stq, Mux(is_v_mask_ls, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl),
-                     Mux(vlmul_sign && !is_v_mask_ls || vlmax < vLen_ecnt || is_red_op && !redperm_act, vLen_ecnt,
-                     Mux(is_v_mask_insn, vmlogic_tolal_ecnt, vlmax))))
+                     Mux(is_v_mask_insn, vmlogic_tolal_ecnt,
+                     Mux(vlmul_sign && !is_v_mask_ls || vlmax < vLen_ecnt || is_red_op && !redperm_act, vLen_ecnt, vlmax))))
     val vseg_flast = vseg_finc === vseg_nf
     val vMVRCount: UInt = inst(RS1_MSB,RS1_LSB)
     val elem_last  = Mux(isVMVR, vMVRCounter === vMVRCount, (vstart + split_ecnt) >= total_ecnt)
