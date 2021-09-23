@@ -446,15 +446,16 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vs2_sew    = Mux(is_v_ls_index, Cat(0.U(1.W), cs.v_ls_ew),
                      Mux(uop.rt(RS2, isWidenV ), csr_vsew + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew)))
-    val vlmul_value = Cat(vlmul_sign, vlmul_mag)
-    val vd_lmul    = Mux(uop.rt(RD, isWidenV), vlmul_value + vd_wfactor,
-                    Mux(uop.rt(RD, isNarrowV), vlmul_value - vd_nfactor,
-                    Mux(cs.uopc === uopVMVR, inst(17,15),
-                    Mux(cs.uopc === uopVRGATHEREI16 , vlmul_value + 1.U - vsew,
-                    Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew - vsew + vlmul_value,
-                    Mux(cs.allow_vd_is_v0, 0.U, vlmul_value))))))
+    val vlmul_value =Cat(vlmul_sign, vlmul_mag)
+    val vd_lmul    = Mux(isVMVR, inst(17,15),
+                     Mux(uop.rt(RD, isWidenV), vlmul_value + vd_wfactor,
+                     Mux(uop.rt(RD, isNarrowV), vlmul_value - vd_nfactor,
+                     Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew - vsew + vlmul_value,
+                     Mux(cs.allow_vd_is_v0, 0.U, vlmul_value)))))
+    val vs1_lmul   = Mux(cs.uopc === uopVRGATHEREI16, vlmul_value + 1.U - vsew,
+                     Mux(uop.rt(RS1, isWidenV ), vlmul_value + 1.U, vlmul_value))
     val vs2_lmul   = Mux(uop.rt(RS2, isWidenV), vlmul_value + vs2_wfactor,
-                    Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor, vlmul_value))
+                     Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor, vlmul_value))
     val vd_inc     = Mux(isVMVR, vMVRCounter,
                      vstart >> (vLenSz.U - 3.U - vd_sew))
     val vs2_inc    = Mux(is_viota_m, 0.U,
@@ -545,6 +546,12 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.v_re_alloc  := Mux(uop.rt(RD, isMaskVD), vstart === 0.U, (vstart & ren_re_mask(vLenSz,0)) === 0.U)
     uop.v_re_vs1    := (vstart & vs1_re_mask(vLenSz,0)) === 0.U
     uop.v_re_vs2    := (vstart & vs2_re_mask(vLenSz,0)) === 0.U
+    uop.vs1_eew     := vs1_sew
+    uop.vs2_eew     := vs2_sew
+    uop.vd_eew      := vd_sew
+    uop.vs1_emul    := vs1_lmul
+    uop.vs2_emul    := vs2_lmul
+    uop.vd_emul     := vd_lmul
 
     //val phys_index = vstart + split_ecnt
     //uop.v_phys_last := Mux(uop.rt(RD, isMaskVD) || uop.rt(RD, isReduceV), elem_last,
@@ -615,8 +622,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.frs3_en := true.B
     }
 
-    val vd_emul = Mux(vlmul_sign, 0.U(2.W), Mux(isWidenV(cs.dst_type), vlmul_mag + 1.U, vlmul_mag))(1,0)
-    val do_perm_insert = vd_emul =/= 0.U
+    val redperm_vd_emul = Mux(vlmul_sign, 0.U(2.W), Mux(isWidenV(cs.dst_type), vlmul_mag + 1.U, vlmul_mag))(1,0)
+    val do_perm_insert = redperm_vd_emul =/= 0.U
     when (io.kill) {
       redperm_act := false.B
     } .elsewhen (io.deq_fire && split_last && redperm_act && (is_red_op || is_perm_op && do_perm_insert)) {
@@ -679,15 +686,16 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val illegal_reg_sew = cs.not_use_vtype && (vd_sew(2) || vs2_sew(2) || vs1_sew(2))
     //vd/vs2 EMUL should be illegal
     val vd_emul_legal = Mux(vd_lmul(2), vd_lmul(1,0) =/= 0.U && ~vd_lmul(1,0) < (3.U - vd_sew), true.B)
+    val vs1_emul_legal = Mux(vs1_lmul(2), vs1_lmul(1,0) =/= 0.U && ~vs1_lmul(1,0) < 3.U - vs1_sew, true.B)
     val vs2_emul_legal = Mux(vs2_lmul(2), vs2_lmul(1,0) =/= 0.U && ~vs2_lmul(1,0) < 3.U - vs2_sew, true.B)
-    val illegal_reg_emul = !vd_emul_legal || !vs2_emul_legal
+    val illegal_reg_emul = !vd_emul_legal || !vs1_emul_legal || !vs2_emul_legal
 
     //reg_num should be multiple of emul, low bit or reg_num !=0 will raise illegal
     val illegal_dst_multiple_emul: Bool = Mux(vd_lmul(2), false.B, (((rightOR(UIntToOH(vd_lmul(1,0))) >> 1.U).asUInt
                                     & inst(RD_MSB,RD_LSB)) =/= 0.U) && (uop.dst_rtype === RT_VEC))
     val illegal_vs2_multiple_emul = Mux(vs2_lmul(2), false.B, (((rightOR(UIntToOH(vs2_lmul(1,0))) >> 1.U).asUInt
                                     & inst(RS2_MSB,RS2_LSB)) =/= 0.U) && (uop.lrs2_rtype === RT_VEC))
-    val illegal_vs1_multiple_emul = Mux(vlmul_value(2), false.B, (((rightOR(UIntToOH(vlmul_value(1,0))) >> 1.U).asUInt
+    val illegal_vs1_multiple_emul = Mux(vs1_lmul(2), false.B, (((rightOR(UIntToOH(vs1_lmul(1,0))) >> 1.U).asUInt
                                     & inst(RS1_MSB,RS1_LSB)) =/= 0.U) && (uop.lrs1_rtype === RT_VEC))
 
     val illegal_regnum_multiple_emul = illegal_dst_multiple_emul || illegal_vs2_multiple_emul || illegal_vs1_multiple_emul

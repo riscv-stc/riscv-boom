@@ -149,10 +149,7 @@ class IssueSlot(
       val ret_common = Wire(Bool())
       val vstart  = Mux(uop.rt(RS1, isReduceV), 0.U, uop.vstart + uop.voffset)
       val tail    = vstart > uop.vconfig.vl
-      val eew     = Mux(uop.uses_v_ls_ew, uop.v_ls_ew,
-                    Mux(uop.uopc === uopVRGATHEREI16, 1.U,
-                    Mux(uop.rt(RS1, isWidenV), uop.vconfig.vtype.vsew + 1.U,
-                    uop.vconfig.vtype.vsew)))
+      val eew     = uop.vs1_eew
       val (rsel, rmsk) = VRegSel(vstart, eew, ecnt, vLenb, eLenSelSz) // TODO, consider eLen_ecnt
       val rsh     = Cat(rsel, 0.U(3.W))
       val mask    = ((p1 >> rsh) & rmsk)
@@ -180,7 +177,6 @@ class IssueSlot(
                              uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS)) {
         // check vreg-wise, permutation ops have identical sew on vs2
         assert(!uop.rt(RS2, isNarrowV) && !uop.rt(RS2, isWidenV), "unexpected VS2 modifier")
-        val vs2_sew  = uop.vconfig.vtype.vsew
         val vs2_eidx = Mux(uop.uopc === uopVSLIDEUP,    vstart - Mux(uop.rt(RS1, isInt), sdata, uop.prs1(4,0)),
                        Mux(uop.uopc === uopVSLIDEDOWN,  vstart + Mux(uop.rt(RS1, isInt), sdata, uop.prs1(4,0)),
                        Mux(uop.uopc === uopVSLIDE1UP,   vstart - 1.U,
@@ -188,24 +184,18 @@ class IssueSlot(
                        Mux(uop.uopc === uopVRGATHER && uop.rt(RS1, isInt), sdata,
                        Mux(uop.uopc === uopVRGATHER && uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), uop.prs1(4,0)),
                        perm_idx))))))
-        val vd_emul  = uop.vd_emul // vs2 and vd have identical emul/eew
         val prs2     = uop.prs2
-        val vs2_rinc = vs2_eidx >> (vLenSz.U - 3.U - vs2_sew)
-        val vs2_ridx = Mux(vd_emul === 1.U, Cat(prs2(prs2.getWidth-1, 1), vs2_rinc(0)),
-                       Mux(vd_emul === 2.U, Cat(prs2(prs2.getWidth-1, 2), vs2_rinc(1,0)),
-                       Mux(vd_emul === 3.U, Cat(prs2(prs2.getWidth-1, 3), vs2_rinc(2,0)), prs2)))
+        val vs2_rinc = vs2_eidx >> (vLenSz.U - 3.U - uop.vs2_eew)
+        val vs2_ridx = Mux(uop.vs2_emul === 1.U, Cat(prs2(prs2.getWidth-1, 1), vs2_rinc(0)),
+                       Mux(uop.vs2_emul === 2.U, Cat(prs2(prs2.getWidth-1, 2), vs2_rinc(1,0)),
+                       Mux(uop.vs2_emul === 3.U, Cat(prs2(prs2.getWidth-1, 3), vs2_rinc(2,0)), prs2)))
         val vs2_ready= !io.agg_vs2_busy(vs2_ridx) // check any busy on corresponding vreg
         // fire and get vs1[i] ASAP
         val vrg_need_vupd = uop.rt(RS1, isVector) && uop.uopc === uopVRGATHER || uop.uopc === uopVRGATHEREI16
         ret := vrg_need_vupd && !perm_ready || vcompress && perm_ready || vs2_ready
       } .otherwise {
         val tail    = vstart > uop.vconfig.vl
-        val vsew    = uop.vconfig.vtype.vsew
-        val vs2_sew = Mux(uop.uopc === uopVEXT8, vsew - 3.U,
-                      Mux(uop.uopc === uopVEXT4, vsew - 2.U,
-                      Mux(uop.rt(RS2, isNarrowV), vsew - 1.U,
-                      Mux(uop.rt(RS2, isWidenV),  vsew + 1.U, vsew))))
-        val eew     = Mux(uop.uses_v_ls_ew, uop.v_ls_ew, vs2_sew)
+        val eew     = Mux(uop.uses_v_ls_ew, uop.v_ls_ew, uop.vs2_eew)
         val (rsel, rmsk) = VRegSel(vstart, eew, ecnt, vLenb, eLenSelSz) // TODO, consider eLen_ecnt
         val rsh     = Cat(rsel, 0.U(3.W))
         val mask    = ((p2 >> rsh) & rmsk)

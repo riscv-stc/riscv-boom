@@ -752,8 +752,8 @@ class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
   val vs2_widen= io_req.uop.rt(RS2, isWidenV)
   if (vector) {
     val vsew = io_req.uop.vconfig.vtype.vsew
-    val vd_sew  = Mux(vd_widen, vsew+1.U, vsew)
-    val vs2_sew = Mux(vs2_widen, vsew+1.U, vsew)
+    val vd_sew  = io_req.uop.vd_eew
+    val vs2_sew = io_req.uop.vs2_eew
     val vd_fmt  = Mux(vd_sew  === 3.U, D, Mux(vd_sew  === 2.U, S, H))
     val vs1_fmt = Mux(vsew    === 3.U, D, Mux(vsew    === 2.U, S, H))
     val vs2_fmt = Mux(vs2_sew === 3.U, D, Mux(vs2_sew === 2.U, S, H))

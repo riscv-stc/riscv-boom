@@ -157,6 +157,12 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_re_alloc       = if (usingVector) Bool() else null            // do rename allocation on first split for every vreg
   val v_re_vs1         = if (usingVector) Bool() else null            // do rename mapping for narrowing ops
   val v_re_vs2         = if (usingVector) Bool() else null            // do rename mapping for indexed LS / narrowing ops
+  val vs1_eew          = if (usingVector) UInt(2.W) else UInt(0.W)
+  val vs2_eew          = if (usingVector) UInt(2.W) else UInt(0.W)
+  val vd_eew           = if (usingVector) UInt(2.W) else UInt(0.W)
+  val vs1_emul         = if (usingVector) UInt(3.W) else UInt(0.W)
+  val vs2_emul         = if (usingVector) UInt(3.W) else UInt(0.W)
+  val vd_emul          = if (usingVector) UInt(3.W) else UInt(0.W)
   val vxsat            = if (usingVector) Bool() else null            // saturating flag
   val vconfig          = if (usingVector) new VConfig else null       // TODO: tag since DECODE
   val v_seg_ls         = if (usingVector) Bool() else null            // segment load/store indicator
@@ -203,15 +209,15 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
                                       MicroOpcodes.uopVSSA)
   def rt(rs: UInt, f: UInt => Bool): Bool = f(Mux1H(UIntToOH(rs), Seq(dst_rtype, lrs1_rtype, lrs2_rtype)))
 
-  def vd_eew: UInt = {
+  /* def vd_eew: UInt = {
     val vsew   = vconfig.vtype.vsew
     val vd_sew = Mux(rt(RD, isWidenV ), vsew + 1.U, vsew)
     //           Mux(rt(RD, isNarrowV), vsew - 1.U, vsew)), no narrow case in VD
     val eew    = Mux(uses_v_ls_ew, v_ls_ew, vd_sew)
     eew
-  }
+  } */
 
-  def vd_emul: UInt = {
+  /* def vd_emul: UInt = {
     val emul = Wire(UInt(2.W))
     val vsew       = vconfig.vtype.vsew
     val vlmul_sign = vconfig.vtype.vlmul_sign
@@ -230,7 +236,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
                               Mux(vlmul_mag >= vsew - v_ls_ew, vlmul_mag + v_ls_ew - vsew, 0.U)),
             vlmul_mag)))(1,0)
     emul
-  }
+  } */
 
   def match_group(prd: UInt): Bool = {
     val ret = Wire(Bool())

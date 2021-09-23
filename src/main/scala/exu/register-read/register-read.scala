@@ -145,8 +145,7 @@ class RegisterRead(
       val perm_idx  = io.iss_uops(w).v_perm_idx
       if (numReadPorts > 0) {
         val is_reduce = io.iss_uops(w).rt(RD, isReduceV)
-        val vs1_sew = Mux(io.iss_uops(w).rt(RS1,isWidenV), vsew + 1.U,
-                      Mux(io.iss_uops(w).uopc === uopVRGATHEREI16, 1.U, vsew))
+        val vs1_sew = io.iss_uops(w).vs1_eew
         val vs1_vstart = Mux(is_reduce, 0.U, vstart)
         val r1_sh = Mux1H(UIntToOH(vs1_sew(1,0)), Seq(Cat(vs1_vstart(2,0),0.U(3.W)), Cat(vs1_vstart(1,0),0.U(4.W)), Cat(vs1_vstart(0),0.U(5.W)), 0.U(6.W)))
         val (r1sel,r1msk) = VRegSel(vs1_vstart, vs1_sew, ecnt, eLenb, eLenSelSz)
@@ -162,11 +161,7 @@ class RegisterRead(
         val perm_on_vs2 = io.iss_uops(w).uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP, uopVSLIDEDOWN, uopVSLIDE1DOWN, uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS)
         val vslide1up   = io.iss_uops(w).uopc === uopVSLIDE1UP
         val vslide1down = io.iss_uops(w).uopc === uopVSLIDE1DOWN
-        val vs2_sew = Mux(io.iss_uops(w).rt(RS2, isWidenV),  vsew+1.U,
-                      Mux(io.iss_uops(w).uopc === uopVEXT8,  vsew-3.U,
-                      Mux(io.iss_uops(w).uopc === uopVEXT4,  vsew-2.U,
-                      Mux(io.iss_uops(w).rt(RS2, isNarrowV), vsew-1.U,
-                      Mux(io.iss_uops(w).v_idx_ls, io.iss_uops(w).v_ls_ew, vsew)))))
+        val vs2_sew = io.iss_uops(w).vs2_eew
         val perm_rinc = perm_idx >> (vLenSz.U - 3.U - vsew)
         val prs2      = io.iss_uops(w).prs2
         val perm_ridx = Mux(vd_emul === 1.U, Cat(prs2(prs2.getWidth-1, 1), perm_rinc(0)),
@@ -194,9 +189,7 @@ class RegisterRead(
                            Mux(RegNext(io.iss_uops(w).rt(RS2, isUnsignedV)), rf_data2, signext2)))))
       }
       if (numReadPorts > 2) {
-        val vd_sew  = Mux(io.iss_uops(w).uses_v_ls_ew, io.iss_uops(w).v_ls_ew,
-                      Mux(io.iss_uops(w).rt(RD, isWidenV ), vsew + 1.U,
-                      Mux(io.iss_uops(w).rt(RD, isNarrowV), vsew - 1.U, vsew)))
+        val vd_sew  = io.iss_uops(w).vd_eew
         val eidx = vstart
         val rd_sh = Mux1H(UIntToOH(vd_sew(1,0)),  Seq(Cat(eidx(2,0),0.U(3.W)), Cat(eidx(1,0),0.U(4.W)), Cat(eidx(0),0.U(5.W)), 0.U(6.W)))
         val (rdsel,rdmsk) = VRegSel(eidx, vd_sew,  ecnt, eLenb, eLenSelSz)
@@ -368,8 +361,7 @@ class RegisterRead(
         val is_perm_fdbk       = exe_reg_uops(w).uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS) && exe_reg_uops(w).v_perm_busy
 
         val vshift  = exe_reg_uops(w).uopc.isOneOf(uopVSLL, uopVSRL, uopVSRA)
-        val vsew    = exe_reg_uops(w).vconfig.vtype.vsew
-        val vs2_sew = Mux(exe_reg_uops(w).rt(RS2, isWidenV), vsew+1.U, vsew)
+        val vs2_sew = exe_reg_uops(w).vs2_eew
         val vshift_rs1_data = Mux(vs2_sew(1,0) === 3.U, exe_reg_rs1_data(w)(5,0),
                               Mux(vs2_sew(1,0) === 2.U, exe_reg_rs1_data(w)(4,0),
                               Mux(vs2_sew(1,0) === 1.U, exe_reg_rs1_data(w)(3,0), exe_reg_rs1_data(w)(2,0))))
