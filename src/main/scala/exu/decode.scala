@@ -17,7 +17,6 @@ import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
 
-// scalastyle:off
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
  */
@@ -29,26 +28,24 @@ abstract trait DecodeConstants
   val DC2   = BitPat.dontCare(2) // Makes the listing below more readable
   val RT_DC = BitPat.dontCare(RT_X.getWidth)
   def decode_default: List[BitPat] =
-  //                                                                  frs3_en                        wakeup_delay
-  //     is val inst?                                                 |  imm sel                     |    bypassable (aka, known/fixed latency)
-  //     |  is fp inst?                                               |  |     uses_ldq              |    |  is_br              is vector instruction
-  //     |  |  is single-prec?                        rs1 regtype     |  |     |  uses_stq           |    |  |                  |  can be split
-  //     |  |  |  micro-code                          |       rs2 type|  |     |  |  is_amo          |    |  |                  |  |  use vm?           vstart_is_zero
-  //     |  |  |  |         iq-type  func unit        |       |       |  |     |  |  |  is_fence     |    |  |                  |  |  |  ew of ls vector|  allow_vd_is_v0
-  //     |  |  |  |         |        |                |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall?  |              |  |  not_use_vtype
-  //     |  |  |  |         |        |        dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)   |  |  |  vd_unequal_vs1
-  //     |  |  |  |         |        |        regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit |  |              |  |  |  |  vd_unequal_vs2
-  //     |  |  |  |         |        |        |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd   |  |  |              |  |  |  |  |
-  //     |  |  |  |         |        |        |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |      |  |  |  |              |  |  |  |  |
-    List(N, N, X, uopX    , IQT_INT, FU_X   , RT_X  , RT_DC  ,RT_DC  ,X, IS_X, X, X, X, X, N, M_X,   DC2, X, X, N, N, X, CSR.X, N, N, N, DC2,           X, X, X, X, X)
+  //                                                       frs3_en                      wakeup_delay
+  //     is val inst?                                      |  imm sel                   |    bypassable (aka, known/fixed latency)
+  //     |  is fp inst?                                    |  |     uses_ldq            |    |  is_br              is vector instruction
+  //     |  |  is single-prec?               rs1 regtype   |  |     |  uses_stq         |    |  |                  |  can be split  allow_vd_is_v0
+  //     |  |  |  micro-code                 |      rs2 type  |     |  |  is_amo        |    |  |                  |  |  use vm?    |  not_use_vtype
+  //     |  |  |  |     iq-type  func unit   |      |      |  |     |  |  |  is_fence   |    |  |                  |  |  |  ew of ls vector
+  //     |  |  |  |     |        |           |      |      |  |     |  |  |  |  is_fencei    |  |  is breakpoint or ecall?  |       |  |  vd_unequal_vs1
+  //     |  |  |  |     |        |     dst   |      |      |  |     |  |  |  |  |  mem  |    |  |  |  is unique? (clear pipeline for it)  |  vd_unequal_vs2
+  //     |  |  |  |     |        |     regtype      |      |  |     |  |  |  |  |  cmd  |    |  |  |  |  flush on commit |  |       |  |  |  |
+  //     |  |  |  |     |        |     |     |      |      |  |     |  |  |  |  |  |    |    |  |  |  |  |  csr cmd   |  |  |    vstart_is_zero
+  //     |  |  |  |     |        |     |     |      |      |  |     |  |  |  |  |  |    |    |  |  |  |  |  |      |  |  |  |    |  |  |  |  |
+    List(N, N, X, uopX, IQT_INT, FU_X, RT_X, RT_DC, RT_DC, X, IS_X, X, X, X, X, N, M_X, DC2, X, X, N, N, X, CSR.X, N, N, N, DC2, X, X, X, X, X)
 
-  val definition: String = "/csv/decode-inst.csv"
   val table: Array[(BitPat, List[BitPat])]
 }
-// scalastyle:on
 
 object DecoderCSVReader {
-  def apply(csv: String, category: String): Array[(BitPat, List[BitPat])] = {
+  def apply(csv: String, category: String, preContext: String, postContext: String): Array[(BitPat, List[BitPat])] = {
     import scala.reflect.runtime.universe
     import scala.tools.reflect.ToolBox
     import scala.io.Source
@@ -56,28 +53,11 @@ object DecoderCSVReader {
     println(s"Reading $category instructions from resources$csv")
     val stream= getClass.getResourceAsStream(csv)
     val lines = Source.fromInputStream(stream).mkString
-    val lists = lines.split("\n")
+    val src   = lines.split("\n")
                      .filter(_.startsWith(category))
                      .map(_.split(" +"))
                      .map(row => row(1) + " -> List(" + row.drop(2).mkString(",") + ")")
-                     .mkString(",\n")
-    val src = s"""
-             |{
-             |  import chisel3._
-             |  import chisel3.util._
-             |  import freechips.rocketchip.rocket.CSR
-             |  import freechips.rocketchip.rocket.Instructions._
-             |  import freechips.rocketchip.util.uintToBitPat
-             |  import boom.common._
-             |  import boom.common.MicroOpcodes._
-             |  import boom.exu.FUConstants._
-             |  object DecoderCSVHelper extends boom.exu.DecodeConstants
-             |  {
-             |    val table: Array[(BitPat, List[BitPat])] = Array($lists)
-             |  }
-             |  val ret: Array[(BitPat, List[BitPat])] = DecoderCSVHelper.table
-             |  ret
-             |}""".stripMargin
+                     .mkString(preContext, ",\n", postContext)
     val tb    = universe.runtimeMirror(getClass.getClassLoader).mkToolBox()
     val ret: Array[(BitPat, List[BitPat])] = tb.eval(tb.parse(src)).asInstanceOf[Array[(BitPat, List[BitPat])]]
     ret
@@ -87,7 +67,7 @@ object DecoderCSVReader {
 /**
  * Decoded control signals
  */
-class CtrlSigs extends Bundle
+class CtrlSigs extends Bundle with DecodeConstants
 {
   val legal           = Bool()
   val fp_val          = Bool()
@@ -124,10 +104,9 @@ class CtrlSigs extends Bundle
   val vd_unequal_vs1  = Bool()
   val vd_unequal_vs2  = Bool()
 
-
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
-    //val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decode_default, table)
-    val decoder = BoomDecoder(inst, XDecode.decode_default, table)
+    //val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, decode_default, table)
+    val decoder = BoomDecoder(inst, decode_default, table)
     val sigs =
       Seq(legal, fp_val, fp_single, uopc, iq_type, fu_code, dst_type, rs1_type,
           rs2_type, frs3_en, imm_sel, uses_ldq, uses_stq, is_amo,
@@ -139,104 +118,12 @@ class CtrlSigs extends Bundle
       rocc := false.B
       this
   }
+
+  val table: Array[(BitPat, List[BitPat])] = null
 }
 
-// scalastyle:off
-/**
- * Decode constants for RV32
- */
-object X32Decode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "X32")
-}
-
-/**
- * Decode constants for RV64
- */
-object X64Decode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "X64")
-}
-
-/**
- * Overall Decode constants
- */
-object XDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "XInt")
-}
-
-/**
- * FP Decode constants
- */
-object FDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "Float")
-}
-
-/**
- * FP Divide SquareRoot Constants
- */
-object FDivSqrtDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "FDivSqrt")
-}
-
-/**
- * Vector Extension
- */
-// chisel complaints on single giant table, so we use multiple objects
-object VectorCfgDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorCfg")
-}
-
-object VectorLSDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorMem")
-}
-
-object VectorIntDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorInt")
-}
-
-object VectorFixDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorFix")
-}
-
-object VectorFPDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorFloat")
-}
-
-object VectorRedDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorReduction")
-}
-
-object VectorMaskDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorMask")
-}
-
-object VectorPermDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "VectorPerm")
-}
-//scalastyle:on
 // TODO:
 // 1. make vsetvli and vsetivli not unique, by tagging at Decode stage, with a flop control whether using CSR.vconfig all decoder.vconfig
-
-/**
- * RoCC initial decode
- */
-object RoCCDecode extends DecodeConstants
-{
-  // Note: We use FU_CSR since CSR instructions cannot co-execute with RoCC instructions
-  val table: Array[(BitPat, List[BitPat])] = DecoderCSVReader(definition, "RoCC")
-}
 
 /**
  * IO bundle for the Decode unit
@@ -269,20 +156,48 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   val uop = Wire(new MicroOp())
   uop := io.enq.uop
 
-  var decode_table = XDecode.table
-  if (usingFPU) decode_table ++= FDecode.table
-  if (usingFPU && usingFDivSqrt) decode_table ++= FDivSqrtDecode.table
-  if (usingRoCC) decode_table ++= RoCCDecode.table
-  decode_table ++= (if (xLen == 64) X64Decode.table else X32Decode.table)
+  val definition: String = "/csv/decode-inst.csv"
+  val preContext: String = s"""
+  |{
+  |  import chisel3._
+  |  import chisel3.util._
+  |  import freechips.rocketchip.rocket.CSR
+  |  import freechips.rocketchip.rocket.Instructions._
+  |  import freechips.rocketchip.util.uintToBitPat
+  |  import boom.common._
+  |  import boom.common.MicroOpcodes._
+  |  import boom.exu.FUConstants._
+  |  object DecoderCSVHelper extends boom.exu.DecodeConstants
+  |  {
+  |    val table: Array[(BitPat, List[BitPat])] = Array(
+  |""".stripMargin
+  val postContext: String = s"""
+  |    )
+  |  }
+  |  val ret: Array[(BitPat, List[BitPat])] = DecoderCSVHelper.table
+  |  ret
+  |}""".stripMargin
+  val xLenISA: String = if (xLen == 64) "X64" else "X32"
+  def getTable(category: String): Array[(BitPat, List[BitPat])] = {
+    DecoderCSVReader(definition, category, preContext, postContext)
+  }
+
+  var decode_table = getTable("XInt")
+  decode_table ++= getTable(xLenISA)
+  if (usingFPU) {
+    decode_table ++= getTable("Float")
+    if (usingFDivSqrt) decode_table ++= getTable("FDivSqrt")
+  }
+  if (usingRoCC) decode_table ++= getTable("RoCC")
   if (usingVector) {
-    decode_table ++= VectorLSDecode.table
-    decode_table ++= VectorCfgDecode.table
-    decode_table ++= VectorIntDecode.table
-    decode_table ++= VectorFixDecode.table
-    decode_table ++= VectorFPDecode.table
-    decode_table ++= VectorRedDecode.table
-    decode_table ++= VectorMaskDecode.table
-    decode_table ++= VectorPermDecode.table
+    decode_table ++= getTable("VectorCfg")
+    decode_table ++= getTable("VectorMem")
+    decode_table ++= getTable("VectorInt")
+    decode_table ++= getTable("VectorFix")
+    decode_table ++= getTable("VectorFloat")
+    decode_table ++= getTable("VectorReduction")
+    decode_table ++= getTable("VectorMask")
+    decode_table ++= getTable("VectorPerm")
   }
 
   val inst = uop.inst
@@ -334,10 +249,14 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   // x-registers placed in 0-31, f-registers placed in 32-63.
   // This allows us to straight-up compare register specifiers and not need to
   // verify the rtypes (e.g., bypassing in rename).
-  uop.ldst       := inst(RD_MSB,RD_LSB)
-  uop.lrs1       := inst(RS1_MSB,RS1_LSB)
-  uop.lrs2       := inst(RS2_MSB,RS2_LSB)
-  uop.lrs3       := inst(RS3_MSB,RS3_LSB)
+  val instRD      = inst(RD_MSB,RD_LSB)
+  val instRS1     = inst(RS1_MSB,RS1_LSB)
+  val instRS2     = inst(RS2_MSB,RS2_LSB)
+  val instRS3     = inst(RS3_MSB,RS3_LSB)
+  uop.ldst       := instRD
+  uop.lrs1       := instRS1
+  uop.lrs2       := instRS2
+  uop.lrs3       := instRS3
 
   uop.ldst_val   := isSomeReg(cs.dst_type) && !(uop.ldst === 0.U && uop.rt(RD, isInt))
   uop.dst_rtype  := cs.dst_type
@@ -349,11 +268,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   // SFB optimization
   when (uop.is_sfb_shadow && isNotReg(cs.rs2_type)) {
     uop.lrs2_rtype  := RT_FIX
-    uop.lrs2        := inst(RD_MSB,RD_LSB)
+    uop.lrs2        := instRD
     uop.ldst_is_rs1 := false.B
-  } .elsewhen (uop.is_sfb_shadow && cs.uopc === uopADD && inst(RS1_MSB,RS1_LSB) === 0.U) {
+  } .elsewhen (uop.is_sfb_shadow && cs.uopc === uopADD && instRS1 === 0.U) {
     uop.uopc        := uopMOV
-    uop.lrs1        := inst(RD_MSB, RD_LSB)
+    uop.lrs1        := instRD
     uop.ldst_is_rs1 := true.B
   }
   when (uop.is_sfb_br) {
@@ -447,7 +366,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(uop.rt(RS2, isWidenV ), csr_vsew + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew)))
     val vlmul_value =Cat(vlmul_sign, vlmul_mag)
-    val vd_lmul    = Mux(isVMVR, inst(17,15),
+    val vd_lmul    = Mux(isVMVR, instRS1(2,0),
                      Mux(uop.rt(RD, isWidenV), vlmul_value + vd_wfactor,
                      Mux(uop.rt(RD, isNarrowV), vlmul_value - vd_nfactor,
                      Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew - vsew + vlmul_value,
@@ -491,8 +410,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(is_v_mask_insn, vmlogic_tolal_ecnt,
                      Mux(vlmul_sign && !is_v_mask_ls || vlmax < vLen_ecnt || is_red_op && !redperm_act, vLen_ecnt, vlmax))))
     val vseg_flast = vseg_finc === vseg_nf
-    val vMVRCount: UInt = inst(RS1_MSB,RS1_LSB)
-    val elem_last  = Mux(isVMVR, vMVRCounter === vMVRCount, (vstart + split_ecnt) >= total_ecnt)
+    val elem_last  = Mux(isVMVR, vMVRCounter === instRS1, (vstart + split_ecnt) >= total_ecnt)
     val split_last = elem_last && Mux(is_v_ls_seg, vseg_flast, true.B)
     when (io.kill) {
       vstart    := 0.U
@@ -563,13 +481,13 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     when (cs.is_rvv) {
       when (!uop.rt(RD, isMaskVD)) {
-        uop.ldst := inst(RD_MSB,RD_LSB) + vd_inc
+        uop.ldst := instRD + vd_inc
       }
       when (uop.rt(RS1, isVector) && cs.uopc =/= uopVCOMPRESS) {
-        uop.lrs1 := inst(RS1_MSB,RS1_LSB) + vs1_inc
+        uop.lrs1 := instRS1 + vs1_inc
       }
       when (uop.rt(RS2, isVector)) {
-        uop.lrs2 := inst(RS2_MSB,RS2_LSB) + vs2_inc
+        uop.lrs2 := instRS2 + vs2_inc
       }
       uop.lrs3 := uop.ldst
       uop.frs3_en := cs.uses_vm
@@ -606,7 +524,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.v_seg_f   := 0.U
     uop.v_seg_nf  := 1.U
     when (cs.is_rvv && is_v_ls_seg) {
-      uop.ldst := inst(RD_MSB,RD_LSB) + vseg_vd_inc
+      uop.ldst := instRD + vseg_vd_inc
       uop.lrs3 := uop.ldst
       uop.v_seg_ls   := true.B
       uop.v_seg_f    := vseg_finc
@@ -637,7 +555,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     when (cs.is_rvv) {
       when (is_red_op) {
         // keep vd during reduction
-        uop.ldst := inst(RD_MSB,RD_LSB)
+        uop.ldst := instRD
         uop.lrs3 := uop.ldst
         when (!redperm_act) {
           // insert an undisturbing move before actual reduction
@@ -675,7 +593,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val illegal_vd_unequal_vs1 = cs.vd_unequal_vs1 && (uop.ldst === uop.lrs1)
     val illegal_vd_unequal_vs2 = (cs.vd_unequal_vs2 || cs.uses_ldq && is_v_ls_seg && is_v_ls_index) && (uop.ldst === uop.lrs2)
     //vadc, vsbc, or a masked instruction(except comparison, reduction) , vd overlap v0 will raise illegal exception
-    val illegal_vd_overlap_v0 = (cs.uopc.isOneOf(uopVADC, uopVSBC) || cs.uses_vm && !inst(25) && !cs.allow_vd_is_v0) &&
+    val illegal_vd_overlap_v0 = (cs.uopc.isOneOf(uopVADC, uopVSBC) || cs.uses_vm && !inst(VM_BIT) && !cs.allow_vd_is_v0) &&
                                 (uop.ldst === 0.U) && (uop.dst_rtype === RT_VEC)
 
     //basic SEW and LMUL configuration illegal is judged by CSR module and will set vill
@@ -692,11 +610,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     //reg_num should be multiple of emul, low bit or reg_num !=0 will raise illegal
     val illegal_dst_multiple_emul: Bool = Mux(vd_lmul(2), false.B, (((rightOR(UIntToOH(vd_lmul(1,0))) >> 1.U).asUInt
-                                    & inst(RD_MSB,RD_LSB)) =/= 0.U) && (uop.dst_rtype === RT_VEC))
+                                    & instRD) =/= 0.U) && (uop.dst_rtype === RT_VEC))
     val illegal_vs2_multiple_emul = Mux(vs2_lmul(2), false.B, (((rightOR(UIntToOH(vs2_lmul(1,0))) >> 1.U).asUInt
-                                    & inst(RS2_MSB,RS2_LSB)) =/= 0.U) && (uop.lrs2_rtype === RT_VEC))
+                                    & instRS2) =/= 0.U) && (uop.lrs2_rtype === RT_VEC))
     val illegal_vs1_multiple_emul = Mux(vs1_lmul(2), false.B, (((rightOR(UIntToOH(vs1_lmul(1,0))) >> 1.U).asUInt
-                                    & inst(RS1_MSB,RS1_LSB)) =/= 0.U) && (uop.lrs1_rtype === RT_VEC))
+                                    & instRS1) =/= 0.U) && (uop.lrs1_rtype === RT_VEC))
 
     val illegal_regnum_multiple_emul = illegal_dst_multiple_emul || illegal_vs2_multiple_emul || illegal_vs1_multiple_emul
 
