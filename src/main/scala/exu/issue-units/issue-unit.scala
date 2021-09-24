@@ -188,13 +188,13 @@ abstract class IssueUnit(
         dis_uops(w).prs1_busy  := 0.U
       } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopVSLIDE1UP, uopVSLIDE1DOWN)) {
         dis_uops(w).fu_code    := FU_ALU
-      } .elsewhen (io.dis_uops(w).bits.rt(RD, isReduceV) && io.dis_uops(w).bits.vstart =/= 0.U) {
+      } .elsewhen (io.dis_uops(w).bits.rt(RD, isReduceV) && io.dis_uops(w).bits.v_eidx =/= 0.U) {
         dis_uops(w).prs1_busy  := ~(0.U(vLenb.W))
       }
       if (usingVector) {
         dis_uops(w).v_perm_busy  := io.dis_uops(w).bits.uopc===uopVRGATHER && io.dis_uops(w).bits.rt(RS1, isVector) ||
                                     io.dis_uops(w).bits.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
-        dis_uops(w).v_perm_wait  := Mux(io.dis_uops(w).bits.uopc === uopVCOMPRESS, io.dis_uops(w).bits.vstart =/= 0.U, false.B)
+        dis_uops(w).v_perm_wait  := Mux(io.dis_uops(w).bits.uopc === uopVCOMPRESS, io.dis_uops(w).bits.v_eidx =/= 0.U, false.B)
         dis_uops(w).v_perm_idx   := 0.U
       }
     }

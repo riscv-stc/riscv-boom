@@ -701,8 +701,8 @@ object VRegMask {
   /**
    * Get byte level mask for vreg
    */
-  def apply(vstart: UInt, vsew: UInt, ecnt: UInt, elenb: Int): UInt = {
-    val lsb = (vstart << vsew)(2, 0)
+  def apply(v_eidx: UInt, vsew: UInt, ecnt: UInt, elenb: Int): UInt = {
+    val lsb = (v_eidx << vsew)(2, 0)
     val len = ecnt << vsew
     val ret = MaskGen(lsb, len, elenb)
     ret
@@ -713,9 +713,9 @@ object VRegSel {
   /**
    * Get an eLen piece selector of a vLen register, not suitable for split whose ecnt size > eLen
    */
-  def apply(vstart: UInt, vsew: UInt, ecnt: UInt, elenb: Int, eLenSelSz: Int): (UInt, UInt) = {
-    val rsel = Mux1H(UIntToOH(vsew(1,0)), Seq(vstart(eLenSelSz+2,3),vstart(eLenSelSz+1,2),vstart(eLenSelSz,1),vstart(eLenSelSz-1,0)))
-    val emsk = VRegMask(vstart, vsew, ecnt, elenb)
+  def apply(v_eidx: UInt, vsew: UInt, ecnt: UInt, elenb: Int, eLenSelSz: Int): (UInt, UInt) = {
+    val rsel = Mux1H(UIntToOH(vsew(1,0)), Seq(v_eidx(eLenSelSz+2,3),v_eidx(eLenSelSz+1,2),v_eidx(eLenSelSz,1),v_eidx(eLenSelSz-1,0)))
+    val emsk = VRegMask(v_eidx, vsew, ecnt, elenb)
     (rsel, emsk)
   }
 }

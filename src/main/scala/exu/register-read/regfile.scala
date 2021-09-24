@@ -70,13 +70,13 @@ object WritePort
       val eLenSelSz = log2Ceil(vLen/eLen)
       val vd_emul= enq_uop.vd_emul
       val pdst   = enq_uop.pdst
-      val vstart = enq_uop.vstart
+      val v_eidx = enq_uop.v_eidx
       val ecnt   = enq_uop.v_split_ecnt
-      val (rsel, rmsk) = VRegSel(vstart, enq_uop.vd_eew, ecnt, eLenb, eLenSelSz)
+      val (rsel, rmsk) = VRegSel(v_eidx, enq_uop.vd_eew, ecnt, eLenb, eLenSelSz)
       val exp_rmsk = Cat((0 until 8).map(b => Fill(8, rmsk(b))).reverse)
       val maskvd = enq_uop.rt(RD, isMaskVD)
-      val maskvd_rsel = (vstart >> eLenSz)(eLenSelSz-1, 0)
-      val maskvd_rmsk = UIntToOH(vstart(eLenSz-1, 0), eLen)
+      val maskvd_rsel = (v_eidx >> eLenSz)(eLenSelSz-1, 0)
+      val maskvd_rmsk = UIntToOH(v_eidx(eLenSz-1, 0), eLen)
       wport.bits.addr := Cat(enq_uop.pdst, Mux(maskvd, maskvd_rsel, rsel))
       wport.bits.mask := Mux(maskvd, maskvd_rmsk, exp_rmsk)
       wport.bits.data := Mux(maskvd, Fill(eLen, enq.bits.data(0)), VDataFill(enq.bits.data, enq_uop.vd_eew, eLenb*8))

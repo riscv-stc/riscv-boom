@@ -831,7 +831,7 @@ class VecExeUnit(
   if (writesFrf){
     val vecToFPQueue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth),
         numStages))
-    vecToFPQueue.io.enq.valid := io.req.valid && (io.req.bits.uop.uopc === uopVFMV_F_S) && !io.req.bits.uop.vstart.orR()
+    vecToFPQueue.io.enq.valid := io.req.valid && (io.req.bits.uop.uopc === uopVFMV_F_S) && !io.req.bits.uop.v_eidx.orR()
     vecToFPQueue.io.enq.bits.uop := io.req.bits.uop
     /* @fixme: fix elen 64bits currently, flexible sew need to be supported. */
     vecToFPQueue.io.enq.bits.uop.mem_size := 2.U
@@ -847,13 +847,13 @@ class VecExeUnit(
   if (writesIrf){
     val vecToIntQueue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth), numStages))
 
-    val vmv_valid = io.req.valid && (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
-    val vmv_is_last = (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.vstart.orR()
+    val vmv_valid = io.req.valid && (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.v_eidx.orR()
+    val vmv_is_last = (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.v_eidx.orR()
     val vl         = io.req.bits.uop.vconfig.vl
     val byteWidth  = 3.U
     val vsew64bit  = 3.U
     val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
-    val vmaskInsn_is_last = io.req.bits.uop.vstart === (vmaskInsn_vl-1.U)
+    val vmaskInsn_is_last = io.req.bits.uop.v_eidx === (vmaskInsn_vl-1.U)
     val vmaskInsn_valid = vmaskunit.io.resp.valid & io.req.bits.uop.uopc.isOneOf(uopVPOPC, uopVFIRST) & vmaskInsn_is_last
     val vmaskInsn_result = vmaskunit.io.resp.bits.data
 

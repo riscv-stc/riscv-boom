@@ -1642,7 +1642,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
           if (usingVector) {
             printf(" v%d[%d] 0x%x\n",
               rob.io.commit.uops(w).ldst,
-              rob.io.commit.uops(w).vstart,
+              rob.io.commit.uops(w).v_eidx,
               rob.io.commit.debug_wdata(w))
           }
         } .otherwise {

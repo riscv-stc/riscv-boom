@@ -215,7 +215,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val eu_vresp = WireInit(eu.io.vresp)
     val eu_vresp_uop = eu_vresp.bits.uop
     when (eu_vresp_uop.rt(RD, isReduceV)) {
-      eu_vresp.bits.uop.vstart := 0.U
+      eu_vresp.bits.uop.v_eidx := 0.U
     }
     if (eu.writesVrf) {
       if (eu.hasVMX) {

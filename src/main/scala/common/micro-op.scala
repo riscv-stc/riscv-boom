@@ -146,8 +146,8 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_active         = if (usingVector) Bool() else false.B
   val v_ls_ew          = if (usingVector) UInt(2.W) else UInt(0.W)    // EEW encoded in load/store instruction
   val v_unmasked       = if (usingVector) Bool() else false.B
-  val vstart           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // element-index
-  val voffset          = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // element-wise offset from first split
+  val v_eidx           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // element-index
+  val v_eofs           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // element-wise offset from first split
   val v_is_split       = if (usingVector) Bool() else false.B         // is a split of a vector instruction
   val v_split_ecnt     = if (usingVector) UInt((log2Ceil(vLenb)+1).W) else UInt(0.W)
   val v_is_first       = if (usingVector) Bool() else false.B

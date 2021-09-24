@@ -147,7 +147,7 @@ class IssueSlot(
     val uop = slot_uop
     if (vector) {
       val ret_common = Wire(Bool())
-      val vstart  = Mux(uop.rt(RS1, isReduceV), 0.U, uop.vstart + uop.voffset)
+      val vstart  = Mux(uop.rt(RS1, isReduceV), 0.U, uop.v_eidx + uop.v_eofs)
       val tail    = vstart > uop.vconfig.vl
       val eew     = uop.vs1_eew
       val (rsel, rmsk) = VRegSel(vstart, eew, ecnt, vLenb, eLenSelSz) // TODO, consider eLen_ecnt
@@ -172,7 +172,7 @@ class IssueSlot(
     val ret = Wire(Bool())
     val uop = slot_uop
     if (vector) {
-      val vstart = uop.vstart + uop.voffset
+      val vstart = uop.v_eidx + uop.v_eofs
       when (uop.uopc.isOneOf(uopVSLIDEUP, uopVSLIDE1UP, uopVSLIDEDOWN, uopVSLIDE1DOWN,
                              uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS)) {
         // check vreg-wise, permutation ops have identical sew on vs2
@@ -211,7 +211,7 @@ class IssueSlot(
     val ret = Wire(Bool())
     val uop = slot_uop
     if (vector) {
-      val vstart = uop.vstart + uop.voffset
+      val vstart = uop.v_eidx + uop.v_eofs
       val (rsel, rmsk) = VRegSel(vstart, uop.vd_eew, ecnt, vLenb, eLenSelSz)
       val rsh     = Cat(rsel, 0.U(3.W))
       val mask    = ((p3 >> rsh) & rmsk)
@@ -226,10 +226,10 @@ class IssueSlot(
     val ret = Wire(Bool())
     val uop = slot_uop
     if (vector) {
-      val vstart = uop.vstart + uop.voffset
+      val vstart = uop.v_eidx + uop.v_eofs
       val tail = vstart > uop.vconfig.vl
       // FIXME consider excluding prestart
-      // val prestart = vstart < io.csr.vstart
+      // val prestart = vstart < io.csr.v_eidx
       ret := !perm_ready || uop.v_unmasked || tail || pm(vstart >> 3.U)
     } else {
       if (usingVector && iqType == IQT_MEM.litValue) {
@@ -372,7 +372,7 @@ class IssueSlot(
     val wk_pdst = io.wakeup_ports(i).bits.pdst
     if (vector) {
       val wk_uop = io.wakeup_ports(i).bits.uop
-      val wk_vstart = wk_uop.vstart
+      val wk_vstart = wk_uop.v_eidx
       val wk_ecnt   = wk_uop.v_split_ecnt
       val (wk_sel, wk_mask) = VRegSel(wk_vstart, wk_uop.vd_eew, wk_ecnt, eLenb, eLenSelSz)
       val wk_rs1 = wk_valid && (wk_pdst === next_uop.prs1)
@@ -389,7 +389,7 @@ class IssueSlot(
         val wk_act  = wk_uop.rt(RD, isReduceV)
         val i_am_red= next_uop.rt(RD, isReduceV)
         val wk_rd   = wk_valid && (wk_pdst === next_uop.pdst)
-        val wk_next = (wk_vstart + 1.U) === (next_uop.vstart + next_uop.voffset)
+        val wk_next = (wk_vstart + 1.U) === (next_uop.v_eidx + next_uop.v_eofs)
         //val wk_last = (wk_vstart + 1.U) === wk_uop.vconfig.vtype.vlMax
         val wk_last = wk_uop.v_is_archlast && wk_uop.v_is_last
         wake_p1(i) := Fill(vLenb, Mux(i_am_red, wk_rd && wk_act && wk_next, wk_rs1 && wk_act && wk_last).asUInt)
@@ -533,7 +533,7 @@ class IssueSlot(
   io.out_uop.lrs2_rtype := next_lrs2_rtype
   io.out_uop.br_mask    := next_br_mask
   if (usingVector) {
-    io.uop.vstart := slot_uop.vstart + slot_uop.voffset
+    io.uop.v_eidx := slot_uop.v_eidx + slot_uop.v_eofs
     if (vector) {
       // value to next slot should be current latched version
       // ignore element busy masking, we keep busy status for entire v-register (i.e. p1,p2,p3,pm)
@@ -551,10 +551,10 @@ class IssueSlot(
       io.uop.v_scalar_data  := Mux(io.uop.rt(RS1, isRvvSImm5), Cat(Fill(eLen-5, io.uop.prs1(4).asUInt), io.uop.prs1(4,0)),
                                Mux(io.uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), slot_uop.prs1(4,0)), sdata))
       io.uop.v_perm_busy    := ~perm_ready
-      io.uop.v_perm_idx     := Mux(slot_uop.uopc === uopVSLIDEUP,   io.uop.vstart - Mux(slot_uop.rt(RS1, isInt), sdata, slot_uop.prs1(4,0)),
-                               Mux(slot_uop.uopc === uopVSLIDEDOWN, io.uop.vstart + Mux(slot_uop.rt(RS1, isInt), sdata, slot_uop.prs1(4,0)),
-                               Mux(slot_uop.uopc === uopVSLIDE1UP,  io.uop.vstart - 1.U,
-                               Mux(slot_uop.uopc === uopVSLIDE1DOWN,io.uop.vstart + 1.U,
+      io.uop.v_perm_idx     := Mux(slot_uop.uopc === uopVSLIDEUP,   io.uop.v_eidx - Mux(slot_uop.rt(RS1, isInt), sdata, slot_uop.prs1(4,0)),
+                               Mux(slot_uop.uopc === uopVSLIDEDOWN, io.uop.v_eidx + Mux(slot_uop.rt(RS1, isInt), sdata, slot_uop.prs1(4,0)),
+                               Mux(slot_uop.uopc === uopVSLIDE1UP,  io.uop.v_eidx - 1.U,
+                               Mux(slot_uop.uopc === uopVSLIDE1DOWN,io.uop.v_eidx + 1.U,
                                Mux(slot_uop.uopc === uopVRGATHER && slot_uop.rt(RS1, isInt), sdata,
                                Mux(slot_uop.uopc === uopVRGATHER && slot_uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), slot_uop.prs1(4,0)),
                                perm_idx))))))
@@ -567,14 +567,14 @@ class IssueSlot(
         //val eLen_ecnt = eLen.U >> (vsew+3.U)
         val ren_mask = ~(Fill(vLenSz,1.U) << (7.U-vsew))
         io.uop.v_split_ecnt := 1.U //eLen_ecnt, TODO consider masking
-        io.uop.v_is_first := (slot_uop.voffset & ren_mask(vLenSz,0)) === 0.U
-        io.uop.v_is_last  := slot_uop.voffset + io.uop.v_split_ecnt === slot_uop.v_split_ecnt
-        val next_voffset   = slot_uop.voffset + io.uop.v_split_ecnt
-        io.out_uop.voffset:= next_voffset
-        slot_uop.voffset  := next_voffset
+        io.uop.v_is_first := (slot_uop.v_eofs & ren_mask(vLenSz,0)) === 0.U
+        io.uop.v_is_last  := slot_uop.v_eofs + io.uop.v_split_ecnt === slot_uop.v_split_ecnt
+        val next_voffset   = slot_uop.v_eofs + io.uop.v_split_ecnt
+        io.out_uop.v_eofs:= next_voffset
+        slot_uop.v_eofs  := next_voffset
         when (slot_uop.rt(RD, isReduceV)) {
           // prs1 uses true rs1 only for the first split of entire reduction op
-          io.uop.prs1 := Mux(io.uop.vstart === 0.U, slot_uop.prs1, slot_uop.pdst)
+          io.uop.prs1 := Mux(io.uop.v_eidx === 0.U, slot_uop.prs1, slot_uop.pdst)
           // clear ready on p1
           red_iss_p1 := 0.U
           io.out_uop.prs1_busy := ~(0.U(vLenb.W))
@@ -582,8 +582,8 @@ class IssueSlot(
         }
         when (vrg_has_vupd || vcompress) {
           when (!perm_ready) {
-            io.out_uop.voffset:= slot_uop.voffset
-            slot_uop.voffset  := slot_uop.voffset
+            io.out_uop.v_eofs:= slot_uop.v_eofs
+            slot_uop.v_eofs  := slot_uop.v_eofs
           }
         }
       }
@@ -658,17 +658,17 @@ class IssueSlot(
     val vu_sel_idx = io.vecUpdate.map(v => v.valid &&
                                            v.bits.uop.uopc === next_uop.uopc &&
                                            v.bits.uop.match_group(next_uop.pdst) &&
-                                           v.bits.uop.vstart + 1.U > next_uop.vstart)
+                                           v.bits.uop.v_eidx + 1.U > next_uop.v_eidx)
     val vu_sel_nxt = io.vecUpdate.map(v => v.valid &&
                                            v.bits.uop.uopc === next_uop.uopc &&
                                            v.bits.uop.match_group(next_uop.pdst) &&
                                            v.bits.uop.v_active &&
-                                           v.bits.uop.vstart + 1.U === next_uop.vstart)
+                                           v.bits.uop.v_eidx + 1.U === next_uop.v_eidx)
     val vu_sel_kill= io.vecUpdate.map(v => v.valid &&
                                            v.bits.uop.uopc === next_uop.uopc &&
                                            v.bits.uop.match_group(next_uop.pdst) &&
                                            v.bits.uop.v_active &&
-                                           v.bits.uop.vstart + 1.U >= next_uop.vstart + next_uop.v_split_ecnt)
+                                           v.bits.uop.v_eidx + 1.U >= next_uop.v_eidx + next_uop.v_split_ecnt)
     val vu_sel_fin = io.vecUpdate.map(v => v.valid &&
                                            v.bits.uop.uopc === next_uop.uopc &&
                                            v.bits.uop.match_group(next_uop.pdst) &&
@@ -680,7 +680,7 @@ class IssueSlot(
     when ((is_valid||io.in_uop.valid) && io.vecUpdate.map(_.valid).reduce(_||_)) {
       val vu_rs1 = io.vecUpdate.map(v => v.bits.data)
       val vu_pidx= io.vecUpdate.map(v => v.bits.uop.v_perm_idx)
-      val vu_vstart= io.vecUpdate.map(v => v.bits.uop.vstart)
+      val vu_vstart= io.vecUpdate.map(v => v.bits.uop.v_eidx)
       val vu_actv= io.vecUpdate.map(v => v.bits.uop.v_active)
       vupd_perm_hit := Mux(next_uop_vcompress, vu_sel_idx.reduce(_||_), vu_sel_rob.reduce(_||_))
       vupd_perm_nxt := next_uop_vcompress && vu_sel_nxt.reduce(_||_)
@@ -692,9 +692,9 @@ class IssueSlot(
         next_state := s_invalid
       }
       when (next_uop_vcompress && (Cat(vu_sel_idx) & Cat(vu_actv)).orR) {
-        val vupd_voffset = next_uop.voffset + 1.U
-        slot_uop.voffset   := vupd_voffset
-        //io.out_uop.voffset := vupd_voffset
+        val vupd_voffset = next_uop.v_eofs + 1.U
+        slot_uop.v_eofs   := vupd_voffset
+        //io.out_uop.v_eofs := vupd_voffset
       }
       assert(io.vecUpdate.map(v => v.valid && v.bits.uop.uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS)).reduce(_||_))
       when (vupd_perm_hit) {

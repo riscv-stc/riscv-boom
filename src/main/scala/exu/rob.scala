@@ -417,7 +417,7 @@ class Rob(
 
     when (io.lxcpt.valid && MatchBank(GetBankIdx(io.lxcpt.bits.uop.rob_idx))) {
       // Mask false exception for vleff, decide if update vl later at commit stage.
-      val isVleFalseException = if (usingVector) {io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.vstart.orR()}
+      val isVleFalseException = if (usingVector) {io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.v_eidx.orR()}
                                 else             false.B
       rob_exception(GetRowIdx(io.lxcpt.bits.uop.rob_idx)) := true.B
       when(isVleFalseException){
@@ -575,8 +575,8 @@ class Rob(
     io.commit.debug_wdata(w) := rob_debug_wdata(rob_head)
 
     if (usingVector) {
-      robSetVL(w).valid := will_commit(w) && rob_vleff_exception(rob_head) && rob_uop(rob_head).vstart < io.csrVConfig.vl
-      robSetVL(w).bits  := rob_uop(rob_head).vstart
+      robSetVL(w).valid := will_commit(w) && rob_vleff_exception(rob_head) && rob_uop(rob_head).v_eidx < io.csrVConfig.vl
+      robSetVL(w).bits  := rob_uop(rob_head).v_eidx
     }
 
   } //for (w <- 0 until coreWidth)
@@ -688,7 +688,7 @@ class Rob(
     enq_xcpts(i) := io.enq_valids(i) && io.enq_uops(i).exception
   }
 
-  val realLxcpt = if (usingVector) {io.lxcpt.valid && !(io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.vstart.orR())}
+  val realLxcpt = if (usingVector) {io.lxcpt.valid && !(io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.v_eidx.orR())}
                   else             io.lxcpt.valid
   when (!(io.flush.valid || exception_thrown) && rob_state =/= s_rollback) {
     when (realLxcpt) {

@@ -517,7 +517,7 @@ class ALUUnit(
   val r_pred = Reg(Vec(numStages, Bool()))
   val alu_out = WireInit(alu.io.out)
   if (usingVector && vector) {
-    val vstart = uop.vstart
+    val vstart = uop.v_eidx
     val vl = uop.vconfig.vl
 
     val isVMerge: Bool = uop.is_rvv && uop.uopc === uopMERGE
@@ -552,7 +552,7 @@ class ALUUnit(
                Mux(uop.uopc.isOneOf(uopVMAX, uopVMAXU) && !v_inactive, Mux(alu.io.out(0), io.req.bits.rs1_data, io.req.bits.rs2_data),
                Mux(uop.rt(RD, isReduceV) && v_inactive, io.req.bits.rs1_data,
                Mux(vmlogic_insn,   vmlogic_result,
-               Mux(uop.uopc === uopVID, uop.vstart,
+               Mux(uop.uopc === uopVID, uop.v_eidx,
                Mux(vadc  || vsbc,  Mux(v_tail, io.req.bits.rs3_data, alu.io.out),
                Mux(vmadc || vmsbc, Cat(0.U((eLen-1).W), Mux(v_tail, io.req.bits.rs3_data(0), alu_co)),
                Mux(vmscmp,         Cat(0.U((eLen-1).W), Mux(v_tail || v_inactive, io.req.bits.rs3_data(0), alu.io.cmp_out)),
@@ -615,8 +615,8 @@ class MemAddrCalcUnit(implicit p: Parameters)
     val vec_cs_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLS, uopVSSA)
     val vec_idx_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     // TODO: optimize multiplications here
-    op2 := Mux(vec_us_ls, ((uop.vstart * uop.v_seg_nf + uop.v_seg_f) << v_ls_ew).asSInt,
-           Mux(vec_cs_ls, io.req.bits.rs2_data.asSInt * uop.vstart.asUInt + Cat(0.U(1.W), uop.v_seg_f << v_ls_ew).asSInt,
+    op2 := Mux(vec_us_ls, ((uop.v_eidx * uop.v_seg_nf + uop.v_seg_f) << v_ls_ew).asSInt,
+           Mux(vec_cs_ls, io.req.bits.rs2_data.asSInt * uop.v_eidx.asUInt + Cat(0.U(1.W), uop.v_seg_f << v_ls_ew).asSInt,
            Mux(vec_idx_ls, uop.v_xls_offset.asSInt + Cat(0.U(1.W), uop.v_seg_f << uop_sew).asSInt,
            uop.imm_packed(19,8).asSInt)))
   }
@@ -1144,7 +1144,7 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val vsew64bit = 3.U
   val is_multiple_of_64 = vl(5,0) === 0.U
   val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
-  val is_vmaskInsn_last_split = uop.vstart === (vmaskInsn_vl-1.U)
+  val is_vmaskInsn_last_split = uop.v_eidx === (vmaskInsn_vl-1.U)
   val vmaskInsn_mask = boom.util.MaskGen(0.U, vl(5,0), 64)
   val vmaskInsn_rs2_data = Mux(is_vmaskInsn_last_split & (~is_multiple_of_64), (rs2_data & vmaskInsn_mask), rs2_data)
 
@@ -1154,8 +1154,8 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
              Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , vmaskInsn_rs2_data,
                  0.U))
 
-  val init_popc = Mux(uop.vstart === 0.U, 0.U, RegNext(vmaskUnit.io.out))
-  val init_first_idx = Mux(uop.vstart === 0.U, 0.U, 64.U)
+  val init_popc = Mux(uop.v_eidx === 0.U, 0.U, RegNext(vmaskUnit.io.out))
+  val init_first_idx = Mux(uop.v_eidx === 0.U, 0.U, 64.U)
 
   // operand 2 select
   val op2_data = WireInit(0.U(xLen.W))
@@ -1177,7 +1177,7 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   }.elsewhen(~is_0_op_num & ~has_find_1_r){
     has_find_1_r := true.B
     firstIdx_r := vmaskUnit.io.out
-  }.elsewhen(uop.vstart === 0.U){
+  }.elsewhen(uop.v_eidx === 0.U){
     has_find_1_r := false.B
     firstIdx_r := 0.U(xLen.W)
   }
@@ -1202,26 +1202,26 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val v_inactive = uop.is_rvv && !uop.v_active
 
   val is_viota_m = uop.uopc.isOneOf(uopVIOTA)
-  val is_viotaInsn_last = is_viota_m && (uop.vstart === vl)
+  val is_viotaInsn_last = is_viota_m && (uop.v_eidx === vl)
   val iota_r = RegInit(0.U(eLen.W))
   when(is_viota_m){
     when(is_viotaInsn_last){
       iota_r := 0.U
-    }.elsewhen(is_masked & rs1_data(uop.vstart(log2Ceil(eLen)-1,0))) {
-      iota_r := iota_r + rs2_data(uop.vstart(log2Ceil(eLen)-1,0))
-    }.elsewhen(is_masked & (~rs1_data(uop.vstart(log2Ceil(eLen)-1,0)))) {
+    }.elsewhen(is_masked & rs1_data(uop.v_eidx(log2Ceil(eLen)-1,0))) {
+      iota_r := iota_r + rs2_data(uop.v_eidx(log2Ceil(eLen)-1,0))
+    }.elsewhen(is_masked & (~rs1_data(uop.v_eidx(log2Ceil(eLen)-1,0)))) {
       iota_r := iota_r
     }.otherwise{
-      iota_r := iota_r + rs2_data(uop.vstart(log2Ceil(eLen)-1,0))
+      iota_r := iota_r + rs2_data(uop.v_eidx(log2Ceil(eLen)-1,0))
     }
   }
 
   val iota_result = WireInit(0.U(eLen.W))
-  when(is_masked & (~rs1_data(uop.vstart(log2Ceil(eLen)-1,0)))) {
+  when(is_masked & (~rs1_data(uop.v_eidx(log2Ceil(eLen)-1,0)))) {
     iota_result := io.req.bits.rs3_data
-  }.elsewhen(uop.vstart === 0.U){
+  }.elsewhen(uop.v_eidx === 0.U){
     iota_result := 0.U
-  }.elsewhen(is_masked & rs1_data(uop.vstart(log2Ceil(eLen)-1,0))) {
+  }.elsewhen(is_masked & rs1_data(uop.v_eidx(log2Ceil(eLen)-1,0))) {
     iota_result := iota_r
   }.otherwise{
     iota_result := iota_r

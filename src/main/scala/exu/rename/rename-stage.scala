@@ -281,7 +281,7 @@ class RenameStage(
 
   for (w <- 0 until plWidth) {
     if (usingVector) {
-      // NOTE: for reduction vd should be renamed only when vstart is 0
+      // NOTE: for reduction vd should be renamed only when v_eidx is 0
       ren2_alloc_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_fire(w) &&
                           (~ren2_uops(w).v_is_split ||
                            (ren2_uops(w).v_re_alloc && !ren2_uops(w).rt(RD, isReduceV)))
@@ -463,20 +463,20 @@ class RenameStage(
   busytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
   if (vector) {
     for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) {
-      val vstart  = wk.bits.uop.vstart
+      val v_eidx  = wk.bits.uop.v_eidx
       val ecnt    = wk.bits.uop.v_split_ecnt
-      val (rsel, rmsk) = VRegSel(vstart, wk.bits.uop.vd_eew, ecnt, eLenb, eLenSelSz)
+      val (rsel, rmsk) = VRegSel(v_eidx, wk.bits.uop.vd_eew, ecnt, eLenb, eLenSelSz)
       bs := rmsk << Cat(rsel, 0.U(3.W))
       // only the final split clears busy status for recductions
       when (wk.bits.uop.rt(RS1, isReduceV)) {
         val is_act = wk.bits.uop.rt(RD, isReduceV)
-        //val is_fin = (vstart + 1.U === wk.bits.uop.vconfig.vl)
+        //val is_fin = (v_eidx + 1.U === wk.bits.uop.vconfig.vl)
         val is_fin = wk.bits.uop.v_is_archlast && wk.bits.uop.v_is_last
         bs := Fill(vLenb, (is_act && is_fin).asUInt)
       } .elsewhen(wk.bits.uop.rt(RD, isMaskVD)) {
-        val rsel_mvd     = vstart(eLenSelSz+5, 6)
-        val is_last_mvd  = (vstart + 1.U === wk.bits.uop.vconfig.vl)
-        val is_eLast_mvd = vstart(5, 0) === "h_3f".U
+        val rsel_mvd     = v_eidx(eLenSelSz+5, 6)
+        val is_last_mvd  = (v_eidx + 1.U === wk.bits.uop.vconfig.vl)
+        val is_eLast_mvd = v_eidx(5, 0) === "h_3f".U
         val emask_mvd    = Fill(eLenb, is_eLast_mvd)
         bs := Fill(vLenb, is_last_mvd) | (emask_mvd << Cat(rsel_mvd, 0.U(3.W)))
       }

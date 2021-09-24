@@ -528,8 +528,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.vxsat       := false.B
     uop.vconfig     := io.csr_vconfig
     uop.vconfig.vtype.reserved := DontCare
-    uop.vstart      := vstart
-    uop.voffset     := 0.U
+    uop.v_eidx      := vstart
+    uop.v_eofs      := 0.U
     uop.v_is_split  := cs.can_be_split
     uop.v_split_ecnt:= split_ecnt
     uop.vconfig.vtype.vsew := Mux(is_v_mask_insn, 3.U, vsew)
