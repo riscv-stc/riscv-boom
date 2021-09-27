@@ -282,93 +282,93 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   //-------------------------------------------------------------
   // Uarch Hardware Performance Events (HPEs)
-  val commit_store = Wire(Vec(coreWidth, Bool()))
-  val commit_load = Wire(Vec(coreWidth, Bool()))
-  val commit_amo = Wire(Vec(coreWidth, Bool()))
-  val commit_system = Wire(Vec(coreWidth, Bool()))
+  val retired_store = Wire(Vec(coreWidth, Bool()))
+  val retired_load = Wire(Vec(coreWidth, Bool()))
+  val retired_amo = Wire(Vec(coreWidth, Bool()))
+  val retired_system = Wire(Vec(coreWidth, Bool()))
 
-  val commit_fp_store = Wire(Vec(coreWidth, Bool()))
-  val commit_fp_load = Wire(Vec(coreWidth, Bool()))
-  val commit_fp_add = Wire(Vec(coreWidth, Bool()))
-  val commit_fp_mul = Wire(Vec(coreWidth, Bool()))
-  val commit_fp_div = Wire(Vec(coreWidth, Bool()))
-  val commit_fp_other = Wire(Vec(coreWidth, Bool()))
+  val retired_fp_store = Wire(Vec(coreWidth, Bool()))
+  val retired_fp_load = Wire(Vec(coreWidth, Bool()))
+  val retired_fp_add = Wire(Vec(coreWidth, Bool()))
+  val retired_fp_mul = Wire(Vec(coreWidth, Bool()))
+  val retired_fp_div = Wire(Vec(coreWidth, Bool()))
+  val retired_fp_other = Wire(Vec(coreWidth, Bool()))
 
-  val is_arith = Wire(Vec(coreWidth, Bool()))
-  val is_branch = Wire(Vec(coreWidth, Bool()))
-  val is_jal = Wire(Vec(coreWidth, Bool()))
-  val is_jalr = Wire(Vec(coreWidth, Bool()))
+  val retired_arith = Wire(Vec(coreWidth, Bool()))
+  val retired_branch = Wire(Vec(coreWidth, Bool()))
+  val retired_jal = Wire(Vec(coreWidth, Bool()))
+  val retired_jalr = Wire(Vec(coreWidth, Bool()))
+
   val branch_cnt = RegInit(0.U(64.W))
   val store_cnt = RegInit(0.U(64.W))
   val load_cnt = RegInit(0.U(64.W))
 
   for (w <- 0 until coreWidth) {
-    commit_store(w) := rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_stq
-    commit_load(w)  := rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_ldq
-    commit_amo(w) := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_amo
-    commit_system(w) := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_sys_pc2epc
+    retired_store(w)  := rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_stq
+    retired_load(w)   := rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_ldq
+    retired_amo(w)    := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_amo
+    retired_system(w) := rob.io.commit.valids(w) && (rob.io.commit.uops(w).ctrl.csr_cmd =/= freechips.rocketchip.rocket.CSR.N)
 
-    commit_fp_store(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_stq 
-    commit_fp_load(w)  := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_ldq
-    commit_fp_add(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_ALU)
-    commit_fp_mul(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_MUL)
-    commit_fp_div(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_DIV)
-    commit_fp_other(w) := rob.io.commit.uops(w).fp_val && !(commit_fp_store(w) || commit_fp_load(w) || commit_fp_add(w) || commit_fp_mul(w) || commit_fp_div(w))
+    retired_fp_store(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_stq
+    retired_fp_load(w)  := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_ldq
+    retired_fp_add(w)   := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_ALU)
+    retired_fp_mul(w)   := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_MUL)
+    retired_fp_div(w)   := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_DIV)
+    retired_fp_other(w) := rob.io.commit.uops(w).fp_val && !(retired_fp_store(w) || retired_fp_load(w) || retired_fp_add(w) || retired_fp_mul(w) || retired_fp_div(w))
 
-    is_arith(w) := dis_valids(w) && !(dis_uops(w).is_jal || dis_uops(w).is_jalr || dis_uops(w).uses_stq || dis_uops(w).uses_ldq || dis_uops(w).is_amo)
+    retired_arith(w) := rob.io.commit.valids(w) && (~rob.io.commit.uops(w).fp_val) && !(rob.io.commit.uops(w).is_jal || rob.io.commit.uops(w).is_jalr || rob.io.commit.uops(w).uses_stq || rob.io.commit.uops(w).uses_ldq || rob.io.commit.uops(w).is_amo)
 
-    is_branch(w) := dis_valids(w) && dis_uops(w).is_br
-    is_jal(w) := dis_valids(w) && dis_uops(w).is_jal
-    is_jalr(w) := dis_valids(w) && dis_uops(w).is_jalr
-    when(is_branch(w).asBool) {
+    retired_branch(w) := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_br
+    retired_jal(w)    := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_jal
+    retired_jalr(w)   := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_jalr
+    when(retired_branch(w).asBool) {
       branch_cnt := branch_cnt + 1.U
       printf("branch_cnt: %d\n", branch_cnt.asUInt())
     }
 
-    when(commit_load(w).asBool) {
+    when(retired_load(w).asBool) {
       load_cnt := load_cnt + 1.U
       printf("load_cnt: %d\n", load_cnt.asUInt())
     }
 
-    when(commit_store(w).asBool) {
+    when(retired_store(w).asBool) {
       store_cnt := store_cnt + 1.U
       printf("store_cnt: %d\n", store_cnt.asUInt())
     }
 
-    when(commit_fp_load(w).asBool) {
+    when(retired_fp_load(w).asBool) {
       load_cnt := load_cnt + 1.U
       printf("load_cnt: %d\n", load_cnt.asUInt())
     }
 
-    when(commit_fp_store(w).asBool) {
+    when(retired_fp_store(w).asBool) {
       store_cnt := store_cnt + 1.U
       printf("store_cnt: %d\n", store_cnt.asUInt())
     }
   }
 
-  val insnCommitEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
-     ("exception", () => rob.io.com_xcpt.valid),
-     ("load",      () => commit_load.reduce(_||_)),
-     ("store",     () => commit_store.reduce(_||_)),
-     ("amo",       () => usingAtomics.asBool() && commit_amo.reduce(_||_)),
-     ("system",    () => commit_system.reduce(_||_)),
-     ("arith",     () => is_arith.reduce(_||_)),
-     ("branch",    () => is_branch.reduce(_||_)),
-     ("jal",       () => is_jal.reduce(_||_)),
-     ("jalr",      () => is_jalr.reduce(_||_)))
+  val insnCommitEvents = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
+     ("load",      () => retired_load(w)),
+     ("store",     () => retired_store(w)),
+     ("amo",       () => usingAtomics.asBool() && retired_amo(w)),
+     ("system",    () => retired_system(w)),
+     ("arith",     () => retired_arith(w)),
+     ("branch",    () => retired_branch(w)),
+     ("jal",       () => retired_jal(w)),
+     ("jalr",      () => retired_jalr(w)))
       ++ (if (!usingFPU) Seq() else Seq(
-       ("fp load",     () => commit_fp_load.reduce(_||_)),
-       ("fp store",    () => commit_fp_store.reduce(_||_)),
-       ("fp add",      () => commit_fp_add.reduce(_||_)),
-       ("fp mul",      () => commit_fp_mul.reduce(_||_)),
+       ("fp load",     () => retired_fp_load(w)),
+       ("fp store",    () => retired_fp_store(w)),
+       ("fp add",      () => retired_fp_add(w)),
+       ("fp mul",      () => retired_fp_mul(w)),
        ("fp mul-add",  () => false.B),
-       ("fp div",      () => commit_fp_div.reduce(_||_)),
-       ("fp other",    () => commit_fp_other.reduce(_||_))
-       )
-     )
-   )
+       ("fp div",      () => retired_fp_div(w)),
+       ("fp other",    () => retired_fp_other(w))
+       ))
+   ))
 
   val microArchEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+     ("exception",                         () => rob.io.com_xcpt.valid),
      ("I$ blocked",                        () => icache_blocked),
      ("nop",                               () => false.B),
      ("branch misprediction",              () => mispredict_val),
@@ -401,13 +401,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val frontend_stall_icache_miss = false.B
   val frontend_stall_branch_resteers = false.B
 
+  val rename_excution_stall = ren_stalls.reduce(_||_)
+  val rob_excution_stall    = !rob.io.ready
+  val issue_slots_stall     = !dispatcher.io.ren_uops.map(r => r.ready).reduce(_||_)
+
   val iss_nostall     = iss_valids.reduce(_||_)
   val iss_stall       = !iss_nostall
-  val rename_excution_stall = iss_stall && ren_stalls.reduce(_||_)
-  val issue_excution_stall  = iss_stall && !dis_ready
-  val rob_excution_stall    = iss_stall && !rob.io.ready
   val exu_port_valids   = exe_units.map(u => u.io.req.valid).padTo(10, false.B)
-
   val mem_stall_anyload = iss_stall && !int_iss_unit.io.event_empty && (0 until coreWidth).map(w => rob.io.commit.uops(w).uses_ldq).reduce(_||_)
   val mem_stall_stores  = iss_stall && io.lsu.perf.stq_full && (~mem_stall_anyload)
   val mem_stall_l1_miss = false.B
@@ -433,7 +433,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("ICache miss stall",                  () => frontend_stall_icache_miss),
     ("branch resteers stall",              () => frontend_stall_branch_resteers),
     ("reanme cause excution stall",        () => rename_excution_stall),
-    ("issue cause excution stall",         () => issue_excution_stall),
+    ("issue slots cause stall",            () => issue_slots_stall),
     ("rob unit cause excution stall",      () => rob_excution_stall),
     ("Excution unit 0 usage cycle",        () => exu_port_valids(0)),
     ("Excution unit 1 usage cycle",        () => exu_port_valids(1)),
@@ -449,7 +449,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val perfEvents = new SuperscalarEventSets(Seq(
     (topDownslotVec,           (m, n) => m +& n),
     (Seq(topDownCycleEvents),  (m, n) => m +& n),
-    (Seq(insnCommitEvents),    (m, n) => m +& n),
+    (insnCommitEvents,         (m, n) => m +& n),
     (Seq(microArchEvents),     (m, n) => m +& n),
     (Seq(memorySystemEvents),  (m, n) => m +& n)
   ))
