@@ -405,9 +405,21 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val rob_excution_stall    = !rob.io.ready
   val issue_slots_stall     = !dispatcher.io.ren_uops.map(r => r.ready).reduce(_||_)
 
+  val fp_iss_valids = if (usingFPU)
+      fp_pipeline.io.perf.iss_valids.padTo(3, false.B)
+    else
+      VecInit(Seq.fill(3) { true.B })
+
   val iss_nostall     = iss_valids.reduce(_||_)
   val iss_stall       = !iss_nostall
-  val exu_port_valids   = exe_units.map(u => u.io.req.valid).padTo(10, false.B)
+
+  val all_exu_valids = if (usingFPU)
+      exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.iss_valids
+    else
+      exe_units.map(u => u.io.req.valid)
+
+  val exu_port_valids   = all_exu_valids.padTo(10, false.B)
+
   val mem_stall_anyload = iss_stall && !int_iss_unit.io.event_empty && (0 until coreWidth).map(w => rob.io.commit.uops(w).uses_ldq).reduce(_||_)
   val mem_stall_stores  = iss_stall && io.lsu.perf.stq_full && (~mem_stall_anyload)
   val mem_stall_l1_miss = false.B
