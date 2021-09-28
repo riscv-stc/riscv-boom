@@ -286,41 +286,50 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val retired_load = Wire(Vec(coreWidth, Bool()))
   val retired_amo = Wire(Vec(coreWidth, Bool()))
   val retired_system = Wire(Vec(coreWidth, Bool()))
+  val csr_insn = Wire(Vec(coreWidth, Bool()))
+  val int_insn = Wire(Vec(coreWidth, Bool()))
+  val retired_arith = Wire(Vec(coreWidth, Bool()))
+  val retired_branch = Wire(Vec(coreWidth, Bool()))
+  val retired_jal = Wire(Vec(coreWidth, Bool()))
+  val retired_jalr = Wire(Vec(coreWidth, Bool()))
+  val retired_mul = Wire(Vec(coreWidth, Bool()))
+  val retired_div = Wire(Vec(coreWidth, Bool()))
 
   val retired_fp_store = Wire(Vec(coreWidth, Bool()))
   val retired_fp_load = Wire(Vec(coreWidth, Bool()))
   val retired_fp_add = Wire(Vec(coreWidth, Bool()))
   val retired_fp_mul = Wire(Vec(coreWidth, Bool()))
+  val retired_fp_madd = Wire(Vec(coreWidth, Bool()))
   val retired_fp_div = Wire(Vec(coreWidth, Bool()))
   val retired_fp_other = Wire(Vec(coreWidth, Bool()))
-
-  val retired_arith = Wire(Vec(coreWidth, Bool()))
-  val retired_branch = Wire(Vec(coreWidth, Bool()))
-  val retired_jal = Wire(Vec(coreWidth, Bool()))
-  val retired_jalr = Wire(Vec(coreWidth, Bool()))
 
   val branch_cnt = RegInit(0.U(64.W))
   val store_cnt = RegInit(0.U(64.W))
   val load_cnt = RegInit(0.U(64.W))
 
   for (w <- 0 until coreWidth) {
-    retired_store(w)  := rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_stq
-    retired_load(w)   := rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_ldq
-    retired_amo(w)    := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_amo
-    retired_system(w) := rob.io.commit.valids(w) && (rob.io.commit.uops(w).ctrl.csr_cmd =/= freechips.rocketchip.rocket.CSR.N)
-
-    retired_fp_store(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_stq
-    retired_fp_load(w)  := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_ldq
-    retired_fp_add(w)   := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_ALU)
-    retired_fp_mul(w)   := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_MUL)
-    retired_fp_div(w)   := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_DIV)
-    retired_fp_other(w) := rob.io.commit.uops(w).fp_val && !(retired_fp_store(w) || retired_fp_load(w) || retired_fp_add(w) || retired_fp_mul(w) || retired_fp_div(w))
-
-    retired_arith(w) := rob.io.commit.valids(w) && (~rob.io.commit.uops(w).fp_val) && !(rob.io.commit.uops(w).is_jal || rob.io.commit.uops(w).is_jalr || rob.io.commit.uops(w).uses_stq || rob.io.commit.uops(w).uses_ldq || rob.io.commit.uops(w).is_amo)
-
+    val insn_is_rvv = if(usingVector) rob.io.commit.uops(w).is_rvv else false.B
+    int_insn(w) := !(rob.io.commit.uops(w).fp_val || insn_is_rvv)
+    retired_load(w)   := rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_ldq && int_insn(w)
+    retired_store(w)  := rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_stq && int_insn(w)
+    retired_amo(w)    := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_amo && int_insn(w)
+    csr_insn(w)       := (rob.io.commit.uops(w).ctrl.csr_cmd =/= freechips.rocketchip.rocket.CSR.N)
+    retired_system(w) := rob.io.commit.valids(w) && csr_insn(w)
+    retired_arith(w)  := rob.io.commit.valids(w) && int_insn(w) && !(rob.io.commit.uops(w).is_jal || rob.io.commit.uops(w).is_jalr || rob.io.commit.uops(w).uses_stq || rob.io.commit.uops(w).uses_ldq || rob.io.commit.uops(w).is_amo || csr_insn(w))
     retired_branch(w) := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_br
     retired_jal(w)    := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_jal
     retired_jalr(w)   := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_jalr
+    retired_mul(w)    := rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_MUL) && int_insn(w)
+    retired_div(w)    := rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_DIV) && int_insn(w)
+
+    retired_fp_store(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_stq
+    retired_fp_load(w)  := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_ldq
+    retired_fp_add(w)   := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uopc.isOneOf(uopFADD_S, uopFSUB_S, uopFADD_D, uopFSUB_D)
+    retired_fp_mul(w)   := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uopc.isOneOf(uopFMUL_S, uopFMUL_D)
+    retired_fp_madd(w)  := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uopc.isOneOf(uopFMADD_S, uopFMSUB_S, uopFNMADD_S, uopFNMSUB_S, uopFMADD_D, uopFMSUB_D, uopFNMADD_D, uopFNMSUB_D)
+    retired_fp_div(w)   := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_FDV)
+    retired_fp_other(w) := rob.io.commit.uops(w).fp_val && !(retired_fp_store(w) || retired_fp_load(w) || retired_fp_add(w) || retired_fp_mul(w) || retired_fp_div(w))
+
     when(retired_branch(w).asBool) {
       branch_cnt := branch_cnt + 1.U
       printf("branch_cnt: %d\n", branch_cnt.asUInt())
@@ -348,23 +357,24 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   val insnCommitEvents = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
-     ("load",      () => retired_load(w)),
-     ("store",     () => retired_store(w)),
-     ("amo",       () => usingAtomics.asBool() && retired_amo(w)),
-     ("system",    () => retired_system(w)),
-     ("arith",     () => retired_arith(w)),
-     ("branch",    () => retired_branch(w)),
-     ("jal",       () => retired_jal(w)),
-     ("jalr",      () => retired_jalr(w)))
-      ++ (if (!usingFPU) Seq() else Seq(
+     ("int load",    () => retired_load(w)),
+     ("int store",   () => retired_store(w)),
+     ("int amo",     () => retired_amo(w)),
+     ("int system",  () => retired_system(w)),
+     ("int arith",   () => retired_arith(w)),
+     ("int branch",  () => retired_branch(w)),
+     ("int jal",     () => retired_jal(w)),
+     ("int jalr",    () => retired_jalr(w)),
+     ("int mul",     () => retired_mul(w)),
+     ("int div",     () => retired_div(w)))
+     ++ (if (!usingFPU) Seq() else Seq(
        ("fp load",     () => retired_fp_load(w)),
        ("fp store",    () => retired_fp_store(w)),
        ("fp add",      () => retired_fp_add(w)),
        ("fp mul",      () => retired_fp_mul(w)),
-       ("fp mul-add",  () => false.B),
+       ("fp mul-add",  () => retired_fp_madd(w)),
        ("fp div",      () => retired_fp_div(w)),
-       ("fp other",    () => retired_fp_other(w))
-       ))
+       ("fp other",    () => retired_fp_other(w))))
    ))
 
   val microArchEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
