@@ -420,11 +420,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     else
       VecInit(Seq.fill(3) { true.B })
 
-  val iss_nostall     = iss_valids.reduce(_||_)
+  val iss_nostall     = (iss_valids ++ fp_pipeline.io.perf.iss_valids).reduce(_||_)
   val iss_stall       = !iss_nostall
 
   val all_exu_valids = if (usingFPU)
-      exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.iss_valids
+      exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids
     else
       exe_units.map(u => u.io.req.valid)
 
@@ -462,6 +462,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("Excution unit 2 usage cycle",        () => exu_port_valids(2)),
     ("Excution unit 3 usage cycle",        () => exu_port_valids(3)),
     ("Excution unit 4 usage cycle",        () => exu_port_valids(4)),
+    ("Excution unit 5 usage cycle",        () => exu_port_valids(5)),
+    ("Excution unit 6 usage cycle",        () => exu_port_valids(6)),
+    ("Excution unit 7 usage cycle",        () => exu_port_valids(7)),
+    ("Excution unit 8 usage cycle",        () => exu_port_valids(8)),
+    ("Excution unit 9 usage cycle",        () => exu_port_valids(9)),
     ("l1 miss mem stall",                  () => mem_stall_l1_miss),
     ("l2 miss mem stall",                  () => false.B),
     ("l3 miss mem stall",                  () => false.B),

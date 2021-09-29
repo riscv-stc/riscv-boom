@@ -57,6 +57,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
 
     val perf = Output(new Bundle {
       val iss_valids = Vec(fpIssueParams.issueWidth, Bool())
+      val exe_units_req_valids = Vec(fpIssueParams.issueWidth, Bool())
     })
   })
 
@@ -94,6 +95,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   val iss_uops   = Wire(Vec(exe_units.numFrfReaders, new MicroOp()))
 
   io.perf.iss_valids := iss_valids
+  io.perf.exe_units_req_valids := exe_units.map(u => u.io.req.valid)
 
   issue_unit.io.tsc_reg := io.debug_tsc_reg
   issue_unit.io.brupdate := io.brupdate
