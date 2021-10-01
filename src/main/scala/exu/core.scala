@@ -444,9 +444,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val opsExecuted_sum_gtN = Wire(Vec(rob.numWakeupPorts, Bool()))
   val opsExecuted_sum_ltN = Wire(Vec(rob.numWakeupPorts, Bool()))
   val opsExecuted_sum = PopCount(uops_executed_valids)
-  (0 until issueParams.map(_.issueWidth).sum).map(n => opsExecuted_sum_gtN(n) := (opsExecuted_sum > n.U))
+  (0 until rob.numWakeupPorts).map(n => opsExecuted_sum_gtN(n) := (opsExecuted_sum > n.U))
   val opsExecuted_gt_events: Seq[(String, () => Bool)] = opsExecuted_sum_gtN.zipWithIndex.map{case(v,i) => ("more than $i ops executed", () => v)}
-  (0 until issueParams.map(_.issueWidth).sum).map(n => opsExecuted_sum_ltN(n) := (opsExecuted_sum <= n.U))
+  (0 until rob.numWakeupPorts).map(n => opsExecuted_sum_ltN(n) := (opsExecuted_sum <= n.U))
   val opsExecuted_lt_events: Seq[(String, () => Bool)] = opsExecuted_sum_ltN.zipWithIndex.map{case(v,i) => ("less than or equal to $i ops executed", () => v)}
 
   val numArithDivider     = exe_units.count(_.hasDiv)
