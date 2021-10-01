@@ -356,12 +356,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }
   }
 
-  val br_insn_retired_cond_ntaken = Wire(Vec(coreWidth, Bool()))
-  val br_insn_retired_cond_taken = Wire(Vec(coreWidth, Bool()))
-  br_insn_retired_cond_taken  := (0 until coreWidth).map(w => retired_branch(w) && rob.io.commit.uops(w).taken)
-  br_insn_retired_cond_ntaken := (0 until coreWidth).map(w => retired_branch(w) && ~rob.io.commit.uops(w).taken)
-
-  val insnCommitEvents = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
+  val insnCommitBaseEvents = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
      ("int load",    () => retired_load(w)),
      ("int store",   () => retired_store(w)),
      ("int amo",     () => retired_amo(w)),
@@ -371,9 +366,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
      ("int jal",     () => retired_jal(w)),
      ("int jalr",    () => retired_jalr(w)),
      ("int mul",     () => retired_mul(w)),
-     ("int div",     () => retired_div(w)),
-     ("taken conditional branch instructions retired", () => br_insn_retired_cond_taken(w)),
-     ("not taken conditional branch instructions retired", () => br_insn_retired_cond_ntaken(w)))
+     ("int div",     () => retired_div(w)))
      ++ (if (!usingFPU) Seq() else Seq(
        ("fp insn",     () => rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w)),
        ("fp load",     () => retired_fp_load(w)),
@@ -385,6 +378,16 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
        ("fp other",    () => retired_fp_other(w))))
     ++ (if (!usingVector) Seq() else Seq(
       ("vector instruction retired",      () => rob.io.commit.uops(w).is_rvv && rob.io.commit.valids(w))))
+   ))
+
+  val br_insn_retired_cond_ntaken = Wire(Vec(coreWidth, Bool()))
+  val br_insn_retired_cond_taken = Wire(Vec(coreWidth, Bool()))
+  br_insn_retired_cond_taken  := (0 until coreWidth).map(w => retired_branch(w) && rob.io.commit.uops(w).taken)
+  br_insn_retired_cond_ntaken := (0 until coreWidth).map(w => retired_branch(w) && ~rob.io.commit.uops(w).taken)
+
+  val insnCommitDetialEvents = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
+     ("taken conditional branch instructions retired",     () => br_insn_retired_cond_taken(w)),
+     ("not taken conditional branch instructions retired", () => br_insn_retired_cond_ntaken(w)))
    ))
 
   val br_misp_retired = brupdate.b2.mispredict
@@ -427,9 +430,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val backend_stall   = dec_hazards.reduce(_||_)
   val backend_nostall = !backend_stall
   val fetch_no_deliver= (~dec_fire.reduce(_||_)) && backend_nostall && (~ifu_redirect_flush_stat)
-  val frontend_stall_itlb_miss   = false.B
-  val frontend_stall_icache_miss = false.B
-  val frontend_stall_branch_resteers = false.B
 
   val rob_excution_stall    = !rob.io.perf.ready
   val issue_slots_stall     = dispatcher.io.ren_uops.map(r => ~r.ready)
@@ -438,18 +438,16 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids
     else
       exe_units.map(u => u.io.req.valid)
+  val exu_active_events: Seq[(String, () => Bool)] = all_exu_valids.zipWithIndex.map{case(v,i) => ("Excution unit $i active cycle", () => v)}
 
-  val exu_port_valids_events: Seq[(String, () => Bool)] = all_exu_valids.zipWithIndex.map{case(v,i) => ("Excution unit $i usage cycle", () => v)}
-
-  val opsExecuted_sum_gtN = Wire(Vec(issueParams.map(_.issueWidth).sum, Bool()))
-  val opsExecuted_sum_ltN = Wire(Vec(issueParams.map(_.issueWidth).sum, Bool()))
-  val opsExecuted_sum = PopCount(all_exu_valids)
-
+  val uops_executed_valids = rob.io.wb_resps.map(r => r.valid)
+  val opsExecuted_sum_gtN = Wire(Vec(rob.numWakeupPorts, Bool()))
+  val opsExecuted_sum_ltN = Wire(Vec(rob.numWakeupPorts, Bool()))
+  val opsExecuted_sum = PopCount(uops_executed_valids)
   (0 until issueParams.map(_.issueWidth).sum).map(n => opsExecuted_sum_gtN(n) := (opsExecuted_sum > n.U))
   val opsExecuted_gt_events: Seq[(String, () => Bool)] = opsExecuted_sum_gtN.zipWithIndex.map{case(v,i) => ("more than $i ops executed", () => v)}
   (0 until issueParams.map(_.issueWidth).sum).map(n => opsExecuted_sum_ltN(n) := (opsExecuted_sum <= n.U))
   val opsExecuted_lt_events: Seq[(String, () => Bool)] = opsExecuted_sum_ltN.zipWithIndex.map{case(v,i) => ("less than or equal to $i ops executed", () => v)}
-
 
   val numArithDivider     = exe_units.count(_.hasDiv)
   val arith_divder_active = Wire(Vec(numArithDivider, Bool()))
@@ -474,7 +472,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val topDownslotsVec = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("slots issued",                      () => dec_fire(w)),
     ("fetch bubbles",                     () => (~dec_fire(w)) && backend_nostall && (~ifu_redirect_flush_stat)),
-    ("branch instruction retired",        () => rob.io.commit.uops(w).is_br && rob.io.commit.valids(w)),
+    ("branch instruction retired",        () => retired_branch(w)),
     ("rename stalls",                     () => ren_stalls(w)),
     ("issue slots cause stall",           () => issue_slots_stall(w)),
     ("Counts the number of retirement",   () => retired_valids(w)))
@@ -493,19 +491,16 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("few ops executed cycle",             () => opsExecuted_sum_ltN(1)),
     ("any load mem stall",                 () => mem_stall_anyload),
     ("stores mem stall",                   () => mem_stall_stores),
-    ("ITLB miss stall",                    () => frontend_stall_itlb_miss),
-    ("ICache miss stall",                  () => frontend_stall_icache_miss),
-    ("branch resteers stall",              () => frontend_stall_branch_resteers),
-    ("rob unit cause excution stall",      () => rob_excution_stall),
     ("l1 miss mem stall",                  () => mem_stall_l1_miss),
     ("l2 miss mem stall",                  () => false.B),
     ("l3 miss mem stall",                  () => false.B),
     ("mem latency",                        () => false.B),
+    ("rob unit cause excution stall",      () => rob_excution_stall),
     ("not actually retired uops",          () => retired_stall)
   ))
 
   val topDownCyclesEvents1 = new EventSet((mask, hits) => (mask & hits).orR,
-    exu_port_valids_events
+    exu_active_events
     ++ opsExecuted_gt_events
     ++ arith_divder_active_events
   )
@@ -515,7 +510,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     (Seq(topDownCyclesEvents0), (m, n) => m +& n),
     (Seq(topDownCyclesEvents1), (m, n) => m +& n),
     (topDownIssVec,             (m, n) => m +& n),
-    (insnCommitEvents,          (m, n) => m +& n),
+    (insnCommitBaseEvents,      (m, n) => m +& n),
+    (insnCommitDetialEvents,    (m, n) => m +& n),
     (Seq(microArchEvents),      (m, n) => m +& n),
     (Seq(memorySystemEvents),   (m, n) => m +& n)
   ))
