@@ -356,6 +356,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }
   }
 
+  val br_insn_retired_cond_ntaken = Wire(Vec(coreWidth, Bool()))
+  val br_insn_retired_cond_taken = Wire(Vec(coreWidth, Bool()))
+  br_insn_retired_cond_taken  := (0 until coreWidth).map(w => retired_branch(w) && rob.io.commit.uops(w).taken)
+  br_insn_retired_cond_ntaken := (0 until coreWidth).map(w => retired_branch(w) && ~rob.io.commit.uops(w).taken)
+
   val insnCommitEvents = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
      ("int load",    () => retired_load(w)),
      ("int store",   () => retired_store(w)),
@@ -366,7 +371,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
      ("int jal",     () => retired_jal(w)),
      ("int jalr",    () => retired_jalr(w)),
      ("int mul",     () => retired_mul(w)),
-     ("int div",     () => retired_div(w)))
+     ("int div",     () => retired_div(w)),
+     ("taken conditional branch instructions retired", () => br_insn_retired_cond_taken(w)),
+     ("not taken conditional branch instructions retired", () => br_insn_retired_cond_ntaken(w)))
      ++ (if (!usingFPU) Seq() else Seq(
        ("fp insn",     () => rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w)),
        ("fp load",     () => retired_fp_load(w)),
@@ -380,17 +387,27 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       ("vector instruction retired",      () => rob.io.commit.uops(w).is_rvv && rob.io.commit.valids(w))))
    ))
 
+  val br_misp_retired = brupdate.b2.mispredict
+  val br_misp_target = br_misp_retired && oldest_mispredict.cfi_type === CFI_JALR
+  val br_misp_dir    = br_misp_retired && oldest_mispredict.cfi_type === CFI_BR
+  val br_misp_retired_cond_taken  = br_misp_dir && brupdate.b2.taken
+  val br_misp_retired_cond_ntaken = br_misp_dir && (~brupdate.b2.taken)
+
   val microArchEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
      ("exception",                         () => rob.io.com_xcpt.valid),
-     ("I$ blocked",                        () => icache_blocked),
-     ("nop",                               () => false.B),
-     ("branch misprediction",              () => mispredict_val),
-     ("control-flow target misprediction", () => mispredict_val && oldest_mispredict.cfi_type === CFI_JALR),
-     ("flush",                             () => rob.io.flush.valid),
-     ("branch resolved",                   () => b1.resolve_mask =/= 0.U)
+     ("control-flow target misprediction", () => br_misp_target),
+     ("mispredicted conditional branch instructions retired", () => br_misp_dir),
+     ("taken conditional mispredicted branch instructions retired", () => br_misp_retired_cond_taken),
+     ("not taken conditional mispredicted branch instructions retired", () => br_misp_retired_cond_ntaken),
+     ("front-end f1 is resteered",         () => io.ifu.perf.f1_clear),
+     ("front-end f2 is resteered",         () => io.ifu.perf.f2_clear),
+     ("front-end f3 is resteered",         () => io.ifu.perf.f3_clear),
+     ("front-end f4 is resteered",         () => io.ifu.perf.f4_clear),
+     ("flush",                             () => rob.io.flush.valid)
    ))
 
   val memorySystemEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+     ("I$ blocked",  () => icache_blocked),
      ("I$ miss",     () => io.ifu.perf.acquire),
      ("D$ miss",     () => io.lsu.perf.acquire),
      ("D$ release",  () => io.lsu.perf.release),
@@ -470,7 +487,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val topDownCyclesEvents0 = new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("recovery cycle",                     () => ifu_redirect_flush_stat),
     ("fetch no Deliver cycle",             () => fetch_no_deliver),
-    ("branch mispred retired",             () => mispredict_val),
+    ("branch mispred retired",             () => brupdate.b2.mispredict),
     ("machine clears",                     () => rob.io.flush.valid),
     ("none ops executed",                  () => opsExecuted_sum_ltN(0)),
     ("few ops executed cycle",             () => opsExecuted_sum_ltN(1)),
@@ -484,11 +501,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("l2 miss mem stall",                  () => false.B),
     ("l3 miss mem stall",                  () => false.B),
     ("mem latency",                        () => false.B),
-    ("not actually retired uops",          () => retired_stall),
-    ("front-end f1 is resteered",          () => io.ifu.perf.f1_clear),
-    ("front-end f2 is resteered",          () => io.ifu.perf.f2_clear),
-    ("front-end f3 is resteered",          () => io.ifu.perf.f3_clear),
-    ("front-end f4 is resteered",          () => io.ifu.perf.f4_clear)
+    ("not actually retired uops",          () => retired_stall)
   ))
 
   val topDownCyclesEvents1 = new EventSet((mask, hits) => (mask & hits).orR,
