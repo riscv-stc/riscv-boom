@@ -368,6 +368,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
      ("int mul",     () => retired_mul(w)),
      ("int div",     () => retired_div(w)))
      ++ (if (!usingFPU) Seq() else Seq(
+       ("fp insn",     () => rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w)),
        ("fp load",     () => retired_fp_load(w)),
        ("fp store",    () => retired_fp_store(w)),
        ("fp add",      () => retired_fp_add(w)),
@@ -375,6 +376,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
        ("fp mul-add",  () => retired_fp_madd(w)),
        ("fp div",      () => retired_fp_div(w)),
        ("fp other",    () => retired_fp_other(w))))
+    ++ (if (!usingVector) Seq() else Seq(
+      ("vector instruction retired",      () => rob.io.commit.uops(w).is_rvv && rob.io.commit.valids(w))))
    ))
 
   val microArchEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
@@ -411,74 +414,97 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val frontend_stall_icache_miss = false.B
   val frontend_stall_branch_resteers = false.B
 
-  val rename_excution_stall = ren_stalls.reduce(_||_)
-  val rob_excution_stall    = !rob.io.ready
-  val issue_slots_stall     = !dispatcher.io.ren_uops.map(r => r.ready).reduce(_||_)
-
-  val fp_iss_valids = if (usingFPU)
-      fp_pipeline.io.perf.iss_valids.padTo(3, false.B)
-    else
-      VecInit(Seq.fill(3) { true.B })
-
-  val iss_nostall     = (iss_valids ++ fp_pipeline.io.perf.iss_valids).reduce(_||_)
-  val iss_stall       = !iss_nostall
+  val rob_excution_stall    = !rob.io.perf.ready
+  val issue_slots_stall     = dispatcher.io.ren_uops.map(r => ~r.ready)
 
   val all_exu_valids = if (usingFPU)
       exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids
     else
       exe_units.map(u => u.io.req.valid)
 
-  val exu_port_valids   = all_exu_valids.padTo(10, false.B)
+  val exu_port_valids_events: Seq[(String, () => Bool)] = all_exu_valids.zipWithIndex.map{case(v,i) => ("Excution unit $i usage cycle", () => v)}
 
+  val opsExecuted_sum_gtN = Wire(Vec(issueParams.map(_.issueWidth).sum, Bool()))
+  val opsExecuted_sum_ltN = Wire(Vec(issueParams.map(_.issueWidth).sum, Bool()))
+  val opsExecuted_sum = PopCount(all_exu_valids)
+
+  (0 until issueParams.map(_.issueWidth).sum).map(n => opsExecuted_sum_gtN(n) := (opsExecuted_sum > n.U))
+  val opsExecuted_gt_events: Seq[(String, () => Bool)] = opsExecuted_sum_gtN.zipWithIndex.map{case(v,i) => ("more than $i ops executed", () => v)}
+  (0 until issueParams.map(_.issueWidth).sum).map(n => opsExecuted_sum_ltN(n) := (opsExecuted_sum <= n.U))
+  val opsExecuted_lt_events: Seq[(String, () => Bool)] = opsExecuted_sum_ltN.zipWithIndex.map{case(v,i) => ("less than or equal to $i ops executed", () => v)}
+
+
+  val numArithDivider     = exe_units.count(_.hasDiv)
+  val arith_divder_active = Wire(Vec(numArithDivider, Bool()))
+  var exu_div_idx = 0
+  for (i <- 0 until exe_units.length) {
+    if (exe_units(i).hasDiv) {
+      arith_divder_active(exu_div_idx) := exe_units(i).io.perf.div_busy
+      exu_div_idx += 1
+    }
+  }
+  val arith_divder_active_events: Seq[(String, () => Bool)] = arith_divder_active.zipWithIndex.map{case(v,i) => ("cycles when $i divider unit is busy", () => v)}
+
+  val iss_nostall = (iss_valids ++ fp_pipeline.io.perf.iss_valids).reduce(_||_)
+  val iss_stall   = !iss_nostall
   val mem_stall_anyload = iss_stall && !int_iss_unit.io.event_empty && (0 until coreWidth).map(w => rob.io.commit.uops(w).uses_ldq).reduce(_||_)
   val mem_stall_stores  = iss_stall && io.lsu.perf.stq_full && (~mem_stall_anyload)
   val mem_stall_l1_miss = false.B
 
-  val topDownslotVec = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
+  val retired_valids = rob.io.commit.valids
+  val retired_stall  = !retired_valids.reduce(_||_)
+
+  val topDownslotsVec = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("slots issued",                      () => dec_fire(w)),
     ("fetch bubbles",                     () => (~dec_fire(w)) && backend_nostall && (~ifu_redirect_flush_stat)),
     ("branch instruction retired",        () => rob.io.commit.uops(w).is_br && rob.io.commit.valids(w)),
-    ("floting-point instruction retired", () => rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w)))
-    ++ (if (!usingVector) Seq() else Seq(
-      ("vector instruction retired",      () => rob.io.commit.uops(w).is_rvv && rob.io.commit.valids(w))))
+    ("rename stalls",                     () => ren_stalls(w)),
+    ("issue slots cause stall",           () => issue_slots_stall(w)),
+    ("Counts the number of retirement",   () => retired_valids(w)))
   ))
 
-  val topDownCycleEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+  val topDownIssVec = (0 until issueParams.map(_.issueWidth).sum).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
+    ("exe sum",             () => all_exu_valids(w))
+    )))
+
+  val topDownCyclesEvents0 = new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("recovery cycle",                     () => ifu_redirect_flush_stat),
     ("fetch no Deliver cycle",             () => fetch_no_deliver),
     ("branch mispred retired",             () => mispredict_val),
     ("machine clears",                     () => rob.io.flush.valid),
-    ("few ops executed cycle",             () => iss_stall),
+    ("none ops executed",                  () => opsExecuted_sum_ltN(0)),
+    ("few ops executed cycle",             () => opsExecuted_sum_ltN(1)),
     ("any load mem stall",                 () => mem_stall_anyload),
     ("stores mem stall",                   () => mem_stall_stores),
     ("ITLB miss stall",                    () => frontend_stall_itlb_miss),
     ("ICache miss stall",                  () => frontend_stall_icache_miss),
     ("branch resteers stall",              () => frontend_stall_branch_resteers),
-    ("reanme cause excution stall",        () => rename_excution_stall),
-    ("issue slots cause stall",            () => issue_slots_stall),
     ("rob unit cause excution stall",      () => rob_excution_stall),
-    ("Excution unit 0 usage cycle",        () => exu_port_valids(0)),
-    ("Excution unit 1 usage cycle",        () => exu_port_valids(1)),
-    ("Excution unit 2 usage cycle",        () => exu_port_valids(2)),
-    ("Excution unit 3 usage cycle",        () => exu_port_valids(3)),
-    ("Excution unit 4 usage cycle",        () => exu_port_valids(4)),
-    ("Excution unit 5 usage cycle",        () => exu_port_valids(5)),
-    ("Excution unit 6 usage cycle",        () => exu_port_valids(6)),
-    ("Excution unit 7 usage cycle",        () => exu_port_valids(7)),
-    ("Excution unit 8 usage cycle",        () => exu_port_valids(8)),
-    ("Excution unit 9 usage cycle",        () => exu_port_valids(9)),
     ("l1 miss mem stall",                  () => mem_stall_l1_miss),
     ("l2 miss mem stall",                  () => false.B),
     ("l3 miss mem stall",                  () => false.B),
-    ("mem latency",                        () => false.B)
+    ("mem latency",                        () => false.B),
+    ("not actually retired uops",          () => retired_stall),
+    ("front-end f1 is resteered",          () => io.ifu.perf.f1_clear),
+    ("front-end f2 is resteered",          () => io.ifu.perf.f2_clear),
+    ("front-end f3 is resteered",          () => io.ifu.perf.f3_clear),
+    ("front-end f4 is resteered",          () => io.ifu.perf.f4_clear)
   ))
 
+  val topDownCyclesEvents1 = new EventSet((mask, hits) => (mask & hits).orR,
+    exu_port_valids_events
+    ++ opsExecuted_gt_events
+    ++ arith_divder_active_events
+  )
+
   val perfEvents = new SuperscalarEventSets(Seq(
-    (topDownslotVec,           (m, n) => m +& n),
-    (Seq(topDownCycleEvents),  (m, n) => m +& n),
-    (insnCommitEvents,         (m, n) => m +& n),
-    (Seq(microArchEvents),     (m, n) => m +& n),
-    (Seq(memorySystemEvents),  (m, n) => m +& n)
+    (topDownslotsVec,           (m, n) => m +& n),
+    (Seq(topDownCyclesEvents0), (m, n) => m +& n),
+    (Seq(topDownCyclesEvents1), (m, n) => m +& n),
+    (topDownIssVec,             (m, n) => m +& n),
+    (insnCommitEvents,          (m, n) => m +& n),
+    (Seq(microArchEvents),      (m, n) => m +& n),
+    (Seq(memorySystemEvents),   (m, n) => m +& n)
   ))
 
 

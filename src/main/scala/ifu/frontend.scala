@@ -255,6 +255,10 @@ class FetchBundle(implicit p: Parameters) extends BoomBundle
 class IFUPerfEvents extends FrontendPerfEvents {
   val fb_enq_valid = Bool()
   val fb_deq_valid = Bool()
+  val f1_clear = Bool()
+  val f2_clear = Bool()
+  val f3_clear = Bool()
+  val f4_clear = Bool()
 }
 
 
@@ -1039,6 +1043,11 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
 
   io.cpu.perf.fb_enq_valid := fb.io.enq.valid
   io.cpu.perf.fb_deq_valid := fb.io.deq.valid
+
+  io.cpu.perf.f1_clear := f1_clear
+  io.cpu.perf.f2_clear := f2_clear
+  io.cpu.perf.f3_clear := f3_clear
+  io.cpu.perf.f4_clear := f4_clear
 
   override def toString: String =
     (BoomCoreStringPrefix("====Overall Frontend Params====") + "\n"
