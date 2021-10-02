@@ -98,6 +98,11 @@ class IssueUnitIO(
   val event_empty      = Output(Bool()) // used by HPM events; is the issue unit empty?
 
   val tsc_reg          = Input(UInt(width=xLen.W))
+
+  val perf = Output(new Bundle {
+    val empty = Bool()
+    val full  = Bool()
+  })
 }
 
 /**
@@ -239,6 +244,8 @@ abstract class IssueUnit(
   val count = PopCount(slots.map(_.io.valid))
   dontTouch(count)
 
+  io.perf.empty := io.event_empty
+  io.perf.full  := count === numIssueSlots.U
   //-------------------------------------------------------------
 
   assert (PopCount(issue_slots.map(s => s.grant)) <= issueWidth.U, "[issue] window giving out too many grants.")

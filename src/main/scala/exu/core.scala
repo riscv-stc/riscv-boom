@@ -380,33 +380,28 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       ("vector instruction retired",      () => rob.io.commit.uops(w).is_rvv && rob.io.commit.valids(w))))
    ))
 
-  val br_insn_retired_cond_ntaken = Wire(Vec(coreWidth, Bool()))
-  val br_insn_retired_cond_taken = Wire(Vec(coreWidth, Bool()))
-  br_insn_retired_cond_taken  := (0 until coreWidth).map(w => retired_branch(w) && rob.io.commit.uops(w).taken)
-  br_insn_retired_cond_ntaken := (0 until coreWidth).map(w => retired_branch(w) && ~rob.io.commit.uops(w).taken)
-
-  val insnCommitDetialEvents = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
-     ("taken conditional branch instructions retired",     () => br_insn_retired_cond_taken(w)),
-     ("not taken conditional branch instructions retired", () => br_insn_retired_cond_ntaken(w)))
+  val micrArchEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+     ("exception",                         () => rob.io.com_xcpt.valid)
    ))
 
-  val br_misp_retired = brupdate.b2.mispredict
-  val br_misp_target = br_misp_retired && oldest_mispredict.cfi_type === CFI_JALR
-  val br_misp_dir    = br_misp_retired && oldest_mispredict.cfi_type === CFI_BR
-  val br_misp_retired_cond_taken  = br_misp_dir && brupdate.b2.taken
-  val br_misp_retired_cond_ntaken = br_misp_dir && (~brupdate.b2.taken)
-
-  val microArchEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+  val resourceEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
      ("exception",                         () => rob.io.com_xcpt.valid),
-     ("control-flow target misprediction", () => br_misp_target),
-     ("mispredicted conditional branch instructions retired", () => br_misp_dir),
-     ("taken conditional mispredicted branch instructions retired", () => br_misp_retired_cond_taken),
-     ("not taken conditional mispredicted branch instructions retired", () => br_misp_retired_cond_ntaken),
      ("front-end f1 is resteered",         () => io.ifu.perf.f1_clear),
      ("front-end f2 is resteered",         () => io.ifu.perf.f2_clear),
      ("front-end f3 is resteered",         () => io.ifu.perf.f3_clear),
      ("front-end f4 is resteered",         () => io.ifu.perf.f4_clear),
-     ("flush",                             () => rob.io.flush.valid)
+     ("frontend fb full",                  () => io.ifu.perf.fb_full),
+     ("frontend ftq full",                 () => io.ifu.perf.ftq_full),
+     ("fp issue slots full",               () => fp_pipeline.io.perf.iss_slots_full),
+     ("fp issue slots empty",              () => fp_pipeline.io.perf.iss_slots_empty),
+     ("int issue slots full",              () => int_iss_unit.io.perf.full),
+     ("int issue slots empty",             () => int_iss_unit.io.perf.empty),
+     ("mem issue slots full",              () => mem_iss_unit.io.perf.full),
+     ("mem issue slots empty",             () => mem_iss_unit.io.perf.empty),
+     ("load queue almost full",            () => io.lsu.ldq_full.reduce(_||_)),
+     ("store queue almost full",           () => io.lsu.stq_full.reduce(_||_)),
+     ("rob entry empty",                   () => rob.io.perf.empty),
+     ("rob entry full",                    () => rob.io.perf.full)
    ))
 
   val memorySystemEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
@@ -426,13 +421,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   } .elsewhen(io.ifu.fetchpacket.valid){
     ifu_redirect_flush_stat := false.B
   }
-
-  val backend_stall   = dec_hazards.reduce(_||_)
-  val backend_nostall = !backend_stall
-  val fetch_no_deliver= (~dec_fire.reduce(_||_)) && backend_nostall && (~ifu_redirect_flush_stat)
-
-  val rob_excution_stall    = !rob.io.perf.ready
-  val issue_slots_stall     = dispatcher.io.ren_uops.map(r => ~r.ready)
 
 
   val uopsDispatched_valids = rob.io.enq_valids
@@ -461,6 +449,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val uopsRetired_stall  = !uopsRetired_valids.reduce(_||_)
 
 
+  val br_insn_retired_cond_ntaken = Wire(Vec(coreWidth, Bool()))
+  val br_insn_retired_cond_taken = Wire(Vec(coreWidth, Bool()))
+  br_insn_retired_cond_taken  := (0 until coreWidth).map(w => retired_branch(w) && rob.io.commit.uops(w).taken)
+  br_insn_retired_cond_ntaken := (0 until coreWidth).map(w => retired_branch(w) && ~rob.io.commit.uops(w).taken)
+
   val numArithDivider     = exe_units.count(_.hasDiv)
   val arith_divder_active = Wire(Vec(numArithDivider, Bool()))
   var exu_div_idx = 0
@@ -472,6 +465,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
   val arith_divder_active_events: Seq[(String, () => Bool)] = arith_divder_active.zipWithIndex.map{case(v,i) => ("cycles when $i divider unit is busy", () => v)}
 
+
+  val backend_stall   = dec_hazards.reduce(_||_)
+  val backend_nostall = !backend_stall
+  val fetch_no_deliver= (~dec_fire.reduce(_||_)) && backend_nostall && (~ifu_redirect_flush_stat)
+
   val mem_stall_anyload = uopsIssued_stall && !int_iss_unit.io.event_empty && (0 until coreWidth).map(w => rob.io.commit.uops(w).uses_ldq).reduce(_||_)
   val mem_stall_stores  = uopsIssued_stall && io.lsu.perf.stq_full && (~mem_stall_anyload)
   val mem_stall_l1_miss = false.B
@@ -480,8 +478,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("slots issued",                      () => dec_fire(w)),
     ("fetch bubbles",                     () => (~dec_fire(w)) && backend_nostall && (~ifu_redirect_flush_stat)),
     ("branch instruction retired",        () => retired_branch(w)),
-    ("rename stalls",                     () => ren_stalls(w)),
-    ("issue slots cause stall",           () => issue_slots_stall(w)),
+    ("taken conditional branch instructions retired",     () => br_insn_retired_cond_taken(w)),
+    ("not taken conditional branch instructions retired", () => br_insn_retired_cond_ntaken(w)),
     ("Counts the number of dispatched",   () => uopsDispatched_valids(w)),
     ("Counts the number of retirement",   () => uopsRetired_valids(w)))
   ))
@@ -490,6 +488,12 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("issued uops sum",            () => uopsIssued_valids(w)),
     ("exe active sum",             () => uopsExeActive_valids(w))
     )))
+
+  val br_misp_retired = brupdate.b2.mispredict
+  val br_misp_target = br_misp_retired && oldest_mispredict.cfi_type === CFI_JALR
+  val br_misp_dir    = br_misp_retired && oldest_mispredict.cfi_type === CFI_BR
+  val br_misp_retired_cond_taken  = br_misp_dir && brupdate.b2.taken
+  val br_misp_retired_cond_ntaken = br_misp_dir && (~brupdate.b2.taken)
 
   val topDownCyclesEvents0 = new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("recovery cycle",                     () => ifu_redirect_flush_stat),
@@ -504,7 +508,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("l2 miss mem stall",                  () => false.B),
     ("l3 miss mem stall",                  () => false.B),
     ("mem latency",                        () => false.B),
-    ("rob unit cause excution stall",      () => rob_excution_stall),
+    ("control-flow target misprediction",  () => br_misp_target),
+    ("mispredicted conditional branch instructions retired", () => br_misp_dir),
+    ("taken conditional mispredicted branch instructions retired", () => br_misp_retired_cond_taken),
+    ("not taken conditional mispredicted branch instructions retired", () => br_misp_retired_cond_ntaken),
+    ("rob unit cause excution stall",      () => !rob.io.perf.ready),
     ("not actually retired uops",          () => uopsRetired_stall)
   ))
 
@@ -520,8 +528,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     (Seq(topDownCyclesEvents1), (m, n) => m +& n),
     (topDownIssVec,             (m, n) => m +& n),
     (insnCommitBaseEvents,      (m, n) => m +& n),
-    (insnCommitDetialEvents,    (m, n) => m +& n),
-    (Seq(microArchEvents),      (m, n) => m +& n),
+    (Seq(resourceEvents),       (m, n) => m +& n),
     (Seq(memorySystemEvents),   (m, n) => m +& n)
   ))
 

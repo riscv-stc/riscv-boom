@@ -115,7 +115,7 @@ class RobIo(
   val perf = Output(new Bundle {
     val empty = Bool()
     val full  = Bool()
-    val ready  = Bool()
+    val ready = Bool()
   })
 }
 
