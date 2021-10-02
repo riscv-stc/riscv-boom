@@ -434,20 +434,32 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val rob_excution_stall    = !rob.io.perf.ready
   val issue_slots_stall     = dispatcher.io.ren_uops.map(r => ~r.ready)
 
-  val all_exu_valids = if (usingFPU)
+
+  val uopsDispatched_valids = rob.io.enq_valids
+  val uopsDispatched_stall  = !uopsDispatched_valids.reduce(_||_)
+
+  val uopsIssued_valids = iss_valids ++ fp_pipeline.io.perf.iss_valids
+  val uopsIssued_stall  = !uopsIssued_valids.reduce(_||_)
+
+  val uopsExeActive_valids = if (usingFPU)
       exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids
     else
       exe_units.map(u => u.io.req.valid)
-  val exu_active_events: Seq[(String, () => Bool)] = all_exu_valids.zipWithIndex.map{case(v,i) => ("Excution unit $i active cycle", () => v)}
+  val uopsExeActive_events: Seq[(String, () => Bool)] = uopsExeActive_valids.zipWithIndex.map{case(v,i) => ("Excution unit $i active cycle", () => v)}
 
   val uops_executed_valids = rob.io.wb_resps.map(r => r.valid)
-  val opsExecuted_sum_gtN = Wire(Vec(rob.numWakeupPorts, Bool()))
-  val opsExecuted_sum_ltN = Wire(Vec(rob.numWakeupPorts, Bool()))
-  val opsExecuted_sum = PopCount(uops_executed_valids)
-  (0 until rob.numWakeupPorts).map(n => opsExecuted_sum_gtN(n) := (opsExecuted_sum > n.U))
-  val opsExecuted_gt_events: Seq[(String, () => Bool)] = opsExecuted_sum_gtN.zipWithIndex.map{case(v,i) => ("more than $i ops executed", () => v)}
-  (0 until rob.numWakeupPorts).map(n => opsExecuted_sum_ltN(n) := (opsExecuted_sum <= n.U))
-  val opsExecuted_lt_events: Seq[(String, () => Bool)] = opsExecuted_sum_ltN.zipWithIndex.map{case(v,i) => ("less than or equal to $i ops executed", () => v)}
+  val uopsExecuted_sum_gtN = Wire(Vec(rob.numWakeupPorts, Bool()))
+  val uopsExecuted_sum_ltN = Wire(Vec(rob.numWakeupPorts, Bool()))
+  val uopsExecuted_sum = PopCount(uops_executed_valids)
+  (0 until rob.numWakeupPorts).map(n => uopsExecuted_sum_gtN(n) := (uopsExecuted_sum > n.U))
+  val uopsExecuted_gt_events: Seq[(String, () => Bool)] = uopsExecuted_sum_gtN.zipWithIndex.map{case(v,i) => ("more than $i uops executed", () => v)}
+  (0 until rob.numWakeupPorts).map(n => uopsExecuted_sum_ltN(n) := (uopsExecuted_sum <= n.U))
+  val uopsExecuted_lt_events: Seq[(String, () => Bool)] = uopsExecuted_sum_ltN.zipWithIndex.map{case(v,i) => ("less than or equal to $i uops executed", () => v)}
+  val uopsExecuted_stall = uopsExecuted_sum_ltN(0)
+
+  val uopsRetired_valids = rob.io.commit.valids
+  val uopsRetired_stall  = !uopsRetired_valids.reduce(_||_)
+
 
   val numArithDivider     = exe_units.count(_.hasDiv)
   val arith_divder_active = Wire(Vec(numArithDivider, Bool()))
@@ -460,14 +472,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
   val arith_divder_active_events: Seq[(String, () => Bool)] = arith_divder_active.zipWithIndex.map{case(v,i) => ("cycles when $i divider unit is busy", () => v)}
 
-  val iss_nostall = (iss_valids ++ fp_pipeline.io.perf.iss_valids).reduce(_||_)
-  val iss_stall   = !iss_nostall
-  val mem_stall_anyload = iss_stall && !int_iss_unit.io.event_empty && (0 until coreWidth).map(w => rob.io.commit.uops(w).uses_ldq).reduce(_||_)
-  val mem_stall_stores  = iss_stall && io.lsu.perf.stq_full && (~mem_stall_anyload)
+  val mem_stall_anyload = uopsIssued_stall && !int_iss_unit.io.event_empty && (0 until coreWidth).map(w => rob.io.commit.uops(w).uses_ldq).reduce(_||_)
+  val mem_stall_stores  = uopsIssued_stall && io.lsu.perf.stq_full && (~mem_stall_anyload)
   val mem_stall_l1_miss = false.B
-
-  val retired_valids = rob.io.commit.valids
-  val retired_stall  = !retired_valids.reduce(_||_)
 
   val topDownslotsVec = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("slots issued",                      () => dec_fire(w)),
@@ -475,11 +482,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("branch instruction retired",        () => retired_branch(w)),
     ("rename stalls",                     () => ren_stalls(w)),
     ("issue slots cause stall",           () => issue_slots_stall(w)),
-    ("Counts the number of retirement",   () => retired_valids(w)))
+    ("Counts the number of dispatched",   () => uopsDispatched_valids(w)),
+    ("Counts the number of retirement",   () => uopsRetired_valids(w)))
   ))
 
   val topDownIssVec = (0 until issueParams.map(_.issueWidth).sum).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
-    ("exe sum",             () => all_exu_valids(w))
+    ("issued uops sum",            () => uopsIssued_valids(w)),
+    ("exe active sum",             () => uopsExeActive_valids(w))
     )))
 
   val topDownCyclesEvents0 = new EventSet((mask, hits) => (mask & hits).orR, Seq(
@@ -487,8 +496,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("fetch no Deliver cycle",             () => fetch_no_deliver),
     ("branch mispred retired",             () => brupdate.b2.mispredict),
     ("machine clears",                     () => rob.io.flush.valid),
-    ("none ops executed",                  () => opsExecuted_sum_ltN(0)),
-    ("few ops executed cycle",             () => opsExecuted_sum_ltN(1)),
+    ("none uops executed",                 () => uopsExecuted_stall),
+    ("few uops executed cycle",            () => uopsExecuted_sum_ltN(1)),
     ("any load mem stall",                 () => mem_stall_anyload),
     ("stores mem stall",                   () => mem_stall_stores),
     ("l1 miss mem stall",                  () => mem_stall_l1_miss),
@@ -496,12 +505,12 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("l3 miss mem stall",                  () => false.B),
     ("mem latency",                        () => false.B),
     ("rob unit cause excution stall",      () => rob_excution_stall),
-    ("not actually retired uops",          () => retired_stall)
+    ("not actually retired uops",          () => uopsRetired_stall)
   ))
 
   val topDownCyclesEvents1 = new EventSet((mask, hits) => (mask & hits).orR,
-    exu_active_events
-    ++ opsExecuted_gt_events
+    uopsExeActive_events
+    ++ uopsExecuted_gt_events
     ++ arith_divder_active_events
   )
 
