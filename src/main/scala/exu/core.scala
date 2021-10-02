@@ -404,6 +404,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
      ("rob entry full",                    () => rob.io.perf.full)
    ))
 
+  // io.lsu.perf.mshrs_load_establish
+  // io.lsu.perf.mshrs_load_reuse
+  // io.lsu.perf.mshrs_store_establish
+  // io.lsu.perf.mshrs_store_reuse
+
   val memorySystemEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
      ("I$ blocked",  () => icache_blocked),
      ("I$ miss",     () => io.ifu.perf.acquire),
@@ -470,9 +475,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val backend_nostall = !backend_stall
   val fetch_no_deliver= (~dec_fire.reduce(_||_)) && backend_nostall && (~ifu_redirect_flush_stat)
 
-  val mem_stall_anyload = uopsIssued_stall && !int_iss_unit.io.event_empty && (0 until coreWidth).map(w => rob.io.commit.uops(w).uses_ldq).reduce(_||_)
+  val cycles_l1d_miss = false.B
+  val cycles_l2_miss  = false.B
+  val cycles_l3_miss  = false.B
+  val mem_stall_anyload = uopsIssued_stall && io.lsu.perf.mshrs_has_busy
   val mem_stall_stores  = uopsIssued_stall && io.lsu.perf.stq_full && (~mem_stall_anyload)
-  val mem_stall_l1_miss = false.B
+  val mem_stall_l1d_miss = false.B
+  val mem_stall_l2_miss  = false.B
+  val mem_stall_l3_miss  = false.B
 
   val topDownslotsVec = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("slots issued",                      () => dec_fire(w)),
@@ -504,7 +514,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("few uops executed cycle",            () => uopsExecuted_sum_ltN(1)),
     ("any load mem stall",                 () => mem_stall_anyload),
     ("stores mem stall",                   () => mem_stall_stores),
-    ("l1 miss mem stall",                  () => mem_stall_l1_miss),
+    ("l1d miss mem stall",                 () => mem_stall_l1d_miss),
     ("l2 miss mem stall",                  () => false.B),
     ("l3 miss mem stall",                  () => false.B),
     ("mem latency",                        () => false.B),

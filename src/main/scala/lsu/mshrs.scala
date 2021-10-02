@@ -91,6 +91,14 @@ class BoomMSHR(implicit edge: TLEdgeOut, p: Parameters) extends BoomModule()(p)
     val wb_resp     = Input(Bool())
 
     val probe_rdy   = Output(Bool())
+
+    val perf = Output(new Bundle {
+      val busy = Bool()
+      val load_establish = Bool()
+      val load_reuse = Bool()
+      val store_establish = Bool()
+      val store_reuse = Bool()
+    })
   })
 
   // TODO: Optimize this. We don't want to mess with cache during speculation
@@ -386,6 +394,12 @@ class BoomMSHR(implicit edge: TLEdgeOut, p: Parameters) extends BoomModule()(p)
       state := handle_pri_req(state)
     }
   }
+
+ io.perf.busy := state =/= s_invalid
+ io.perf.load_establish := io.req_pri_val && isRead(io.req.uop.mem_cmd)
+ io.perf.load_reuse := io.req_sec_val && isRead(req.uop.mem_cmd)
+ io.perf.store_establish := io.req_pri_val && isWrite(io.req.uop.mem_cmd)
+ io.perf.store_reuse := io.req_sec_val && isWrite(req.uop.mem_cmd)
 }
 
 class BoomIOMSHR(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extends BoomModule()(p)
@@ -398,6 +412,10 @@ class BoomIOMSHR(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extends BoomM
     val mem_ack    = Flipped(Valid(new TLBundleD(edge.bundle)))
 
     // We don't need brupdate in here because uncacheable operations are guaranteed non-speculative
+
+    val perf = Output(new Bundle {
+      val busy = Bool()
+    })
   })
 
   def beatOffset(addr: UInt) = addr.extract(beatOffBits-1, wordOffBits)
@@ -414,6 +432,7 @@ class BoomIOMSHR(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extends BoomM
 
   val state = RegInit(s_idle)
   io.req.ready := state === s_idle
+  io.perf.busy := state =/= s_idle
 
   val loadgen = new LoadGen(req.uop.mem_size, req.uop.mem_signed, req.addr, grant_word, false.B, wordBytes)
 
@@ -533,6 +552,15 @@ class BoomMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends BoomModule()
 
     val fence_rdy = Output(Bool())
     val probe_rdy = Output(Bool())
+
+    val perf = Output(new Bundle {
+      val mshr_busy = Vec(cfg.nMSHRs, Bool())
+      val mshr_load_establish = Vec(cfg.nMSHRs, Bool())
+      val mshr_load_reuse = Vec(cfg.nMSHRs, Bool())
+      val mshr_store_establish = Vec(cfg.nMSHRs, Bool())
+      val mshr_store_reuse = Vec(cfg.nMSHRs, Bool())
+      val iomshr_busy = Vec(nIOMSHRs, Bool())
+    })
   })
 
   val req_idx = OHToUInt(io.req.map(_.valid))
@@ -686,6 +714,12 @@ class BoomMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends BoomModule()
       }
     }
 
+    io.perf.mshr_busy(i) := mshr.io.perf.busy
+    io.perf.mshr_load_establish(i) := mshr.io.perf.load_establish
+    io.perf.mshr_load_reuse(i) := mshr.io.perf.load_reuse
+    io.perf.mshr_store_establish(i) := mshr.io.perf.store_establish
+    io.perf.mshr_store_reuse(i) := mshr.io.perf.store_reuse
+
     mshr
   }
 
@@ -726,6 +760,9 @@ class BoomMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends BoomModule()
     when (!mshr.io.req.ready) {
       io.fence_rdy := false.B
     }
+
+    io.perf.iomshr_busy(i) := mshr.io.perf.busy
+
     mshr
   }
 
