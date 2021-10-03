@@ -554,12 +554,12 @@ class BoomMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends BoomModule()
     val probe_rdy = Output(Bool())
 
     val perf = Output(new Bundle {
-      val mshr_busy = Vec(cfg.nMSHRs, Bool())
-      val mshr_load_establish = Vec(cfg.nMSHRs, Bool())
-      val mshr_load_reuse = Vec(cfg.nMSHRs, Bool())
-      val mshr_store_establish = Vec(cfg.nMSHRs, Bool())
-      val mshr_store_reuse = Vec(cfg.nMSHRs, Bool())
-      val iomshr_busy = Vec(nIOMSHRs, Bool())
+      val mshr_busy_vec = Vec(cfg.nMSHRs, Bool())
+      val mshr_load_establish_vec = Vec(cfg.nMSHRs, Bool())
+      val mshr_load_reuse_vec = Vec(cfg.nMSHRs, Bool())
+      val mshr_store_establish_vec = Vec(cfg.nMSHRs, Bool())
+      val mshr_store_reuse_vec = Vec(cfg.nMSHRs, Bool())
+      val iomshr_busy_vec = Vec(nIOMSHRs, Bool())
     })
   })
 
@@ -714,11 +714,11 @@ class BoomMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends BoomModule()
       }
     }
 
-    io.perf.mshr_busy(i) := mshr.io.perf.busy
-    io.perf.mshr_load_establish(i) := mshr.io.perf.load_establish
-    io.perf.mshr_load_reuse(i) := mshr.io.perf.load_reuse
-    io.perf.mshr_store_establish(i) := mshr.io.perf.store_establish
-    io.perf.mshr_store_reuse(i) := mshr.io.perf.store_reuse
+    io.perf.mshr_busy_vec(i) := mshr.io.perf.busy
+    io.perf.mshr_load_establish_vec(i) := mshr.io.perf.load_establish
+    io.perf.mshr_load_reuse_vec(i) := mshr.io.perf.load_reuse
+    io.perf.mshr_store_establish_vec(i) := mshr.io.perf.store_establish
+    io.perf.mshr_store_reuse_vec(i) := mshr.io.perf.store_reuse
 
     mshr
   }
@@ -761,7 +761,7 @@ class BoomMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends BoomModule()
       io.fence_rdy := false.B
     }
 
-    io.perf.iomshr_busy(i) := mshr.io.perf.busy
+    io.perf.iomshr_busy_vec(i) := mshr.io.perf.busy
 
     mshr
   }

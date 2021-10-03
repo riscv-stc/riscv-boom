@@ -404,19 +404,20 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
      ("rob entry full",                    () => rob.io.perf.full)
    ))
 
-  // io.lsu.perf.mshrs_load_establish
-  // io.lsu.perf.mshrs_load_reuse
-  // io.lsu.perf.mshrs_store_establish
-  // io.lsu.perf.mshrs_store_reuse
 
   val memorySystemEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
-     ("I$ blocked",  () => icache_blocked),
-     ("I$ miss",     () => io.ifu.perf.acquire),
-     ("D$ miss",     () => io.lsu.perf.acquire),
-     ("D$ release",  () => io.lsu.perf.release),
-     ("ITLB miss",   () => io.ifu.perf.tlbMiss),
-     ("DTLB miss",   () => io.lsu.perf.tlbMiss),
-     ("L2 TLB miss", () => io.ptw.perf.l2miss)
+     ("MSHR reuse",           () => io.lsu.perf.mshrs_reuse),
+     ("MSHR load establish",  () => io.lsu.perf.mshrs_load_establish),
+     ("MSHR load reuse",      () => io.lsu.perf.mshrs_load_reuse),
+     ("MSHR store establish", () => io.lsu.perf.mshrs_store_establish),
+     ("MSHR store reuse",     () => io.lsu.perf.mshrs_store_reuse),
+     ("I$ blocked",           () => icache_blocked),
+     ("I$ miss",              () => io.ifu.perf.acquire),
+     ("D$ miss",              () => io.lsu.perf.acquire),
+     ("D$ release",           () => io.lsu.perf.release),
+     ("ITLB miss",            () => io.ifu.perf.tlbMiss),
+     ("DTLB miss",            () => io.lsu.perf.tlbMiss),
+     ("L2 TLB miss",          () => io.ptw.perf.l2miss)
      ))
 
   // split at ifu-fetuchBuffer < - > decode

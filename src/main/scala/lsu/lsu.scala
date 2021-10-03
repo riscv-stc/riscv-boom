@@ -81,7 +81,6 @@ class BoomDCacheResp(implicit p: Parameters) extends BoomBundle()(p)
 }
 
 class LSUDMemIO(implicit p: Parameters, edge: TLEdgeOut) extends BoomBundle()(p)
-  with rocket.HasL1HellaCacheParameters
 {
   // In LSU's dmem stage, send the request
   val req         = new DecoupledIO(Vec(memWidth, Valid(new BoomDCacheReq)))
@@ -108,10 +107,11 @@ class LSUDMemIO(implicit p: Parameters, edge: TLEdgeOut) extends BoomBundle()(p)
     val release = Bool()
     val mshrs_has_busy = Bool()
     val mshrs_all_busy = Bool()
-    val mshrs_load_establish = Vec(cfg.nMSHRs, Bool())
-    val mshrs_load_reuse = Vec(cfg.nMSHRs, Bool())
-    val mshrs_store_establish = Vec(cfg.nMSHRs, Bool())
-    val mshrs_store_reuse = Vec(cfg.nMSHRs, Bool())
+    val mshrs_reuse = Bool()
+    val mshrs_load_establish = Bool()
+    val mshrs_load_reuse = Bool()
+    val mshrs_store_establish = Bool()
+    val mshrs_store_reuse = Bool()
     val iomshrs_has_busy = Bool()
     val iomshrs_all_busy = Bool()
   })
@@ -120,7 +120,6 @@ class LSUDMemIO(implicit p: Parameters, edge: TLEdgeOut) extends BoomBundle()(p)
 }
 
 class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
-  with rocket.HasL1HellaCacheParameters
 {
   val exe = Vec(memWidth, new LSUExeIO)
 
@@ -173,10 +172,11 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
     val stq_full = Bool()
     val mshrs_has_busy = Bool()
     val mshrs_all_busy = Bool()
-    val mshrs_load_establish = Vec(cfg.nMSHRs, Bool())
-    val mshrs_load_reuse = Vec(cfg.nMSHRs, Bool())
-    val mshrs_store_establish = Vec(cfg.nMSHRs, Bool())
-    val mshrs_store_reuse = Vec(cfg.nMSHRs, Bool())
+    val mshrs_reuse = Bool()
+    val mshrs_load_establish = Bool()
+    val mshrs_load_reuse = Bool()
+    val mshrs_store_establish = Bool()
+    val mshrs_store_reuse = Bool()
     val iomshrs_has_busy = Bool()
     val iomshrs_all_busy = Bool()
   })
@@ -281,6 +281,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   io.core.perf.release := io.dmem.perf.release
   io.core.perf.mshrs_has_busy := io.dmem.perf.mshrs_has_busy
   io.core.perf.mshrs_all_busy := io.dmem.perf.mshrs_all_busy
+  io.core.perf.mshrs_reuse := io.dmem.perf.mshrs_reuse
   io.core.perf.mshrs_load_establish := io.dmem.perf.mshrs_load_establish
   io.core.perf.mshrs_load_reuse := io.dmem.perf.mshrs_load_reuse
   io.core.perf.mshrs_store_establish := io.dmem.perf.mshrs_store_establish

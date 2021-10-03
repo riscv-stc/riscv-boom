@@ -800,14 +800,15 @@ class BoomNonBlockingDCacheModule(outer: BoomNonBlockingDCache) extends LazyModu
 
   tl_out.e <> mshrs.io.mem_finish
 
-  io.lsu.perf.mshrs_has_busy := mshrs.io.perf.mshr_busy.reduce(_&&_)
-  io.lsu.perf.mshrs_all_busy := mshrs.io.perf.mshr_busy.reduce(_||_)
-  io.lsu.perf.mshrs_load_establish := mshrs.io.perf.mshr_load_establish
-  io.lsu.perf.mshrs_load_reuse := mshrs.io.perf.mshr_load_reuse
-  io.lsu.perf.mshrs_store_establish := mshrs.io.perf.mshr_store_establish
-  io.lsu.perf.mshrs_store_reuse := mshrs.io.perf.mshr_store_reuse
-  io.lsu.perf.iomshrs_has_busy := mshrs.io.perf.iomshr_busy.reduce(_||_)
-  io.lsu.perf.iomshrs_all_busy := mshrs.io.perf.iomshr_busy.reduce(_&&_)
+  io.lsu.perf.mshrs_has_busy := mshrs.io.perf.mshr_busy_vec.reduce(_&&_)
+  io.lsu.perf.mshrs_all_busy := mshrs.io.perf.mshr_busy_vec.reduce(_||_)
+  io.lsu.perf.mshrs_load_establish := mshrs.io.perf.mshr_load_establish_vec.reduce(_||_)
+  io.lsu.perf.mshrs_load_reuse := mshrs.io.perf.mshr_load_reuse_vec.reduce(_||_)
+  io.lsu.perf.mshrs_store_establish := mshrs.io.perf.mshr_store_establish_vec.reduce(_||_)
+  io.lsu.perf.mshrs_store_reuse := mshrs.io.perf.mshr_store_reuse_vec.reduce(_||_)
+  io.lsu.perf.mshrs_reuse := io.lsu.perf.mshrs_load_reuse|| io.lsu.perf.mshrs_store_reuse
+  io.lsu.perf.iomshrs_has_busy := mshrs.io.perf.iomshr_busy_vec.reduce(_||_)
+  io.lsu.perf.iomshrs_all_busy := mshrs.io.perf.iomshr_busy_vec.reduce(_&&_)
 
   // writebacks
   val wbArb = Module(new Arbiter(new WritebackReq(edge.bundle), 2))
