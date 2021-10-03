@@ -411,7 +411,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
      ("MSHR load reuse",      () => io.lsu.perf.mshrs_load_reuse),
      ("MSHR store establish", () => io.lsu.perf.mshrs_store_establish),
      ("MSHR store reuse",     () => io.lsu.perf.mshrs_store_reuse),
-     ("I$ blocked",           () => icache_blocked),
      ("I$ miss",              () => io.ifu.perf.acquire),
      ("D$ miss",              () => io.lsu.perf.acquire),
      ("D$ release",           () => io.lsu.perf.release),
@@ -479,7 +478,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val cycles_l1d_miss = false.B
   val cycles_l2_miss  = false.B
   val cycles_l3_miss  = false.B
-  val mem_stall_anyload = uopsIssued_stall && io.lsu.perf.mshrs_has_busy
+  val mem_stall_anyload = uopsIssued_stall && io.lsu.perf.ldq_nonempty
   val mem_stall_stores  = uopsIssued_stall && io.lsu.perf.stq_full && (~mem_stall_anyload)
   val mem_stall_l1d_miss = false.B
   val mem_stall_l2_miss  = false.B
