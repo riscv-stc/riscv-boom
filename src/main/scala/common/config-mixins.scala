@@ -547,24 +547,24 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               decodeWidth = 2,
               numRobEntries = 64,
               issueParams = Seq(
-                IssueParams(issueWidth=1, numEntries=32, iqType=IQT_MEM.litValue, dispatchWidth=2),
-                IssueParams(issueWidth=2, numEntries=32, iqType=IQT_INT.litValue, dispatchWidth=2),
+                IssueParams(issueWidth=1, numEntries=24, iqType=IQT_MEM.litValue, dispatchWidth=2),
+                IssueParams(issueWidth=2, numEntries=24, iqType=IQT_INT.litValue, dispatchWidth=2),
                 IssueParams(issueWidth=1, numEntries=16, iqType=IQT_FP.litValue , dispatchWidth=2),
-                IssueParams(issueWidth=1, numEntries=32, iqType=IQT_VEC.litValue, dispatchWidth=2)),
-              numIntPhysRegisters = 80,
-              numFpPhysRegisters = 64,
-              numLdqEntries = 32,
-              numStqEntries = 32,
+                IssueParams(issueWidth=1, numEntries=24, iqType=IQT_VEC.litValue, dispatchWidth=2)),
+              numIntPhysRegisters = 64,
+              numFpPhysRegisters = 48,
+              numLdqEntries = 16,
+              numStqEntries = 16,
               maxBrCount = 12,
               numFetchBufferEntries = 16,
               ftq = FtqParameters(nEntries=32),
               nPerfCounters = 29,
               fpu = Some(freechips.rocketchip.tile.FPUParams(minFLen=16, fLen=64, sfmaLatency=4, dfmaLatency=4, divSqrt=true)),
               useVector = true,
-              vLen = 1024,
+              vLen = 128,
               eLen = 64,
               vMemDataBits = 64,
-              numVecPhysRegisters = 64
+              numVecPhysRegisters = 40
             ),
             dcache = Some(
               DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4, nTLBWays=16)

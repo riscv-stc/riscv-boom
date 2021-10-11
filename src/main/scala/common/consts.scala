@@ -225,7 +225,7 @@ trait ScalarOpConstants
     uop.prs2       := 0.U
     uop.prs3       := 0.U
     if (usingVector) {
-      uop.prvm        := 0.U
+      uop.pvm        := 0.U
     }
     uop.dst_rtype  := RT_X
 

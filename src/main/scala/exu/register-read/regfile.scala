@@ -62,29 +62,10 @@ object WritePort
     val enq_uop = enq.bits.uop
     wport.valid := enq.valid && enq_uop.rt(RD, rtype)
     if (vector) {
-      val eLen = p(freechips.rocketchip.tile.TileKey).core.eLen
-      val vLen = p(freechips.rocketchip.tile.TileKey).core.vLen
-      val eLenb = eLen/8
-      val eLenSz = log2Ceil(eLen)
-      val vLenSz = log2Ceil(vLen)
-      val eLenSelSz = log2Ceil(vLen/eLen)
-      val vd_emul= enq_uop.vd_emul
-      val pdst   = enq_uop.pdst
-      val v_eidx = enq_uop.v_eidx
-      val ecnt   = enq_uop.v_split_ecnt
-      val (rsel, rmsk) = VRegSel(v_eidx, enq_uop.vd_eew, ecnt, eLenb, eLenSelSz)
-      val exp_rmsk = Cat((0 until 8).map(b => Fill(8, rmsk(b))).reverse)
-      val maskvd = enq_uop.rt(RD, isMaskVD)
-      val maskvd_rsel = (v_eidx >> eLenSz)(eLenSelSz-1, 0)
-      val maskvd_rmsk = UIntToOH(v_eidx(eLenSz-1, 0), eLen)
-      wport.bits.addr := Cat(enq_uop.pdst, Mux(maskvd, maskvd_rsel, rsel))
-      wport.bits.mask := Mux(maskvd, maskvd_rmsk, exp_rmsk)
-      wport.bits.data := Mux(maskvd, Fill(eLen, enq.bits.data(0)), VDataFill(enq.bits.data, enq_uop.vd_eew, eLenb*8))
-      when (wport.valid) { assert(enq_uop.vd_eew <= 3.U) }
-    } else {
-      wport.bits.addr := enq_uop.pdst
-      wport.bits.data := enq.bits.data
+      wport.bits.mask := Fill(dataWidth, 1.U(1.W))
     }
+    wport.bits.addr := enq_uop.pdst
+    wport.bits.data := enq.bits.data
     enq.ready := true.B
     wport
   }
@@ -189,7 +170,7 @@ class RegisterFileSynthesizable(
   // Write ports.
 
   if (vector) {
-    require(registerWidth == eLen)
+    require(registerWidth == vLen)
 
 //  for (wport <- io.write_ports) {
 //    when (wport.valid) {

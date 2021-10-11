@@ -143,10 +143,10 @@ abstract class IssueUnit(
       if (usingVector) {
         when (io.dis_uops(w).bits.is_rvv && io.dis_uops(w).bits.v_idx_ls) {
           dis_uops(w).prs2_busy := 0.U
-          dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
+          //dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
         }
         when (io.dis_uops(w).bits.is_rvv && !io.dis_uops(w).bits.v_unmasked) {
-          dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
+          //dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
         }
       }
       dis_uops(w).prs3_busy := 0.U
@@ -169,7 +169,7 @@ abstract class IssueUnit(
         dis_uops(w).prs1_busy  := 0.U
       }
       if (usingVector) {
-        dis_uops(w).prvm_busy := 0.U
+        //dis_uops(w).prvm_busy := 0.U
         when (dis_uops(w).rt(RS2, isVector)) { dis_uops(w).prs2_busy := 0.U }
         when (dis_uops(w).is_rvv )           { dis_uops(w).prs3_busy := 0.U }
         // hack fu_code if the instruction is merge.

@@ -322,31 +322,15 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   if (usingVector) {
     val csr_vsew  = io.csr_vconfig.vtype.vsew
     val csr_vlmax = io.csr_vconfig.vtype.vlMax
-    //val ls_vconfig = WireInit(io.csr_vconfig)
-    //ls_vconfig.vtype.vsew := cs.v_ls_ew
-    //val ls_vlmax = csr_vlmax //ls_vconfig.vtype.vlMax
     val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
-    val is_v_ls_ustride = cs.uopc.isOneOf(uopVL, uopVLFF, uopVSA)
-    val is_v_ls_stride = cs.uopc.isOneOf(uopVLS, uopVSSA)
     val isVMVR: Bool = cs.uopc.isOneOf(uopVMVR)
     val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     val is_v_mask_ls = cs.uopc.isOneOf(uopVLM, uopVSMA)
-    val is_viota_m = cs.uopc.isOneOf(uopVIOTA)
     val is_v_reg_ls = cs.uopc.isOneOf(uopVLR, uopVSR)
-    val is_red_op  = isReduceV(cs.dst_type)
-    val is_perm_op = cs.uopc.isOneOf(uopVSLIDEUP, uopVSLIDEDOWN, uopVSLIDE1UP, uopVSLIDE1DOWN,
-                                     uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS)
     val vseg_nf = inst(NF_MSB, NF_LSB)
     val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) && !is_v_reg_ls
-    val redperm_act = RegInit(false.B) // state for actual Reduce/Permutation operation, inverse means inserting operation
-    val vstart  = RegInit(0.U((vLenSz+1).W))
-    val vMVRCounter = RegInit(0.U(3.W))
-    val vseg_finc = RegInit(0.U(3.W))
-    val vseg_gidx = RegInit(0.U(3.W))
 
     val vreg_nf = WireDefault(UInt((NF_MSB - NF_LSB + 2).W), vseg_nf)
-    val vlmax = Mux(is_v_mask_ls, vLenb.U,
-                Mux(is_v_reg_ls, vLenb.U << Log2(vreg_nf + 1.U) >> cs.v_ls_ew, csr_vlmax))
     val vsew = Mux(is_v_reg_ls, cs.v_ls_ew, csr_vsew)
     val vlmul_sign = io.csr_vconfig.vtype.vlmul_sign
     val vlmul_mag  = io.csr_vconfig.vtype.vlmul_mag
@@ -366,21 +350,17 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(uop.rt(RS2, isWidenV ), csr_vsew + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew)))
     val vlmul_value =Cat(vlmul_sign, vlmul_mag)
-    val vd_lmul    = Mux(isVMVR, instRS1(2,0),
+    val vd_emul    = Mux(isVMVR, instRS1(2,0),
+                     Mux(uop.rt(RD, isReduceV), 0.U,
                      Mux(uop.rt(RD, isWidenV), vlmul_value + vd_wfactor,
                      Mux(uop.rt(RD, isNarrowV), vlmul_value - vd_nfactor,
                      Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew - vsew + vlmul_value,
-                     Mux(cs.allow_vd_is_v0, 0.U, vlmul_value)))))
-    val vs1_lmul   = Mux(cs.uopc === uopVRGATHEREI16, vlmul_value + 1.U - vsew,
-                     Mux(uop.rt(RS1, isWidenV ), vlmul_value + 1.U, vlmul_value))
-    val vs2_lmul   = Mux(uop.rt(RS2, isWidenV), vlmul_value + vs2_wfactor,
+                     Mux(cs.allow_vd_is_v0, 0.U, vlmul_value))))))
+    val vs1_emul   = Mux(cs.uopc === uopVRGATHEREI16, vlmul_value + 1.U - vsew,
+                     Mux(uop.rt(RS1, isReduceV), 0.U,
+                     Mux(uop.rt(RS1, isWidenV ), vlmul_value + 1.U, vlmul_value)))
+    val vs2_emul   = Mux(uop.rt(RS2, isWidenV), vlmul_value + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor, vlmul_value))
-    val vd_inc     = Mux(isVMVR, vMVRCounter,
-                     vstart >> (vLenSz.U - 3.U - vd_sew))
-    val vs2_inc    = Mux(is_viota_m, 0.U,
-                     Mux(isVMVR, vMVRCounter,
-                     vstart >> (vLenSz.U - 3.U - vs2_sew)))
-    val vs1_inc    = Mux(is_viota_m, 0.U, vstart >> (vLenSz.U - 3.U - vs1_sew))
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
       //assert(vsew >= vd_nfactor  && vsew + vd_wfactor  <= 3.U, "Unsupported vd_sew")
@@ -399,43 +379,16 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_vmask_set_m = cs.uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
     val is_v_mask_insn = vmlogic_insn || is_vmask_cnt_m || is_vmask_set_m
 
-    //val eLen_ecnt = eLen.U >> (vsew+3.U)
     val vLen_ecnt  = Mux(!is_v_ls && vs2_sew > vd_sew, vLen.U >> (vs2_sew+3.U), vLen.U >> (vd_sew+3.U))
     val split_ecnt = Mux(is_v_ls, 1.U, Mux(is_v_mask_insn, vmlogic_split_ecnt, vLen_ecnt))
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     // for fractional lmul, we need visit at least one entire vreg
     // for undisturbing move before reduction, we need visit at most one vreg
-    val total_ecnt = Mux(is_v_reg_ls, vlmax,
+    val total_ecnt = Mux(is_v_mask_ls, vLenb.U,
+                     Mux(is_v_reg_ls, vLenb.U << Log2(vreg_nf + 1.U) >> cs.v_ls_ew,
                      Mux(cs.uses_stq, Mux(is_v_mask_ls, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl),
                      Mux(is_v_mask_insn, vmlogic_tolal_ecnt,
-                     Mux(vlmul_sign && !is_v_mask_ls || vlmax < vLen_ecnt || is_red_op && !redperm_act, vLen_ecnt, vlmax))))
-    val vseg_flast = vseg_finc === vseg_nf
-    val elem_last  = Mux(isVMVR, vMVRCounter === instRS1, (vstart + split_ecnt) >= total_ecnt)
-    val split_last = elem_last && Mux(is_v_ls_seg, vseg_flast, true.B)
-    when (io.kill) {
-      vstart    := 0.U
-      vseg_finc := 0.U
-      vseg_gidx := 0.U
-      vMVRCounter := 0.U
-    } .elsewhen (~cs.can_be_split | split_last & io.deq_fire) {
-      vstart    := 0.U
-      vseg_finc := 0.U
-      vseg_gidx := 0.U
-      vMVRCounter := 0.U
-    } .elsewhen (cs.can_be_split & ~split_last & io.deq_fire) {
-      when (is_v_ls_seg) {
-        vseg_finc := Mux(vseg_flast, 0.U, vseg_finc + 1.U)
-        vstart    := vstart    + Mux(vseg_flast, 1.U, 0.U)
-        vseg_gidx := vseg_gidx + Mux((vseg_flast) && uop.v_re_alloc, 1.U, 0.U)
-      }.elsewhen(isVMVR){
-        vstart := 0.U
-        vMVRCounter := vMVRCounter + 1.U
-      } .otherwise {
-        vstart    := vstart + split_ecnt
-      }
-    }
-    val vseg_vd_inc  = (vseg_finc << vlmul) + vseg_gidx
-
+                     Mux(vlmul_sign && !is_v_mask_ls || csr_vlmax < vLen_ecnt, vLen_ecnt, csr_vlmax)))))
     uop.is_rvv      := cs.is_rvv
     uop.v_ls_ew     := cs.v_ls_ew
     when (is_v_ls) {
@@ -446,52 +399,20 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.vxsat       := false.B
     uop.vconfig     := io.csr_vconfig
     uop.vconfig.vtype.reserved := DontCare
-    uop.v_eidx      := vstart
+    uop.v_eidx      := 0.U // io.csr_vstart
     uop.v_eofs      := 0.U
-    uop.v_is_split  := cs.can_be_split
-    uop.v_split_ecnt:= split_ecnt
+    //uop.v_is_split  := cs.can_be_split
+    //uop.v_split_ecnt:= split_ecnt
     uop.vconfig.vtype.vsew := Mux(is_v_mask_insn, 3.U, vsew)
     when (io.deq_fire && cs.can_be_split) {
       assert(cs.is_rvv, "can_be_split applies only to vector instructions.")
     }
-    uop.v_is_first  := (vstart === 0.U)
-    uop.v_is_last   := elem_last
-    uop.v_is_archfirst  := (vstart === 0.U)
-    uop.v_is_archlast   := elem_last
-    val ren_re_mask = ~(Fill(vLenSz,1.U) << (7.U - vd_sew))
-    val vs1_re_mask = ~(Fill(vLenSz,1.U) << (7.U - vs1_sew))
-    val vs2_re_mask = ~(Fill(vLenSz,1.U) << (7.U - vs2_sew))
-    uop.v_re_alloc  := Mux(uop.rt(RD, isMaskVD), vstart === 0.U, (vstart & ren_re_mask(vLenSz,0)) === 0.U)
-    uop.v_re_vs1    := (vstart & vs1_re_mask(vLenSz,0)) === 0.U
-    uop.v_re_vs2    := (vstart & vs2_re_mask(vLenSz,0)) === 0.U
     uop.vs1_eew     := vs1_sew
     uop.vs2_eew     := vs2_sew
     uop.vd_eew      := vd_sew
-    uop.vs1_emul    := vs1_lmul
-    uop.vs2_emul    := vs2_lmul
-    uop.vd_emul     := vd_lmul
-
-    //val phys_index = vstart + split_ecnt
-    //uop.v_phys_last := Mux(uop.rt(RD, isMaskVD) || uop.rt(RD, isReduceV), elem_last,
-    //                   Mux(vd_sew === 3.U, phys_index(3, 0) === 0.U,
-    //                   Mux(vd_sew === 2.U, phys_index(4, 0) === 0.U,
-    //                   Mux(vd_sew === 1.U, phys_index(5, 0) === 0.U,
-    //                   phys_index(6, 0) === 0.U))))
-    // already handled properly
-
-    when (cs.is_rvv) {
-      when (!uop.rt(RD, isMaskVD)) {
-        uop.ldst := instRD + vd_inc
-      }
-      when (uop.rt(RS1, isVector) && cs.uopc =/= uopVCOMPRESS) {
-        uop.lrs1 := instRS1 + vs1_inc
-      }
-      when (uop.rt(RS2, isVector)) {
-        uop.lrs2 := instRS2 + vs2_inc
-      }
-      uop.lrs3 := uop.ldst
-      uop.frs3_en := cs.uses_vm
-    }
+    uop.vs1_emul    := vs1_emul
+    uop.vs2_emul    := vs2_emul
+    uop.vd_emul     := vd_emul
 
     when (cs.is_rvv && !uop.v_unmasked) {
       when (is_v_ls) {
@@ -520,75 +441,14 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     uop.v_xls_offset := 0.U
 
-    uop.v_seg_ls  := false.B
-    uop.v_seg_f   := 0.U
-    uop.v_seg_nf  := 1.U
-    when (cs.is_rvv && is_v_ls_seg) {
-      uop.ldst := instRD + vseg_vd_inc
-      uop.lrs3 := uop.ldst
-      uop.v_seg_ls   := true.B
-      uop.v_seg_f    := vseg_finc
-      uop.v_seg_nf   := 1.U(4.W) + vseg_nf
-    }
-
-    // handle load tail: dispatch to vector pipe
-    // masked load / store, send to vector pipe
-    when (cs.is_rvv && cs.uses_ldq && !is_v_reg_ls && vstart >= io.csr_vconfig.vl) {
-      uop.iq_type := IQT_VEC
-      uop.fu_code := FU_VMX
-      uop.uses_ldq := false.B
-      uop.frs3_en := true.B
-    }
-
-    val redperm_vd_emul = Mux(vlmul_sign, 0.U(2.W), Mux(isWidenV(cs.dst_type), vlmul_mag + 1.U, vlmul_mag))(1,0)
-    val do_perm_insert = redperm_vd_emul =/= 0.U
-    when (io.kill) {
-      redperm_act := false.B
-    } .elsewhen (io.deq_fire && split_last && redperm_act && (is_red_op || is_perm_op && do_perm_insert)) {
-      redperm_act := false.B
-    } .elsewhen (io.deq_fire && split_last && !redperm_act && (is_red_op || is_perm_op && do_perm_insert)) {
-      redperm_act := true.B
-    }
-
-    io.enq_stall := cs.can_be_split && !split_last
-
-    when (cs.is_rvv) {
-      when (is_red_op) {
-        // keep vd during reduction
-        uop.ldst := instRD
-        uop.lrs3 := uop.ldst
-        when (!redperm_act) {
-          // insert an undisturbing move before actual reduction
-          vstart          := vstart // preserve vstart
-          uop.uopc        := uopVADD
-          uop.dst_rtype   := RT_VEC
-          // keep lrs1_rtype to distinguish this inserted mov and actual reduction
-          //uop.lrs1_rtype  := RT_VEC
-          uop.vconfig.vl  := 0.U // make all elements inactive
-          io.enq_stall    := true.B
-        }
-      } .elsewhen (is_perm_op) {
-        when (!redperm_act && do_perm_insert) {
-          // insert an unmasked, all-inactive TIDY vadd vs2, vs2, vs1 to reassign vs2 physical names
-          // so that vs2 physical names will be continuous and within a physical group
-          uop.uopc        := uopVADD
-          uop.iq_type     := IQT_VEC
-          uop.lrs1        := 0.U
-          uop.lrs1_rtype  := RT_PERM // special mark for such op
-          //uop.lrs1_rtype  := RT_PERM // special mark for such op
-          uop.ldst        := uop.lrs2 // vadd vs2, vs2, vs1
-          uop.v_unmasked  := true.B
-          uop.vconfig.vl  := 0.U // make all elements inactive
-          io.enq_stall    := true.B
-        }
-      }
-    }
+    //io.enq_stall := cs.can_be_split && !split_last
+    io.enq_stall := cs.is_rvv && !vsetvl
 
     /**
      * vector illegal instruction handler
      */
     // reduction, vpopc, vfirst,vmsbf,vmsif,vmsof,viota,vcompress must execute with vstart=0,otherwise illegal
-    val illegal_vstart_not_zero = cs.vstart_is_zero && (vstart =/= 0.U)
+    val illegal_vstart_not_zero = cs.vstart_is_zero && (io.csr_vstart =/= 0.U)
     //The destination register cannot overlap the source register
     val illegal_vd_unequal_vs1 = cs.vd_unequal_vs1 && (uop.ldst === uop.lrs1)
     val illegal_vd_unequal_vs2 = (cs.vd_unequal_vs2 || cs.uses_ldq && is_v_ls_seg && is_v_ls_index) && (uop.ldst === uop.lrs2)
@@ -603,22 +463,22 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     //register EEW > 64
     val illegal_reg_sew = cs.not_use_vtype && (vd_sew(2) || vs2_sew(2) || vs1_sew(2))
     //vd/vs2 EMUL should be illegal
-    val vd_emul_legal = Mux(vd_lmul(2), vd_lmul(1,0) =/= 0.U && ~vd_lmul(1,0) < (3.U - vd_sew), true.B)
-    val vs1_emul_legal = Mux(vs1_lmul(2), vs1_lmul(1,0) =/= 0.U && ~vs1_lmul(1,0) < 3.U - vs1_sew, true.B)
-    val vs2_emul_legal = Mux(vs2_lmul(2), vs2_lmul(1,0) =/= 0.U && ~vs2_lmul(1,0) < 3.U - vs2_sew, true.B)
+    val vd_emul_legal = Mux(vd_emul(2), vd_emul(1,0) =/= 0.U && ~vd_emul(1,0) < (3.U - vd_sew), true.B)
+    val vs1_emul_legal = Mux(vs1_emul(2), vs1_emul(1,0) =/= 0.U && ~vs1_emul(1,0) < 3.U - vs1_sew, true.B)
+    val vs2_emul_legal = Mux(vs2_emul(2), vs2_emul(1,0) =/= 0.U && ~vs2_emul(1,0) < 3.U - vs2_sew, true.B)
     val illegal_reg_emul = !vd_emul_legal || !vs1_emul_legal || !vs2_emul_legal
 
     //reg_num should be multiple of emul, low bit or reg_num !=0 will raise illegal
-    val illegal_dst_multiple_emul: Bool = Mux(vd_lmul(2), false.B, (((rightOR(UIntToOH(vd_lmul(1,0))) >> 1.U).asUInt
+    val illegal_dst_multiple_emul: Bool = Mux(vd_emul(2), false.B, (((rightOR(UIntToOH(vd_emul(1,0))) >> 1.U).asUInt
                                     & instRD) =/= 0.U) && (uop.dst_rtype === RT_VEC))
-    val illegal_vs2_multiple_emul = Mux(vs2_lmul(2), false.B, (((rightOR(UIntToOH(vs2_lmul(1,0))) >> 1.U).asUInt
+    val illegal_vs2_multiple_emul = Mux(vs2_emul(2), false.B, (((rightOR(UIntToOH(vs2_emul(1,0))) >> 1.U).asUInt
                                     & instRS2) =/= 0.U) && (uop.lrs2_rtype === RT_VEC))
-    val illegal_vs1_multiple_emul = Mux(vs1_lmul(2), false.B, (((rightOR(UIntToOH(vs1_lmul(1,0))) >> 1.U).asUInt
+    val illegal_vs1_multiple_emul = Mux(vs1_emul(2), false.B, (((rightOR(UIntToOH(vs1_emul(1,0))) >> 1.U).asUInt
                                     & instRS1) =/= 0.U) && (uop.lrs1_rtype === RT_VEC))
 
     val illegal_regnum_multiple_emul = illegal_dst_multiple_emul || illegal_vs2_multiple_emul || illegal_vs1_multiple_emul
 
-    val illegal_vs2_overlap_vd_lowpart = (uop.ldst === (uop.lrs2 + vs2_lmul(1,0))) && uop.rt(RD, isNarrowV)
+    val illegal_vs2_overlap_vd_lowpart = (uop.ldst === (uop.lrs2 + vs2_emul(1,0))) && uop.rt(RD, isNarrowV)
 
         illegal_vector_case :=  !vsetvl && (illegal_vstart_not_zero ||
                                 illegal_vd_unequal_vs1  ||
@@ -629,7 +489,6 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                                 illegal_reg_emul        ||
                                 illegal_regnum_multiple_emul ||
                                 illegal_vs2_overlap_vd_lowpart)
-    // handle vstart != 0
     when (cs.is_rvv && io.csr_vstart =/= 0.U) {
       uop.is_unique := true.B
     }

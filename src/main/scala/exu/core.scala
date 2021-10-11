@@ -107,15 +107,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dec_brmask_logic = Module(new BranchMaskGenerationLogic(coreWidth))
   val rename_stage     = Module(new RenameStage(coreWidth, numIntPhysRegs, numIntRenameWakeupPorts, false))
   val fp_rename_stage  = if (usingFPU) Module(new RenameStage(coreWidth, numFpPhysRegs, numFpWakeupPorts, true)) else null
-  val pred_rename_stage = Module(new PredRenameStage(coreWidth, ftqSz, 1))
-  val v_rename_stage   = if (usingVector) Module(new RenameStage(coreWidth, numVecPhysRegs, numVecWakeupPorts, false, true)) else null
+  val pred_rename_stage= Module(new PredRenameStage(coreWidth, ftqSz, 1))
+  val v_rename_stage   = if (usingVector) Module(new VecRenameStage(coreWidth, numVecPhysRegs, numVecWakeupPorts)) else null
 
-  val rename_stages    = if (usingFPU && usingVector)
+  // usingVector implies usingFPU
+  val rename_stages    = if (usingVector)
       Seq(rename_stage, fp_rename_stage, v_rename_stage, pred_rename_stage)
     else if (usingFPU)
       Seq(rename_stage, fp_rename_stage, pred_rename_stage)
-    else if (usingVector)
-      Seq(rename_stage, v_rename_stage, pred_rename_stage)
     else
       Seq(rename_stage, pred_rename_stage)
 
@@ -797,45 +796,37 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     val p_stall = if (enableSFBOpt) pred_rename_stage.io.ren_stalls(w) else false.B
 
     // lrs1 can "pass through" to prs1. Used solely to index the csr file.
-    dis_uops(w).prs1 := Mux(dis_uops(w).rt(RS1, isVector), v_uop.prs1,
-                        Mux(dis_uops(w).rt(RS1, isFloat ), f_uop.prs1,
-                        Mux(dis_uops(w).rt(RS1, isInt   ), i_uop.prs1, dis_uops(w).lrs1)))
-    dis_uops(w).prs2 := Mux(dis_uops(w).rt(RS2, isVector), v_uop.prs2,
-                        Mux(dis_uops(w).rt(RS2, isFloat ), f_uop.prs2,
-                        Mux(dis_uops(w).rt(RS2, isInt   ), i_uop.prs2, dis_uops(w).lrs2)))
+    dis_uops(w).prs1 := Mux(dis_uops(w).rt(RS1, isFloat ), f_uop.prs1,
+                        Mux(dis_uops(w).rt(RS1, isInt   ), i_uop.prs1, dis_uops(w).lrs1))
+    dis_uops(w).prs2 := Mux(dis_uops(w).rt(RS2, isFloat ), f_uop.prs2,
+                        Mux(dis_uops(w).rt(RS2, isInt   ), i_uop.prs2, dis_uops(w).lrs2))
     dis_uops(w).prs3 := f_uop.prs3
     dis_uops(w).ppred := p_uop.ppred
-    dis_uops(w).pdst := Mux(dis_uops(w).rt(RD, isVector), v_uop.pdst,
-                        Mux(dis_uops(w).rt(RD, isFloat ), f_uop.pdst,
-                        Mux(dis_uops(w).rt(RD, isInt   ), i_uop.pdst, p_uop.pdst)))
-    dis_uops(w).stale_pdst := Mux(dis_uops(w).rt(RD, isVector), v_uop.stale_pdst,
-                              Mux(dis_uops(w).rt(RD, isFloat ), f_uop.stale_pdst, i_uop.stale_pdst))
+    dis_uops(w).pdst := Mux(dis_uops(w).rt(RD, isFloat ), f_uop.pdst,
+                        Mux(dis_uops(w).rt(RD, isInt   ), i_uop.pdst, p_uop.pdst))
+    dis_uops(w).stale_pdst := Mux(dis_uops(w).rt(RD, isFloat ), f_uop.stale_pdst, i_uop.stale_pdst)
 
+    dis_uops(w).prs3_busy   := f_uop.prs3_busy & dis_uops(w).frs3_en
+    dis_uops(w).ppred_busy  := p_uop.ppred_busy && dis_uops(w).is_sfb_shadow
     if (usingVector) {
-      dis_uops(w).prs3 := Mux(dis_uops(w).is_rvv, v_uop.prs3, f_uop.prs3)
       dis_uops(w).prs1_busy := Mux1H(Seq((dis_uops(w).rt(RS1, isInt   ), i_uop.prs1_busy),
-                                         (dis_uops(w).rt(RS1, isFloat ), f_uop.prs1_busy),
-                                         (dis_uops(w).rt(RS1, isVector), v_uop.prs1_busy)))
+                                         (dis_uops(w).rt(RS1, isFloat ), f_uop.prs1_busy)))
       dis_uops(w).prs2_busy := Mux1H(Seq((dis_uops(w).rt(RS2, isInt   ), i_uop.prs2_busy),
-                                         (dis_uops(w).rt(RS2, isFloat ), f_uop.prs2_busy),
-                                         (dis_uops(w).rt(RS2, isVector), v_uop.prs2_busy)))
-      dis_uops(w).prs3_busy := Mux1H(Seq((dis_uops(w).frs3_en && dis_uops(w).is_rvv,  v_uop.prs3_busy),
-                                         (dis_uops(w).frs3_en && !dis_uops(w).is_rvv, f_uop.prs3_busy),
-                                         (!dis_uops(w).frs3_en,                       0.U)))
-      dis_uops(w).prvm      := v_uop.prvm
-      dis_uops(w).prvm_busy := Mux(dis_uops(w).is_rvv && !dis_uops(w).v_unmasked, v_uop.prvm_busy, 0.U)
+                                         (dis_uops(w).rt(RS2, isFloat ), f_uop.prs2_busy)))
+      dis_uops(w).pvd       := v_uop.pvd
+      dis_uops(w).stale_pvd := v_uop.stale_pvd
+      dis_uops(w).pvs1      := v_uop.pvs1
+      dis_uops(w).pvs2      := v_uop.pvs2
+      dis_uops(w).pvm       := v_uop.pvm
       dis_uops(w).v_scalar_busy := dis_uops(w).is_rvv && dis_uops(w).uses_scalar
-      
     } else {
       dis_uops(w).prs1_busy := i_uop.prs1_busy & (dis_uops(w).rt(RS1, isInt)) |
                                f_uop.prs1_busy & (dis_uops(w).rt(RS1, isFloat))
       dis_uops(w).prs2_busy := i_uop.prs2_busy & (dis_uops(w).rt(RS2, isInt)) |
                                f_uop.prs2_busy & (dis_uops(w).rt(RS2, isFloat))
-      dis_uops(w).prs3_busy := f_uop.prs3_busy & dis_uops(w).frs3_en
     }
-    dis_uops(w).ppred_busy := p_uop.ppred_busy && dis_uops(w).is_sfb_shadow
 
-    ren_stalls(w) := rename_stage.io.ren_stalls(w) || f_stall || p_stall
+    ren_stalls(w) := rename_stage.io.ren_stalls(w) || f_stall || p_stall || v_stall
   }
 
   //-------------------------------------------------------------

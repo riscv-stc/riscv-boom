@@ -415,7 +415,7 @@ object Transpose
  */
 object SelectFirstN
 {
-  def apply(in: UInt, n: Int) = {
+  def apply(in: UInt, n: Int): Vec[UInt] = {
     val sels = Wire(Vec(n, UInt(in.getWidth.W)))
     var mask = in
 
@@ -740,3 +740,18 @@ object IsKilledByVM
   }
 }
 
+object lvdGroup
+{
+  def apply(lvd: UInt, emul: UInt, nf: UInt): Vec[Valid[UInt]] = {
+    val ret = Wire(Vec(8, Valid(UInt(5.W))))
+    val emul_sign = emul(2)
+    val emul_mag  = emul(1,0)
+    val nr  = nf << Mux(emul_sign, 0.U(2.W), emul_mag)
+    assert (nr <= 8.U)
+    for (i <- 0 until 8) {
+      ret(i).valid := i.U < nr
+      ret(i).bits  := (lvd + i.U)(4, 0)
+    }
+    ret
+  }
+}

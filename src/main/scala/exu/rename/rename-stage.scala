@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.util._
 
 import boom.common._
 import boom.util._
@@ -84,6 +85,7 @@ abstract class AbstractRenameStage(
     val com_uops = Input(Vec(plWidth, new MicroOp()))
     val rbk_valids = Input(Vec(plWidth, Bool()))
     val rollback = Input(Bool())
+    val vbusy_status = if (vector) Output(UInt(numPhysRegs.W)) else Output(UInt(0.W))
 
     val debug_rob_empty = Input(Bool())
     val debug = Output(new DebugRenameStageIO(numPhysRegs, vector))
@@ -148,8 +150,7 @@ abstract class AbstractRenameStage(
 
 class RenameBypass(
   val oldWidth: Int,
-  val float: Boolean = false,
-  val vector: Boolean = false)
+  val float: Boolean = false)
 (implicit p: Parameters) extends BoomModule {
   val io = IO(new Bundle{
     val i_uop = Input(new MicroOp)
@@ -163,53 +164,33 @@ class RenameBypass(
   val uop = io.i_uop
   bypassed_uop := uop
 
-  if (vector) require(usingVector)
-
-  val bypass_hits_rs1 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.lrs1 }
-  val bypass_hits_rs2 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.lrs2 }
-  val bypass_hits_rs3 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.lrs3 }
-  val bypass_hits_vs0 = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === 0.U && vector.B }
-  val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (r,a) => a && r.ldst === uop.ldst }
+  val bypass_hits_rs1 = (older_uops zip alloc_reqs) map { case (o,a) => a && o.ldst === uop.lrs1 }
+  val bypass_hits_rs2 = (older_uops zip alloc_reqs) map { case (o,a) => a && o.ldst === uop.lrs2 }
+  val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (o,a) => a && o.ldst === uop.ldst }
+  val bypass_hits_rs3 = (older_uops zip alloc_reqs) map { case (o,a) => a && o.ldst === uop.lrs3 && float.B}
 
   val bypass_sel_rs1 = PriorityEncoderOH(bypass_hits_rs1.reverse).reverse
   val bypass_sel_rs2 = PriorityEncoderOH(bypass_hits_rs2.reverse).reverse
   val bypass_sel_rs3 = PriorityEncoderOH(bypass_hits_rs3.reverse).reverse
-  val bypass_sel_vs0 = PriorityEncoderOH(bypass_hits_vs0.reverse).reverse
   val bypass_sel_dst = PriorityEncoderOH(bypass_hits_dst.reverse).reverse
 
   val do_bypass_rs1 = bypass_hits_rs1.reduce(_||_)
   val do_bypass_rs2 = bypass_hits_rs2.reduce(_||_)
   val do_bypass_rs3 = bypass_hits_rs3.reduce(_||_)
-  val do_bypass_vs0 = bypass_hits_vs0.reduce(_||_)
   val do_bypass_dst = bypass_hits_dst.reduce(_||_)
 
-  val bypass_pdsts = older_uops.map(_.pdst)
 
+  val bypass_pdsts = older_uops.map(_.pdst)
   when (do_bypass_rs1) { bypassed_uop.prs1       := Mux1H(bypass_sel_rs1, bypass_pdsts) }
   when (do_bypass_rs2) { bypassed_uop.prs2       := Mux1H(bypass_sel_rs2, bypass_pdsts) }
   when (do_bypass_rs3) { bypassed_uop.prs3       := Mux1H(bypass_sel_rs3, bypass_pdsts) }
   when (do_bypass_dst) { bypassed_uop.stale_pdst := Mux1H(bypass_sel_dst, bypass_pdsts) }
 
-  if (usingVector) {
-    if (vector) {
-      bypassed_uop.prs1_busy := uop.prs1_busy | Fill(vLenb, do_bypass_rs1.asUInt)
-      bypassed_uop.prs2_busy := uop.prs2_busy | Fill(vLenb, do_bypass_rs2.asUInt)
-      bypassed_uop.prs3_busy := uop.prs3_busy | Fill(vLenb, do_bypass_rs3.asUInt)
-      when (do_bypass_vs0) { bypassed_uop.prvm := Mux1H(bypass_sel_vs0, bypass_pdsts) }
-      bypassed_uop.prvm_busy := uop.prvm_busy | Fill(vLenb, do_bypass_vs0.asUInt)
-    } else {
-      bypassed_uop.prs1_busy := Cat(0.U, (uop.prs1_busy(0) || do_bypass_rs1).asUInt)
-      bypassed_uop.prs2_busy := Cat(0.U, (uop.prs2_busy(0) || do_bypass_rs2).asUInt)
-      bypassed_uop.prs3_busy := Cat(0.U, (uop.prs3_busy(0) || do_bypass_rs3).asUInt)
-      bypassed_uop.prvm_busy := 0.U
-    }
-  } else {
-    bypassed_uop.prs1_busy := uop.prs1_busy | do_bypass_rs1
-    bypassed_uop.prs2_busy := uop.prs2_busy | do_bypass_rs2
-    bypassed_uop.prs3_busy := uop.prs3_busy | do_bypass_rs3
-  }
+  bypassed_uop.prs1_busy := uop.prs1_busy | do_bypass_rs1
+  bypassed_uop.prs2_busy := uop.prs2_busy | do_bypass_rs2
+  bypassed_uop.prs3_busy := uop.prs3_busy | do_bypass_rs3
 
-  if (!float && !vector) {
+  if (!float) {
     bypassed_uop.prs3      := DontCare
     bypassed_uop.prs3_busy := 0.U
   }
@@ -229,12 +210,14 @@ class RenameStage(
   plWidth: Int,
   numPhysRegs: Int,
   numWbPorts: Int,
-  float: Boolean, vector: Boolean=false)
-(implicit p: Parameters) extends AbstractRenameStage(plWidth, numPhysRegs, numWbPorts, vector)(p)
+  float: Boolean)(implicit p: Parameters)
+extends AbstractRenameStage(
+  plWidth,
+  numPhysRegs,
+  numWbPorts)(p)
 {
-  require(!(float & vector))
   val pregSz = log2Ceil(numPhysRegs)
-  val rtype: UInt => Bool = if (float) isFloat else if (vector) isVector else isInt
+  val rtype: UInt => Bool = if (float) isFloat else isInt
 
   //-------------------------------------------------------------
   // Helper Functions
@@ -242,7 +225,7 @@ class RenameStage(
   def BypassAllocations(uop: MicroOp, older_uops: Seq[MicroOp], alloc_reqs: Seq[Bool]): MicroOp = {
     require(older_uops.length == alloc_reqs.length)
     val bypassed_uop = Wire(new MicroOp)
-    val bypLogic = Module(new RenameBypass(older_uops.length, float, vector))
+    val bypLogic = Module(new RenameBypass(older_uops.length, float))
     bypLogic.io.i_uop := uop
     bypLogic.io.older_uops := older_uops
     bypLogic.io.alloc_reqs := alloc_reqs
@@ -258,20 +241,17 @@ class RenameStage(
     32,
     numPhysRegs,
     false,
-    float, vector))
+    float))
   val freelist = Module(new RenameFreeList(
     plWidth,
     numPhysRegs,
-    if (float | vector) 32 else 31,
-    vector))
+    if (float) 32 else 31))
   val busytable = Module(new RenameBusyTable(
     plWidth,
     numPhysRegs,
     numWbPorts,
     false,
-    float, vector))
-
-
+    float))
 
   val ren2_br_tags    = Wire(Vec(plWidth, Valid(UInt(brTagSz.W))))
 
@@ -280,32 +260,11 @@ class RenameStage(
   val rbk_valids      = Wire(Vec(plWidth, Bool()))
 
   for (w <- 0 until plWidth) {
-    if (usingVector) {
-      // NOTE: for reduction vd should be renamed only when v_eidx is 0
-      ren2_alloc_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_fire(w) &&
-                          (~ren2_uops(w).v_is_split ||
-                           (ren2_uops(w).v_re_alloc && !ren2_uops(w).rt(RD, isReduceV)))
-    } else {
-      ren2_alloc_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_fire(w)
-    }
+    ren2_alloc_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_fire(w)
     ren2_br_tags(w).valid := ren2_fire(w) && ren2_uops(w).allocate_brtag
 
-    if (usingVector && vector) {
-      val com_red_act = io.com_uops(w).rt(RD, isReduceV)
-      val com_red_mov = io.com_uops(w).is_red_vadd
-      val com_rvv_ls  = io.com_uops(w).is_rvv && (io.com_uops(w).ctrl.is_load || io.com_uops(w).ctrl.is_sta)
-      com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w) &&
-                       (!io.com_uops(w).v_is_split ||                                  // unsplitable ops
-                         io.com_uops(w).v_re_alloc && (!com_red_mov && !com_red_act || // skip reduction move, free on every cmt v_re_alloc
-                         io.com_uops(w).v_is_archlast && com_red_act))                 // do free on last split of actual reduction
-                     //(!io.com_uops(w).v_is_split || (io.com_uops(w).v_phys_last || io.com_uops(w).v_is_last) && !com_red_mov)
-      rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w) &&
-                       (!io.com_uops(w).v_is_split ||
-                         io.com_uops(w).v_re_alloc && !com_red_act)    // rollback on every v_re_alloc, skip actual reduction
-    } else {
-      com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w)
-      rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w)
-    }
+    com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w)
+    rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w)
     ren2_br_tags(w).bits  := ren2_uops(w).br_tag
   }
 
@@ -333,7 +292,7 @@ class RenameStage(
   maptable.io.map_reqs    := map_reqs
   maptable.io.remap_reqs  := remap_reqs
   maptable.io.ren_br_tags := ren2_br_tags
-  maptable.io.brupdate      := io.brupdate
+  maptable.io.brupdate    := io.brupdate
   maptable.io.rollback    := io.rollback
 
   // Maptable outputs.
@@ -342,116 +301,33 @@ class RenameStage(
 
     uop.prs1       := mappings.prs1
     uop.prs2       := mappings.prs2
-    uop.prs3       := mappings.prs3 // scalar integer will not use rs3
+    uop.prs3       := mappings.prs3
     uop.stale_pdst := mappings.stale_pdst
-    if (vector) uop.prvm := mappings.prvm
   }
-
-
 
   //-------------------------------------------------------------
   // Free List
 
   // Freelist inputs.
   for (w <- 0 until plWidth) {
-    if (vector) {
-      freelist.io.reqs(w).valid := ren2_alloc_reqs(w) && ren2_uops(w).v_is_first
-    } else {
-      freelist.io.reqs(w).valid := ren2_alloc_reqs(w)
-    }
+    freelist.io.reqs(w).valid := ren2_alloc_reqs(w)
     freelist.io.reqs(w).bits  := ren2_uops(w)
   }
   freelist.io.dealloc_pregs zip com_valids zip rbk_valids map
     {case ((d,c),r) => d.valid := c || r}
   freelist.io.dealloc_pregs zip io.com_uops map
     {case (d,c) => d.bits := Mux(io.rollback, c.pdst, c.stale_pdst)}
+  assert (ren2_alloc_reqs zip freelist.io.alloc_pregs map {case (r,p) => !r || p.bits =/= 0.U} reduce (_&&_),
+         "[rename-stage] A uop is trying to allocate the zero physical register.")
   freelist.io.ren_br_tags := ren2_br_tags
   freelist.io.brupdate := io.brupdate
   freelist.io.debug.pipeline_empty := io.debug_rob_empty
 
-  assert (ren2_alloc_reqs zip freelist.io.alloc_pregs map {case (r,p) => !r || p.bits =/= 0.U} reduce (_&&_),
-           "[rename-stage] A uop is trying to allocate the zero physical register.")
-
   //val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(plWidth, UInt(maxPregSz.W)))
   // Freelist outputs.
   for ((uop, w) <- ren2_uops.zipWithIndex) {
-    if (vector) {
-      val emul = uop.vd_emul
-      val fl_preg = freelist.io.alloc_pregs(w).bits
-      val preg = Mux(emul === 1.U, Cat(fl_preg(fl_preg.getWidth-1, 1), uop.ldst(0)),
-                 Mux(emul === 2.U, Cat(fl_preg(fl_preg.getWidth-1, 2), uop.ldst(1,0)),
-                 Mux(emul === 3.U, Cat(fl_preg(fl_preg.getWidth-1, 3), uop.ldst(2,0)), fl_preg)))
-      uop.pdst := Mux(uop.ldst =/= 0.U || float.B || vector.B, preg, 0.U)
-    } else {
-      val preg = freelist.io.alloc_pregs(w).bits
-      uop.pdst := Mux(uop.ldst =/= 0.U || float.B || vector.B, preg, 0.U)
-    }
-
-    if (usingVector) {
-      val prs1, prs2, prs3, stale_pdst, pdst, prvm = RegInit(VecInit(Seq.fill(8){0.U(maxPregSz.W)}))
-      // record physical names of first split
-      // for reduction, vs1, vd, vm should be consistent through vrgroup
-      // NOTE: for reduction vd may overlap vs1, vs2, or vm
-      // NOTE: for reduction we need read VS2 map through this, but skip vs1 and do not re-alloc vd
-      when (uop.v_is_split) {
-        // handle VD
-        when (uop.v_re_alloc) {
-          when(uop.rt(RD, isReduceV)) {
-            when(uop.frs3_en && vector.B) { uop.prs3 := prs3(0) }
-            when(uop.rt(RD,  rtype)) { uop.stale_pdst := stale_pdst(0) }
-            when(uop.rt(RD,  rtype)) { uop.pdst := pdst(0) }
-            when(~uop.v_unmasked)    { uop.prvm := prvm(0) }
-          } .otherwise {
-            // handle seg ls, latch for different v_seg_f's
-            when(uop.ldst_val && uop.rt(RD, rtype))     {
-              pdst(uop.v_seg_f) := io.ren2_uops(w).pdst
-              val emul = uop.vd_emul
-              when (!uop.v_is_first && emul > 0.U) {
-                val prev_pdst = pdst(uop.v_seg_f)
-                val next_pdst = Mux(emul === 1.U, Cat(prev_pdst(prev_pdst.getWidth-1, 1), uop.ldst(0)),
-                                Mux(emul === 2.U, Cat(prev_pdst(prev_pdst.getWidth-1, 2), uop.ldst(1,0)),
-                                                  Cat(prev_pdst(prev_pdst.getWidth-1, 3), uop.ldst(2,0))))
-                uop.pdst := next_pdst
-              }
-            }
-            when(uop.ldst_val && uop.rt(RD, rtype))     { stale_pdst(uop.v_seg_f) := io.ren2_uops(w).stale_pdst }
-            when(~uop.v_unmasked)                       { prvm(uop.v_seg_f)       := io.ren2_uops(w).prvm }
-            when(uop.frs3_en && (float.B || vector.B))  { prs3(uop.v_seg_f)       := io.ren2_uops(w).prs3 }
-          }
-        } .otherwise {
-          when(uop.ldst_val && uop.rt(RD, rtype))       { uop.stale_pdst          := stale_pdst(uop.v_seg_f) }
-          when(uop.ldst_val && uop.rt(RD, rtype))       { uop.pdst                := pdst(uop.v_seg_f) }
-          when(~uop.v_unmasked)                         { uop.prvm                := prvm(uop.v_seg_f) }
-          when(uop.frs3_en && (float.B || vector.B))    { uop.prs3                := prs3(uop.v_seg_f) }
-        }
-
-        //handle VS1/RS1
-        when (uop.v_re_vs1) {
-          when(uop.rt(RD, isReduceV)) {
-            when(uop.rt(RS1, rtype)) { uop.prs1 := prs1(0) }
-          } .otherwise {
-            when(uop.rt(RS1, rtype)) { prs1(uop.v_seg_f) := io.ren2_uops(w).prs1 }
-          }
-        } .otherwise {
-          when(uop.rt(RS1, rtype)) { uop.prs1 := prs1(uop.v_seg_f) }
-        }
-
-        //handle VS2
-        when (uop.v_re_vs2) {
-          when(uop.rt(RD, isReduceV)) {
-            when(uop.rt(RS2, rtype) && uop.v_is_first) { uop.prs2 := prs2(0) }
-          } .otherwise {
-            when(uop.rt(RS2, rtype)) { prs2(uop.v_seg_f) := io.ren2_uops(w).prs2 }
-          }
-          // vd may overlap vs2, latch vs2 on reduction mov
-          when (uop.rt(RS1, isReduceV)) {
-            when(uop.rt(RS2, rtype) && (!uop.rt(RD, isReduceV) || !uop.v_is_first)) { prs2(0) := uop.prs2 }
-          }
-        } .otherwise {
-          when(uop.rt(RS2, rtype)) { uop.prs2 := prs2(uop.v_seg_f) }
-        }
-      }
-    }
+    val preg = freelist.io.alloc_pregs(w).bits
+    uop.pdst := Mux(uop.ldst =/= 0.U || float.B, preg, 0.U)
   }
 
   //-------------------------------------------------------------
@@ -461,59 +337,19 @@ class RenameStage(
   busytable.io.rebusy_reqs := ren2_alloc_reqs
   busytable.io.wb_valids := io.wakeups.map(_.valid)
   busytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
-  if (vector) {
-    for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) {
-      val v_eidx  = wk.bits.uop.v_eidx
-      val ecnt    = wk.bits.uop.v_split_ecnt
-      val (rsel, rmsk) = VRegSel(v_eidx, wk.bits.uop.vd_eew, ecnt, eLenb, eLenSelSz)
-      bs := rmsk << Cat(rsel, 0.U(3.W))
-      // only the final split clears busy status for recductions
-      when (wk.bits.uop.rt(RS1, isReduceV)) {
-        val is_act = wk.bits.uop.rt(RD, isReduceV)
-        //val is_fin = (v_eidx + 1.U === wk.bits.uop.vconfig.vl)
-        val is_fin = wk.bits.uop.v_is_archlast && wk.bits.uop.v_is_last
-        bs := Fill(vLenb, (is_act && is_fin).asUInt)
-      } .elsewhen(wk.bits.uop.rt(RD, isMaskVD)) {
-        val rsel_mvd     = v_eidx(eLenSelSz+5, 6)
-        val is_last_mvd  = (v_eidx + 1.U === wk.bits.uop.vconfig.vl)
-        val is_eLast_mvd = v_eidx(5, 0) === "h_3f".U
-        val emask_mvd    = Fill(eLenb, is_eLast_mvd)
-        bs := Fill(vLenb, is_last_mvd) | (emask_mvd << Cat(rsel_mvd, 0.U(3.W)))
-      }
-    }
-  }
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
    "[rename] Wakeup has wrong rtype.")
 
   for ((uop, w) <- ren2_uops.zipWithIndex) {
-    if (usingVector) {
-      if (vector) {
-        val vbusy = busytable.io.vbusy_resps(w)
-        uop.prs1_busy := vbusy.prs1_busy & Fill(vLenb, (uop.rt(RS1, rtype)).asUInt) //& (rmsk << Cat(rsel, 0.U(3.W)))
-        uop.prs2_busy := vbusy.prs2_busy & Fill(vLenb, (uop.rt(RS2, rtype)).asUInt) //& (rmsk << Cat(rsel, 0.U(3.W)))
-        uop.prs3_busy := vbusy.prs3_busy & Fill(vLenb, uop.frs3_en.asUInt) //& (rmsk << Cat(rsel, 0.U(3.W)))
-        uop.prvm_busy := vbusy.prvm_busy & Fill(vLenb, (!uop.is_rvv || !uop.v_unmasked).asUInt)
-      } else {
-        val busy = busytable.io.busy_resps(w)
-        uop.prs1_busy := Cat(0.U, (uop.rt(RS1, rtype) && busy.prs1_busy).asUInt)
-        uop.prs2_busy := Cat(0.U, (uop.rt(RS2, rtype) && busy.prs2_busy).asUInt)
-        uop.prs3_busy := Cat(0.U, (uop.frs3_en && busy.prs3_busy).asUInt)
+    val busy = busytable.io.busy_resps(w)
+    uop.prs1_busy := uop.rt(RS1, rtype) && busy.prs1_busy
+    uop.prs2_busy := uop.rt(RS2, rtype) && busy.prs2_busy
+    uop.prs3_busy := uop.frs3_en && busy.prs3_busy
 
-        val valid = ren2_valids(w)
-        assert (!(valid && busy.prs1_busy(0) && (!vector.B && !float.B) && uop.lrs1 === 0.U), "[rename] x0 is busy??")
-        assert (!(valid && busy.prs2_busy(0) && (!vector.B && !float.B) && uop.lrs2 === 0.U), "[rename] x0 is busy??")
-      }
-    } else {
-      val busy = busytable.io.busy_resps(w)
-      uop.prs1_busy := uop.rt(RS1, rtype) && busy.prs1_busy
-      uop.prs2_busy := uop.rt(RS2, rtype) && busy.prs2_busy
-      uop.prs3_busy := uop.frs3_en && busy.prs3_busy
-
-      val valid = ren2_valids(w)
-      assert (!(valid && busy.prs1_busy && (!vector.B && !float.B) && uop.lrs1 === 0.U), "[rename] x0 is busy??")
-      assert (!(valid && busy.prs2_busy && (!vector.B && !float.B) && uop.lrs2 === 0.U), "[rename] x0 is busy??")
-    }
+    val valid = ren2_valids(w)
+    assert (!(valid && busy.prs1_busy && !float.B && uop.lrs1 === 0.U), "[rename] x0 is busy??")
+    assert (!(valid && busy.prs2_busy && !float.B && uop.lrs2 === 0.U), "[rename] x0 is busy??")
   }
 
   //-------------------------------------------------------------
@@ -589,3 +425,267 @@ class PredRenameStage(
 
   busy_table := ((busy_table.asUInt | to_busy.asUInt) & ~unbusy.asUInt).asBools
 }
+
+class VecRenameBypass(
+  val oldWidth: Int)
+(implicit p: Parameters) extends BoomModule {
+  val io = IO(new Bundle{
+    val i_uop = Input(new MicroOp)
+    val older_uops = Input(Vec(oldWidth, new MicroOp()))
+    val alloc_reqs = Input(Vec(oldWidth, Bool()))
+    val o_uop = Output(new MicroOp)
+  })
+  val bypassed_uop = Wire(new MicroOp)
+  val older_uops = io.older_uops
+  val alloc_reqs = io.alloc_reqs
+  val uop = io.i_uop
+  bypassed_uop := uop
+
+  def idIsActive(emul: UInt, nf: UInt, idInGroup: UInt): Bool = {
+    val grpCount = nf << Mux(emul(2), 0.U, emul(1,0))
+    val ret: Bool = idInGroup < grpCount
+    ret
+  }
+  def grpCount(emul: UInt, nf: UInt): UInt = {
+    val ret = nf << Mux(emul(2), 0.U, emul(1,0))
+    ret
+  }
+
+  def isInGroup(rs: UInt, grpRS: UInt, grpEMUL: UInt = 0.U, grpNF: UInt = 1.U): Bool = {
+    val ret: Bool = (rs >= grpRS) && (rs < grpRS + grpCount(grpEMUL, grpNF))
+    ret
+  }
+
+  val bypass_hits_rs1 = (older_uops zip alloc_reqs) map { case (o,a) => {
+      // returns a vector of Bool, one for each reg in a group
+      Cat((0 until 8).map(r => a &&                                                       // it requests alloc
+                               r.U < grpCount(uop.vs1_emul, 1.U) &&                       // vs1 is active in the group
+                               uop.rt(RS1, isVector) &&                                   // uop.vs1 is Vector
+                               o.rt(RD, isVector) &&                                      // older uop vd is vector
+                               o.ldst_val &&                                              // older uop updates vd
+                               isInGroup(uop.lrs1 + r.U, o.ldst, o.vd_emul, o.v_seg_nf))) // vs1 matches one in the older dst group
+  }}
+  val bypass_hits_rs2 = (older_uops zip alloc_reqs) map { case (o,a) => {
+      Cat((0 until 8).map(r => a &&
+                               r.U < grpCount(uop.vs2_emul, 1.U) &&
+                               uop.rt(RS2, isVector) &&
+                               o.rt(RD, isVector) &&
+                               o.ldst_val &&
+                               isInGroup(uop.lrs2 + r.U, o.ldst, o.vd_emul, o.v_seg_nf)))
+  }}
+  val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (o,a) => {
+      Cat((0 until 8).map(r => a &&
+                               r.U < grpCount(uop.vd_emul, uop.v_seg_nf) &&
+                               uop.rt(RD, isVector) &&
+                               o.rt(RD, isVector) &&
+                               o.ldst_val &&
+                               isInGroup(uop.ldst + r.U, o.ldst, o.vd_emul, o.v_seg_nf)))
+  }}
+  val bypass_hits_vs0 = (older_uops zip alloc_reqs) map { case (o,a) => a && o.ldst === 0.U }
+
+  val bypass_sel_rs1 = (0 until 8).map(r => PriorityEncoderOH(bypass_hits_rs1.map(b => b(r)).reverse).reverse)
+  val bypass_sel_rs2 = (0 until 8).map(r => PriorityEncoderOH(bypass_hits_rs2.map(b => b(r)).reverse).reverse)
+  val bypass_sel_dst = (0 until 8).map(r => PriorityEncoderOH(bypass_hits_dst.map(b => b(r)).reverse).reverse)
+  val bypass_sel_vs0 = PriorityEncoderOH(bypass_hits_vs0.reverse).reverse
+
+  val do_bypass_rs1 = (0 until 8).map(r => bypass_sel_rs1(r).reduce(_ || _))
+  val do_bypass_rs2 = (0 until 8).map(r => bypass_sel_rs2(r).reduce(_ || _))
+  val do_bypass_dst = (0 until 8).map(r => bypass_sel_dst(r).reduce(_ || _))
+  val do_bypass_vs0 = bypass_hits_vs0.reduce(_||_)
+
+  val bypass_pvd = older_uops.map(_.pvd)
+  for (i <- 0 until 8) {
+    when (do_bypass_rs1(i)) { bypassed_uop.pvs1(i).bits      := Mux1H(bypass_sel_rs1(i), bypass_pvd.map(b => b(i).bits)) }
+    when (do_bypass_rs2(i)) { bypassed_uop.pvs2(i).bits      := Mux1H(bypass_sel_rs2(i), bypass_pvd.map(b => b(i).bits)) }
+    when (do_bypass_dst(i)) { bypassed_uop.stale_pvd(i).bits := Mux1H(bypass_sel_dst(i), bypass_pvd.map(b => b(i).bits)) }
+  }
+  when (do_bypass_vs0)    { bypassed_uop.pvm               := Mux1H(bypass_sel_vs0, bypass_pvd.map(b => b(0).bits)) }
+
+  bypassed_uop.prs1_busy := DontCare
+  bypassed_uop.prs2_busy := DontCare
+  bypassed_uop.prs3_busy := DontCare
+  bypassed_uop.prs3      := DontCare
+  io.o_uop := bypassed_uop
+  bypassed_uop.prs3      := DontCare
+}
+
+/**
+ * Rename stage that connets the map table, free list, and busy table.
+ * Can be used in both the FP pipeline and the normal execute pipeline.
+ *
+ * @param plWidth pipeline width
+ * @param numWbPorts number of int writeback ports
+ * @param numWbPorts number of FP writeback ports
+ */
+class VecRenameStage(
+  plWidth: Int,
+  numPhysRegs: Int,
+  numWbPorts: Int)(implicit p: Parameters)
+extends AbstractRenameStage(
+  plWidth,
+  numPhysRegs,
+  numWbPorts,
+  true)(p)
+{
+  val pregSz = log2Ceil(numPhysRegs)
+  val rtype: UInt => Bool = isVector
+
+  //-------------------------------------------------------------
+  // Helper Functions
+
+  def BypassAllocations(uop: MicroOp, older_uops: Seq[MicroOp], alloc_reqs: Seq[Bool]): MicroOp = {
+    require(older_uops.length == alloc_reqs.length)
+    val bypassed_uop = Wire(new MicroOp)
+    val bypLogic = Module(new VecRenameBypass(older_uops.length))
+    bypLogic.io.i_uop := uop
+    bypLogic.io.older_uops := older_uops
+    bypLogic.io.alloc_reqs := alloc_reqs
+    bypassed_uop := bypLogic.io.o_uop
+    bypassed_uop
+  }
+
+  //-------------------------------------------------------------
+  // Rename Structures
+
+  val maptable = Module(new VecRenameMapTable(
+    plWidth,
+    32,
+    numPhysRegs,
+    false))
+  val freelist = Module(new VecRenameFreeList(
+    plWidth,
+    numPhysRegs,
+    32))
+  val busytable = Module(new VecRenameBusyTable(
+    plWidth,
+    numPhysRegs,
+    numWbPorts))
+
+  val ren2_br_tags    = Wire(Vec(plWidth, Valid(UInt(brTagSz.W))))
+
+  // Commit/Rollback
+  val com_valids      = Wire(Vec(plWidth, Bool()))
+  val rbk_valids      = Wire(Vec(plWidth, Bool()))
+
+  for (w <- 0 until plWidth) {
+    ren2_alloc_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_fire(w)
+    ren2_br_tags(w).valid := ren2_fire(w) && ren2_uops(w).allocate_brtag
+
+    com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w)
+    rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w)
+    ren2_br_tags(w).bits  := ren2_uops(w).br_tag
+  }
+
+  //-------------------------------------------------------------
+  // Rename Table
+
+  // Maptable inputs.
+  val map_reqs   = Wire(Vec(plWidth, new VecMapReq(lregSz)))
+  val remap_reqs = Wire(Vec(plWidth, new VecRemapReq(lregSz, pregSz)))
+
+  // Generate maptable requests.
+  for ((((ren1,ren2),com),w) <- ren1_uops zip ren2_uops zip io.com_uops.reverse zipWithIndex) {
+    map_reqs(w).lrs1 := ren1.lrs1
+    map_reqs(w).lrs2 := ren1.lrs2
+    map_reqs(w).lrs3 := ren1.lrs3
+    map_reqs(w).ldst := ren1.ldst
+    map_reqs(w).vs1_emul := ren1.vs1_emul
+    map_reqs(w).vs2_emul := ren1.vs2_emul
+    map_reqs(w).vd_emul  := ren1.vd_emul
+    map_reqs(w).v_seg_nf := ren1.v_seg_nf
+
+    remap_reqs(w).ldst := Mux(io.rollback, com.ldst, ren2.ldst)
+    for (i <- 0 until 8) {
+      remap_reqs(w).pdst(i) := Mux(io.rollback, com.stale_pvd(i).bits, ren2.pvd(i).bits )
+    }
+    remap_reqs(w).vd_emul  := Mux(io.rollback, com.vd_emul,  ren2.vd_emul)
+    remap_reqs(w).v_seg_nf := Mux(io.rollback, com.v_seg_nf, ren2.v_seg_nf)
+  }
+  ren2_alloc_reqs zip rbk_valids.reverse zip remap_reqs map {
+    case ((a,r),rr) => rr.valid := a || r}
+
+  // Hook up inputs.
+  maptable.io.map_reqs    := map_reqs
+  maptable.io.remap_reqs  := remap_reqs
+  maptable.io.ren_br_tags := ren2_br_tags
+  maptable.io.brupdate    := io.brupdate
+  maptable.io.rollback    := io.rollback
+
+  // Maptable outputs.
+  for ((uop, w) <- ren1_uops.zipWithIndex) {
+    val mappings = maptable.io.map_resps(w)
+    uop.pvs1       := mappings.prs1
+    uop.pvs2       := mappings.prs2
+    uop.stale_pvd  := mappings.stale_pdst
+    uop.pvm        := mappings.prvm
+  }
+
+  //-------------------------------------------------------------
+  // Free List
+
+  // Freelist inputs.
+  for (w <- 0 until plWidth) {
+    freelist.io.reqs(w).valid := ren2_alloc_reqs(w)
+    freelist.io.reqs(w).bits  := ren2_uops(w)
+  }
+  (freelist.io.dealloc_pregs zip io.com_uops zip com_valids zip rbk_valids).map { case(((da, uop), c), r) => {
+    da.zipWithIndex.map { case (d, i) => {
+      d.valid := (c || r) && uop.stale_pvd(i).valid
+      d.bits  := Mux(io.rollback, uop.pvd(i).bits, uop.stale_pvd(i).bits)
+    }}
+  }}
+  freelist.io.ren_br_tags := ren2_br_tags
+  freelist.io.brupdate := io.brupdate
+  freelist.io.debug.pipeline_empty := io.debug_rob_empty
+
+  //val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(plWidth, UInt(maxPregSz.W)))
+  // Freelist outputs.
+  for ((uop, w) <- ren2_uops.zipWithIndex) {
+    uop.pvd := freelist.io.alloc_pregs(w)
+  }
+
+  //-------------------------------------------------------------
+  // Busy Table
+
+  busytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
+  busytable.io.rebusy_reqs := ren2_alloc_reqs
+  busytable.io.wb_valids := io.wakeups.map(_.valid)
+  busytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
+  io.vbusy_status := busytable.io.vbusy_status
+  for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) {
+    val v_eidx  = wk.bits.uop.v_eidx
+    val ecnt    = wk.bits.uop.v_split_ecnt
+    val vsew    = wk.bits.uop.vconfig.vtype.vsew(1,0)
+    val lsb     = (v_eidx << vsew)(vLenSz-1, 0)
+    val len     = ecnt << vsew
+    val rmask   = boom.util.MaskGen(v_eidx, len, vLen)
+    bs := rmask
+  }
+
+  assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
+   "[rename] Wakeup has wrong rtype.")
+
+  //-------------------------------------------------------------
+  // Outputs
+
+  for (w <- 0 until plWidth) {
+    val can_allocate = freelist.io.alloc_pregs(w).map(_.valid).reduce(_ || _)
+
+    // Push back against Decode stage if Rename1 can't proceed.
+    io.ren_stalls(w) := (ren2_uops(w).rt(RD, rtype)) && !can_allocate
+
+    val bypassed_uop = Wire(new MicroOp)
+    if (w > 0) bypassed_uop := BypassAllocations(ren2_uops(w), ren2_uops.slice(0,w), ren2_alloc_reqs.slice(0,w))
+    else       bypassed_uop := ren2_uops(w)
+
+    io.ren2_uops(w) := GetNewUopAndBrMask(bypassed_uop, io.brupdate)
+  }
+
+  //-------------------------------------------------------------
+  // Debug signals
+
+  io.debug.freelist  := freelist.io.debug.freelist
+  io.debug.isprlist  := freelist.io.debug.isprlist
+  io.debug.busytable := busytable.io.debug.busytable
+}
+

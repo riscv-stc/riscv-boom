@@ -84,13 +84,13 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val prs1             = UInt(maxPregSz.W)
   val prs2             = UInt(maxPregSz.W)
   val prs3             = UInt(maxPregSz.W)
+  val stale_pdst       = UInt(maxPregSz.W)
   val ppred            = UInt(log2Ceil(ftqSz).W)
 
-  val prs1_busy        = if (usingVector) UInt(vLenb.W) else Bool()
-  val prs2_busy        = if (usingVector) UInt(vLenb.W) else Bool()
-  val prs3_busy        = if (usingVector) UInt(vLenb.W) else Bool()
+  val prs1_busy        = Bool()
+  val prs2_busy        = Bool()
+  val prs3_busy        = Bool()
   val ppred_busy       = Bool()
-  val stale_pdst       = UInt(maxPregSz.W)
   val exception        = Bool()
   val exc_cause        = UInt(xLen.W)          // TODO compress this down, xlen is insanity
   val bypassable       = Bool()                      // can we bypass ALU results? (doesn't include loads, csr, etc...)
@@ -139,8 +139,11 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
 
   // vector extension
   val is_rvv           = if (usingVector) Bool() else false.B         // is vector instruction
-  val prvm             = if (usingVector) UInt(maxPregSz.W) else UInt(0.W)
-  val prvm_busy        = if (usingVector) UInt(vLenb.W) else UInt(0.W)
+  val pvd              = if (usingVector) Vec(8, Valid(UInt(vpregSz.W))) else null
+  val stale_pvd        = if (usingVector) Vec(8, Valid(UInt(vpregSz.W))) else null
+  val pvs1             = if (usingVector) Vec(8, Valid(UInt(vpregSz.W))) else null
+  val pvs2             = if (usingVector) Vec(8, Valid(UInt(vpregSz.W))) else null
+  val pvm              = if (usingVector) UInt(vpregSz.W) else UInt(0.W)
   val v_scalar_busy    = if (usingVector) Bool() else false.B
   val v_scalar_data    = if (usingVector) UInt(eLen.W) else UInt(0.W) // scalar value for vector pipe
   val v_active         = if (usingVector) Bool() else false.B
@@ -154,9 +157,6 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_is_last        = if (usingVector) Bool() else false.B
   val v_is_archfirst   = if (usingVector) Bool() else false.B         // arch 1st/last records since decode
   val v_is_archlast    = if (usingVector) Bool() else false.B
-  val v_re_alloc       = if (usingVector) Bool() else false.B         // do rename allocation on first split for every vreg
-  val v_re_vs1         = if (usingVector) Bool() else false.B         // do rename mapping for narrowing ops
-  val v_re_vs2         = if (usingVector) Bool() else false.B         // do rename mapping for indexed LS / narrowing ops
   val vs1_eew          = if (usingVector) UInt(2.W) else UInt(0.W)
   val vs2_eew          = if (usingVector) UInt(2.W) else UInt(0.W)
   val vd_eew           = if (usingVector) UInt(2.W) else UInt(0.W)
@@ -240,7 +240,10 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
 
   def match_group(prd: UInt): Bool = {
     val ret = Wire(Bool())
-    ret := ((pdst ^ prd) >> vd_emul) === 0.U
+    ret := false.B
+    if (usingVector) {
+      ret := pvd.map(e => e.valid && e.bits === prd).reduce(_ || _)
+    }
     ret
   }
 }
