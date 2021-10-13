@@ -22,6 +22,7 @@ import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util._
+import freechips.rocketchip.tile.{TileKey, XLen}
 
 import boom.common._
 import boom.util._
@@ -689,3 +690,72 @@ extends AbstractRenameStage(
   io.debug.busytable := busytable.io.debug.busytable
 }
 
+import freechips.rocketchip.rocket._
+import freechips.rocketchip.config._
+import freechips.rocketchip.unittest._
+import boom.ifu._
+import boom.lsu._
+
+class VecRenameUT(timeout: Int = 1000)(implicit p: Parameters) extends UnitTest(timeout)
+{
+  def NullBrUpdateInfo: BrUpdateInfo = {
+    val ret = Wire(new BrUpdateInfo)
+    ret.b1.resolve_mask     := 0.U
+    ret.b1.mispredict_mask  := 0.U
+    ret.b2.uop              := NullMicroOp(true)
+    ret.b2.valid            := false.B
+    ret.b2.mispredict       := false.B
+    ret.b2.taken            := false.B
+    ret.b2.cfi_type         := 0.U
+    ret.b2.pc_sel           := 0.U
+    ret.b2.jalr_target      := 0.U
+    ret.b2.target_offset    := 0.S
+    ret
+  }
+
+  def NullWakeup: Valid[ExeUnitResp] = {
+    val ret = Wire(new Valid(new ExeUnitResp(p(XLen))))
+    ret.valid                   := false.B
+    ret.bits.uop                := NullMicroOp(true)
+    ret.bits.data               := 0.U
+    ret.bits.predicated         := false.B
+    ret.bits.fflags.valid       := false.B
+    ret.bits.fflags.bits.uop    := NullMicroOp(true)
+    ret.bits.fflags.bits.flags  := 0.U
+    ret
+  }
+
+  val plWidth: Int = 2
+  val numPregs: Int = 64
+  val numWbPorts: Int = 1
+
+  val dut = Module(new VecRenameStage(plWidth, numPregs, numWbPorts))
+  //val dec_fire = RegInit(VecInit.tabulate(plWidth)(x: Int => false.B))
+  //val dec_uops = RegInit(VecInit.tabulate(plWidth)(x: Int => NullMicroOp(true)))
+  //val brupdate = Wire(new BrUpdateInfo())
+  //val dis_fire = RegInit(VecInit.tabulate(plWidth)(x: Int => false.B))
+  //val dis_ready = RegInit(false.B)
+  dut.io.kill := false.B
+  dut.io.dec_fire.map(x => x := false.B)
+  dut.io.dec_uops.map(x => x := NullMicroOp(true))
+  dut.io.brupdate := NullBrUpdateInfo
+  dut.io.wakeups(0) := NullWakeup
+  dut.io.dis_fire.map(x => x := false.B)
+  dut.io.dis_ready := false.B
+  dut.io.com_valids.map(x => x := false.B)
+  dut.io.com_uops.map(x => x := NullMicroOp(true))
+  dut.io.rbk_valids.map(x => x := false.B)
+  dut.io.rollback := false.B
+  dut.io.debug_rob_empty := false.B
+}
+
+class WithVecRenameUT extends Config((site, here, up) => {
+  case UnitTests => (q: Parameters) => {
+    implicit val p = BoomTestUtils.getBoomParameters("StcBoomConfig", "chipyard")
+    Seq(
+      Module(new VecRenameUT(10000))
+    )
+  }
+})
+
+class VecRenameUTConfig extends Config(new WithVecRenameUT)

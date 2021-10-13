@@ -17,8 +17,12 @@ import chisel3.util._
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.util.{Str}
-import freechips.rocketchip.config.{Parameters}
-import freechips.rocketchip.tile.{TileKey}
+import freechips.rocketchip.config.{Parameters, Config}
+import freechips.rocketchip.tile._
+import freechips.rocketchip.system._
+import freechips.rocketchip.tilelink._
+import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.subsystem._
 
 import boom.common.{MicroOp}
 import boom.exu.{BrUpdateInfo}
@@ -755,3 +759,50 @@ object lvdGroup
     ret
   }
 }
+
+object BoomTestUtils {
+  private def augment(tp: TileParams)(implicit p: Parameters): Parameters = p.alterPartial {
+    case TileKey => tp
+    case TileVisibilityNodeKey => TLEphemeralNode()(ValName("fake"))
+    case LookupByHartId => lookupByHartId(Seq(tp))
+    // TODO: Figure out proper TL parameters
+  }
+
+  private def lookupByHartId(tps: Seq[TileParams]) = {
+    // return a new lookup hart
+    new LookupByHartIdImpl {
+      def apply[T <: Data](f: TileParams => Option[T], hartId: UInt): T =
+        PriorityMux(tps.collect { case t if f(t).isDefined => (t.hartId.U === hartId) -> f(t).get })
+    }
+  }
+
+  def getBoomParameters(configName: String, configPackage: String = "boom.common"): Parameters = {
+    // get the full path to the config
+    val fullConfigName: String = configPackage + "." + configName
+
+    // get the default unmodified params
+    val origParams: Parameters = try {
+      (Class.forName(fullConfigName)
+            .getDeclaredConstructor()
+            .newInstance()
+            .asInstanceOf[Config]
+       ++ Parameters.empty)
+    }
+    catch {
+      case e: java.lang.ClassNotFoundException => {
+        //throw new Exception(s"""Unable to find config "$fullConfigName".""", e)
+        println(s"""Unable to find config "$fullConfigName".""")
+        Parameters.empty
+      }
+    }
+
+    // get the tile parameters
+    val boomTileParams = origParams(TilesLocated(InSubsystem)) // this is a seq
+
+    // augment the parameters
+    val outParams = augment(boomTileParams(0).tileParams)(origParams)
+
+    outParams
+  }
+}
+

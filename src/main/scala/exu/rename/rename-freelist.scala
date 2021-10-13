@@ -82,7 +82,7 @@ class RenameFreeList(
   for (w <- 0 until plWidth) {
     val can_sel = sels(w).orR
     val r_valid = RegInit(false.B)
-    val r_sel   = RegEnable(PriorityEncoder(sels(w)), sel_fire(w))
+    val r_sel   = RegEnable(OHToUInt(sels(w)), sel_fire(w))
 
     r_valid := r_valid && !io.reqs(w).valid || can_sel
     sel_fire(w) := (!r_valid || io.reqs(w).valid) && can_sel
@@ -91,7 +91,7 @@ class RenameFreeList(
     io.alloc_pregs(w).valid := r_valid
   }
 
-  io.debug.freelist := free_list //| io.alloc_pregs.map(p => UIntToOH(p.bits) & Fill(n, p.valid)).reduce(_|_)
+  io.debug.freelist := free_list | io.alloc_pregs.map(p => UIntToOH(p.bits) & Fill(n, p.valid)).reduce(_|_)
   io.debug.isprlist := 0.U  // TODO track commit free list.
 
   assert (!(io.debug.freelist & dealloc_mask).orR, "[freelist] Returning a free physical register.")
@@ -174,12 +174,12 @@ class VecRenameFreeList(
     sel_fire(w) := Fill(8, ((!r_valid || io.reqs(w).valid) && can_sel).asUInt)
 
     io.alloc_pregs(w).zipWithIndex.map { case(a,i) =>
-      a.bits   := RegEnable(PriorityEncoder(vec_sels(w)(i)), sel_fire(w)(i))
+      a.bits   := RegEnable(OHToUInt(vec_sels(w)(i)), sel_fire(w)(i))
       a.valid  := r_valid && vgrp(i).valid
     }
   }
 
-  io.debug.freelist := free_list //| io.alloc_pregs.map(p => UIntToOH(p.bits) & Fill(n, p.valid)).reduce(_|_)
+  io.debug.freelist := free_list | alloc_masks.reduce(_|_)
   io.debug.isprlist := 0.U  // TODO track commit free list.
 
   assert (!(io.debug.freelist & dealloc_mask).orR, "[freelist] Returning a free physical register.")
