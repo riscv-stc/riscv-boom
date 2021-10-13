@@ -381,15 +381,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
    ))
 
   val micrArchEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
-     ("exception",                         () => rob.io.com_xcpt.valid)
-   ))
-
-  val resourceEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
      ("exception",                         () => rob.io.com_xcpt.valid),
      ("front-end f1 is resteered",         () => io.ifu.perf.f1_clear),
      ("front-end f2 is resteered",         () => io.ifu.perf.f2_clear),
      ("front-end f3 is resteered",         () => io.ifu.perf.f3_clear),
-     ("front-end f4 is resteered",         () => io.ifu.perf.f4_clear),
+     ("front-end f4 is resteered",         () => io.ifu.perf.f4_clear)
+   ))
+
+  val resourceEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
      ("frontend fb full",                  () => io.ifu.perf.fb_full),
      ("frontend ftq full",                 () => io.ifu.perf.ftq_full),
      ("fp issue slots full",               () => fp_pipeline.io.perf.iss_slots_full),
@@ -515,8 +514,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("any load mem stall",                 () => mem_stall_anyload),
     ("stores mem stall",                   () => mem_stall_stores),
     ("l1d miss mem stall",                 () => mem_stall_l1d_miss),
-    ("l2 miss mem stall",                  () => false.B),
-    ("l3 miss mem stall",                  () => false.B),
+    ("l2 miss mem stall",                  () => mem_stall_l2_miss),
+    ("l3 miss mem stall",                  () => mem_stall_l3_miss),
     ("mem latency",                        () => false.B),
     ("control-flow target misprediction",  () => br_misp_target),
     ("mispredicted conditional branch instructions retired", () => br_misp_dir),
@@ -538,6 +537,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     (Seq(topDownCyclesEvents1), (m, n) => m +& n),
     (topDownIssVec,             (m, n) => m +& n),
     (insnCommitBaseEvents,      (m, n) => m +& n),
+    (Seq(micrArchEvents),       (m, n) => m +& n),
     (Seq(resourceEvents),       (m, n) => m +& n),
     (Seq(memorySystemEvents),   (m, n) => m +& n)
   ))
