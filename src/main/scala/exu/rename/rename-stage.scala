@@ -693,11 +693,33 @@ extends AbstractRenameStage(
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.config._
 import freechips.rocketchip.unittest._
+import freechips.rocketchip.tile._
+import freechips.rocketchip.subsystem._
+import freechips.rocketchip.tilelink.LFSR64
 import boom.ifu._
 import boom.lsu._
 
-class VecRenameUT(timeout: Int = 1000)(implicit p: Parameters) extends UnitTest(timeout)
+class VecRenameUT(timeout: Int = 1000)(implicit p: Parameters)
+  extends UnitTest(timeout)
 {
+  val tileParams = p(TilesLocated(InSubsystem))(0).tileParams
+  val coreParames = tileParams.core.asInstanceOf[BoomCoreParams]
+  val coreWidth = coreParames.decodeWidth
+  val numVecPhysRegs = coreParames.numVecPhysRegisters
+  val vpregSz = log2Ceil(numVecPhysRegs)
+
+  val cycle = Reg(UInt(32.W))
+  when (io.start) {
+    cycle := 0.U
+  } .otherwise {
+    cycle := cycle + 1.U
+  }
+
+  val active = RegInit(false.B)
+  when (io.start) {
+    active := true.B
+  }
+
   def NullBrUpdateInfo: BrUpdateInfo = {
     val ret = Wire(new BrUpdateInfo)
     ret.b1.resolve_mask     := 0.U
@@ -725,25 +747,60 @@ class VecRenameUT(timeout: Int = 1000)(implicit p: Parameters) extends UnitTest(
     ret
   }
 
-  val plWidth: Int = 2
-  val numPregs: Int = 64
-  val numWbPorts: Int = 1
+  def NullVConfig: VConfig = {
+    val ret = Wire(new VConfig)
+    ret.vl := 0.U
+    ret.vtype.reserved := DontCare
+    ret.vtype.vill := false.B
+    ret.vtype.vma  := false.B
+    ret.vtype.vta  := false.B
+    ret.vtype.vsew := 0.U
+    ret.vtype.vlmul_sign := false.B
+    ret.vtype.vlmul_mag  := 0.U
+    ret
+  }
 
-  val dut = Module(new VecRenameStage(plWidth, numPregs, numWbPorts))
-  //val dec_fire = RegInit(VecInit.tabulate(plWidth)(x: Int => false.B))
-  //val dec_uops = RegInit(VecInit.tabulate(plWidth)(x: Int => NullMicroOp(true)))
-  //val brupdate = Wire(new BrUpdateInfo())
-  //val dis_fire = RegInit(VecInit.tabulate(plWidth)(x: Int => false.B))
-  //val dis_ready = RegInit(false.B)
-  dut.io.kill := false.B
-  dut.io.dec_fire.map(x => x := false.B)
-  dut.io.dec_uops.map(x => x := NullMicroOp(true))
-  dut.io.brupdate := NullBrUpdateInfo
+  val dut = Module(new VecRenameStage(coreWidth, numVecPhysRegs, 1))
+
+  val dec_fire = LCG(coreWidth, active)
+  val dec_uops = WireInit(VecInit.tabulate(coreWidth)(x => {
+    val ret = Wire(new MicroOp)
+    ret := NullMicroOp(true)
+    ret.vconfig := NullVConfig
+    ret
+  }))
+  dec_uops.map(uop => uop.ldst_val    := LCG(1, active))
+  dec_uops.map(uop => uop.ldst        := LCG(vpregSz, active))
+  dec_uops.map(uop => uop.lrs1        := LCG(vpregSz, active))
+  dec_uops.map(uop => uop.lrs2        := LCG(vpregSz, active))
+  dec_uops.map(uop => uop.dst_rtype   := LCG(5, active))
+  dec_uops.map(uop => uop.lrs1_rtype  := LCG(5, active))
+  dec_uops.map(uop => uop.lrs2_rtype  := LCG(5, active))
+  dec_uops.map(uop => uop.frs3_en     := false.B)
+  dec_uops.map(uop => uop.v_unmasked  := LCG(1, active))
+  dec_uops.map(uop => uop.vs1_eew     := Cat(0.U(1.W),LCG(2, active)))
+  dec_uops.map(uop => uop.vs2_eew     := Cat(0.U(1.W),LCG(2, active)))
+  dec_uops.map(uop => uop.vd_eew      := Cat(0.U(1.W),LCG(2, active)))
+  dec_uops.map(uop => uop.vs1_emul    := LCG(3, active))
+  dec_uops.map(uop => uop.vs2_emul    := LCG(3, active))
+  dec_uops.map(uop => uop.vd_emul     := LCG(3, active))
+  dec_uops.map(uop => uop.v_seg_nf    := 1.U)
+
+  val brupdate = RegInit(NullBrUpdateInfo)
+  val dis_fire = LCG(coreWidth, active)
+  val dis_ready = LCG(1, active)
+  val comPipe = (0 until coreWidth).map(i => Pipe(dis_fire(i), dut.io.ren2_uops(i), 5))
+
+  dut.io.kill       := false.B
+  dut.io.dec_fire   := dec_fire.asBools
+  dut.io.dec_uops   := dec_uops
+  dut.io.brupdate   := brupdate
   dut.io.wakeups(0) := NullWakeup
-  dut.io.dis_fire.map(x => x := false.B)
-  dut.io.dis_ready := false.B
-  dut.io.com_valids.map(x => x := false.B)
-  dut.io.com_uops.map(x => x := NullMicroOp(true))
+  dut.io.dis_fire   := dis_fire.asBools
+  dut.io.dis_ready  := dis_ready
+  dut.io.com_valids.zipWithIndex.map{case (cv,i) =>
+    cv := comPipe(i).valid && comPipe(i).bits.ldst_val && comPipe(i).bits.dst_rtype(4)}
+  dut.io.com_uops.zipWithIndex.map{case (cu,i) => cu := comPipe(i).bits}
   dut.io.rbk_valids.map(x => x := false.B)
   dut.io.rollback := false.B
   dut.io.debug_rob_empty := false.B

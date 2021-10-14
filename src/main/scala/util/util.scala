@@ -751,7 +751,7 @@ object lvdGroup
     val emul_sign = emul(2)
     val emul_mag  = emul(1,0)
     val nr  = nf << Mux(emul_sign, 0.U(2.W), emul_mag)
-    assert (nr <= 8.U)
+    //assert (nr <= 8.U)
     for (i <- 0 until 8) {
       ret(i).valid := i.U < nr
       ret(i).bits  := (lvd + i.U)(4, 0)
@@ -797,10 +797,10 @@ object BoomTestUtils {
     }
 
     // get the tile parameters
-    val boomTileParams = origParams(TilesLocated(InSubsystem)) // this is a seq
+    val boomTileParams = origParams(TilesLocated(InSubsystem))(0).tileParams // this is a seq
 
     // augment the parameters
-    val outParams = augment(boomTileParams(0).tileParams)(origParams)
+    val outParams = augment(boomTileParams)(origParams)
 
     outParams
   }
