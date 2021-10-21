@@ -564,7 +564,7 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               vLen = 128,
               eLen = 64,
               vMemDataBits = 64,
-              numVecPhysRegisters = 40
+              numVecPhysRegisters = 65
             ),
             dcache = Some(
               DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4, nTLBWays=16)

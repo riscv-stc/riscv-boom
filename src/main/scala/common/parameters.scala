@@ -264,7 +264,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   // vector stuff
   require (issueParams.count(_.iqType == IQT_VEC.litValue) == 1 || !usingVector)
   val numVecPhysRegs = boomParams.numVecPhysRegisters
-  require (numVecPhysRegs % 8 == 0, "Number of vector physical register must be multiple of 8")
+  //require (numVecPhysRegs % 8 == 0, "Number of vector physical register must be multiple of 8")
   def numELENinVLEN = if (usingVector) vLen/eLen else 0
   //def numVecPhysElens= boomParams.numVecPhysRegisters * numELENinVLEN
   def vLenb = vLen/8
@@ -279,7 +279,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val numRobRows      = numRobEntries/coreWidth
   val robAddrSz       = log2Ceil(numRobRows) + log2Ceil(coreWidth)
   // the f-registers are mapped into the space above the x-registers
-  val logicalRegCount = if (usingFPU) 64 else 32
+  val logicalRegCount = 32 //if (usingFPU) 64 else 32
   val lregSz          = log2Ceil(logicalRegCount)
   val ipregSz         = log2Ceil(numIntPhysRegs)
   val fpregSz         = log2Ceil(numFpPhysRegs)

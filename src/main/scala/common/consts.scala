@@ -183,7 +183,6 @@ trait ScalarOpConstants
   val RT_VRW   = 0x1A.U(5.W) // vector, signed reduction VD/VS1 with vsew*2
   val RT_VRU   = 0x1C.U(5.W) // vector, unsigned reduction VD/VS1 with vsew
   val RT_VRWU  = 0x1E.U(5.W) // vector, unsigned reduction VD/VS1 with vsew*2
-                             // TODO rename RT_NAR
 
   def isInt      (rt: UInt): Bool = (rt === RT_FIX || rt === RT_FIXU)
   def isIntU     (rt: UInt): Bool = (rt === RT_FIXU)

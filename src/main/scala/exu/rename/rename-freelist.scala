@@ -107,11 +107,14 @@ class VecRenameFreeList(
 {
   private val pregSz = log2Ceil(numPregs)
   private val n = numPregs
+  // preallocate 8*plWidth before the first request
+  require(numPregs - numLregs > 8*plWidth*2)
 
   val io = IO(new BoomBundle()(p) {
     // Physical register requests.
     val reqs          = Input(Vec(plWidth, Valid(new MicroOp)))
     val alloc_pregs   = Output(Vec(plWidth, Vec(8, Valid(UInt(pregSz.W)))))
+    val can_allocate  = Output(Vec(plWidth, Bool()))
 
     // Pregs returned by the ROB.
     val dealloc_pregs = Input(Vec(plWidth, Vec(8, Valid(UInt(pregSz.W)))))
@@ -120,7 +123,7 @@ class VecRenameFreeList(
     val ren_br_tags   = Input(Vec(plWidth, Valid(UInt(brTagSz.W))))
 
     // Mispredict info for recovering speculatively allocated registers.
-    val brupdate        = Input(new BrUpdateInfo)
+    val brupdate      = Input(new BrUpdateInfo)
 
     val debug = new Bundle {
       val pipeline_empty = Input(Bool())
@@ -128,6 +131,8 @@ class VecRenameFreeList(
       val isprlist = Output(Bits(numPregs.W))
     }
   })
+  val ioreq_grp = io.reqs.map(req => lvdGroup(req))
+
   // The free list register array and its branch allocation lists.
   val free_list = RegInit(UInt(numPregs.W), ~(1.U(numPregs.W)))
   val br_alloc_lists = Reg(Vec(maxBrCount, UInt(numPregs.W)))
@@ -136,16 +141,21 @@ class VecRenameFreeList(
   val vec_sels = Wire(Vec(plWidth, Vec(8, UInt(numPregs.W))))
   val flat_sels = SelectFirstN(free_list, plWidth*8)
   for (w <- 0 until plWidth) {
-    (vec_sels(w) zip flat_sels.slice(8*w, 8*w+8)).map { case(v,f) => v := f }
+    for (i <- 0 until 8) {
+      vec_sels(w)(i) := flat_sels(2*i+w)
+    }
+    //(vec_sels(w) zip flat_sels.slice(8*w, 8*w+8)).zipWithIndex.map { case((v,f),i) =>
+      //v := Mux(ioreq_grp(w)(i).valid || !r_valid(w), f, io.alloc_pregs(w)(i).bits)
+    //}
   }
-  val sel_fire = Wire(Vec(plWidth, UInt(8.W)))
+  val sel_fire = Wire(Vec(plWidth, Vec(8, Bool())))
 
   val allocs = io.alloc_pregs.map(a => a.map(ar => Fill(n, ar.valid) & UIntToOH(ar.bits, n)).reduce(_ | _))
   val alloc_masks = (allocs zip io.reqs).scanRight(0.U(n.W)) { case ((a,r),m) => m | a & Fill(n,r.valid) }
 
   // Masks that modify the freelist array.
   val sel_mask = (vec_sels zip sel_fire).map { case (vs,sf) =>
-                   (vs zip sf.asBools).map { case(bm,f) => bm & Fill(n,f) }.reduce(_ | _)
+                   (vs zip sf).map { case(bm,f) => bm & Fill(n,f) }.reduce(_ | _)
                  }.reduce(_ | _)
   val br_deallocs = br_alloc_lists(io.brupdate.b2.uop.br_tag) & Fill(n, io.brupdate.b2.mispredict)
   val dealloc_mask = io.dealloc_pregs.map(dreq => {
@@ -166,17 +176,18 @@ class VecRenameFreeList(
 
   // Pipeline logic | hookup outputs.
   for (w <- 0 until plWidth) {
-    val vgrp = lvdGroup(io.reqs(w).bits.ldst, io.reqs(w).bits.vd_emul, io.reqs(w).bits.v_seg_nf)
-    val can_sel = vec_sels(w).zipWithIndex.map { case (vs, i) => vs.orR || !vgrp(i).valid }.reduce(_ && _)
-    val r_valid = RegInit(false.B)
+    for (i <- 0 until 8) {
+      val can_sel = vec_sels(w)(i).orR
+      val r_sel   = RegEnable(OHToUInt(vec_sels(w)(i)), sel_fire(w)(i))
+      val r_valid = RegInit(false.B)
 
-    r_valid := r_valid && !io.reqs(w).valid || can_sel
-    sel_fire(w) := Fill(8, ((!r_valid || io.reqs(w).valid) && can_sel).asUInt)
+      r_valid := r_valid && !(io.reqs(w).valid && ioreq_grp(w)(i).valid) || can_sel
+      sel_fire(w)(i) := (!r_valid || io.reqs(w).valid && ioreq_grp(w)(i).valid) && can_sel
 
-    io.alloc_pregs(w).zipWithIndex.map { case(a,i) =>
-      a.bits   := RegEnable(OHToUInt(vec_sels(w)(i)), sel_fire(w)(i))
-      a.valid  := r_valid && vgrp(i).valid
+      io.alloc_pregs(w)(i).bits  := r_sel
+      io.alloc_pregs(w)(i).valid := r_valid
     }
+    io.can_allocate(w) := io.alloc_pregs(w).map(_.valid).reduce(_ && _)
   }
 
   io.debug.freelist := free_list | alloc_masks.reduce(_|_)

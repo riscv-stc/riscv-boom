@@ -758,6 +758,20 @@ object lvdGroup
     }
     ret
   }
+
+  def apply(req: Valid[MicroOp]): Vec[Valid[UInt]] = {
+    val ret = Wire(Vec(8, Valid(UInt(5.W))))
+    val uop = req.bits
+    val lvd = uop.ldst
+    val emul = uop.vd_emul
+    val nf = uop.v_seg_nf
+    val grp = apply(lvd, emul, nf)
+    for (i <- 0 until 8) {
+      ret(i).valid := grp(i).valid && req.valid && uop.ldst_val
+      ret(i).bits  := grp(i).bits
+    }
+    ret
+  }
 }
 
 object BoomTestUtils {

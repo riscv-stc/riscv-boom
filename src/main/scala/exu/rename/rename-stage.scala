@@ -442,65 +442,60 @@ class VecRenameBypass(
   val uop = io.i_uop
   bypassed_uop := uop
 
-  def idIsActive(emul: UInt, nf: UInt, idInGroup: UInt): Bool = {
-    val grpCount = nf << Mux(emul(2), 0.U, emul(1,0))
-    val ret: Bool = idInGroup < grpCount
-    ret
-  }
   def grpCount(emul: UInt, nf: UInt): UInt = {
     val ret = nf << Mux(emul(2), 0.U, emul(1,0))
     ret
   }
 
-  def isInGroup(rs: UInt, grpRS: UInt, grpEMUL: UInt = 0.U, grpNF: UInt = 1.U): Bool = {
-    val ret: Bool = (rs >= grpRS) && (rs < grpRS + grpCount(grpEMUL, grpNF))
+  def matchGroup(rs: UInt, grpRS: UInt, grpEMUL: UInt = 0.U, grpNF: UInt = 1.U): Vec[Bool] = {
+    val gCount = grpCount(grpEMUL, grpNF)
+    val ret = Wire(Vec(8, Bool()))
+    (0 until 8).map(i => ret(i) := (rs === grpRS + i.U) && i.U < gCount)
     ret
   }
 
-  val bypass_hits_rs1 = (older_uops zip alloc_reqs) map { case (o,a) => {
-      // returns a vector of Bool, one for each reg in a group
-      Cat((0 until 8).map(r => a &&                                                       // it requests alloc
-                               r.U < grpCount(uop.vs1_emul, 1.U) &&                       // vs1 is active in the group
-                               uop.rt(RS1, isVector) &&                                   // uop.vs1 is Vector
-                               o.rt(RD, isVector) &&                                      // older uop vd is vector
-                               o.ldst_val &&                                              // older uop updates vd
-                               isInGroup(uop.lrs1 + r.U, o.ldst, o.vd_emul, o.v_seg_nf))) // vs1 matches one in the older dst group
-  }}
-  val bypass_hits_rs2 = (older_uops zip alloc_reqs) map { case (o,a) => {
-      Cat((0 until 8).map(r => a &&
-                               r.U < grpCount(uop.vs2_emul, 1.U) &&
-                               uop.rt(RS2, isVector) &&
-                               o.rt(RD, isVector) &&
-                               o.ldst_val &&
-                               isInGroup(uop.lrs2 + r.U, o.ldst, o.vd_emul, o.v_seg_nf)))
-  }}
-  val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (o,a) => {
-      Cat((0 until 8).map(r => a &&
-                               r.U < grpCount(uop.vd_emul, uop.v_seg_nf) &&
-                               uop.rt(RD, isVector) &&
-                               o.rt(RD, isVector) &&
-                               o.ldst_val &&
-                               isInGroup(uop.ldst + r.U, o.ldst, o.vd_emul, o.v_seg_nf)))
-  }}
-  val bypass_hits_vs0 = (older_uops zip alloc_reqs) map { case (o,a) => a && o.ldst === 0.U }
-
-  val bypass_sel_rs1 = (0 until 8).map(r => PriorityEncoderOH(bypass_hits_rs1.map(b => b(r)).reverse).reverse)
-  val bypass_sel_rs2 = (0 until 8).map(r => PriorityEncoderOH(bypass_hits_rs2.map(b => b(r)).reverse).reverse)
-  val bypass_sel_dst = (0 until 8).map(r => PriorityEncoderOH(bypass_hits_dst.map(b => b(r)).reverse).reverse)
-  val bypass_sel_vs0 = PriorityEncoderOH(bypass_hits_vs0.reverse).reverse
-
-  val do_bypass_rs1 = (0 until 8).map(r => bypass_sel_rs1(r).reduce(_ || _))
-  val do_bypass_rs2 = (0 until 8).map(r => bypass_sel_rs2(r).reduce(_ || _))
-  val do_bypass_dst = (0 until 8).map(r => bypass_sel_dst(r).reduce(_ || _))
-  val do_bypass_vs0 = bypass_hits_vs0.reduce(_||_)
-
-  val bypass_pvd = older_uops.map(_.pvd)
   for (i <- 0 until 8) {
-    when (do_bypass_rs1(i)) { bypassed_uop.pvs1(i).bits      := Mux1H(bypass_sel_rs1(i), bypass_pvd.map(b => b(i).bits)) }
-    when (do_bypass_rs2(i)) { bypassed_uop.pvs2(i).bits      := Mux1H(bypass_sel_rs2(i), bypass_pvd.map(b => b(i).bits)) }
-    when (do_bypass_dst(i)) { bypassed_uop.stale_pvd(i).bits := Mux1H(bypass_sel_dst(i), bypass_pvd.map(b => b(i).bits)) }
+    val bypass_hits_rs1 = (older_uops zip alloc_reqs) map { case (o,a) =>
+      (Fill(8, (a && i.U < grpCount(uop.vs1_emul, 1.U) && uop.rt(RS1, isVector) &&
+               o.rt(RD, isVector) && o.ldst_val).asUInt) &
+       matchGroup(uop.lrs1 + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
+    }
+    val bypass_hits_rs2 = (older_uops zip alloc_reqs) map { case (o,a) =>
+      (Fill(8, (a && i.U < grpCount(uop.vs2_emul, 1.U) && uop.rt(RS2, isVector) &&
+               o.rt(RD, isVector) && o.ldst_val).asUInt) &
+       matchGroup(uop.lrs2 + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
+    }
+    val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (o,a) =>
+      (Fill(8, (a && i.U < grpCount(uop.vd_emul, 1.U) && uop.rt(RD, isVector) &&
+               o.rt(RD, isVector) && o.ldst_val).asUInt) &
+       matchGroup(uop.ldst + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
+    }
+
+    val bypass_sel_rs1 = bypass_hits_rs1.map(x => PriorityEncoderOH(x.reverse).reverse)
+    val bypass_sel_rs2 = bypass_hits_rs2.map(x => PriorityEncoderOH(x.reverse).reverse)
+    val bypass_sel_dst = bypass_hits_dst.map(x => PriorityEncoderOH(x.reverse).reverse)
+
+    val do_bypass_rs1 = bypass_hits_rs1.map(x => x.orR)
+    val do_bypass_rs2 = bypass_hits_rs2.map(x => x.orR)
+    val do_bypass_dst = bypass_hits_dst.map(x => x.orR)
+
+    val bypass_pvd = older_uops.map(_.pvd)
+    when (do_bypass_rs1.reduce(_ || _)) {
+      bypassed_uop.pvs1(i).bits      := Mux1H(do_bypass_rs1, (bypass_sel_rs1 zip bypass_pvd).map{case(s,p) => Mux1H(s, p.map(_.bits))})
+    }
+    when (do_bypass_rs2.reduce(_ || _)) {
+      bypassed_uop.pvs2(i).bits      := Mux1H(do_bypass_rs2, (bypass_sel_rs2 zip bypass_pvd).map{case(s,p) => Mux1H(s, p.map(_.bits))})
+    }
+    when (do_bypass_dst.reduce(_ || _)) {
+      bypassed_uop.stale_pvd(i).bits := Mux1H(do_bypass_dst, (bypass_sel_dst zip bypass_pvd).map{case(s,p) => Mux1H(s, p.map(_.bits))})
+    }
   }
-  when (do_bypass_vs0)    { bypassed_uop.pvm               := Mux1H(bypass_sel_vs0, bypass_pvd.map(b => b(0).bits)) }
+
+  val bypass_hits_vs0 = (older_uops zip alloc_reqs) map { case (o,a) => a && o.ldst === 0.U }
+  val bypass_sel_vs0 = PriorityEncoderOH(bypass_hits_vs0.reverse).reverse
+  val do_bypass_vs0 = bypass_hits_vs0.reduce(_||_)
+  val bypass_pvd = older_uops.map(_.pvd)
+  when (do_bypass_vs0)    { bypassed_uop.pvm := Mux1H(bypass_sel_vs0, bypass_pvd.map(b => b(0).bits)) }
 
   bypassed_uop.prs1_busy := DontCare
   bypassed_uop.prs2_busy := DontCare
@@ -619,6 +614,10 @@ extends AbstractRenameStage(
     uop.pvs2       := mappings.prs2
     uop.stale_pvd  := mappings.stale_pdst
     uop.pvm        := mappings.prvm
+    when(!uop.rt(RS1, rtype)) {uop.pvs1.map(_.valid := false.B)}
+    when(!uop.rt(RS2, rtype)) {uop.pvs2.map(_.valid := false.B)}
+    when(!uop.rt(RD , rtype)) {uop.pvd.map( _.valid := false.B)}
+    when(!uop.rt(RD , rtype)) {uop.stale_pvd.map( _.valid := false.B)}
   }
 
   //-------------------------------------------------------------
@@ -642,7 +641,14 @@ extends AbstractRenameStage(
   //val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(plWidth, UInt(maxPregSz.W)))
   // Freelist outputs.
   for ((uop, w) <- ren2_uops.zipWithIndex) {
-    uop.pvd := freelist.io.alloc_pregs(w)
+    val alloc_req = Wire(Valid(new MicroOp))
+    alloc_req.valid := ren2_alloc_reqs(w)
+    alloc_req.bits  := ren2_uops(w)
+    val alloc_grp = lvdGroup(alloc_req)
+    for (i <- 0 until 8) {
+      uop.pvd(i).valid := freelist.io.alloc_pregs(w)(i).valid && alloc_grp(i).valid
+      uop.pvd(i).bits  := freelist.io.alloc_pregs(w)(i).bits
+    }
   }
 
   //-------------------------------------------------------------
@@ -670,7 +676,8 @@ extends AbstractRenameStage(
   // Outputs
 
   for (w <- 0 until plWidth) {
-    val can_allocate = freelist.io.alloc_pregs(w).map(_.valid).reduce(_ || _)
+    //val can_allocate = freelist.io.alloc_pregs(w).map(_.valid).reduce(_ && _)
+    val can_allocate = freelist.io.can_allocate(w)
 
     // Push back against Decode stage if Rename1 can't proceed.
     io.ren_stalls(w) := (ren2_uops(w).rt(RD, rtype)) && !can_allocate
@@ -699,7 +706,7 @@ import freechips.rocketchip.tilelink.LFSR64
 import boom.ifu._
 import boom.lsu._
 
-class VecRenameUT(timeout: Int = 1000)(implicit p: Parameters)
+class VecRenameUT(timeout: Int = 10000)(implicit p: Parameters)
   extends UnitTest(timeout)
 {
   val tileParams = p(TilesLocated(InSubsystem))(0).tileParams
@@ -762,48 +769,122 @@ class VecRenameUT(timeout: Int = 1000)(implicit p: Parameters)
 
   val dut = Module(new VecRenameStage(coreWidth, numVecPhysRegs, 1))
 
-  val dec_fire = LCG(coreWidth, active)
+  //val dec_fire = LCG(coreWidth, active)
   val dec_uops = WireInit(VecInit.tabulate(coreWidth)(x => {
     val ret = Wire(new MicroOp)
     ret := NullMicroOp(true)
     ret.vconfig := NullVConfig
     ret
   }))
-  dec_uops.map(uop => uop.ldst_val    := LCG(1, active))
-  dec_uops.map(uop => uop.ldst        := LCG(vpregSz, active))
-  dec_uops.map(uop => uop.lrs1        := LCG(vpregSz, active))
-  dec_uops.map(uop => uop.lrs2        := LCG(vpregSz, active))
-  dec_uops.map(uop => uop.dst_rtype   := LCG(5, active))
-  dec_uops.map(uop => uop.lrs1_rtype  := LCG(5, active))
-  dec_uops.map(uop => uop.lrs2_rtype  := LCG(5, active))
-  dec_uops.map(uop => uop.frs3_en     := false.B)
-  dec_uops.map(uop => uop.v_unmasked  := LCG(1, active))
-  dec_uops.map(uop => uop.vs1_eew     := Cat(0.U(1.W),LCG(2, active)))
-  dec_uops.map(uop => uop.vs2_eew     := Cat(0.U(1.W),LCG(2, active)))
-  dec_uops.map(uop => uop.vd_eew      := Cat(0.U(1.W),LCG(2, active)))
-  dec_uops.map(uop => uop.vs1_emul    := LCG(3, active))
-  dec_uops.map(uop => uop.vs2_emul    := LCG(3, active))
-  dec_uops.map(uop => uop.vd_emul     := LCG(3, active))
-  dec_uops.map(uop => uop.v_seg_nf    := 1.U)
+  def lreg_mask(emul: UInt): UInt = {
+    val ret = Wire(UInt(5.W))
+    ret := Mux(emul === 3.U, ~(7.U(5.W)),
+           Mux(emul === 2.U, ~(3.U(5.W)),
+           Mux(emul === 1.U, ~(1.U(5.W)), ~(0.U(5.W)))))
+    ret
+  }
+  dec_uops.map(uop => {
+      val vd_emul  = Cat(LCG(2, active)===3.U, LCG(2, active))
+      val vs1_emul = Cat(LCG(2, active)===3.U, LCG(2, active))
+      val vs2_emul = Cat(LCG(2, active)===3.U, LCG(2, active))
+      uop.ldst_val    := LCG(1, active)
+      uop.ldst        := LCG(5, active) & lreg_mask(vd_emul)
+      uop.lrs1        := LCG(5, active) & lreg_mask(vs1_emul)
+      uop.lrs2        := LCG(5, active) & lreg_mask(vs2_emul)
+      uop.dst_rtype   := LCG(5, active)
+      uop.lrs1_rtype  := LCG(5, active)
+      uop.lrs2_rtype  := LCG(5, active)
+      uop.frs3_en     := false.B
+      uop.v_unmasked  := LCG(1, active)
+      uop.vd_eew      := Cat(0.U(1.W),LCG(2, active))
+      uop.vs1_eew     := Cat(0.U(1.W),LCG(2, active))
+      uop.vs2_eew     := Cat(0.U(1.W),LCG(2, active))
+      uop.vd_emul     := vd_emul
+      uop.vs1_emul    := vs1_emul
+      uop.vs2_emul    := vs2_emul
+      uop.v_seg_nf    := 1.U
+  })
+  val dec_queue_enq = Wire(DecoupledIO(Vec(coreWidth, new MicroOp)))
+  val dec_queue = Queue(dec_queue_enq, 2)
+  val dec_done  = RegInit(0.U(coreWidth.W))
+  val dis_done  = RegInit(0.U(coreWidth.W))
+  val ren_stalls = Cat(dut.io.ren_stalls.scanLeft(false.B){case(s,acc) => s || acc}.tail.reverse)
+  val dis_ready = LCG(1, active)(0)
+  val dec_fire  = ~dec_done & Fill(coreWidth, (dec_queue.valid && dis_ready).asUInt) & ~ren_stalls
+  val dis_fire  = dut.io.ren2_mask.asUInt & Fill(2, dis_ready) & ~dis_done & ~ren_stalls
+  dec_queue_enq.valid := LCG(1, active)
+  dec_queue_enq.bits  := dec_uops
+  dec_queue.ready     := (dec_done | dec_fire).andR
+  when ((dec_done | dec_fire).andR) {
+    dec_done := 0.U
+  }.otherwise {
+    dec_done := dec_fire
+  }
+  when ((dis_done | dis_fire).andR) {
+    dis_done := 0.U
+  }.otherwise {
+    dis_done := dis_fire
+  }
 
   val brupdate = RegInit(NullBrUpdateInfo)
-  val dis_fire = LCG(coreWidth, active)
-  val dis_ready = LCG(1, active)
-  val comPipe = (0 until coreWidth).map(i => Pipe(dis_fire(i), dut.io.ren2_uops(i), 5))
+  val dis_uops = Wire(Vec(coreWidth, Valid(new MicroOp)))
+  val com = Pipe(
+    dis_fire.orR,
+    dis_uops,
+    5)
+  for (i <- 0 until coreWidth) {
+    dis_uops(i).valid := dis_fire(i)
+    dis_uops(i).bits  := dut.io.ren2_uops(i)
+    dut.io.com_valids(i) := com.valid && com.bits(i).valid && com.bits(i).bits.ldst_val && com.bits(i).bits.dst_rtype(4)
+    dut.io.com_uops(i)   := com.bits(i).bits
+  }
 
   dut.io.kill       := false.B
   dut.io.dec_fire   := dec_fire.asBools
-  dut.io.dec_uops   := dec_uops
+  dut.io.dec_uops   := dec_queue.bits
   dut.io.brupdate   := brupdate
   dut.io.wakeups(0) := NullWakeup
   dut.io.dis_fire   := dis_fire.asBools
   dut.io.dis_ready  := dis_ready
-  dut.io.com_valids.zipWithIndex.map{case (cv,i) =>
-    cv := comPipe(i).valid && comPipe(i).bits.ldst_val && comPipe(i).bits.dst_rtype(4)}
-  dut.io.com_uops.zipWithIndex.map{case (cu,i) => cu := comPipe(i).bits}
   dut.io.rbk_valids.map(x => x := false.B)
   dut.io.rollback := false.B
   dut.io.debug_rob_empty := false.B
+
+  for (w <- 0 until coreWidth) {
+    val f = dis_fire(w)
+    val u = dut.io.ren2_uops(w)
+    when(f && u.ldst_val && u.dst_rtype(4)) {
+      printf("dis(%d) vd[%x,m%x,nf%x,p(%x,%x,%x,%x,%x,%x,%x,%x)]<-vs2[%x,m%x,p(%x,%x,%x,%x,%x,%x,%x,%x)],vs1[%x,m%x,p(%x,%x,%x,%x,%x,%x,%x,%x)]\n",
+        w.U,
+        u.ldst, 1.U << Mux(u.vd_emul(2), 0.U, u.vd_emul(1,0)), u.v_seg_nf,
+                Mux(u.pvd(0).valid, u.pvd(0).bits, 0.U),
+                Mux(u.pvd(1).valid, u.pvd(1).bits, 0.U),
+                Mux(u.pvd(2).valid, u.pvd(2).bits, 0.U),
+                Mux(u.pvd(3).valid, u.pvd(3).bits, 0.U),
+                Mux(u.pvd(4).valid, u.pvd(4).bits, 0.U),
+                Mux(u.pvd(5).valid, u.pvd(5).bits, 0.U),
+                Mux(u.pvd(6).valid, u.pvd(6).bits, 0.U),
+                Mux(u.pvd(7).valid, u.pvd(7).bits, 0.U),
+        u.lrs2, 1.U << Mux(u.vs2_emul(2), 0.U, u.vs2_emul(1,0)),
+                Mux(u.pvs2(0).valid, u.pvs2(0).bits, 0.U),
+                Mux(u.pvs2(1).valid, u.pvs2(1).bits, 0.U),
+                Mux(u.pvs2(2).valid, u.pvs2(2).bits, 0.U),
+                Mux(u.pvs2(3).valid, u.pvs2(3).bits, 0.U),
+                Mux(u.pvs2(4).valid, u.pvs2(4).bits, 0.U),
+                Mux(u.pvs2(5).valid, u.pvs2(5).bits, 0.U),
+                Mux(u.pvs2(6).valid, u.pvs2(6).bits, 0.U),
+                Mux(u.pvs2(7).valid, u.pvs2(7).bits, 0.U),
+        u.lrs1, 1.U << Mux(u.vs1_emul(2), 0.U, u.vs1_emul(1,0)),
+                Mux(u.pvs1(0).valid, u.pvs1(0).bits, 0.U),
+                Mux(u.pvs1(1).valid, u.pvs1(1).bits, 0.U),
+                Mux(u.pvs1(2).valid, u.pvs1(2).bits, 0.U),
+                Mux(u.pvs1(3).valid, u.pvs1(3).bits, 0.U),
+                Mux(u.pvs1(4).valid, u.pvs1(4).bits, 0.U),
+                Mux(u.pvs1(5).valid, u.pvs1(5).bits, 0.U),
+                Mux(u.pvs1(6).valid, u.pvs1(6).bits, 0.U),
+                Mux(u.pvs1(7).valid, u.pvs1(7).bits, 0.U))
+    }
+  }
 }
 
 class WithVecRenameUT extends Config((site, here, up) => {

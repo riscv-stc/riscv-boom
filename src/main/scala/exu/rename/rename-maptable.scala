@@ -62,7 +62,7 @@ class RenameMapTable(
     val ren_br_tags = Input(Vec(plWidth, Valid(UInt(brTagSz.W))))
 
     // Signals for restoring state following misspeculation.
-    val brupdate      = Input(new BrUpdateInfo)
+    val brupdate    = Input(new BrUpdateInfo)
     val rollback    = Input(Bool())
   })
 
@@ -276,7 +276,7 @@ class VecRenameMapTable(
     val nr = req.v_seg_nf << Mux(req.vd_emul(2), 0.U(2.W), req.vd_emul(1,0))
     for (i <- 0 until 8) {
       val pd = req.pdst
-      assert(!req.valid || i.U >= nr || map_table.contains(pd(i)) || pd(i) === 0.U && io.rollback,
+      assert(!req.valid || i.U >= nr || !map_table.contains(pd(i)) || pd(i) === 0.U && io.rollback,
              "[maptable] Trying to write a duplicate mapping.")
     }
   }
