@@ -380,7 +380,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_v_mask_insn = vmlogic_insn || is_vmask_cnt_m || is_vmask_set_m
 
     val vLen_ecnt  = Mux(!is_v_ls && vs2_sew > vd_sew, vLen.U >> (vs2_sew+3.U), vLen.U >> (vd_sew+3.U))
-    val split_ecnt = Mux(is_v_ls, 1.U, Mux(is_v_mask_insn, vmlogic_split_ecnt, vLen_ecnt))
+    val split_ecnt = Mux(is_v_mask_insn, vmlogic_split_ecnt, vLen_ecnt)
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     // for fractional lmul, we need visit at least one entire vreg
     // for undisturbing move before reduction, we need visit at most one vreg
@@ -400,13 +400,14 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.vconfig     := io.csr_vconfig
     uop.vconfig.vtype.reserved := DontCare
     uop.v_eidx      := 0.U // io.csr_vstart
-    uop.v_eofs      := 0.U
+    //uop.v_eofs      := 0.U
     //uop.v_is_split  := cs.can_be_split
-    //uop.v_split_ecnt:= split_ecnt
+    uop.can_be_split  := cs.can_be_split
+    uop.v_split_ecnt:= total_ecnt
     uop.vconfig.vtype.vsew := Mux(is_v_mask_insn, 3.U, vsew)
-    when (io.deq_fire && cs.can_be_split) {
-      assert(cs.is_rvv, "can_be_split applies only to vector instructions.")
-    }
+    //when (io.deq_fire && cs.can_be_split) {
+      //assert(cs.is_rvv, "can_be_split applies only to vector instructions.")
+    //}
     uop.vs1_eew     := vs1_sew
     uop.vs2_eew     := vs2_sew
     uop.vd_eew      := vd_sew
@@ -422,7 +423,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.frs3_en := true.B
     }
 
+    uop.v_seg_nf     := 1.U(4.W) + vseg_nf
     uop.v_idx_ls     := is_v_ls_index
+    uop.v_eidx       := 0.U
 
     when (cs.is_rvv && cs.uopc === uopVLM) {
       uop.uopc := uopVL
@@ -442,7 +445,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.v_xls_offset := 0.U
 
     //io.enq_stall := cs.can_be_split && !split_last
-    io.enq_stall := cs.is_rvv && !vsetvl
+    io.enq_stall := false.B
 
     /**
      * vector illegal instruction handler

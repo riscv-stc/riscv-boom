@@ -91,6 +91,7 @@ class IssueUnitIO(
   val intupdate        = if (vector) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
   val fpupdate         = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   val vecUpdate        = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val vbusy_status     = if (vector) Input(UInt(numVecPhysRegs.W)) else null
   val flush_pipeline   = Input(Bool())
   val ld_miss          = Input(Bool())
 
@@ -213,10 +214,6 @@ abstract class IssueUnit(
     slot
   }
   val issue_slots = VecInit(slots.map(_.io))
-  val agg_vs2_busy = if (vector) WireInit(0.U(numVecPhysRegs.W)) else null
-  if (vector) {
-    agg_vs2_busy := issue_slots.map(_.cur_vs2_busy).reduce(_|_)
-  }
 
   for (i <- 0 until numIssueSlots) {
     issue_slots(i).wakeup_ports     := io.wakeup_ports
@@ -227,10 +224,10 @@ abstract class IssueUnit(
     issue_slots(i).kill             := io.flush_pipeline
     if (usingVector) {
       if (vector) {
+        issue_slots(i).vbusy_status   := io.vbusy_status
         issue_slots(i).intupdate      := io.intupdate
         issue_slots(i).fpupdate       := io.fpupdate
         issue_slots(i).vecUpdate      := io.vecUpdate
-        issue_slots(i).agg_vs2_busy   := agg_vs2_busy
       } else {
         issue_slots(i).vmupdate       := io.vmupdate
       }

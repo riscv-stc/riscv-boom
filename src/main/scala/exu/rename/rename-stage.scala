@@ -457,16 +457,19 @@ class VecRenameBypass(
   for (i <- 0 until 8) {
     val bypass_hits_rs1 = (older_uops zip alloc_reqs) map { case (o,a) =>
       (Fill(8, (a && i.U < grpCount(uop.vs1_emul, 1.U) && uop.rt(RS1, isVector) &&
+               o.rob_idx =/= uop.rob_idx && // exclude self-match on dispatch splitting
                o.rt(RD, isVector) && o.ldst_val).asUInt) &
        matchGroup(uop.lrs1 + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
     }
     val bypass_hits_rs2 = (older_uops zip alloc_reqs) map { case (o,a) =>
       (Fill(8, (a && i.U < grpCount(uop.vs2_emul, 1.U) && uop.rt(RS2, isVector) &&
+               o.rob_idx =/= uop.rob_idx && // exclude self-match on dispatch splitting
                o.rt(RD, isVector) && o.ldst_val).asUInt) &
        matchGroup(uop.lrs2 + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
     }
     val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (o,a) =>
       (Fill(8, (a && i.U < grpCount(uop.vd_emul, 1.U) && uop.rt(RD, isVector) &&
+               o.rob_idx =/= uop.rob_idx && // exclude self-match on dispatch splitting
                o.rt(RD, isVector) && o.ldst_val).asUInt) &
        matchGroup(uop.ldst + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
     }
@@ -567,8 +570,11 @@ extends AbstractRenameStage(
     ren2_alloc_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_fire(w)
     ren2_br_tags(w).valid := ren2_fire(w) && ren2_uops(w).allocate_brtag
 
-    com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w)
-    rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w)
+    val com_uop = io.com_uops(w)
+    com_valids(w) := io.com_valids(w) && com_uop.ldst_val && com_uop.rt(RD, rtype) &&
+                     (!(com_uop.uses_ldq || com_uop.uses_stq) || com_uop.v_split_last)
+    rbk_valids(w) := io.rbk_valids(w) && com_uop.ldst_val && com_uop.rt(RD, rtype) &&
+                     (!(com_uop.uses_ldq || com_uop.uses_stq) || com_uop.v_split_first)
     ren2_br_tags(w).bits  := ren2_uops(w).br_tag
   }
 
@@ -641,10 +647,12 @@ extends AbstractRenameStage(
   //val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(plWidth, UInt(maxPregSz.W)))
   // Freelist outputs.
   for ((uop, w) <- ren2_uops.zipWithIndex) {
-    val alloc_req = Wire(Valid(new MicroOp))
+    val alloc_req, alloc_assign = Wire(Valid(new MicroOp))
     alloc_req.valid := ren2_alloc_reqs(w)
     alloc_req.bits  := ren2_uops(w)
-    val alloc_grp = lvdGroup(alloc_req)
+    alloc_assign.valid := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_valids(w)
+    alloc_assign.bits  := ren2_uops(w)
+    val alloc_grp = lvdGroup(alloc_assign)
     for (i <- 0 until 8) {
       uop.pvd(i).valid := freelist.io.alloc_pregs(w)(i).valid && alloc_grp(i).valid
       uop.pvd(i).bits  := freelist.io.alloc_pregs(w)(i).bits

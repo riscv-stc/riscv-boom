@@ -139,6 +139,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
 
   // vector extension
   val is_rvv           = if (usingVector) Bool() else false.B         // is vector instruction
+  val can_be_split     = if (usingVector) Bool() else false.B
   val pvd              = if (usingVector) Vec(8, Valid(UInt(vpregSz.W))) else null
   val stale_pvd        = if (usingVector) Vec(8, Valid(UInt(vpregSz.W))) else null
   val pvs1             = if (usingVector) Vec(8, Valid(UInt(vpregSz.W))) else null
@@ -150,13 +151,11 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_ls_ew          = if (usingVector) UInt(2.W) else UInt(0.W)    // EEW encoded in load/store instruction
   val v_unmasked       = if (usingVector) Bool() else false.B
   val v_eidx           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // element-index
-  val v_eofs           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // element-wise offset from first split
+  //val v_eofs           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // element-wise offset from first split
   val v_is_split       = if (usingVector) Bool() else false.B         // is a split of a vector instruction
   val v_split_ecnt     = if (usingVector) UInt((log2Ceil(vLenb)+1).W) else UInt(0.W)
-  val v_is_first       = if (usingVector) Bool() else false.B
-  val v_is_last        = if (usingVector) Bool() else false.B
-  val v_is_archfirst   = if (usingVector) Bool() else false.B         // arch 1st/last records since decode
-  val v_is_archlast    = if (usingVector) Bool() else false.B
+  val v_split_first    = if (usingVector) Bool() else false.B
+  val v_split_last     = if (usingVector) Bool() else false.B
   val vs1_eew          = if (usingVector) UInt(2.W) else UInt(0.W)
   val vs2_eew          = if (usingVector) UInt(2.W) else UInt(0.W)
   val vd_eew           = if (usingVector) UInt(2.W) else UInt(0.W)
@@ -165,7 +164,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val vd_emul          = if (usingVector) UInt(3.W) else UInt(0.W)
   val vxsat            = if (usingVector) Bool() else false.B         // saturating flag
   val vconfig          = if (usingVector) new VConfig else null       // TODO: tag since DECODE
-  val v_seg_ls         = if (usingVector) Bool() else false.B         // segment load/store indicator
+  //val v_seg_ls         = if (usingVector) Bool() else false.B         // segment load/store indicator
   val v_seg_f          = if (usingVector) UInt(3.W) else UInt(0.W)    // field index, for segment load/store
   val v_seg_nf         = if (usingVector) UInt(4.W) else UInt(0.W)    // number of fields
   val v_idx_ls         = if (usingVector) Bool() else false.B         // indexed load/store indicator

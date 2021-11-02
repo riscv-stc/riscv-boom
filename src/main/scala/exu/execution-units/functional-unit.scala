@@ -322,8 +322,7 @@ class ALUUnit(
   isJmpUnit: Boolean = false,
   isCsrUnit: Boolean = false,
   numStages: Int = 1,
-  dataWidth: Int,
-  vector: Boolean = false
+  dataWidth: Int
   )
 (implicit p: Parameters)
   extends PipelinedFunctionalUnit(
@@ -351,13 +350,9 @@ class ALUUnit(
     val uop_pc = (block_pc | uop.pc_lob) - Mux(uop.edge_inst, 2.U, 0.U)
 
     op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data,
-               Mux(uop.ctrl.op1_sel.asUInt === OP1_PC  , Sext(uop_pc, xLen),
-                                                         0.U))
+               Mux(uop.ctrl.op1_sel.asUInt === OP1_PC  , Sext(uop_pc, xLen), 0.U))
   } else {
-    op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data,
-               Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , io.req.bits.rs2_data,
-               Mux(uop.ctrl.op1_sel.asUInt === OP1_INV_VS2, ~io.req.bits.rs2_data,
-                                                         0.U)))
+    op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data, 0.U)
   }
 
   // operand 2 select
@@ -376,9 +371,8 @@ class ALUUnit(
     op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,     Sext(imm_xprlen.asUInt, xLen),
                Mux(uop.ctrl.op2_sel === OP2_IMMC,    uop.prs1(4,0),
                Mux(uop.ctrl.op2_sel === OP2_RS2 ,    io.req.bits.rs2_data,
-               Mux(uop.ctrl.op2_sel === OP2_INV_VS1, ~io.req.bits.rs1_data,
                Mux(uop.ctrl.op2_sel === OP2_NEXT,    Mux(uop.is_rvc, 2.U, 4.U),
-               Mux(uop.ctrl.op2_sel === OP2_VL,      new_vl, 0.U))))))
+               Mux(uop.ctrl.op2_sel === OP2_VL,      new_vl, 0.U)))))
 
     val set_vconfig = vsetvl | vsetvli | vsetivli
     io.resp.bits.uop.vconfig.vl := RegEnable(new_vl, set_vconfig)
@@ -387,21 +381,15 @@ class ALUUnit(
     op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,     Sext(imm_xprlen.asUInt, xLen),
                Mux(uop.ctrl.op2_sel === OP2_IMMC,    uop.prs1(4,0),
                Mux(uop.ctrl.op2_sel === OP2_RS2 ,    io.req.bits.rs2_data,
-               Mux(uop.ctrl.op2_sel === OP2_NEXT,    Mux(uop.is_rvc, 2.U, 4.U),
-               Mux(uop.ctrl.op2_sel === OP2_VS1,     io.req.bits.rs1_data,
-               Mux(uop.ctrl.op2_sel === OP2_INV_VS1, ~io.req.bits.rs1_data,
-                                                     0.U))))))
+               Mux(uop.ctrl.op2_sel === OP2_NEXT,    Mux(uop.is_rvc, 2.U, 4.U), 0.U))))
   }
 
-  val alu = Module(new freechips.rocketchip.rocket.ALU(withCarryIO = usingVector && vector))
+  val alu = Module(new freechips.rocketchip.rocket.ALU(withCarryIO = false))
 
   alu.io.in1 := op1_data.asUInt
   alu.io.in2 := op2_data.asUInt
   alu.io.fn  := uop.ctrl.op_fcn
   alu.io.dw  := uop.ctrl.fcn_dw
-  if (usingVector && vector) {
-    alu.io.ci  := uop.uopc.isOneOf(uopVADC, uopVSBC, uopVMADC, uopVMSBC) & ~uop.v_unmasked & uop.v_active
-  }
 
   // Did I just get killed by the previous cycle's branch,
   // or by a flush pipeline?
@@ -461,9 +449,7 @@ class ALUUnit(
                            Mux(is_br  , CFI_BR, CFI_X))
   brinfo.taken          := is_taken
   brinfo.pc_sel         := pc_sel
-
   brinfo.jalr_target    := DontCare
-
 
   // Branch/Jump Target Calculation
   // For jumps we read the FTQ, and can calculate the target
@@ -480,7 +466,6 @@ class ALUUnit(
       val msb = Mux(a === 0.S || a === -1.S, ea(vaddrBits), !ea(vaddrBits-1))
       Cat(msb, ea(vaddrBits-1,0))
     }
-
 
     val jalr_target_base = io.req.bits.rs1_data.asSInt
     val jalr_target_xlen = Wire(UInt(xLen.W))
@@ -499,11 +484,7 @@ class ALUUnit(
   }
 
   brinfo.target_offset := target_offset
-
-
   io.brinfo := brinfo
-
-
 
 // Response
 // TODO add clock gate on resp bits from functional units
@@ -516,53 +497,8 @@ class ALUUnit(
   val r_data = Reg(Vec(numStages, UInt(xLen.W)))
   val r_pred = Reg(Vec(numStages, Bool()))
   val alu_out = WireInit(alu.io.out)
-  if (usingVector && vector) {
-    val vstart = uop.v_eidx
-    val vl = uop.vconfig.vl
-
-    val isVMerge: Bool = uop.is_rvv && uop.uopc === uopMERGE
-    val v_inactive = uop.is_rvv && !uop.v_active
-    val v_tail = (vstart >= vl)
-
-    val byteWidth = 3.U
-    val vsew64bit = 3.U
-    val is_multiple_of_64 = vl(5,0) === 0.U
-    val vmlogic_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
-    val is_vmlogic_last_split = vstart === (vmlogic_vl-1.U)
-
-    val vmlogic_insn = uop.ctrl.is_vmlogic
-    val vmlogic_mask = boom.util.MaskGen(0.U, vl(5,0), 64)
-    val vmlogic_alu_result = Mux(uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR), ~alu.io.out, alu.io.out)
-    val vmlogic_last_result = (vmlogic_alu_result & vmlogic_mask) | (io.req.bits.rs3_data & (~vmlogic_mask))
-    val vmlogic_result = Mux(is_vmlogic_last_split & (~is_multiple_of_64), vmlogic_last_result, vmlogic_alu_result)
-
-    val vmscmp = uop.ctrl.is_vmscmp
-    when (io.req.valid && vmscmp) { assert(uop.rt(RD, isMaskVD), "Problematic vmcompare") }
-    val vadc   = uop.uopc === uopVADC
-    val vsbc   = uop.uopc === uopVSBC
-    val vmadc  = uop.uopc === uopVMADC
-    val vmsbc  = uop.uopc === uopVMSBC
-    when (io.req.valid && (vadc || vsbc)) { assert(!uop.v_unmasked, "Problematic vadc/vsbc") }
-    val alu_co = Mux1H(UIntToOH(uop.vconfig.vtype.vsew(1,0)), Seq(alu.io.out(8), alu.io.out(16), alu.io.out(32), alu.io.co))
-
-    alu_out := Mux(uop.is_sfb_shadow && io.req.bits.pred_data, Mux(uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
-               Mux(uop.uopc === uopMOV, io.req.bits.rs2_data,
-               Mux(isVMerge, Mux(!uop.v_active, io.req.bits.rs2_data, io.req.bits.rs1_data),
-               Mux(uop.uopc.isOneOf(uopVMIN, uopVMINU) && !v_inactive, Mux(alu.io.out(0), io.req.bits.rs2_data, io.req.bits.rs1_data),
-               Mux(uop.uopc.isOneOf(uopVMAX, uopVMAXU) && !v_inactive, Mux(alu.io.out(0), io.req.bits.rs1_data, io.req.bits.rs2_data),
-               Mux(uop.rt(RD, isReduceV) && v_inactive, io.req.bits.rs1_data,
-               Mux(vmlogic_insn,   vmlogic_result,
-               Mux(uop.uopc === uopVID, uop.v_eidx,
-               Mux(vadc  || vsbc,  Mux(v_tail, io.req.bits.rs3_data, alu.io.out),
-               Mux(vmadc || vmsbc, Cat(0.U((eLen-1).W), Mux(v_tail, io.req.bits.rs3_data(0), alu_co)),
-               Mux(vmscmp,         Cat(0.U((eLen-1).W), Mux(v_tail || v_inactive, io.req.bits.rs3_data(0), alu.io.cmp_out)),
-               Mux(uop.is_rvv && (uop.ctrl.is_load || v_inactive), io.req.bits.rs3_data,
-                   alu.io.out))))))))))))
-  } else {
-    alu_out := Mux(uop.is_sfb_shadow && io.req.bits.pred_data, Mux(uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
-               Mux(uop.uopc === uopMOV, io.req.bits.rs2_data,
-                   alu.io.out))
-  }
+  alu_out := Mux(uop.is_sfb_shadow && io.req.bits.pred_data, Mux(uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
+             Mux(uop.uopc === uopMOV, io.req.bits.rs2_data, alu.io.out))
   r_val (0) := io.req.valid
   r_data(0) := Mux(uop.is_sfb_br, pc_sel === PC_BRJMP, alu_out)
   r_pred(0) := uop.is_sfb_shadow && io.req.bits.pred_data
@@ -763,7 +699,7 @@ class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
       assert(vsew <= 3.U, "unsupported vsew")
       assert(vd_sew >= 1.U && vd_sew <= 3.U, "unsupported vd_sew")
     }
-   
+
     when (io_req.uop.is_rvv) {
       // TODO considering widening and narrowing operations
       fp_rm := io.fcsr_rm
@@ -1306,3 +1242,174 @@ class SRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFunct
   io.resp.valid     := div.io.out_valid && !this.do_kill
   io.resp.bits.data := div.io.out_data
 }
+
+/**
+ * Vector ALU Wrapper
+ *
+ * @param numStages how many pipeline stages does the functional unit have
+ * @param dataWidth width of the data being operated on in the functional unit
+ */
+@chiselName
+class VecALUUnit(
+  numStages: Int = 1,
+  dataWidth: Int)
+(implicit p: Parameters)
+  extends PipelinedFunctionalUnit(
+    numStages = numStages,
+    numBypassStages = numStages,
+    isAluUnit = false,
+    earliestBypassStage = 0,
+    dataWidth = dataWidth,
+    isCsrUnit = false,
+    isJmpUnit = false)
+  with boom.ifu.HasBoomFrontendParameters
+{
+  val uop = io.req.bits.uop
+
+  // immediate generation
+  val imm_xprlen = ImmGen(uop.imm_packed, uop.ctrl.imm_sel)
+  val rs1_data = io.req.bits.rs1_data
+  val rs2_data = io.req.bits.rs2_data
+
+  // operand 1 select
+  val op1_data = WireInit(0.U(vLen.W))
+  op1_data := Mux1H(Seq((uop.ctrl.op1_sel === OP1_RS1).asBool     -> io.req.bits.rs1_data,
+                        (uop.ctrl.op1_sel === OP1_VS2).asBool     -> io.req.bits.rs2_data,
+                        (uop.ctrl.op1_sel === OP1_INV_VS2).asBool -> ~io.req.bits.rs2_data,
+                        (uop.ctrl.op1_sel === OP1_ZERO).asBool    -> 0.U))
+
+  // operand 2 select
+  val op2_data = WireInit(0.U(vLen.W))
+  op2_data := Mux1H(Seq((uop.ctrl.op2_sel === OP2_IMMC).asBool    -> uop.prs1(4,0),
+                        (uop.ctrl.op2_sel === OP2_RS2).asBool     -> io.req.bits.rs2_data,
+                        (uop.ctrl.op2_sel === OP2_VS1).asBool     -> io.req.bits.rs1_data,
+                        (uop.ctrl.op2_sel === OP2_INV_VS1).asBool -> ~io.req.bits.rs1_data,
+                        (uop.ctrl.op2_sel === OP2_ZERO).asBool    -> 0.U))
+
+  val op1_eew = Mux(uop.ctrl.op1_sel === OP1_RS1, uop.vs1_eew, uop.vs2_eew)
+  val op2_eew = Mux(uop.ctrl.op2_sel === OP2_RS2, uop.vs2_eew, uop.vs1_eew)
+  val e64_adder_out       = Wire(Vec(numELENinVLEN, UInt(64.W)))
+  val e64_cmp_out, e64_co = Wire(Vec(numELENinVLEN, Bool()))
+  val e32_adder_out       = Wire(Vec(numELENinVLEN*2, UInt(32.W)))
+  val e32_cmp_out, e32_co = Wire(Vec(numELENinVLEN*2, Bool()))
+  val e16_adder_out       = Wire(Vec(numELENinVLEN*4, UInt(16.W)))
+  val e16_cmp_out, e16_co = Wire(Vec(numELENinVLEN*4, Bool()))
+  val e8_adder_out        = Wire(Vec(numELENinVLEN*8, UInt(8.W)))
+  val e8_cmp_out, e8_co   = Wire(Vec(numELENinVLEN*8, Bool()))
+  for (e <- 0 until vLenb) {
+    val alu = Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true))
+    // input
+    alu.io.fn  := uop.ctrl.op_fcn
+    alu.io.dw  := uop.ctrl.fcn_dw
+    if (e < numELENinVLEN) {
+      // e64 ALU
+      alu.io.in1 := Mux1H(UIntToOH(op1_eew), Seq(op1_data(64*e+63, 64*e), op1_data(32*e+31, 32*e), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e)))
+      alu.io.in2 := Mux1H(UIntToOH(op2_eew), Seq(op2_data(64*e+63, 64*e), op2_data(32*e+31, 32*e), op2_data(16*e+15, 16*e), op2_data(8*e+7, 8*e)))
+      alu.io.ci  := false.B // FIXME
+    } else if (e < numELENinVLEN*2) {
+      // e32 ALU
+      alu.io.in1 := Mux1H(UIntToOH(op1_eew), Seq(0.U, op1_data(32*e+31, 32*e), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e)))
+      alu.io.in2 := Mux1H(UIntToOH(op2_eew), Seq(0.U, op2_data(32*e+31, 32*e), op2_data(16*e+15, 16*e), op2_data(8*e+7, 8*e)))
+      alu.io.ci  := false.B // FIXME
+    } else if (e < numELENinVLEN*4) {
+      // e16 ALU
+      alu.io.in1 := Mux(op1_eew(0), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e))
+      alu.io.in2 := Mux(op2_eew(0), op2_data(16*e+15, 16*e), op2_data(8*e+7, 8*e))
+      alu.io.ci  := false.B // FIXME
+    } else {
+      // e8 ALU
+      alu.io.in1 := op1_data(8*e+7, 8*e)
+      alu.io.in2 := op2_data(8*e+7, 8*e)
+      alu.io.ci  := false.B // FIXME
+    }
+
+    // output
+    if (e < numELENinVLEN) {
+      e64_adder_out(e) := alu.io.adder_out
+      e64_cmp_out(e)   := alu.io.cmp_out
+      e64_co(e)        := alu.io.co
+    }
+    if (e < numELENinVLEN*2) {
+      e32_adder_out(e) := alu.io.adder_out
+      e32_cmp_out(e)   := alu.io.cmp_out
+      e32_co(e)        := alu.io.co
+    }
+    if (e < numELENinVLEN*4) {
+      e16_adder_out(e) := alu.io.adder_out
+      e16_cmp_out(e)   := alu.io.cmp_out
+      e16_co(e)        := alu.io.co
+    }
+    e8_adder_out(e) := alu.io.adder_out
+    e8_cmp_out(e)   := alu.io.cmp_out
+    e8_co(e)        := alu.io.co
+  }
+
+  // Did I just get killed by the previous cycle's branch,
+  // or by a flush pipeline?
+  val killed = WireInit(false.B)
+  when (io.req.bits.kill || IsKilledByBranch(io.brupdate, uop)) {
+    killed := true.B
+  }
+
+  val r_val  = RegInit(VecInit(Seq.fill(numStages) { false.B }))
+  val r_data = Reg(Vec(numStages, UInt(vLen.W)))
+  val r_pred = Reg(Vec(numStages, Bool()))
+  val alu_out = WireInit(0.U(vLen.W))
+  val v_eidx = uop.v_eidx
+  val vl = uop.vconfig.vl
+
+  //val v_inactive = uop.is_rvv && !uop.v_active
+  //val v_tail = (v_eidx >= vl)
+
+  //val byteWidth = 3.U
+  //val vsew64bit = 3.U
+  //val is_multiple_of_64 = vl(5,0) === 0.U
+  //val vmlogic_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
+  //val is_vmlogic_last_split = v_eidx === (vmlogic_vl-1.U)
+
+  //val vmlogic_insn = uop.ctrl.is_vmlogic
+  //val vmlogic_mask = boom.util.MaskGen(0.U, vl(5,0), 64)
+  //val vmlogic_alu_result = Mux(uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR), ~alu.io.out, alu.io.out)
+  //val vmlogic_last_result = (vmlogic_alu_result & vmlogic_mask) | (io.req.bits.rs3_data & (~vmlogic_mask))
+  //val vmlogic_result = Mux(is_vmlogic_last_split & (~is_multiple_of_64), vmlogic_last_result, vmlogic_alu_result)
+
+  //val vmscmp = uop.ctrl.is_vmscmp
+  //when (io.req.valid && vmscmp) { assert(uop.rt(RD, isMaskVD), "Problematic vmcompare") }
+  //val vadc   = uop.uopc === uopVADC
+  //val vsbc   = uop.uopc === uopVSBC
+  //val vmadc  = uop.uopc === uopVMADC
+  //val vmsbc  = uop.uopc === uopVMSBC
+  //when (io.req.valid && (vadc || vsbc)) { assert(!uop.v_unmasked, "Problematic vadc/vsbc") }
+  //val alu_co = Mux1H(UIntToOH(uop.vconfig.vtype.vsew(1,0)), Seq(alu.io.out(8), alu.io.out(16), alu.io.out(32), alu.io.co))
+
+  alu_out := Mux1H(UIntToOH(uop.vd_eew), Seq(e64_adder_out.asUInt,
+                                             e32_adder_out.asUInt,
+                                             e16_adder_out.asUInt,
+                                             e8_adder_out.asUInt))
+
+  r_val (0) := io.req.valid
+  r_data(0) := alu_out
+  r_pred(0) := uop.is_sfb_shadow && io.req.bits.pred_data
+  for (i <- 1 until numStages) {
+    r_val(i)  := r_val(i-1)
+    r_data(i) := r_data(i-1)
+    r_pred(i) := r_pred(i-1)
+  }
+  io.resp.bits.data := r_data(numStages-1)
+  io.resp.bits.predicated := r_pred(numStages-1)
+  // Bypass
+  // for the ALU, we can bypass same cycle as compute
+  require (numStages >= 1)
+  require (numBypassStages >= 1)
+  io.bypass(0).valid := io.req.valid
+  io.bypass(0).bits.data := alu_out
+  for (i <- 1 until numStages) {
+    io.bypass(i).valid := r_val(i-1)
+    io.bypass(i).bits.data := r_data(i-1)
+  }
+
+  // Exceptions
+  io.resp.bits.fflags.valid := false.B
+  //io.brinfo := DontCare
+}
+

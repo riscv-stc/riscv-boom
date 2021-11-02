@@ -350,7 +350,7 @@ class Rob(
       if (usingVector) {
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
           val wb_v_ls = wb_uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
-          rob_bsy(row_idx)      := Mux(wb_v_ls, false.B, wb_uop.v_is_split && !wb_uop.v_is_last)
+          rob_bsy(row_idx)      := Mux(wb_v_ls, false.B, wb_uop.v_is_split && !wb_uop.v_split_last)
           rob_unsafe(row_idx)   := false.B
           rob_predicated(row_idx)  := wb_resp.bits.predicated
           rob_uop(row_idx).vxsat := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
@@ -569,7 +569,9 @@ class Rob(
                !rob_bsy(GetRowIdx(rob_idx))),
                "[rob] writeback (" + i + ") occurred to a not-busy ROB entry.")
       assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
-               temp_uop.ldst_val && temp_uop.pdst =/= io.wb_resps(i).bits.uop.pdst),
+               temp_uop.ldst_val && Mux(temp_uop.rt(RD, isVector),
+                 !(temp_uop.pvd.map(p => p.valid && p.bits === io.wb_resps(i).bits.uop.pdst).reduce(_ || _)), // matching pvd(x).bits
+                 temp_uop.pdst =/= io.wb_resps(i).bits.uop.pdst)),
                "[rob] writeback (" + i + ") occurred to the wrong pdst.")
     }
     io.commit.debug_wdata(w) := rob_debug_wdata(rob_head)

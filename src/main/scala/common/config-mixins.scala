@@ -561,7 +561,7 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               nPerfCounters = 29,
               fpu = Some(freechips.rocketchip.tile.FPUParams(minFLen=16, fLen=64, sfmaLatency=4, dfmaLatency=4, divSqrt=true)),
               useVector = true,
-              vLen = 128,
+              vLen = 1024,
               eLen = 64,
               vMemDataBits = 64,
               numVecPhysRegisters = 65

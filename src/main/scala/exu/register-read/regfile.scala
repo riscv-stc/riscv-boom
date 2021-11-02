@@ -136,7 +136,7 @@ class RegisterFileSynthesizable(
   val read_addrs = io.read_ports.map(p => RegNext(p.addr))
 
   for (i <- 0 until numReadPorts) {
-    read_data(i) := regfile(read_addrs(i))
+    read_data(i) := Mux(read_addrs(i)===0.U, 0.U, regfile(read_addrs(i)))
   }
 
   // --------------------------------------------------------------
@@ -172,18 +172,6 @@ class RegisterFileSynthesizable(
   if (vector) {
     require(registerWidth == vLen)
 
-//  for (wport <- io.write_ports) {
-//    when (wport.valid) {
-//      val old_data = regfile(wport.bits.addr)
-//      val new_data = Wire(Vec(eLenb, UInt(8.W)))
-//      require(registerWidth == eLen)
-//      for (i <- 0 until eLenb) {
-//        new_data(i) := Mux(wport.bits.mask(i), wport.bits.data(i*8+7,i*8), old_data(i*8+7,i*8))
-//      }
-//      regfile(wport.bits.addr) := Cat(new_data.reverse)
-//    }
-//  }
-
     // for vector you need merge write ports since they may access the same ELEN on different elements
     for (r <- 0 until numRegisters) {
       when (io.write_ports.map(w => w.valid && r.U === w.bits.addr).reduce(_|_)) {
@@ -197,7 +185,7 @@ class RegisterFileSynthesizable(
             }
           }
         }
-        regfile(r) := Cat(new_data.reverse)
+        regfile(r) := Mux(r.U === 0.U, 0.U, Cat(new_data.reverse))
       }
     }
 

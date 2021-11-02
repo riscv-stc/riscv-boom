@@ -42,6 +42,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val status           = Input(new MStatus())
 
     val dis_uops         = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
+    val vbusy_status     = Input(UInt(numVecPhysRegs.W))
 
     val ll_wports        = Flipped(Vec(memWidth, Decoupled(new ExeUnitResp(eLen))))
     val from_int         = Flipped(Decoupled(new ExeUnitResp(eLen)))
@@ -82,7 +83,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
                          exe_units.withFilter(_.readsVrf).map(x => 4),
                          0, // No bypass for VEC
                          0,
-                         vLen, vector = true))
+                         vLen, float = false, vector = true))
 
   require (exe_units.count(_.readsVrf) == vecWidth)
   require (exe_units.numVrfWritePorts + memWidth == numWakeupPorts)
@@ -94,6 +95,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   val iss_valids = Wire(Vec(exe_units.numVrfReaders, Bool()))
   val iss_uops   = Wire(Vec(exe_units.numVrfReaders, new MicroOp()))
 
+  issue_unit.io.vbusy_status := io.vbusy_status
   issue_unit.io.tsc_reg := io.debug_tsc_reg
   issue_unit.io.brupdate := io.brupdate
   issue_unit.io.flush_pipeline := io.flush_pipeline

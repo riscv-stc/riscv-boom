@@ -695,8 +695,8 @@ object VDataSwap {
 object MaskGen {
   def apply(lsb: UInt, len: UInt, width: Int): UInt = {
     val ret = Wire(UInt(width.W))
-    val full = Fill(width, 1.U(1.W))
-    ret := (full << lsb) & (full >> (width.U-lsb-len))
+    val full = Fill(width, 1.U(1.W)) << lsb
+    ret := full & ((full << len) >> width.U)
     ret
   }
 }
@@ -721,6 +721,14 @@ object VRegSel {
     val rsel = Mux1H(UIntToOH(vsew(1,0)), Seq(v_eidx(eLenSelSz+2,3),v_eidx(eLenSelSz+1,2),v_eidx(eLenSelSz,1),v_eidx(eLenSelSz-1,0)))
     val emsk = VRegMask(v_eidx, vsew, ecnt, elenb)
     (rsel, emsk)
+  }
+
+  /**
+   * Get Register index (of the group) from v_eidx
+   */
+  def apply(v_eidx: UInt, vsew: UInt, eLenSelSz: Int): UInt = {
+    val ret = ((v_eidx << vsew) >> (eLenSelSz.U + 3.U))(2, 0)
+    ret
   }
 }
 

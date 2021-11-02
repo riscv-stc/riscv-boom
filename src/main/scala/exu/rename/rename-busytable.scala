@@ -113,7 +113,7 @@ class VecRenameBusyTable(
     }
 
     busy_table := busy_table_next
-    io.vbusy_status := Cat((0 until numPregs).map(p => busy_table(p).orR))
+    io.vbusy_status := Cat((0 until numPregs).map(p => busy_table(p).orR).reverse)
     // for better timing, consider following
     //io.vbusy_status := RegNext(Cat((0 until numPregs).map(p => busy_table(p).orR)))
     io.debug.busytable := busy_table

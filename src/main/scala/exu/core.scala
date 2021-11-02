@@ -34,7 +34,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.rocket.{CSR, Causes, PRV, VConfig}
-import freechips.rocketchip.util.{CoreMonitorBundle, Str, UIntIsOneOf}
+import freechips.rocketchip.util.{CoreMonitorBundle, Str, UIntIsOneOf, SeqBoolBitwiseOps}
 import freechips.rocketchip.devices.tilelink.{CLINTConsts, PLICConsts}
 import testchipip.ExtendedTracedInstruction
 import boom.common._
@@ -185,7 +185,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dis_valids = Wire(Vec(coreWidth, Bool()))
   val dis_uops   = Wire(Vec(coreWidth, new MicroOp))
   val dis_fire   = Wire(Vec(coreWidth, Bool()))
+  val dis_fire_fb= Wire(Vec(coreWidth, Bool())) // upstream dis_fire: ren/ifu
   val dis_ready  = Wire(Bool())
+  //val dis_split       = Wire(Vec(coreWidth, Bool()))
+  val dis_fired       = RegInit(VecInit(0.U(coreWidth.W).asBools))
+  val dis_split_last  = Wire(Vec(coreWidth, Bool()))
+  val dis_split_cand  = Wire(Vec(coreWidth, Bool()))
+  val dis_split_actv  = Wire(Vec(coreWidth, Bool()))
+  val dis_prev_split_actv  = Wire(Vec(coreWidth, Bool()))
 
   // Issue Stage/Register Read
   val iss_valids = Wire(Vec(exe_units.numIrfReaders, Bool()))
@@ -259,6 +266,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   if (usingVector) {
     v_pipeline.io.brupdate := brupdate
+    v_pipeline.io.vbusy_status := v_rename_stage.io.vbusy_status
   }
 
   // Load/Store Unit & ExeUnits
@@ -754,7 +762,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     rename.io.dec_fire := dec_fire
     rename.io.dec_uops := dec_uops
 
-    rename.io.dis_fire := dis_fire
+    rename.io.dis_fire := dis_fire_fb
     rename.io.dis_ready := dis_ready
 
     rename.io.com_valids := rob.io.commit.valids
@@ -772,7 +780,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // clear the unique flag in dispatched uops caused by vstart > 0 in the decode stage
   // as only the first rvv inst is required to execute in unique mode
   if(usingVector) {
-    val rvv_commit = (0 until coreParams.retireWidth).map{i => rob.io.commit.arch_valids(i) & rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).v_is_last}.reduce(_ || _)
+    val rvv_commit = (0 until coreParams.retireWidth).map{i => rob.io.commit.arch_valids(i) & rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).v_split_last}.reduce(_ || _)
 
     for (w <- 0 until coreWidth) {
       when (dis_uops(w).is_rvv && !dis_uops(w).uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)) {
@@ -850,10 +858,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dis_rocc_alloc_stall = (dis_uops.map(_.uopc === uopROCC) zip block_rocc) map {case (p,r) =>
                                if (usingRoCC) p && r else false.B}
 
+  dis_prev_split_actv(0) := false.B
+  (1 until coreWidth).map(w => dis_prev_split_actv(w) := dis_split_actv.slice(0, w).reduce(_ || _))
   val dis_hazards = (0 until coreWidth).map(w =>
                       dis_valids(w) &&
                       (  !rob.io.ready
                       || ren_stalls(w)
+                      || dis_prev_split_actv(w)
                       || io.lsu.ldq_full(w) && dis_uops(w).uses_ldq
                       || io.lsu.stq_full(w) && dis_uops(w).uses_stq
                       || !dispatcher.io.ren_uops(w).ready
@@ -869,8 +880,76 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   io.lsu.fence_dmem := (dis_valids zip wait_for_empty_pipeline).map {case (v,w) => v && w} .reduce(_||_)
 
   val dis_stalls = dis_hazards.scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
-  dis_fire := dis_valids zip dis_stalls map {case (v,s) => v && !s}
-  dis_ready := !dis_stalls.last
+  if (usingVector) {
+    dis_ready := !dis_stalls.last &&
+                 (!dis_valids.last || !dis_split_cand.last || dis_split_last.last || dis_fired.last)
+    //dis_ready := dis_fire_fb.last
+  } else {
+    dis_ready := !dis_stalls.last
+  }
+
+  //-------------------------------------------------------------
+  // RVV L/S split
+  if (usingVector) {
+    val dis_split_ecnt  = 1.U
+
+    for (w <- 0 until coreWidth) {
+      val dis_split_eidx  = RegInit(0.U((vLenSz+1).W))
+      val dis_split_segf  = RegInit(0.U(3.W))
+      val dis_split_segg  = RegInit(0.U(3.W))
+      val vseg_ls         = dis_uops(w).is_rvv && dis_uops(w).v_seg_nf > 1.U
+      val vseg_flast      = dis_split_segf + 1.U(4.W) === dis_uops(w).v_seg_nf
+      val dis_total_ecnt  = Mux(dis_uops(w).uses_stq, dis_uops(w).vconfig.vl, dis_uops(w).vconfig.vtype.vlMax)
+      val elem_last       = dis_split_eidx + dis_split_ecnt >= dis_total_ecnt
+
+      when (io.ifu.redirect_flush) {
+        dis_split_eidx := 0.U
+        dis_split_segf := 0.U
+        dis_split_segg := 0.U
+        dis_fired(w) := false.B
+      } .elsewhen (dis_ready) {
+        dis_split_eidx := 0.U
+        dis_split_segf := 0.U
+        dis_split_segg := 0.U
+        dis_fired(w) := false.B
+      } .elsewhen (dis_fire(w)) {
+        when (vseg_ls) {
+          dis_split_eidx := dis_split_eidx + Mux(vseg_flast, dis_split_ecnt, 0.U)
+          dis_split_segf := dis_split_segf + Mux(vseg_flast, 0.U, 1.U)
+          dis_split_segg := dis_split_segg + Mux(vseg_flast, 1.U, 0.U)
+        } .otherwise {
+          dis_split_eidx := dis_split_eidx + dis_split_ecnt
+        }
+        when (dis_split_last(w)) { dis_fired(w) := true.B }
+      }
+
+      dis_split_last(w) := elem_last && (!vseg_ls || vseg_flast)
+      dis_split_cand(w) := dis_uops(w).is_rvv && dis_uops(w).can_be_split && (dis_uops(w).uses_ldq || dis_uops(w).uses_stq)
+      //if (w == 0) {
+      //  dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_fired(w)
+      //} else {
+      //  dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_fired(w) && !(dis_split_actv.slice(0,w).reduce(_||_))
+      //}
+      dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_fired(w) && !dis_split_last(w)
+      dis_fire(w)    := (!dis_split_cand(w) || !dis_fired(w)) && dis_valids(w) && !dis_stalls(w)
+      dis_fire_fb(w) := dis_fire(w) && (!dis_split_cand(w) || dis_split_last(w))
+      when (dis_split_actv(w)) {
+        when (vseg_ls) { dis_uops(w).v_seg_f := dis_split_segf }
+        dis_uops(w).v_eidx        := dis_split_eidx
+        dis_uops(w).v_split_first := dis_split_eidx === 0.U
+        dis_uops(w).v_split_last  := dis_split_last(w)
+        dis_uops(w).v_split_ecnt  := dis_split_ecnt
+      }
+    }
+  } else {
+    dis_fire := dis_valids zip dis_stalls map {case (v,s) => v && !s}
+
+    for (w <- 0 until coreWidth) {
+      dis_fire_fb(w)    := dis_fire(w)
+      dis_split_actv(w) := false.B
+      dis_split_last(w) := true.B
+    }
+  }
 
   //-------------------------------------------------------------
   // LDQ/STQ Allocation Logic
@@ -886,7 +965,12 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   rob.io.enq_valids := dis_fire
   rob.io.enq_uops   := dis_uops
-  rob.io.enq_partial_stall := dis_stalls.last // TODO come up with better ROB compacting scheme.
+  if (usingVector) {
+    rob.io.enq_partial_stall := (dis_split_actv zip dis_stalls).foldRight(dis_stalls.last){
+      case((actv, stall), prev) => Mux(actv, stall, prev)}
+  } else {
+    rob.io.enq_partial_stall := dis_stalls.last // TODO come up with better ROB compacting scheme.
+  }
   rob.io.debug_tsc := debug_tsc_reg
   rob.io.csr_stall := csr.io.csr_stall
 
@@ -1242,7 +1326,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }.reduce(_ || _)
     val cmt_archlast_rvv = (0 until coreParams.retireWidth).map{i =>
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv &&
-        rob.io.commit.uops(i).v_is_last &&    // architectural last split
+        rob.io.commit.uops(i).v_split_last && // architectural last split
         !rob.io.commit.uops(i).is_red_vadd && // excluding inserted VADD
         !rob.io.commit.uops(i).is_perm_vadd
     }.reduce(_ || _)

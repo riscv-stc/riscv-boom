@@ -118,8 +118,8 @@ abstract class ExecutionUnit(
 
     val req      = Flipped(new DecoupledIO(new FuncUnitReq(dataWidth)))
 
-    val iresp    = if (writesIrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
-    val fresp    = if (writesFrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
+    val iresp    = if (writesIrf)   new DecoupledIO(new ExeUnitResp(xLen)) else null
+    val fresp    = if (writesFrf)   new DecoupledIO(new ExeUnitResp(xLen)) else null
     val vresp    = if (writesVrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_iresp = if (writesLlIrf) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_fresp = if (writesLlFrf) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
@@ -619,7 +619,7 @@ class VecExeUnit(
     writesIrf        = true,
     writesFrf        = true,
     numBypassStages  = if (hasMacc) 3 else 1,
-    dataWidth        = p(tile.TileKey).core.eLen,
+    dataWidth        = p(tile.TileKey).core.vLen,
     bypassable       = false,
     alwaysBypassable = false,
     hasAlu           = hasAlu,
@@ -667,12 +667,12 @@ class VecExeUnit(
                  Mux(hasFdiv.B,               FU_FR7, 0.U)
 
   // ALU Unit -------------------------------
-  var alu: ALUUnit = null
+  var valu: VecALUUnit = null
   if (hasAlu) {
-    alu = Module(new ALUUnit(numStages = numStages, dataWidth = eLen, vector = hasVector))
-    alu.io.req.valid := io.req.valid && io.req.bits.uop.fu_code === FU_ALU && 
+    valu = Module(new VecALUUnit(numStages = numStages, dataWidth = vLen))
+    valu.io.req.valid := io.req.valid && io.req.bits.uop.fu_code === FU_ALU && 
                         (io.req.bits.uop.uopc =/= uopVFMV_F_S) && (io.req.bits.uop.uopc =/= uopVMV_X_S)
-    vec_fu_units += alu
+    vec_fu_units += valu
   }
 
   // Pipelined, FixMulAcc Unit ------------------
@@ -829,13 +829,18 @@ class VecExeUnit(
   }
 
   if (writesFrf){
-    val vecToFPQueue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth),
-        numStages))
+    val vecToFPQueue = Module(new BranchKillableQueue(new ExeUnitResp(eLen), numStages))
+    val vsew = io.req.bits.uop.vconfig.vtype.vsew(1,0)
+    val rs2_data_elem0 = Mux1H(UIntToOH(vsew), Seq(io.req.bits.rs2_data(63, 0),
+                                                   io.req.bits.rs2_data(31, 0),
+                                                   io.req.bits.rs2_data(15, 0),
+                                                   0.U))
     vecToFPQueue.io.enq.valid := io.req.valid && (io.req.bits.uop.uopc === uopVFMV_F_S) && !io.req.bits.uop.v_eidx.orR()
     vecToFPQueue.io.enq.bits.uop := io.req.bits.uop
-    /* @fixme: fix elen 64bits currently, flexible sew need to be supported. */
-    vecToFPQueue.io.enq.bits.uop.mem_size := 2.U
-    vecToFPQueue.io.enq.bits.data := io.req.bits.rs2_data
+    /* @fixme: FIXME: fix elen 64bits currently, flexible sew need to be supported. */
+    assert(!vecToFPQueue.io.enq.valid || vsew != 0.U, "Unexpected FP vsew");
+    vecToFPQueue.io.enq.bits.uop.mem_size := vsew - 1.U //2.U
+    vecToFPQueue.io.enq.bits.data := rs2_data_elem0
     vecToFPQueue.io.enq.bits.predicated := false.B
     vecToFPQueue.io.enq.bits.fflags := DontCare
     vecToFPQueue.io.brupdate := io.brupdate
@@ -845,7 +850,7 @@ class VecExeUnit(
   }
 
   if (writesIrf){
-    val vecToIntQueue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth), numStages))
+    val vecToIntQueue = Module(new BranchKillableQueue(new ExeUnitResp(eLen), numStages))
 
     val vmv_valid = io.req.valid && (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.v_eidx.orR()
     val vmv_is_last = (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.v_eidx.orR()
@@ -856,11 +861,16 @@ class VecExeUnit(
     val vmaskInsn_is_last = io.req.bits.uop.v_eidx === (vmaskInsn_vl-1.U)
     val vmaskInsn_valid = vmaskunit.io.resp.valid & io.req.bits.uop.uopc.isOneOf(uopVPOPC, uopVFIRST) & vmaskInsn_is_last
     val vmaskInsn_result = vmaskunit.io.resp.bits.data
+    val vsew = io.req.bits.uop.vconfig.vtype.vsew(1,0)
+    val rs2_data_elem0 = Mux1H(UIntToOH(vsew), Seq(io.req.bits.rs2_data(63, 0),
+                                                   io.req.bits.rs2_data(31, 0),
+                                                   io.req.bits.rs2_data(15, 0),
+                                                   io.req.bits.rs2_data(7, 0)))
 
     vecToIntQueue.io.enq.valid := vmv_valid | vmaskInsn_valid
     vecToIntQueue.io.enq.bits.uop := io.req.bits.uop
-    vecToIntQueue.io.enq.bits.data := Mux(vmv_valid, io.req.bits.rs2_data, Mux(vmaskInsn_valid, vmaskInsn_result, 0.U))
-    vecToIntQueue.io.enq.bits.uop.v_is_last := Mux(vmv_valid, vmv_is_last, Mux(vmaskInsn_valid, vmaskInsn_is_last, false.B))
+    vecToIntQueue.io.enq.bits.data := Mux(vmv_valid, rs2_data_elem0, Mux(vmaskInsn_valid, vmaskInsn_result, 0.U))
+    vecToIntQueue.io.enq.bits.uop.v_split_last := Mux(vmv_valid, vmv_is_last, Mux(vmaskInsn_valid, vmaskInsn_is_last, false.B))
     vecToIntQueue.io.enq.bits.predicated := false.B
     vecToIntQueue.io.enq.bits.fflags := DontCare
     vecToIntQueue.io.brupdate := io.brupdate
