@@ -706,7 +706,7 @@ object VRegMask {
    * Get byte level mask for vreg
    */
   def apply(v_eidx: UInt, vsew: UInt, ecnt: UInt, elenb: Int): UInt = {
-    val lsb = (v_eidx << vsew)(2, 0)
+    val lsb = (v_eidx << vsew)(log2Ceil(elenb)-1, 0)
     val len = ecnt << vsew
     val ret = MaskGen(lsb, len, elenb)
     ret
@@ -738,6 +738,21 @@ object VDataFill {
                                              Fill(4,data(elen/4-1,0)),
                                              Fill(2,data(elen/2-1,0)),
                                              data(elen-1,0)))
+    ret
+  }
+}
+
+object VDataSel {
+  def apply(vdata: UInt, vsew: UInt, v_eidx: UInt, vlen: Int, elen: Int): UInt = {
+    val ret = Wire(UInt(elen.W))
+    val vdata8 = VecInit.tabulate[UInt](vlen/8)(x => vdata(x*8+7, x*8))
+    val vdata16 = VecInit.tabulate[UInt](vlen/16)(x => vdata(x*16+15, x*16))
+    val vdata32 = VecInit.tabulate[UInt](vlen/32)(x => vdata(x*32+31, x*32))
+    val vdata64 = VecInit.tabulate[UInt](vlen/64)(x => vdata(x*64+63, x*64))
+    ret := Mux1H(UIntToOH(vsew(1,0)), Seq(vdata8(v_eidx(6,0)),
+                                          vdata16(v_eidx(5,0)),
+                                          vdata32(v_eidx(4,0)),
+                                          vdata64(v_eidx(3,0))))
     ret
   }
 }

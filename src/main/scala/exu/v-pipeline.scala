@@ -196,13 +196,16 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   ll_wbarb.io.in(0).bits.data := io.ll_wports(0).bits.data
 
   ll_wbarb.io.in(1) <> io.from_int
+  ll_wbarb.io.in(1).bits.data := io.from_int.bits.data
+
   ll_wbarb.io.in(2) <> io.from_fp
+  ll_wbarb.io.in(2).bits.data := io.from_fp.bits.data
 
 
   // Cut up critical path by delaying the write by a cycle.
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
-  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vpregSz, vLen, isVector, true))
+  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vpregSz, vLen, isVector, true, true))
 
   assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
   when (io.from_int.valid) { assert (io.from_int.bits.uop.rf_wen && io.from_int.bits.uop.rt(RD, isVector)) }
@@ -210,7 +213,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   var w_cnt = 1
   for (i <- 1 until memWidth) {
-    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), vpregSz, vLen, isVector, true))
+    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), vpregSz, vLen, isVector, true, true))
     w_cnt += 1
   }
   for (eu <- exe_units) {
@@ -240,7 +243,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   val vmx_unit = exe_units.vmx_unit
   val vmx_resp = vmx_unit.io.vresp
 
-  io.to_sdq.valid := vmx_resp.valid && vmx_resp.bits.uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
+  io.to_sdq.valid := vmx_resp.valid && vmx_resp.bits.uop.is_rvv && vmx_resp.bits.uop.ctrl.is_sta
   io.to_sdq.bits  := vmx_resp.bits
   //io.to_int.valid := false.B // FIXME
   //io.to_int.bits  := DontCare
@@ -272,7 +275,11 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       val exe_resp = eu.io.vresp
       val wb_uop = eu.io.vresp.bits.uop
       val wport = io.wakeups(w_cnt)
-      wport.valid := exe_resp.valid && wb_uop.rt(RD, isVector)
+      if (eu.hasVMX) {
+        wport.valid := exe_resp.valid && wb_uop.rf_wen && !(wb_uop.is_rvv && wb_uop.ctrl.is_sta)
+      } else {
+        wport.valid := exe_resp.valid && wb_uop.rf_wen
+      }
       wport.bits := exe_resp.bits
 
       w_cnt += 1

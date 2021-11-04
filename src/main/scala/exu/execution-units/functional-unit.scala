@@ -1303,13 +1303,13 @@ class VecALUUnit(
     alu.io.dw  := uop.ctrl.fcn_dw
     if (e < numELENinVLEN) {
       // e64 ALU
-      alu.io.in1 := Mux1H(UIntToOH(op1_eew), Seq(op1_data(64*e+63, 64*e), op1_data(32*e+31, 32*e), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e)))
-      alu.io.in2 := Mux1H(UIntToOH(op2_eew), Seq(op2_data(64*e+63, 64*e), op2_data(32*e+31, 32*e), op2_data(16*e+15, 16*e), op2_data(8*e+7, 8*e)))
+      alu.io.in1 := Mux1H(UIntToOH(op1_eew), Seq(op1_data(8*e+7, 8*e), op1_data(16*e+15, 16*e), op1_data(32*e+31, 32*e), op1_data(64*e+63, 64*e)))
+      alu.io.in2 := Mux1H(UIntToOH(op2_eew), Seq(op2_data(8*e+7, 8*e), op2_data(16*e+15, 16*e), op2_data(32*e+31, 32*e), op2_data(64*e+63, 64*e)))
       alu.io.ci  := false.B // FIXME
     } else if (e < numELENinVLEN*2) {
       // e32 ALU
-      alu.io.in1 := Mux1H(UIntToOH(op1_eew), Seq(0.U, op1_data(32*e+31, 32*e), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e)))
-      alu.io.in2 := Mux1H(UIntToOH(op2_eew), Seq(0.U, op2_data(32*e+31, 32*e), op2_data(16*e+15, 16*e), op2_data(8*e+7, 8*e)))
+      alu.io.in1 := Mux1H(UIntToOH(op1_eew), Seq(op1_data(8*e+7, 8*e), op1_data(16*e+15, 16*e), op1_data(32*e+31, 32*e), 0.U))
+      alu.io.in2 := Mux1H(UIntToOH(op2_eew), Seq(op2_data(8*e+7, 8*e), op2_data(16*e+15, 16*e), op2_data(32*e+31, 32*e), 0.U))
       alu.io.ci  := false.B // FIXME
     } else if (e < numELENinVLEN*4) {
       // e16 ALU
@@ -1382,10 +1382,10 @@ class VecALUUnit(
   //when (io.req.valid && (vadc || vsbc)) { assert(!uop.v_unmasked, "Problematic vadc/vsbc") }
   //val alu_co = Mux1H(UIntToOH(uop.vconfig.vtype.vsew(1,0)), Seq(alu.io.out(8), alu.io.out(16), alu.io.out(32), alu.io.co))
 
-  alu_out := Mux1H(UIntToOH(uop.vd_eew), Seq(e64_adder_out.asUInt,
-                                             e32_adder_out.asUInt,
+  alu_out := Mux1H(UIntToOH(uop.vd_eew), Seq(e8_adder_out.asUInt,
                                              e16_adder_out.asUInt,
-                                             e8_adder_out.asUInt))
+                                             e32_adder_out.asUInt,
+                                             e64_adder_out.asUInt))
 
   r_val (0) := io.req.valid
   r_data(0) := alu_out

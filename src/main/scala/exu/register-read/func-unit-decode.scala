@@ -118,6 +118,29 @@ object AluRRdDecode extends RRdDecodeConstants
          BitPat(uopBLTU)  -> List(BR_LTU,Y, N, N, FN_SLTU, DW_XPR, OP1_X   , OP2_X   , IS_B, REN_0, CSR.N))
 }
 
+/**
+ * VMX unit register read constants
+ */
+object VmxRRdDecode extends RRdDecodeConstants
+{
+  val table: Array[(BitPat, List[BitPat])] =
+             Array[(BitPat, List[BitPat])](
+                               // br type
+                               // |      use alu pipe              op1 sel   op2 sel
+                               // |      |  use muldiv pipe        |         |         immsel       csr_cmd
+                               // |      |  |  use mem pipe        |         |         |     rf wen |
+                               // |      |  |  |  alu fcn  wd/word?|         |         |     |      |
+                               // |      |  |  |  |        |       |         |         |     |      |
+         BitPat(uopVL)    -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_X, REN_1, CSR.N),
+         BitPat(uopVSA)   -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_X   , IS_X, REN_0, CSR.N),
+         BitPat(uopVLS)   -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_1, CSR.N),
+         BitPat(uopVSSA)  -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
+         BitPat(uopVLUX)  -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_1, CSR.N),
+         BitPat(uopVSUXA) -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N),
+         BitPat(uopVLOX)  -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_1, CSR.N),
+         BitPat(uopVSOXA) -> List(BR_N , N, N, Y, FN_ADD , DW_XPR, OP1_RS1 , OP2_RS2 , IS_X, REN_0, CSR.N))
+}
+
 object VecRRdDecode extends RRdDecodeConstants
 {
   val table: Array[(BitPat, List[BitPat])] =
@@ -413,6 +436,7 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
   if (supportedUnits.fpu) dec_table ++= FpuRRdDecode.table
   if (supportedUnits.fdiv) dec_table ++= FDivRRdDecode.table
   if (supportedUnits.ifpu) dec_table ++= IfmvRRdDecode.table
+  if (supportedUnits.vmx) dec_table = VmxRRdDecode.table
   if (supportedUnits.vector) dec_table = VecRRdDecode.table
   val rrd_cs = Wire(new RRdCtrlSigs()).decode(io.rrd_uop.uopc, dec_table)
 

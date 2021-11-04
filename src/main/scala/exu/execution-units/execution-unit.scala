@@ -30,7 +30,7 @@ import FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.ifu.{GetPCFromFtqIO}
-import boom.util.{ImmGen, IsKilledByBranch, BranchKillableQueue, BoomCoreStringPrefix, VDataSwap}
+import boom.util._
 
 /**
  * Response from Execution Unit. Bundles a MicroOp with data
@@ -738,9 +738,12 @@ class VecExeUnit(
   // VMX Unit -------------------------------
   var vmx: VMXUnit = null
   if (hasVMX) {
-    vmx = Module(new VMXUnit(xLen))
+    vmx = Module(new VMXUnit(eLen))
     vmx.suggestName("vmx")
     vmx.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMX)
+    vmx.io.req.bits.rs3_data := VDataSel(io.req.bits.rs3_data, io.req.bits.uop.vd_eew,
+                                                               io.req.bits.uop.v_eidx,
+                                                               vLen, eLen)
 
     // share write port with the pipelined units
     vmx.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
@@ -814,6 +817,13 @@ class VecExeUnit(
     if (f != div && f != fdivsqrt && f!= vmx) 
       f.io.resp.ready := io.vresp.ready
   })
+
+  // VMX Unit rs3_data
+  if (hasVMX) {
+    vmx.io.req.bits.rs3_data := VDataSel(io.req.bits.rs3_data, io.req.bits.uop.vd_eew,
+                                                               io.req.bits.uop.v_eidx,
+                                                               vLen, eLen)
+  }
 
   // Outputs (Write Port #0)  ---------------
   if (writesVrf) {

@@ -188,7 +188,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dis_fire_fb= Wire(Vec(coreWidth, Bool())) // upstream dis_fire: ren/ifu
   val dis_ready  = Wire(Bool())
   //val dis_split       = Wire(Vec(coreWidth, Bool()))
-  val dis_fired       = RegInit(VecInit(0.U(coreWidth.W).asBools))
+  //val dis_fired       = RegInit(VecInit(0.U(coreWidth.W).asBools))
   val dis_split_last  = Wire(Vec(coreWidth, Bool()))
   val dis_split_cand  = Wire(Vec(coreWidth, Bool()))
   val dis_split_actv  = Wire(Vec(coreWidth, Bool()))
@@ -882,7 +882,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dis_stalls = dis_hazards.scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
   if (usingVector) {
     dis_ready := !dis_stalls.last &&
-                 (!dis_valids.last || !dis_split_cand.last || dis_split_last.last || dis_fired.last)
+                 (!dis_valids.last || !dis_split_cand.last || dis_split_last.last)
     //dis_ready := dis_fire_fb.last
   } else {
     dis_ready := !dis_stalls.last
@@ -906,12 +906,12 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         dis_split_eidx := 0.U
         dis_split_segf := 0.U
         dis_split_segg := 0.U
-        dis_fired(w) := false.B
+        //dis_fired(w) := false.B
       } .elsewhen (dis_ready) {
         dis_split_eidx := 0.U
         dis_split_segf := 0.U
         dis_split_segg := 0.U
-        dis_fired(w) := false.B
+        //dis_fired(w) := false.B
       } .elsewhen (dis_fire(w)) {
         when (vseg_ls) {
           dis_split_eidx := dis_split_eidx + Mux(vseg_flast, dis_split_ecnt, 0.U)
@@ -920,7 +920,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         } .otherwise {
           dis_split_eidx := dis_split_eidx + dis_split_ecnt
         }
-        when (dis_split_last(w)) { dis_fired(w) := true.B }
+        //when (dis_split_last(w)) { dis_fired(w) := true.B }
       }
 
       dis_split_last(w) := elem_last && (!vseg_ls || vseg_flast)
@@ -930,16 +930,19 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       //} else {
       //  dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_fired(w) && !(dis_split_actv.slice(0,w).reduce(_||_))
       //}
-      dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_fired(w) && !dis_split_last(w)
-      dis_fire(w)    := (!dis_split_cand(w) || !dis_fired(w)) && dis_valids(w) && !dis_stalls(w)
+      dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_split_last(w) // && !dis_fired(w)
+      //dis_fire(w)    := (!dis_split_cand(w) || !dis_fired(w)) && dis_valids(w) && !dis_stalls(w)
+      dis_fire(w)    := dis_valids(w) && !dis_stalls(w)
       dis_fire_fb(w) := dis_fire(w) && (!dis_split_cand(w) || dis_split_last(w))
-      when (dis_split_actv(w)) {
+      when (dis_split_cand(w) && dis_valids(w)) {
         when (vseg_ls) { dis_uops(w).v_seg_f := dis_split_segf }
         dis_uops(w).v_eidx        := dis_split_eidx
         dis_uops(w).v_split_first := dis_split_eidx === 0.U
         dis_uops(w).v_split_last  := dis_split_last(w)
         dis_uops(w).v_split_ecnt  := dis_split_ecnt
       }
+
+      v_rename_stage.io.dis_fire_first(w) := dis_fire(w) && dis_uops(w).v_split_first
     }
   } else {
     dis_fire := dis_valids zip dis_stalls map {case (v,s) => v && !s}

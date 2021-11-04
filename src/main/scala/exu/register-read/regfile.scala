@@ -17,6 +17,7 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.tile.TileKey
 
 import boom.common._
 import boom.util._
@@ -56,16 +57,26 @@ object WritePort
     addrWidth: Int,
     dataWidth: Int,
     rtype: UInt => Bool,
-    vector: Boolean = false
+    vector: Boolean = false,
+    llport: Boolean = false,
   ) (implicit p: Parameters): Valid[RegisterFileWritePort] = {
     val wport = Wire(Valid(new RegisterFileWritePort(addrWidth, dataWidth, vector)))
     val enq_uop = enq.bits.uop
     wport.valid := enq.valid && enq_uop.rt(RD, rtype)
-    if (vector) {
-      wport.bits.mask := Fill(dataWidth, 1.U(1.W))
-    }
     wport.bits.addr := enq_uop.pdst
     wport.bits.data := enq.bits.data
+    if (vector) {
+      val byteMask = VRegMask(enq_uop.v_eidx, enq_uop.vd_eew, enq_uop.v_split_ecnt, dataWidth/8)
+      wport.bits.mask := Cat((0 until dataWidth/8).map(i => Fill(8, byteMask(i))).reverse)
+      if (llport) {
+        val vLen = p(TileKey).core.vLen
+        val eLen = p(TileKey).core.eLen
+        val e_filled = VDataFill(enq.bits.data, enq_uop.vd_eew, eLen)
+        val v_filled = Fill(vLen/eLen, e_filled)
+        require(dataWidth == vLen)
+        wport.bits.data := v_filled
+      }
+    }
     enq.ready := true.B
     wport
   }
@@ -176,10 +187,10 @@ class RegisterFileSynthesizable(
     for (r <- 0 until numRegisters) {
       when (io.write_ports.map(w => w.valid && r.U === w.bits.addr).reduce(_|_)) {
         val old_data = regfile(r)
-        val new_data = Wire(Vec(eLen, UInt(1.W)))
-        (0 until eLen).map(x => new_data(x) := old_data(x))
+        val new_data = Wire(Vec(vLen, UInt(1.W)))
+        (0 until vLen).map(x => new_data(x) := old_data(x))
         for (wport <- io.write_ports) {
-          for (i <- 0 until eLen) {
+          for (i <- 0 until vLen) {
             when (wport.valid && r.U === wport.bits.addr && wport.bits.mask(i)) {
               new_data(i) := wport.bits.data(i)
             }

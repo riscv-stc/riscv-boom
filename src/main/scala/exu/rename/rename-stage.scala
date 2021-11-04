@@ -77,6 +77,7 @@ abstract class AbstractRenameStage(
 
     val dis_fire  = Input(Vec(coreWidth, Bool()))
     val dis_ready = Input(Bool())
+    val dis_fire_first = if (vector) Input(Vec(coreWidth, Bool())) else null
 
     // wakeup ports
     val wakeups = Flipped(Vec(numWbPorts, Valid(new ExeUnitResp(xLen))))
@@ -457,19 +458,16 @@ class VecRenameBypass(
   for (i <- 0 until 8) {
     val bypass_hits_rs1 = (older_uops zip alloc_reqs) map { case (o,a) =>
       (Fill(8, (a && i.U < grpCount(uop.vs1_emul, 1.U) && uop.rt(RS1, isVector) &&
-               o.rob_idx =/= uop.rob_idx && // exclude self-match on dispatch splitting
                o.rt(RD, isVector) && o.ldst_val).asUInt) &
        matchGroup(uop.lrs1 + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
     }
     val bypass_hits_rs2 = (older_uops zip alloc_reqs) map { case (o,a) =>
       (Fill(8, (a && i.U < grpCount(uop.vs2_emul, 1.U) && uop.rt(RS2, isVector) &&
-               o.rob_idx =/= uop.rob_idx && // exclude self-match on dispatch splitting
                o.rt(RD, isVector) && o.ldst_val).asUInt) &
        matchGroup(uop.lrs2 + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
     }
     val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (o,a) =>
       (Fill(8, (a && i.U < grpCount(uop.vd_emul, 1.U) && uop.rt(RD, isVector) &&
-               o.rob_idx =/= uop.rob_idx && // exclude self-match on dispatch splitting
                o.rt(RD, isVector) && o.ldst_val).asUInt) &
        matchGroup(uop.ldst + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
     }
@@ -644,7 +642,6 @@ extends AbstractRenameStage(
   freelist.io.brupdate := io.brupdate
   freelist.io.debug.pipeline_empty := io.debug_rob_empty
 
-  //val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(plWidth, UInt(maxPregSz.W)))
   // Freelist outputs.
   for ((uop, w) <- ren2_uops.zipWithIndex) {
     val alloc_req, alloc_assign = Wire(Valid(new MicroOp))
@@ -663,17 +660,17 @@ extends AbstractRenameStage(
   // Busy Table
 
   busytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
-  busytable.io.rebusy_reqs := ren2_alloc_reqs
   busytable.io.wb_valids := io.wakeups.map(_.valid)
   busytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
   io.vbusy_status := busytable.io.vbusy_status
+  for (w <- 0 until plWidth) {
+    busytable.io.rebusy_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && io.dis_fire_first(w)
+  }
   for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) {
     val v_eidx  = wk.bits.uop.v_eidx
+    val vsew    = wk.bits.uop.vd_eew(1,0)
     val ecnt    = wk.bits.uop.v_split_ecnt
-    val vsew    = wk.bits.uop.vconfig.vtype.vsew(1,0)
-    val lsb     = (v_eidx << vsew)(vLenSz-1, 0)
-    val len     = ecnt << vsew
-    val rmask   = boom.util.MaskGen(v_eidx, len, vLen)
+    val rmask   = VRegMask(v_eidx, vsew, ecnt, vLenb)
     bs := rmask
   }
 
