@@ -401,8 +401,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.vconfig.vtype.reserved := DontCare
     uop.v_eidx      := 0.U // io.csr_vstart
     //uop.v_eofs      := 0.U
-    //uop.v_is_split  := cs.can_be_split
-    uop.can_be_split  := cs.can_be_split
+    uop.v_is_split  := cs.can_be_split
+    //uop.can_be_split  := cs.can_be_split
     uop.v_split_ecnt:= total_ecnt
     uop.vconfig.vtype.vsew := Mux(is_v_mask_insn, 3.U, vsew)
     //when (io.deq_fire && cs.can_be_split) {

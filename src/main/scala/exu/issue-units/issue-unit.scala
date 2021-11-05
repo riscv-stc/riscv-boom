@@ -131,41 +131,42 @@ abstract class IssueUnit(
 
     if (iqType == IQT_MEM.litValue || iqType == IQT_INT.litValue) {
       // For StoreAddrGen for Int, or AMOAddrGen, we go to addr gen state
-      when ((io.dis_uops(w).bits.uopc === uopSTA && io.dis_uops(w).bits.rt(RS2, isInt)) ||
-             io.dis_uops(w).bits.uopc === uopAMO_AG) {
+      when ((dis_uops(w).uopc === uopSTA && dis_uops(w).rt(RS2, isInt)) ||
+             dis_uops(w).uopc === uopAMO_AG) {
         dis_uops(w).iw_state := s_valid_2
-      } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopSTA, uopVSA) && io.dis_uops(w).bits.rt(RS2, isNotInt)) {
+      } .elsewhen (dis_uops(w).uopc.isOneOf(uopSTA, uopVSA) && dis_uops(w).rt(RS2, isNotInt)) {
         // For store addr gen for FP, rs2 is the FP/VEC register, and we don't wait for that here
-        when (io.dis_uops(w).bits.fp_val) {
+        when (dis_uops(w).fp_val) {
           //dis_uops(w).lrs2_rtype := RT_X
           dis_uops(w).prs2_busy := 0.U
         }
       }
       if (usingVector) {
-        when (io.dis_uops(w).bits.is_rvv && io.dis_uops(w).bits.v_idx_ls) {
+        when (dis_uops(w).is_rvv && dis_uops(w).v_idx_ls) {
           dis_uops(w).prs2_busy := 0.U
           //dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
         }
-        when (io.dis_uops(w).bits.is_rvv && !io.dis_uops(w).bits.v_unmasked) {
+        when (dis_uops(w).is_rvv && !dis_uops(w).v_unmasked) {
           //dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
         }
-      }
-      dis_uops(w).prs3_busy := 0.U
-      if (iqType == IQT_INT.litValue) {
-        if (usingVector) {
-          when (io.dis_uops(w).valid && io.dis_uops(w).bits.is_rvv && !io.dis_uops(w).bits.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)) {
-            assert(io.dis_uops(w).bits.uses_scalar, "unexpected rvv in INT pipe")
+        if (iqType == IQT_INT.litValue) {
+          when (io.dis_uops(w).valid && dis_uops(w).is_rvv && !dis_uops(w).uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)) {
+            assert(dis_uops(w).uses_scalar, "unexpected rvv in INT pipe")
             dis_uops(w).fu_code := FU_ALU
+          }
+          when (dis_uops(w).rt(RS2, isVector)) { dis_uops(w).prs2_busy := 0.U }
+          when (dis_uops(w).frs3_en )          { dis_uops(w).prs3_busy := 0.U }
+        } else { // iqType == IQT_MEM.litvalue
+          when (io.dis_uops(w).valid && dis_uops(w).is_rvv && (dis_uops(w).uses_ldq || dis_uops(w).uses_stq)) {
+            val vd_idx = VRegSel(dis_uops(w).v_eidx, dis_uops(w).vd_eew, eLenSelSz)
+            dis_uops(w).pdst := dis_uops(w).pvd(vd_idx).bits
           }
         }
       }
-      if (usingVector && iqType == IQT_INT.litValue) {
-        when (dis_uops(w).rt(RS2, isVector)) { dis_uops(w).prs2_busy := 0.U }
-        when (dis_uops(w).frs3_en )          { dis_uops(w).prs3_busy := 0.U }
-      }
+      dis_uops(w).prs3_busy := 0.U
     } else if (iqType == IQT_FP.litValue) {
       // FP "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
-      when (io.dis_uops(w).bits.uopc.isOneOf(uopSTA)) {
+      when (dis_uops(w).uopc.isOneOf(uopSTA)) {
         //dis_uops(w).lrs1_rtype := RT_FIX
         dis_uops(w).prs1_busy  := 0.U
       }
@@ -174,34 +175,34 @@ abstract class IssueUnit(
         when (dis_uops(w).rt(RS2, isVector)) { dis_uops(w).prs2_busy := 0.U }
         when (dis_uops(w).is_rvv )           { dis_uops(w).prs3_busy := 0.U }
         // hack fu_code if the instruction is merge.
-        when (io.dis_uops(w).bits.is_rvv && io.dis_uops(w).bits.uopc.isOneOf(uopMERGE)){
+        when (dis_uops(w).is_rvv && dis_uops(w).uopc.isOneOf(uopMERGE)){
           dis_uops(w).fu_code := FU_FPU
         }
       }
     } else if (iqType == IQT_VEC.litValue) {
       // VEC "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
       // VEC Load that arrives here are tail splits, prs3 holds stale register name, read in RRD
-      when (io.dis_uops(w).bits.uopc.isOneOf(uopVSA, uopVL, uopVLFF, uopVLS, uopVSSA)) {
+      when (dis_uops(w).uopc.isOneOf(uopVSA, uopVL, uopVLFF, uopVLS, uopVSSA)) {
         //dis_uops(w).lrs1_rtype := RT_FIX
         dis_uops(w).prs1_busy  := 0.U
         dis_uops(w).prs2_busy  := 0.U
-      } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
+      } .elsewhen (dis_uops(w).uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
         dis_uops(w).prs1_busy  := 0.U
-      } .elsewhen (io.dis_uops(w).bits.uopc.isOneOf(uopVSLIDE1UP, uopVSLIDE1DOWN)) {
+      } .elsewhen (dis_uops(w).uopc.isOneOf(uopVSLIDE1UP, uopVSLIDE1DOWN)) {
         dis_uops(w).fu_code    := FU_ALU
-      } .elsewhen (io.dis_uops(w).bits.rt(RD, isReduceV) && io.dis_uops(w).bits.v_eidx =/= 0.U) {
+      } .elsewhen (dis_uops(w).rt(RD, isReduceV) && dis_uops(w).v_eidx =/= 0.U) {
         dis_uops(w).prs1_busy  := ~(0.U(vLenb.W))
       }
       if (usingVector) {
-        dis_uops(w).v_perm_busy  := io.dis_uops(w).bits.uopc===uopVRGATHER && io.dis_uops(w).bits.rt(RS1, isVector) ||
-                                    io.dis_uops(w).bits.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
-        dis_uops(w).v_perm_wait  := Mux(io.dis_uops(w).bits.uopc === uopVCOMPRESS, io.dis_uops(w).bits.v_eidx =/= 0.U, false.B)
+        dis_uops(w).v_perm_busy  := dis_uops(w).uopc===uopVRGATHER && dis_uops(w).rt(RS1, isVector) ||
+                                    dis_uops(w).uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
+        dis_uops(w).v_perm_wait  := Mux(dis_uops(w).uopc === uopVCOMPRESS, dis_uops(w).v_eidx =/= 0.U, false.B)
         dis_uops(w).v_perm_idx   := 0.U
       }
     }
 
     if (iqType != IQT_INT.litValue) {
-      assert(!(io.dis_uops(w).bits.ppred_busy && io.dis_uops(w).valid))
+      assert(!(dis_uops(w).ppred_busy && io.dis_uops(w).valid))
       dis_uops(w).ppred_busy := false.B
     }
   }

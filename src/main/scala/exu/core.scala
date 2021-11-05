@@ -891,7 +891,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
   // RVV L/S split
   if (usingVector) {
-    val dis_split_ecnt  = 1.U
 
     for (w <- 0 until coreWidth) {
       val dis_split_eidx  = RegInit(0.U((vLenSz+1).W))
@@ -900,6 +899,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       val vseg_ls         = dis_uops(w).is_rvv && dis_uops(w).v_seg_nf > 1.U
       val vseg_flast      = dis_split_segf + 1.U(4.W) === dis_uops(w).v_seg_nf
       val dis_total_ecnt  = Mux(dis_uops(w).uses_stq, dis_uops(w).vconfig.vl, dis_uops(w).vconfig.vtype.vlMax)
+      val dis_split_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, 1.U, dis_total_ecnt)
       val elem_last       = dis_split_eidx + dis_split_ecnt >= dis_total_ecnt
 
       when (io.ifu.redirect_flush) {
@@ -924,7 +924,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       }
 
       dis_split_last(w) := elem_last && (!vseg_ls || vseg_flast)
-      dis_split_cand(w) := dis_uops(w).is_rvv && dis_uops(w).can_be_split && (dis_uops(w).uses_ldq || dis_uops(w).uses_stq)
+      dis_split_cand(w) := dis_uops(w).is_rvv && dis_uops(w).v_is_split && (dis_uops(w).uses_ldq || dis_uops(w).uses_stq)
       //if (w == 0) {
       //  dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_fired(w)
       //} else {
@@ -937,10 +937,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       when (dis_split_cand(w) && dis_valids(w)) {
         when (vseg_ls) { dis_uops(w).v_seg_f := dis_split_segf }
         dis_uops(w).v_eidx        := dis_split_eidx
-        dis_uops(w).v_split_first := dis_split_eidx === 0.U
-        dis_uops(w).v_split_last  := dis_split_last(w)
-        dis_uops(w).v_split_ecnt  := dis_split_ecnt
       }
+      dis_uops(w).v_split_first := dis_split_eidx === 0.U
+      dis_uops(w).v_split_last  := dis_split_last(w)
+      dis_uops(w).v_split_ecnt  := dis_split_ecnt
 
       v_rename_stage.io.dis_fire_first(w) := dis_fire(w) && dis_uops(w).v_split_first
     }

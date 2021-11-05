@@ -139,7 +139,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
 
   // vector extension
   val is_rvv           = if (usingVector) Bool() else false.B         // is vector instruction
-  val can_be_split     = if (usingVector) Bool() else false.B
+  //val can_be_split     = if (usingVector) Bool() else false.B
   val pvd              = if (usingVector) Vec(8, Valid(UInt(vpregSz.W))) else null
   val stale_pvd        = if (usingVector) Vec(8, Valid(UInt(vpregSz.W))) else null
   val pvs1             = if (usingVector) Vec(8, Valid(UInt(vpregSz.W))) else null
@@ -153,7 +153,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_eidx           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // element-index
   //val v_eofs           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // element-wise offset from first split
   val v_is_split       = if (usingVector) Bool() else false.B         // is a split of a vector instruction
-  val v_split_ecnt     = if (usingVector) UInt((log2Ceil(vLenb)+1).W) else UInt(0.W)
+  val v_split_ecnt     = if (usingVector) UInt((vLenSz+1).W) else UInt(0.W)
   val v_split_first    = if (usingVector) Bool() else false.B
   val v_split_last     = if (usingVector) Bool() else false.B
   val vs1_eew          = if (usingVector) UInt(2.W) else UInt(0.W)
