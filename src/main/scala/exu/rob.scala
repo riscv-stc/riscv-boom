@@ -349,8 +349,10 @@ class Rob(
       val row_idx = GetRowIdx(wb_uop.rob_idx)
       if (usingVector) {
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
-          val wb_v_ls = wb_uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
-          rob_bsy(row_idx)      := Mux(wb_v_ls, false.B, wb_uop.v_is_split && !wb_uop.v_split_last)
+          val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
+          val wb_rvv_sta  = wb_uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
+          rob_bsy(row_idx)      := Mux(wb_rvv_load, Mux(wb_uop.uses_ldq, false.B, rob_bsy(row_idx)),
+                                   Mux(wb_rvv_sta,  false.B, wb_uop.v_is_split && !wb_uop.v_split_last))
           rob_unsafe(row_idx)   := false.B
           rob_predicated(row_idx)  := wb_resp.bits.predicated
           rob_uop(row_idx).vxsat := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)

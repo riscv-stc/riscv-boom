@@ -767,13 +767,21 @@ object IsKilledByVM
   }
 }
 
+object nrVecGroup
+{
+  def apply(emul: UInt, nf: UInt = 1.U): UInt = {
+    val emul_sign = emul(2)
+    val emul_mag  = emul(1,0)
+    val ret = (nf(3,0) << Mux(emul_sign, 0.U(2.W), emul_mag))(3,0)
+    ret
+  }
+}
+
 object lvdGroup
 {
   def apply(lvd: UInt, emul: UInt, nf: UInt): Vec[Valid[UInt]] = {
     val ret = Wire(Vec(8, Valid(UInt(5.W))))
-    val emul_sign = emul(2)
-    val emul_mag  = emul(1,0)
-    val nr  = nf << Mux(emul_sign, 0.U(2.W), emul_mag)
+    val nr  = nrVecGroup(emul, nf)
     //assert (nr <= 8.U)
     for (i <- 0 until 8) {
       ret(i).valid := i.U < nr

@@ -66,11 +66,13 @@ object WritePort
     wport.bits.addr := enq_uop.pdst
     wport.bits.data := enq.bits.data
     if (vector) {
+      val vLen = p(TileKey).core.vLen
+      val eLen = p(TileKey).core.eLen
+      val r_eidx = VRegSel(enq_uop.v_eidx, enq_uop.vd_eew, log2Ceil(vLen/eLen))
+      val r_eofs = r_eidx << (log2Ceil(vLen) - 3).U >> enq_uop.vd_eew
       val byteMask = VRegMask(enq_uop.v_eidx, enq_uop.vd_eew, enq_uop.v_split_ecnt, dataWidth/8)
-      wport.bits.mask := Cat((0 until dataWidth/8).map(i => Fill(8, byteMask(i))).reverse)
+      wport.bits.mask := Cat((0 until dataWidth/8).map(i => Fill(8, byteMask(r_eidx+i.U))).reverse)
       if (llport) {
-        val vLen = p(TileKey).core.vLen
-        val eLen = p(TileKey).core.eLen
         val e_filled = VDataFill(enq.bits.data, enq_uop.vd_eew, eLen)
         val v_filled = Fill(vLen/eLen, e_filled)
         require(dataWidth == vLen)

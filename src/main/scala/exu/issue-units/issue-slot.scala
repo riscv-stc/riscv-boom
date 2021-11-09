@@ -465,7 +465,7 @@ class IssueSlot(
         io.uop.pvm := slot_uop.prs1
       }
       //val red_iss_p1 = WireInit(p1)
-      when (io.request && io.grant && !io.uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
+      when (io.request && io.grant && !io.uop.uopc.isOneOf(/*uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, */uopVSA, uopVSSA, uopVSUXA, uopVSOXA)) {
         val vsew = slot_uop.vd_eew(1,0)
         val vLen_ecnt = (vLen.U >> 3.U) >> slot_uop.vd_eew
         io.uop.v_split_ecnt := vLen_ecnt

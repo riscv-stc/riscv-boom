@@ -116,7 +116,7 @@ abstract class ExecutionUnit(
   val io = IO(new Bundle {
     val fu_types = Output(Bits(FUC_SZ.W))
 
-    val req      = Flipped(new DecoupledIO(new FuncUnitReq(dataWidth)))
+    val req      = Flipped(new DecoupledIO(new FuncUnitReq(dataWidth, hasVector)))
 
     val iresp    = if (writesIrf)   new DecoupledIO(new ExeUnitResp(xLen)) else null
     val fresp    = if (writesFrf)   new DecoupledIO(new ExeUnitResp(xLen)) else null
@@ -302,6 +302,7 @@ class ALUExeUnit(
     alu.io.req.bits.rs1_data := io.req.bits.rs1_data
     alu.io.req.bits.rs2_data := io.req.bits.rs2_data
     alu.io.req.bits.rs3_data := DontCare
+    alu.io.req.bits.rvm_data := DontCare
     alu.io.req.bits.pred_data := io.req.bits.pred_data
     alu.io.resp.ready := DontCare
     alu.io.brupdate := io.brupdate
@@ -506,6 +507,7 @@ class FPUExeUnit(
     fpu.io.req.bits.rs1_data := io.req.bits.rs1_data
     fpu.io.req.bits.rs2_data := io.req.bits.rs2_data
     fpu.io.req.bits.rs3_data := io.req.bits.rs3_data
+    fpu.io.req.bits.rvm_data := DontCare
     fpu.io.req.bits.pred_data := false.B
     fpu.io.req.bits.kill     := io.req.bits.kill
     fpu.io.fcsr_rm           := io.fcsr_rm
@@ -529,6 +531,7 @@ class FPUExeUnit(
     fdivsqrt.io.req.bits.rs1_data := io.req.bits.rs1_data
     fdivsqrt.io.req.bits.rs2_data := io.req.bits.rs2_data
     fdivsqrt.io.req.bits.rs3_data := io.req.bits.rs3_data
+    fdivsqrt.io.req.bits.rvm_data := DontCare
     fdivsqrt.io.req.bits.pred_data := false.B
     fdivsqrt.io.req.bits.kill     := io.req.bits.kill
     fdivsqrt.io.fcsr_rm           := io.fcsr_rm
@@ -670,8 +673,8 @@ class VecExeUnit(
   var valu: VecALUUnit = null
   if (hasAlu) {
     valu = Module(new VecALUUnit(numStages = numStages, dataWidth = vLen))
-    valu.io.req.valid := io.req.valid && io.req.bits.uop.fu_code === FU_ALU && 
-                        (io.req.bits.uop.uopc =/= uopVFMV_F_S) && (io.req.bits.uop.uopc =/= uopVMV_X_S)
+    valu.io.req.valid := io.req.valid && (io.req.bits.uop.fu_code & FU_ALU).orR //&& 
+                        //(io.req.bits.uop.uopc =/= uopVFMV_F_S) && (io.req.bits.uop.uopc =/= uopVMV_X_S)
     vec_fu_units += valu
   }
 
@@ -811,6 +814,7 @@ class VecExeUnit(
     f.io.req.bits.rs1_data  := io.req.bits.rs1_data
     f.io.req.bits.rs2_data  := io.req.bits.rs2_data
     f.io.req.bits.rs3_data  := io.req.bits.rs3_data
+    f.io.req.bits.rvm_data  := io.req.bits.rvm_data
     f.io.req.bits.pred_data := io.req.bits.pred_data
     f.io.req.bits.kill      := io.req.bits.kill
     f.io.brupdate           := io.brupdate
@@ -848,7 +852,7 @@ class VecExeUnit(
     vecToFPQueue.io.enq.valid := io.req.valid && (io.req.bits.uop.uopc === uopVFMV_F_S) && !io.req.bits.uop.v_eidx.orR()
     vecToFPQueue.io.enq.bits.uop := io.req.bits.uop
     /* @fixme: FIXME: fix elen 64bits currently, flexible sew need to be supported. */
-    assert(!vecToFPQueue.io.enq.valid || vsew != 0.U, "Unexpected FP vsew");
+    assert(!vecToFPQueue.io.enq.valid || vsew =/= 0.U, "Unexpected FP vsew");
     vecToFPQueue.io.enq.bits.uop.mem_size := vsew - 1.U //2.U
     vecToFPQueue.io.enq.bits.data := rs2_data_elem0
     vecToFPQueue.io.enq.bits.predicated := false.B

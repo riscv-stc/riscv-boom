@@ -112,14 +112,15 @@ class SupportedFuncUnits(
  *
  * @param dataWidth width of the data sent to the functional unit
  */
-class FuncUnitReq(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
+class FuncUnitReq(val dataWidth: Int, val vector: Boolean = false)(implicit p: Parameters) extends BoomBundle
   with HasBoomUOP
 {
   val numOperands = 3
 
   val rs1_data = UInt(dataWidth.W)
   val rs2_data = UInt(dataWidth.W)
-  val rs3_data = UInt(dataWidth.W) // only used for FMA units
+  val rs3_data = UInt(dataWidth.W) // used for FMA, vector units
+  val rvm_data = UInt(dataWidth.W)
   val pred_data = Bool()
 
   val kill = Bool() // kill everything
@@ -1270,6 +1271,21 @@ class VecALUUnit(
   val imm_xprlen = ImmGen(uop.imm_packed, uop.ctrl.imm_sel)
   val rs1_data = io.req.bits.rs1_data
   val rs2_data = io.req.bits.rs2_data
+  val rs3_data = io.req.bits.rs3_data
+  val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
+  val vl = uop.vconfig.vl
+  prestart := 0.U // FIXME: Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < csr_vstart).reverse)
+  //body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= csr_vstart && uop.v_eidx + b.U < vl).reverse)
+  body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= 0.U && uop.v_eidx + b.U < vl).reverse)
+  mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)),
+                                  Cat((0 until vLen/8).map(b => io.req.bits.rvm_data(uop.v_eidx + b.U)).reverse))
+  tail     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= vl).reverse)
+  inactive := prestart | body & ~mask | tail
+  val byte_inactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                            Seq(inactive,
+                                Cat((0 until vLenb/2).map(e => Fill(2, inactive(e))).reverse),
+                                Cat((0 until vLenb/4).map(e => Fill(4, inactive(e))).reverse),
+                                Cat((0 until vLenb/8).map(e => Fill(8, inactive(e))).reverse)))
 
   // operand 1 select
   val op1_data = WireInit(0.U(vLen.W))
@@ -1356,7 +1372,6 @@ class VecALUUnit(
   val r_pred = Reg(Vec(numStages, Bool()))
   val alu_out = WireInit(0.U(vLen.W))
   val v_eidx = uop.v_eidx
-  val vl = uop.vconfig.vl
 
   //val v_inactive = uop.is_rvv && !uop.v_active
   //val v_tail = (v_eidx >= vl)
@@ -1388,7 +1403,7 @@ class VecALUUnit(
                                              e64_adder_out.asUInt))
 
   r_val (0) := io.req.valid
-  r_data(0) := alu_out
+  r_data(0) := Cat((0 until vLenb).map(b => Mux(byte_inactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse)
   r_pred(0) := uop.is_sfb_shadow && io.req.bits.pred_data
   for (i <- 1 until numStages) {
     r_val(i)  := r_val(i-1)

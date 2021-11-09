@@ -415,32 +415,32 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.vs2_emul    := vs2_emul
     uop.vd_emul     := vd_emul
 
-    when (cs.is_rvv && !uop.v_unmasked) {
-      when (is_v_ls) {
-        uop.iq_type := IQT_MVEC
-        uop.fu_code := FU_MEMV
-      }
-      uop.frs3_en := true.B
-    }
+    //when (cs.is_rvv && !uop.v_unmasked) {
+      //when (is_v_ls) {
+        //uop.iq_type := IQT_MVEC
+        //uop.fu_code := FU_MEMV
+      //}
+      //uop.frs3_en := true.B
+    //}
 
     uop.v_seg_nf     := 1.U(4.W) + vseg_nf
     uop.v_idx_ls     := is_v_ls_index
     uop.v_eidx       := 0.U
 
-    when (cs.is_rvv && cs.uopc === uopVLM) {
-      uop.uopc := uopVL
+    //when (cs.is_rvv && cs.uopc === uopVLM) {
+      //uop.uopc := uopVL
       // make elements >= ceil(vl/8) inactive
-      uop.vconfig.vl := (io.csr_vconfig.vl + 7.U) >> 3.U
-    }
-    when (cs.is_rvv && cs.uopc === uopVSMA) {
-      uop.uopc := uopVSA
-    }
-    when (cs.is_rvv && cs.uopc === uopVLR) {
-      uop.uopc := uopVL
-    }
-    when (cs.is_rvv && cs.uopc === uopVSR) {
-      uop.uopc := uopVSA
-    }
+      //uop.vconfig.vl := (io.csr_vconfig.vl + 7.U) >> 3.U
+    //}
+    //when (cs.is_rvv && cs.uopc === uopVSMA) {
+      //uop.uopc := uopVSA
+    //}
+    ////when (cs.is_rvv && cs.uopc === uopVLR) {
+      //uop.uopc := uopVL
+    //}
+    //when (cs.is_rvv && cs.uopc === uopVSR) {
+      //uop.uopc := uopVSA
+    //}
 
     uop.v_xls_offset := 0.U
 

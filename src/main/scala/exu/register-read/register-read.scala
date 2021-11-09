@@ -84,7 +84,7 @@ class RegisterRead(
   val exe_reg_rs2_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
   val exe_reg_rs3_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
   val exe_reg_rvm_data = if (vector) Reg(Vec(issueWidth, Bool())) else null
-  val exe_reg_vmaskInsn_rvm_data = if (vector) Reg(Vec(issueWidth, Bits(registerWidth.W))) else null
+  //val exe_reg_vmaskInsn_rvm_data = if (vector) Reg(Vec(issueWidth, Bits(registerWidth.W))) else null
   val exe_reg_pred_data = Reg(Vec(issueWidth, Bool()))
 
   //-------------------------------------------------------------
@@ -131,6 +131,7 @@ class RegisterRead(
     val rs1_addr = WireInit(io.iss_uops(w).prs1)
     val rs2_addr = WireInit(io.iss_uops(w).prs2)
     val rs3_addr = WireInit(io.iss_uops(w).prs3)
+    val rvm_addr = if (vector) WireInit(io.iss_uops(w).pvm) else 0.U
     val pred_addr = io.iss_uops(w).ppred
 
     if (vector) {
@@ -140,14 +141,17 @@ class RegisterRead(
       rs1_addr := io.iss_uops(w).pvs1(rs1_sel).bits
       rs2_addr := io.iss_uops(w).pvs2(rs2_sel).bits
       rs3_addr := io.iss_uops(w).stale_pvd(rs3_sel).bits
+      rvm_addr := io.iss_uops(w).pvm
     }
 
     if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := rs1_addr
     if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := rs2_addr
     if (numReadPorts > 2) io.rf_read_ports(idx+2).addr := rs3_addr
+    if (numReadPorts > 3 && vector) io.rf_read_ports(idx+3).addr := rvm_addr
     if (numReadPorts > 0) rrd_rs1_data(w) := Mux(RegNext(rs1_addr === 0.U), 0.U, io.rf_read_ports(idx+0).data)
     if (numReadPorts > 1) rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, io.rf_read_ports(idx+1).data)
     if (numReadPorts > 2) rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, io.rf_read_ports(idx+2).data)
+    if (numReadPorts > 3 && vector) rrd_rvm_data(w) := Mux(RegNext(rvm_addr === 0.U), 0.U, io.rf_read_ports(idx+3).data)
 
     if (enableSFBOpt) {
       io.prf_read_ports(w).addr := pred_addr
@@ -224,7 +228,7 @@ class RegisterRead(
     if (numReadPorts > 1) exe_reg_rs2_data(w) := bypassed_rs2_data(w)
     if (numReadPorts > 2) exe_reg_rs3_data(w) := rrd_rs3_data(w)
     if (numReadPorts > 3 && vector) exe_reg_rvm_data(w) := rrd_rvm_data(w)
-    if (numReadPorts > 3 && vector) exe_reg_vmaskInsn_rvm_data(w) := rrd_vmaskInsn_rvm_data(w)
+    //if (numReadPorts > 3 && vector) exe_reg_vmaskInsn_rvm_data(w) := rrd_vmaskInsn_rvm_data(w)
     if (enableSFBOpt)     exe_reg_pred_data(w) := bypassed_pred_data(w)
     // ASSUMPTION: rs3 is FPU which is NOT bypassed
   }
@@ -241,6 +245,7 @@ class RegisterRead(
     if (numReadPorts > 0) io.exe_reqs(w).bits.rs1_data := exe_reg_rs1_data(w)
     if (numReadPorts > 1) io.exe_reqs(w).bits.rs2_data := exe_reg_rs2_data(w)
     if (numReadPorts > 2) io.exe_reqs(w).bits.rs3_data := exe_reg_rs3_data(w)
+    if (numReadPorts > 3 && vector) io.exe_reqs(w).bits.rvm_data := exe_reg_rvm_data(w)
     if (enableSFBOpt)     io.exe_reqs(w).bits.pred_data := exe_reg_pred_data(w)
 
     if (usingVector) {
@@ -259,65 +264,66 @@ class RegisterRead(
         io.fpupdate(w).bits.uop := exe_reg_uops(w)
         io.fpupdate(w).bits.data := ieee(exe_reg_rs1_data(w))
       } else if (vector) {
-        val uses_ldq   = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_ldq
-        val uses_stq   = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_stq
+        //val uses_ldq   = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_ldq
+        //val uses_stq   = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_stq
+        val is_load    = exe_reg_uops(w).ctrl.is_load
+        val is_sta     = exe_reg_uops(w).ctrl.is_sta
         val is_masked  = !exe_reg_uops(w).v_unmasked
         val is_idx_ls  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).v_idx_ls
         val v_eidx     = exe_reg_uops(w).v_eidx
         val vl         = exe_reg_uops(w).vconfig.vl
-        val vmlogic    = exe_reg_uops(w).ctrl.is_vmlogic
-        val is_vmask_cnt_m     = exe_reg_uops(w).uopc.isOneOf(uopVPOPC, uopVFIRST)
-        val is_vmask_set_m     = exe_reg_uops(w).uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
-        val is_vmask_iota_m    = exe_reg_uops(w).uopc.isOneOf(uopVIOTA)
-        val is_vmaskInsn       = vmlogic || is_vmask_cnt_m || is_vmask_set_m
-        val byteWidth          = 3.U
-        val vsew64bit          = 3.U
-        val vmaskInsn_vl       = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
-        val vmaskInsn_active   = v_eidx < vmaskInsn_vl
+        //val vmlogic    = exe_reg_uops(w).ctrl.is_vmlogic
+        //val is_vmask_cnt_m     = exe_reg_uops(w).uopc.isOneOf(uopVPOPC, uopVFIRST)
+        //val is_vmask_set_m     = exe_reg_uops(w).uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
+        //val is_vmask_iota_m    = exe_reg_uops(w).uopc.isOneOf(uopVIOTA)
+        //val is_vmaskInsn       = vmlogic || is_vmask_cnt_m || is_vmask_set_m
+        //val byteWidth          = 3.U
+        //val vsew64bit          = 3.U
+        //val vmaskInsn_vl       = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
+        //val vmaskInsn_active   = v_eidx < vmaskInsn_vl
         //val vslideup           = exe_reg_uops(w).uopc === uopVSLIDEUP
         //val vcompress          = exe_reg_uops(w).uopc === uopVCOMPRESS
         //val perm_idx           = exe_reg_uops(w).v_perm_idx
-        val is_active          = Mux(is_vmaskInsn, vmaskInsn_active,
+        val is_active          = Mux(is_masked, exe_reg_rvm_data(w), true.B) && v_eidx < vl && v_eidx >= io.csr_vstart
+                                 //Mux(is_vmaskInsn, vmaskInsn_active,
                                  //Mux(vslideup,  exe_reg_uops(w).v_eidx >= exe_reg_uops(w).v_scalar_data && (exe_reg_rvm_data(w) || !is_masked),
                                  //Mux(is_masked || vcompress, exe_reg_rvm_data(w), true.B))) && Mux(vcompress, perm_idx, v_eidx) < vl && v_eidx >= io.csr_vstart
-                                 Mux(is_masked, exe_reg_rvm_data(w), true.B)) && v_eidx < vl && v_eidx >= io.csr_vstart
-        val vmaskInsn_rs2_data = Mux(is_masked, exe_reg_rs2_data(w) & exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs2_data(w))
+        //val vmaskInsn_rs2_data = Mux(is_masked, exe_reg_rs2_data(w) & exe_reg_vmaskInsn_rvm_data(w), exe_reg_rs2_data(w))
 
-        val vshift  = exe_reg_uops(w).uopc.isOneOf(uopVSLL, uopVSRL, uopVSRA)
-        val vs2_sew = exe_reg_uops(w).vs2_eew
-        val vshift_rs1_data = Mux(vs2_sew(1,0) === 3.U, exe_reg_rs1_data(w)(5,0),
-                              Mux(vs2_sew(1,0) === 2.U, exe_reg_rs1_data(w)(4,0),
-                              Mux(vs2_sew(1,0) === 1.U, exe_reg_rs1_data(w)(3,0), exe_reg_rs1_data(w)(2,0))))
+        //val vshift  = exe_reg_uops(w).uopc.isOneOf(uopVSLL, uopVSRL, uopVSRA)
+        //val vs2_sew = exe_reg_uops(w).vs2_eew
+        //val vshift_rs1_data = Mux(vs2_sew(1,0) === 3.U, exe_reg_rs1_data(w)(5,0),
+        //                      Mux(vs2_sew(1,0) === 2.U, exe_reg_rs1_data(w)(4,0),
+        //                      Mux(vs2_sew(1,0) === 1.U, exe_reg_rs1_data(w)(3,0), exe_reg_rs1_data(w)(2,0))))
 
-        io.exe_reqs(w).bits.rs2_data    := Mux(is_vmask_cnt_m | is_vmask_set_m, vmaskInsn_rs2_data, exe_reg_rs2_data(w))
-        io.exe_reqs(w).bits.rs1_data    := Mux(is_vmask_set_m | is_vmask_iota_m, exe_reg_vmaskInsn_rvm_data(w),
-                                           Mux(vshift, vshift_rs1_data, exe_reg_rs1_data(w)))
+        //io.exe_reqs(w).bits.rs1_data    := Mux(is_vmask_set_m | is_vmask_iota_m, exe_reg_vmaskInsn_rvm_data(w),
+        //                                   Mux(vshift, vshift_rs1_data, exe_reg_rs1_data(w)))
+        //io.exe_reqs(w).bits.rs2_data    := Mux(is_vmask_cnt_m | is_vmask_set_m, vmaskInsn_rs2_data, exe_reg_rs2_data(w))
 
         //val is_perm_fdbk       = exe_reg_uops(w).uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS) && exe_reg_uops(w).v_perm_busy
         //io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && is_active) && (!is_perm_fdbk || vcompress && (!exe_reg_uops(w).v_perm_busy || exe_reg_rvm_data(w)))
-        io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && is_active)
-        //io.vmupdate(w).valid    := exe_reg_valids(w) && ((uses_stq || uses_ldq) && (is_masked || is_idx_ls))
-        io.vmupdate(w).valid    := false.B // FIXME
-        val vmove: Bool = VecInit(Seq(exe_reg_uops(w).uopc === uopVFMV_S_F,
-          exe_reg_uops(w).uopc === uopVFMV_F_S,
-          exe_reg_uops(w).uopc === uopVMV_X_S,
-          exe_reg_uops(w).uopc === uopVMV_S_X
-        )).asUInt().orR()
+        io.exe_reqs(w).valid    := exe_reg_valids(w) && (!is_sta || is_active)
+        //val vmove: Bool = VecInit(Seq(exe_reg_uops(w).uopc === uopVFMV_S_F,
+          //exe_reg_uops(w).uopc === uopVFMV_F_S,
+          //exe_reg_uops(w).uopc === uopVMV_X_S,
+          //exe_reg_uops(w).uopc === uopVMV_S_X
+        //)).asUInt().orR()
 
-        io.vmupdate(w).bits                 := exe_reg_uops(w)
+        io.vmupdate(w).valid  := exe_reg_valids(w) && ((is_sta || is_load) && (is_masked || is_idx_ls))
+        io.vmupdate(w).bits   := exe_reg_uops(w)
         io.vmupdate(w).bits.v_active        := is_active
         io.vmupdate(w).bits.v_xls_offset    := exe_reg_rs2_data(w)
         io.vecUpdate(w).valid               := false.B // FIXME: exe_reg_valids(w) && is_perm_fdbk
         io.vecUpdate(w).bits.uop            := exe_reg_uops(w)
-        io.vecUpdate(w).bits.uop.v_active   := exe_reg_rvm_data(w) && (v_eidx < vl)
+        io.vecUpdate(w).bits.uop.v_active   := false.B //exe_reg_rvm_data(w) && (v_eidx < vl)
         io.vecUpdate(w).bits.uop.v_perm_idx := 0.U //perm_idx + (v_eidx < vl)
-        io.vecUpdate(w).bits.data           := exe_reg_rs1_data(w)
-        io.exe_reqs(w).bits.uop.v_active := Mux(vmove, !v_eidx.orR(), is_active)
-        val vdiv_sqrt = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVFDIV, uopVFRDIV, uopVFSQRT, uopVDIV, uopVDIVU, uopVREM, uopVREMU)
-        val is_vmx = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVSA, uopVSMA, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA, uopVSR)
+        io.vecUpdate(w).bits.data           := 0.U //exe_reg_rs1_data(w)
+        io.exe_reqs(w).bits.uop.v_active    := is_active //Mux(vmove, !v_eidx.orR(), is_active)
+        //val vdiv_sqrt = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVFDIV, uopVFRDIV, uopVFSQRT, uopVDIV, uopVDIVU, uopVREM, uopVREMU)
+        //val is_vmx = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVSA, uopVSMA, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA, uopVSR)
         // forward inactive ops to ALU
-        val withCarry  = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVADC, uopVSBC, uopVMADC, uopVMSBC)
-        val vmscmp     = io.exe_reqs(w).bits.uop.ctrl.is_vmscmp
+        //val withCarry  = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVADC, uopVSBC, uopVMADC, uopVMSBC)
+        //val vmscmp     = io.exe_reqs(w).bits.uop.ctrl.is_vmscmp
         //when ((io.exe_reqs(w).bits.uop.is_rvv && !is_active && !vdiv_sqrt && !is_vmx && !withCarry && !vmscmp && !is_vmask_iota_m) || (vmove && v_eidx.orR())) {
         //  io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
         //  io.exe_reqs(w).bits.uop.ctrl.op_fcn := freechips.rocketchip.rocket.ALU.FN_ADD

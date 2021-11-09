@@ -901,6 +901,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       val dis_total_ecnt  = Mux(dis_uops(w).uses_stq, dis_uops(w).vconfig.vl, dis_uops(w).vconfig.vtype.vlMax)
       val dis_split_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, 1.U, dis_total_ecnt)
       val elem_last       = dis_split_eidx + dis_split_ecnt >= dis_total_ecnt
+      val vLen_ecnt       = (vLen.U >> 3.U) >> dis_uops(w).vd_eew
+      val dis_undisturb   = dis_uops(w).vconfig.vl < dis_uops(w).vconfig.vtype.vlMax ||
+                            dis_uops(w).vconfig.vtype.vlMax < vLen_ecnt
 
       when (io.ifu.redirect_flush) {
         dis_split_eidx := 0.U
@@ -941,6 +944,12 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dis_uops(w).v_split_first := dis_split_eidx === 0.U
       dis_uops(w).v_split_last  := dis_split_last(w)
       dis_uops(w).v_split_ecnt  := dis_split_ecnt
+      // for partial load, shoot first split to vector pipe to get undisturb part
+      when (dis_uops(w).is_rvv && dis_uops(w).uses_ldq && dis_split_eidx === 0.U && dis_undisturb) {
+        dis_uops(w).iq_type := IQT_MVEC
+        dis_uops(w).fu_code := FU_MEM | FU_ALU
+      }
+      // TODO: for masked load/store, dispatch every split to vector pipe to get mask update
 
       v_rename_stage.io.dis_fire_first(w) := dis_fire(w) && dis_uops(w).v_split_first
     }
