@@ -90,7 +90,7 @@ class IssueUnitIO(
   val vmupdate         = if (usingVector && !vector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
   val intupdate        = if (vector) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
   val fpupdate         = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
-  val vecUpdate        = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
+  //val vecUpdate        = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
   val vbusy_status     = if (vector) Input(UInt(numVecPhysRegs.W)) else null
   val flush_pipeline   = Input(Bool())
   val ld_miss          = Input(Bool())
@@ -179,33 +179,25 @@ abstract class IssueUnit(
           dis_uops(w).fu_code := FU_FPU
         }
       }
-    } else if (iqType == IQT_VEC.litValue) {
+    //} else if (iqType == IQT_VEC.litValue) {
+    } else if (iqType == IQT_VMX.litValue) {
       // VEC "StoreAddrGen" is really storeDataGen, and rs1 is the integer address register
       // VEC Load that arrives here are tail splits, prs3 holds stale register name, read in RRD
       when (dis_uops(w).uopc.isOneOf(uopVL, uopVLFF, uopVLS)) {
         //dis_uops(w).lrs1_rtype := RT_FIX
-        dis_uops(w).prs1_busy  := 0.U
-        dis_uops(w).prs2_busy  := 0.U
+        dis_uops(w).prs1_busy   := 0.U
+        dis_uops(w).prs2_busy   := 0.U
         // NOTE: for unit-stride load, do undisturb load
-        dis_uops(w).v_split_ecnt := (vLenb.U >> dis_uops(w).vd_eew) * nrVecGroup(dis_uops(w).vd_emul, dis_uops(w).v_seg_nf)
-        dis_uops(w).v_eidx     := dis_uops(w).vconfig.vl
-        dis_uops(w).uses_ldq   := false.B
+        dis_uops(w).v_split_ecnt:= (vLenb.U >> dis_uops(w).vd_eew) * nrVecGroup(dis_uops(w).vd_emul, dis_uops(w).v_seg_nf)
+        dis_uops(w).v_eidx      := dis_uops(w).vconfig.vl
+        dis_uops(w).fu_code     := FU_VMX
+        dis_uops(w).uses_ldq    := false.B
       } .elsewhen (dis_uops(w).uopc.isOneOf(uopVSA, uopVSSA)) {
-        dis_uops(w).prs1_busy  := 0.U
-        dis_uops(w).prs2_busy  := 0.U
+        dis_uops(w).prs1_busy   := 0.U
+        dis_uops(w).prs2_busy   := 0.U
       } .elsewhen (dis_uops(w).uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
-        dis_uops(w).prs1_busy  := 0.U
-      //} .elsewhen (dis_uops(w).uopc.isOneOf(uopVSLIDE1UP, uopVSLIDE1DOWN)) {
-        //dis_uops(w).fu_code    := FU_ALU
-      //} .elsewhen (dis_uops(w).rt(RD, isReduceV) && dis_uops(w).v_eidx =/= 0.U) {
-        //dis_uops(w).prs1_busy  := ~(0.U(vLenb.W))
+        dis_uops(w).prs1_busy   := 0.U
       }
-      //if (usingVector) {
-        //dis_uops(w).v_perm_busy  := dis_uops(w).uopc===uopVRGATHER && dis_uops(w).rt(RS1, isVector) ||
-                                    //dis_uops(w).uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
-        //dis_uops(w).v_perm_wait  := Mux(dis_uops(w).uopc === uopVCOMPRESS, dis_uops(w).v_eidx =/= 0.U, false.B)
-        //dis_uops(w).v_perm_idx   := 0.U
-      //}
     }
 
     if (iqType != IQT_INT.litValue) {
@@ -235,7 +227,7 @@ abstract class IssueUnit(
         issue_slots(i).vbusy_status   := io.vbusy_status
         issue_slots(i).intupdate      := io.intupdate
         issue_slots(i).fpupdate       := io.fpupdate
-        issue_slots(i).vecUpdate      := io.vecUpdate
+        //issue_slots(i).vecUpdate      := io.vecUpdate
       } else {
         issue_slots(i).vmupdate       := io.vmupdate
       }

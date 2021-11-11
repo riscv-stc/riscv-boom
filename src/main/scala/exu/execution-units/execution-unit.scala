@@ -619,8 +619,8 @@ class VecExeUnit(
   extends ExecutionUnit(
     readsVrf         = true,
     writesVrf        = true,
-    writesIrf        = true,
-    writesFrf        = true,
+    writesIrf        = hasAlu,
+    writesFrf        = hasAlu,
     numBypassStages  = if (hasMacc) 3 else 1,
     dataWidth        = p(tile.TileKey).core.vLen,
     bypassable       = false,
@@ -646,7 +646,7 @@ class VecExeUnit(
     (if (hasFpu)  BoomCoreStringPrefix(" - FPU/FPIU (Latency: " + dfmaLatency + ")") else "") +
     (if (hasDiv)  BoomCoreStringPrefix(" - FDIV/FR7") else "")
 
-  val numStages = dfmaLatency
+  val numStages = if (hasAlu) dfmaLatency else 1
 
   override def toString: String = out_str.toString
 
@@ -713,6 +713,7 @@ class VecExeUnit(
   val fpu_resp_val = WireInit(false.B)
   val fpu_resp_fflags = Wire(new ValidIO(new FFlagsResp()))
   fpu_resp_fflags.valid := false.B
+  fpu_resp_fflags.bits  := DontCare
   if (hasFpu) {
     fpu = Module(new FPUUnit(vector = true))
     fpu.io.req.valid         := io.req.valid &&
@@ -739,17 +740,15 @@ class VecExeUnit(
   }
 
   // VMX Unit -------------------------------
+  // It is the only FU in VMX pipe
   var vmx: VMXUnit = null
   if (hasVMX) {
-    vmx = Module(new VMXUnit(eLen))
-    vmx.suggestName("vmx")
+    vmx = Module(new VMXUnit(vLen))
+    vmx.suggestName("vmx_unit")
     vmx.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMX)
-    vmx.io.req.bits.rs3_data := VDataSel(io.req.bits.rs3_data, io.req.bits.uop.vd_eew,
-                                                               io.req.bits.uop.v_eidx,
-                                                               vLen, eLen)
 
-    // share write port with the pipelined units
-    vmx.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
+    // separate write port
+    vmx.io.resp.ready := io.vresp.ready
     vmx_busy := !vmx.io.req.ready
 
     vec_fu_units += vmx
@@ -822,13 +821,6 @@ class VecExeUnit(
       f.io.resp.ready := io.vresp.ready
   })
 
-  // VMX Unit rs3_data
-  if (hasVMX) {
-    vmx.io.req.bits.rs3_data := VDataSel(io.req.bits.rs3_data, io.req.bits.uop.vd_eew,
-                                                               io.req.bits.uop.v_eidx,
-                                                               vLen, eLen)
-  }
-
   // Outputs (Write Port #0)  ---------------
   if (writesVrf) {
     val is_not_vpopc = vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVPOPC).foldLeft(true.B)(_ && _)
@@ -863,7 +855,7 @@ class VecExeUnit(
     assert(!(vecToFPQueue.io.enq.valid && !vecToFPQueue.io.enq.ready))
   }
 
-  if (writesIrf){
+  if (writesIrf && hasAlu){
     val vecToIntQueue = Module(new BranchKillableQueue(new ExeUnitResp(eLen), numStages))
 
     val vmv_valid = io.req.valid && (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.v_eidx.orR()

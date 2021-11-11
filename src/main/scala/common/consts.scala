@@ -54,16 +54,17 @@ trait BOOMDebugConstants
  */
 trait IQType
 {
-  val IQT_SZ  = 4
-  val IQT_INT = 1.U(IQT_SZ.W)
-  val IQT_MEM = 2.U(IQT_SZ.W)
-  val IQT_FP  = 4.U(IQT_SZ.W)
-  val IQT_VEC = 8.U(IQT_SZ.W)
+  val IQT_SZ  = 5
+  val IQT_INT = 0x1.U(IQT_SZ.W)
+  val IQT_MEM = 0x2.U(IQT_SZ.W)
+  val IQT_FP  = 0x4.U(IQT_SZ.W)
+  val IQT_VEC = 0x8.U(IQT_SZ.W)
+  val IQT_VMX = 0x10.U(IQT_SZ.W)
 
-  val IQT_MFP = 6.U(IQT_SZ.W)
-  val IQT_MVEC= 0xA.U(IQT_SZ.W)
+  val IQT_MFP = 0x6.U(IQT_SZ.W)
   val IQT_IVEC= 0x9.U(IQT_SZ.W)
   val IQT_FVEC= 0xC.U(IQT_SZ.W)
+  val IQT_MVMX= 0x12.U(IQT_SZ.W)
 }
 
 

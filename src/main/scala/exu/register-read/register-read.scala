@@ -64,8 +64,8 @@ class RegisterRead(
 
     // send micro-ops to the execution pipelines
     val exe_reqs = Vec(issueWidth, (new DecoupledIO(new FuncUnitReq(registerWidth))))
-    val vmupdate = if (vector) Output(Vec(issueWidth, Valid(new MicroOp))) else null
-    val vecUpdate = if (vector) Output(Vec(issueWidth, Valid(new ExeUnitResp(eLen)))) else null
+    val vmupdate = if (vector) Output(Vec(1, Valid(new MicroOp))) else null
+    //val vecUpdate = if (vector) Output(Vec(1, Valid(new ExeUnitResp(eLen)))) else null
     val intupdate= if (usingVector && !vector && !float) Output(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
     val fpupdate = if (usingVector && float) Output(Vec(issueWidth, Valid(new ExeUnitResp(eLen)))) else null
     require(!(float && vector))
@@ -144,14 +144,23 @@ class RegisterRead(
       rvm_addr := io.iss_uops(w).pvm
     }
 
-    if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := rs1_addr
-    if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := rs2_addr
-    if (numReadPorts > 2) io.rf_read_ports(idx+2).addr := rs3_addr
-    if (numReadPorts > 3 && vector) io.rf_read_ports(idx+3).addr := rvm_addr
-    if (numReadPorts > 0) rrd_rs1_data(w) := Mux(RegNext(rs1_addr === 0.U), 0.U, io.rf_read_ports(idx+0).data)
-    if (numReadPorts > 1) rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, io.rf_read_ports(idx+1).data)
-    if (numReadPorts > 2) rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, io.rf_read_ports(idx+2).data)
-    if (numReadPorts > 3 && vector) rrd_rvm_data(w) := Mux(RegNext(rvm_addr === 0.U), 0.U, io.rf_read_ports(idx+3).data)
+    if (vector) {
+      if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := rvm_addr
+      if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := rs3_addr
+      if (numReadPorts > 2) io.rf_read_ports(idx+2).addr := rs2_addr
+      if (numReadPorts > 3) io.rf_read_ports(idx+3).addr := rs1_addr
+      if (numReadPorts > 0) rrd_rvm_data(w) := Mux(RegNext(rvm_addr === 0.U), 0.U, io.rf_read_ports(idx+0).data)
+      if (numReadPorts > 1) rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, io.rf_read_ports(idx+1).data)
+      if (numReadPorts > 2) rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, io.rf_read_ports(idx+2).data)
+      if (numReadPorts > 3) rrd_rs1_data(w) := Mux(RegNext(rs1_addr === 0.U), 0.U, io.rf_read_ports(idx+3).data)
+    } else {
+      if (numReadPorts > 0) io.rf_read_ports(idx+0).addr := rs1_addr
+      if (numReadPorts > 1) io.rf_read_ports(idx+1).addr := rs2_addr
+      if (numReadPorts > 2) io.rf_read_ports(idx+2).addr := rs3_addr
+      if (numReadPorts > 0) rrd_rs1_data(w) := Mux(RegNext(rs1_addr === 0.U), 0.U, io.rf_read_ports(idx+0).data)
+      if (numReadPorts > 1) rrd_rs2_data(w) := Mux(RegNext(rs2_addr === 0.U), 0.U, io.rf_read_ports(idx+1).data)
+      if (numReadPorts > 2) rrd_rs3_data(w) := Mux(RegNext(rs3_addr === 0.U), 0.U, io.rf_read_ports(idx+2).data)
+    }
 
     if (enableSFBOpt) {
       io.prf_read_ports(w).addr := pred_addr
@@ -224,10 +233,16 @@ class RegisterRead(
 
   for (w <- 0 until issueWidth) {
     val numReadPorts = numReadPortsArray(w)
-    if (numReadPorts > 0) exe_reg_rs1_data(w) := bypassed_rs1_data(w)
-    if (numReadPorts > 1) exe_reg_rs2_data(w) := bypassed_rs2_data(w)
-    if (numReadPorts > 2) exe_reg_rs3_data(w) := rrd_rs3_data(w)
-    if (numReadPorts > 3 && vector) exe_reg_rvm_data(w) := rrd_rvm_data(w)
+    if (vector) {
+      if (numReadPorts > 0) exe_reg_rvm_data(w) := rrd_rvm_data(w)
+      if (numReadPorts > 1) exe_reg_rs3_data(w) := rrd_rs3_data(w)
+      if (numReadPorts > 2) exe_reg_rs2_data(w) := rrd_rs2_data(w)
+      if (numReadPorts > 3) exe_reg_rs1_data(w) := rrd_rs1_data(w)
+    } else {
+      if (numReadPorts > 0) exe_reg_rs1_data(w) := bypassed_rs1_data(w)
+      if (numReadPorts > 1) exe_reg_rs2_data(w) := bypassed_rs2_data(w)
+      if (numReadPorts > 2) exe_reg_rs3_data(w) := rrd_rs3_data(w)
+    }
     //if (numReadPorts > 3 && vector) exe_reg_vmaskInsn_rvm_data(w) := rrd_vmaskInsn_rvm_data(w)
     if (enableSFBOpt)     exe_reg_pred_data(w) := bypassed_pred_data(w)
     // ASSUMPTION: rs3 is FPU which is NOT bypassed
@@ -242,10 +257,16 @@ class RegisterRead(
 
     io.exe_reqs(w).valid    := exe_reg_valids(w)
     io.exe_reqs(w).bits.uop := exe_reg_uops(w)
-    if (numReadPorts > 0) io.exe_reqs(w).bits.rs1_data := exe_reg_rs1_data(w)
-    if (numReadPorts > 1) io.exe_reqs(w).bits.rs2_data := exe_reg_rs2_data(w)
-    if (numReadPorts > 2) io.exe_reqs(w).bits.rs3_data := exe_reg_rs3_data(w)
-    if (numReadPorts > 3 && vector) io.exe_reqs(w).bits.rvm_data := exe_reg_rvm_data(w)
+    if (vector) {
+      if (numReadPorts > 0) io.exe_reqs(w).bits.rvm_data := exe_reg_rvm_data(w)
+      if (numReadPorts > 1) io.exe_reqs(w).bits.rs3_data := exe_reg_rs3_data(w)
+      if (numReadPorts > 2) io.exe_reqs(w).bits.rs2_data := exe_reg_rs2_data(w)
+      if (numReadPorts > 3) io.exe_reqs(w).bits.rs1_data := exe_reg_rs1_data(w)
+    } else {
+      if (numReadPorts > 0) io.exe_reqs(w).bits.rs1_data := exe_reg_rs1_data(w)
+      if (numReadPorts > 1) io.exe_reqs(w).bits.rs2_data := exe_reg_rs2_data(w)
+      if (numReadPorts > 2) io.exe_reqs(w).bits.rs3_data := exe_reg_rs3_data(w)
+    }
     if (enableSFBOpt)     io.exe_reqs(w).bits.pred_data := exe_reg_pred_data(w)
 
     if (usingVector) {
@@ -309,15 +330,17 @@ class RegisterRead(
           //exe_reg_uops(w).uopc === uopVMV_S_X
         //)).asUInt().orR()
 
-        io.vmupdate(w).valid  := exe_reg_valids(w) && ((is_sta || is_load) && (is_masked || is_idx_ls))
-        io.vmupdate(w).bits   := exe_reg_uops(w)
-        io.vmupdate(w).bits.v_active        := is_active
-        io.vmupdate(w).bits.v_xls_offset    := exe_reg_rs2_data(w)
-        io.vecUpdate(w).valid               := false.B // FIXME: exe_reg_valids(w) && is_perm_fdbk
-        io.vecUpdate(w).bits.uop            := exe_reg_uops(w)
-        io.vecUpdate(w).bits.uop.v_active   := false.B //exe_reg_rvm_data(w) && (v_eidx < vl)
-        io.vecUpdate(w).bits.uop.v_perm_idx := 0.U //perm_idx + (v_eidx < vl)
-        io.vecUpdate(w).bits.data           := 0.U //exe_reg_rs1_data(w)
+        if (w >= vecWidth) {
+          io.vmupdate(w-vecWidth).valid  := exe_reg_valids(w) && ((is_sta || is_load) && (is_masked || is_idx_ls))
+          io.vmupdate(w-vecWidth).bits   := exe_reg_uops(w)
+          io.vmupdate(w-vecWidth).bits.v_active        := is_active
+          io.vmupdate(w-vecWidth).bits.v_xls_offset    := exe_reg_rs2_data(w)
+        }
+        //io.vecUpdate(w).valid               := false.B // FIXME: exe_reg_valids(w) && is_perm_fdbk
+        //io.vecUpdate(w).bits.uop            := exe_reg_uops(w)
+        //io.vecUpdate(w).bits.uop.v_active   := false.B //exe_reg_rvm_data(w) && (v_eidx < vl)
+        //io.vecUpdate(w).bits.uop.v_perm_idx := 0.U //perm_idx + (v_eidx < vl)
+        //io.vecUpdate(w).bits.data           := 0.U //exe_reg_rs1_data(w)
         io.exe_reqs(w).bits.uop.v_active    := is_active //Mux(vmove, !v_eidx.orR(), is_active)
         //val vdiv_sqrt = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVFDIV, uopVFRDIV, uopVFSQRT, uopVDIV, uopVDIVU, uopVREM, uopVREMU)
         //val is_vmx = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVSA, uopVSMA, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA, uopVSR)

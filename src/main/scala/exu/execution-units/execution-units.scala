@@ -141,17 +141,24 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(impl
                                              hasFpiu = (w==0)))
       exe_units += fpu_exe_unit
     }
-  } else {
-    // vector
+  } else { // vector
     val vec_width = issueParams.find(_.iqType == IQT_VEC.litValue).get.issueWidth
     for (w <- 0 until vec_width) {
-      val hasVMX = (w == 0)
-      val vec_exe_unit = Module(new VecExeUnit(hasVMX = hasVMX, 
-                                               hasIfpu = true, 
-                                               hasFpu = true, 
+      val vec_exe_unit = Module(new VecExeUnit(hasVMX = false,
+                                               hasIfpu = true,
+                                               hasFpu = true,
                                                hasFdiv = usingFDivSqrt))
+      vec_exe_unit.suggestName("vec_exe_unit")
       exe_units += vec_exe_unit
     }
+
+    val vmx_exe_unit = Module(new VecExeUnit(hasVMX = true,
+                                             hasAlu = false,
+                                             hasMacc = false,
+                                             hasVMaskUnit = false,
+                                             hasDiv = false))
+    vmx_exe_unit.suggestName("vmx_exe_unit")
+    exe_units += vmx_exe_unit
   }
 
   val exeUnitsStr = new StringBuilder
@@ -193,7 +200,7 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(impl
   val numLlFrfWritePorts  = exe_units.count(_.writesLlFrf)
 
   val numVrfReaders       = exe_units.count(_.readsVrf)
-  val numVrfReadPorts     = exe_units.count(_.readsVrf) * 4
+  val numVrfReadPorts     = exe_units.count(_.readsVrf) * 4 - exe_units.count(_.hasVMX) * 2
   val numVrfWritePorts    = exe_units.count(_.writesVrf)
   val numLlVrfWritePorts  = exe_units.count(_.writesLlVrf)
 

@@ -946,8 +946,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dis_uops(w).v_split_ecnt  := dis_split_ecnt
       // for partial load, shoot first split to vector pipe to get undisturb part
       when (dis_uops(w).is_rvv && dis_uops(w).uses_ldq && dis_split_eidx === 0.U && dis_undisturb) {
-        dis_uops(w).iq_type := IQT_MVEC
-        dis_uops(w).fu_code := FU_MEM | FU_ALU
+        dis_uops(w).iq_type := IQT_MVMX
       }
       // TODO: for masked load/store, dispatch every split to vector pipe to get mask update
 
@@ -1028,7 +1027,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // Backpressure through dispatcher if necessary
   for (i <- 0 until issueParams.size) {
     if (issueParams(i).iqType == IQT_VEC.litValue) {
-       v_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
+       v_pipeline.io.vec_dis_uops <> dispatcher.io.dis_uops(i)
+     } else if (issueParams(i).iqType == IQT_VMX.litValue) {
+       v_pipeline.io.vmx_dis_uops <> dispatcher.io.dis_uops(i)
     } else if (issueParams(i).iqType == IQT_FP.litValue) {
        fp_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
     } else {

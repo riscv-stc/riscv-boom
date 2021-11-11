@@ -1187,10 +1187,11 @@ class VMXUnit(dataWidth: Int)(implicit p: Parameters) extends FunctionalUnit(
     numBypassStages = 0,
     dataWidth = dataWidth)
 {
+  require (numStages > 1)
   // buffer up results since we share write-port on integer regfile.
   val queue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth), entries = numStages))
   // enque
-  io.req.ready                   := queue.io.enq.ready && (queue.io.count < (numStages-2).asUInt)
+  io.req.ready                   := queue.io.enq.ready && (queue.io.count < (numStages-1).U)
   queue.io.enq.valid             := io.req.valid && !IsKilledByBranch(io.brupdate, io.req.bits.uop) && !io.req.bits.kill
   queue.io.enq.bits.uop          := io.req.bits.uop
   queue.io.enq.bits.data         := io.req.bits.rs3_data
