@@ -1279,7 +1279,7 @@ class VecALUUnit(
   //body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= csr_vstart && uop.v_eidx + b.U < vl).reverse)
   body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= 0.U && uop.v_eidx + b.U < vl).reverse)
   mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)),
-                                  Cat((0 until vLen/8).map(b => io.req.bits.rvm_data(uop.v_eidx + b.U)).reverse))
+              Cat((0 until vLen/8).map(b => io.req.bits.rvm_data(uop.v_eidx + b.U)).reverse))
   tail     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= vl).reverse)
   inactive := prestart | body & ~mask | tail
   val byte_inactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
@@ -1314,6 +1314,7 @@ class VecALUUnit(
   val e8_adder_out        = Wire(Vec(numELENinVLEN*8, UInt(8.W)))
   val e8_cmp_out, e8_co   = Wire(Vec(numELENinVLEN*8, Bool()))
   for (e <- 0 until vLenb) {
+    // FIXME: parameterize data width of ALU to save area
     val alu = Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true))
     // input
     alu.io.fn  := uop.ctrl.op_fcn

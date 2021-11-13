@@ -185,7 +185,8 @@ class IssueSlot(
       val tail = vstart > uop.vconfig.vl
       // FIXME consider excluding prestart
       // val prestart = vstart < io.csr.v_eidx
-      ret := uop.v_unmasked || tail // || !perm_ready || pm(vstart >> 3.U)
+      val pvm = uop.pvm
+      ret := uop.v_unmasked || tail || !io.vbusy_status(pvm) // || !perm_ready || pm(vstart >> 3.U)
     } else {
       if (usingVector && iqType == IQT_MEM.litValue) {
         ret := !uop.is_rvv || (uop.v_unmasked && !uop.v_idx_ls) // || pm(0)

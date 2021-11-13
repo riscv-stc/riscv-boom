@@ -83,7 +83,7 @@ class RegisterRead(
   val exe_reg_rs1_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
   val exe_reg_rs2_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
   val exe_reg_rs3_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
-  val exe_reg_rvm_data = if (vector) Reg(Vec(issueWidth, Bool())) else null
+  val exe_reg_rvm_data = if (vector) Reg(Vec(issueWidth, Bits(registerWidth.W))) else null
   //val exe_reg_vmaskInsn_rvm_data = if (vector) Reg(Vec(issueWidth, Bits(registerWidth.W))) else null
   val exe_reg_pred_data = Reg(Vec(issueWidth, Bool()))
 
@@ -108,7 +108,7 @@ class RegisterRead(
   val rrd_rs1_data   = Wire(Vec(issueWidth, Bits(registerWidth.W)))
   val rrd_rs2_data   = Wire(Vec(issueWidth, Bits(registerWidth.W)))
   val rrd_rs3_data   = Wire(Vec(issueWidth, Bits(registerWidth.W)))
-  val rrd_rvm_data   = Wire(Vec(issueWidth, Bool()))
+  val rrd_rvm_data   = Wire(Vec(issueWidth, Bits(registerWidth.W)))
   val rrd_pred_data  = Wire(Vec(issueWidth, Bool()))
   val rrd_vmaskInsn_rvm_data   = Wire(Vec(issueWidth, Bits(registerWidth.W)))
   rrd_rs1_data := DontCare
@@ -305,7 +305,7 @@ class RegisterRead(
         //val vslideup           = exe_reg_uops(w).uopc === uopVSLIDEUP
         //val vcompress          = exe_reg_uops(w).uopc === uopVCOMPRESS
         //val perm_idx           = exe_reg_uops(w).v_perm_idx
-        val is_active          = Mux(is_masked, exe_reg_rvm_data(w), true.B) && v_eidx < vl && v_eidx >= io.csr_vstart
+        val is_active          = Mux(is_masked, exe_reg_rvm_data(w)(v_eidx), true.B) && v_eidx < vl && v_eidx >= io.csr_vstart
                                  //Mux(is_vmaskInsn, vmaskInsn_active,
                                  //Mux(vslideup,  exe_reg_uops(w).v_eidx >= exe_reg_uops(w).v_scalar_data && (exe_reg_rvm_data(w) || !is_masked),
                                  //Mux(is_masked || vcompress, exe_reg_rvm_data(w), true.B))) && Mux(vcompress, perm_idx, v_eidx) < vl && v_eidx >= io.csr_vstart

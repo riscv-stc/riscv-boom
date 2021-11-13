@@ -898,7 +898,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       val dis_split_segg  = RegInit(0.U(3.W))
       val vseg_ls         = dis_uops(w).is_rvv && dis_uops(w).v_seg_nf > 1.U
       val vseg_flast      = dis_split_segf + 1.U(4.W) === dis_uops(w).v_seg_nf
-      val dis_total_ecnt  = Mux(dis_uops(w).uses_stq, dis_uops(w).vconfig.vl, dis_uops(w).vconfig.vtype.vlMax)
+      val dis_total_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, dis_uops(w).vconfig.vl, rename_stage.io.ren2_uops(w).v_split_ecnt)
       val dis_split_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, 1.U, dis_total_ecnt)
       val elem_last       = dis_split_eidx + dis_split_ecnt >= dis_total_ecnt
       val vLen_ecnt       = (vLen.U >> 3.U) >> dis_uops(w).vd_eew

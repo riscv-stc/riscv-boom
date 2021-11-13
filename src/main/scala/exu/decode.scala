@@ -325,7 +325,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
     val isVMVR: Bool = cs.uopc.isOneOf(uopVMVR)
     val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
-    val is_v_mask_ls = cs.uopc.isOneOf(uopVLM, uopVSMA)
+    val is_v_mask_ld = cs.uopc.isOneOf(uopVLM)
+    val is_v_mask_st = cs.uopc.isOneOf(uopVSMA)
     val is_v_reg_ls = cs.uopc.isOneOf(uopVLR, uopVSR)
     val vseg_nf = inst(NF_MSB, NF_LSB)
     val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) && !is_v_reg_ls
@@ -384,11 +385,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     // for fractional lmul, we need visit at least one entire vreg
     // for undisturbing move before reduction, we need visit at most one vreg
-    val total_ecnt = Mux(is_v_mask_ls, vLenb.U,
+    val total_ecnt = Mux(is_v_mask_ld, vLenb.U,
                      Mux(is_v_reg_ls, vLenb.U << Log2(vreg_nf + 1.U) >> cs.v_ls_ew,
-                     Mux(cs.uses_stq, Mux(is_v_mask_ls, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl),
+                     Mux(cs.uses_stq, Mux(is_v_mask_st, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl),
                      Mux(is_v_mask_insn, vmlogic_tolal_ecnt,
-                     Mux(vlmul_sign && !is_v_mask_ls || csr_vlmax < vLen_ecnt, vLen_ecnt, csr_vlmax)))))
+                     Mux(vlmul_sign || csr_vlmax < vLen_ecnt, vLen_ecnt, csr_vlmax)))))
     uop.is_rvv      := cs.is_rvv
     uop.v_ls_ew     := cs.v_ls_ew
     when (is_v_ls) {
@@ -427,14 +428,14 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.v_idx_ls     := is_v_ls_index
     uop.v_eidx       := 0.U
 
-    //when (cs.is_rvv && cs.uopc === uopVLM) {
-      //uop.uopc := uopVL
+    when (cs.is_rvv && is_v_mask_ld) {
+      uop.uopc := uopVL
       // make elements >= ceil(vl/8) inactive
-      //uop.vconfig.vl := (io.csr_vconfig.vl + 7.U) >> 3.U
-    //}
-    //when (cs.is_rvv && cs.uopc === uopVSMA) {
-      //uop.uopc := uopVSA
-    //}
+      uop.vconfig.vl := (io.csr_vconfig.vl + 7.U) >> 3.U
+    }
+    when (cs.is_rvv && is_v_mask_st) {
+      uop.uopc := uopVSA
+    }
     ////when (cs.is_rvv && cs.uopc === uopVLR) {
       //uop.uopc := uopVL
     //}
