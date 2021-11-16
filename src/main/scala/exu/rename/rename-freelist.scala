@@ -194,6 +194,6 @@ class VecRenameFreeList(
   io.debug.isprlist := 0.U  // TODO track commit free list.
 
   assert (!(io.debug.freelist & dealloc_mask).orR, "[freelist] Returning a free physical register.")
-  assert (!io.debug.pipeline_empty || PopCount(io.debug.freelist) >= (numPregs - numLregs - 1).U,
+  assert (!io.debug.pipeline_empty || PopCount(io.debug.freelist) > (numPregs - numLregs - 8*plWidth*2).U,
     "[freelist] Leaking physical registers.")
 }
