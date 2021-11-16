@@ -214,12 +214,12 @@ class FMADecoder(vector: Boolean = false) extends Module
 /**
  * Bundle representing data to be sent to the FPU
  */
-class FpuReq()(implicit p: Parameters) extends BoomBundle
+class FpuReq(val vector: Boolean = false)(implicit p: Parameters) extends BoomBundle
 {
   val uop      = new MicroOp()
-  val rs1_data = Bits(65.W)
-  val rs2_data = Bits(65.W)
-  val rs3_data = Bits(65.W)
+  val rs1_data = if (vector) Bits(vLen.W) else Bits(65.W)
+  val rs2_data = if (vector) Bits(vLen.W) else Bits(65.W)
+  val rs3_data = if (vector) Bits(vLen.W) else Bits(65.W)
   val fcsr_rm  = Bits(tile.FPConstants.RM_SZ.W)
 }
 
@@ -229,7 +229,7 @@ class FpuReq()(implicit p: Parameters) extends BoomBundle
 class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule with tile.HasFPUParameters
 {
   val io = IO(new Bundle {
-    val req = Flipped(new ValidIO(new FpuReq))
+    val req = Flipped(new ValidIO(new FpuReq(false)))
     val resp = new ValidIO(new ExeUnitResp(65))
   })
 
@@ -397,6 +397,245 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
   } else {
     io.resp.bits.data := fpu_out_data
   }
+  io.resp.bits.fflags.valid      := io.resp.valid
+  io.resp.bits.fflags.bits.flags := fpu_out_exc
+}
+
+/**
+ * FPU unit that wraps the RocketChip FPU units (which in turn wrap hardfloat)
+ */
+class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParameters
+{
+  val io = IO(new Bundle {
+    val req = Flipped(new ValidIO(new FpuReq(true)))
+    val resp = new ValidIO(new ExeUnitResp(vLen))
+  })
+
+  // all FP units are padded out to the same latency for easy scheduling of the write port
+  val fpu_latency = dfmaLatency
+  val io_req = io.req.bits
+
+  val fp_decoder = Module(new UOPCodeFPUDecoder(vector = true))
+  fp_decoder.io.uopc := io_req.uop.uopc
+  val fp_ctrl = WireInit(fp_decoder.io.sigs)
+  val fp_rm = io_req.fcsr_rm
+  val rs1_data = WireInit(io_req.rs1_data)
+  val rs2_data = WireInit(io_req.rs2_data)
+  val rs3_data = WireInit(io_req.rs3_data)
+  val vd_widen = io_req.uop.rt(RD , isWidenV)
+  val vs1_widen= io_req.uop.rt(RS1, isWidenV)
+  val vs2_widen= io_req.uop.rt(RS2, isWidenV)
+  val vd_sew  = io_req.uop.vd_eew
+  val vs1_sew = io_req.uop.vs1_eew
+  val vs2_sew = io_req.uop.vs2_eew
+  val vd_fmt  = Mux(vd_sew  === 3.U, D, Mux(vd_sew  === 2.U, S, H))
+  val vs1_fmt = Mux(vs1_sew === 3.U, D, Mux(vs1_sew === 2.U, S, H))
+  val vs2_fmt = Mux(vs2_sew === 3.U, D, Mux(vs2_sew === 2.U, S, H))
+  when (io.req.valid && io_req.uop.is_rvv) {
+    assert(io_req.uop.fp_val, "unexpected fp_val")
+    assert(io_req.uop.v_active, "unexpected inactive split")
+    assert(vd_sew >= 1.U && vd_sew <= 3.U, "unsupported vd_sew")
+  }
+  //rs1_data := recode(io_req.rs1_data, vs1_fmt)
+  //rs2_data := recode(io_req.rs2_data, vs2_fmt)
+  //rs3_data := recode(io_req.rs3_data, vd_fmt)
+  when (io_req.uop.is_rvv) {
+    fp_ctrl.typeTagIn := Mux(fp_ctrl.swap12 || vs1_widen && !vs2_widen, vs2_fmt, vs1_fmt)
+    fp_ctrl.typeTagOut:= vd_fmt
+  }
+
+  // FIXME: S->H widening operation must be fixed
+  def fuInput(minT: Option[tile.FType], esel: Int): tile.FPInput = {
+    val req     = Wire(new tile.FPInput)
+    val tagIn   = fp_ctrl.typeTagIn
+    val tag     = fp_ctrl.typeTagOut
+    val vs1_tag = Mux((vd_widen ^ vs1_widen), tagIn, tag)
+    val vs2_tag = Mux((vd_widen ^ vs2_widen), tagIn, tag)
+    req <> fp_ctrl
+    val rs1_edata, rs2_edata, rs3_edata = WireInit(0.U(65.W))
+    if (minT == Some(tile.FType.D)) {
+      rs1_edata := recode(rs1_data(esel*64+63, esel*64), vs1_fmt)
+      rs2_edata := recode(rs2_data(esel*64+63, esel*64), vs2_fmt)
+      rs3_edata := recode(rs3_data(esel*64+63, esel*64), vd_fmt)
+    } else if (minT == Some(tile.FType.S)) {
+      rs1_edata := recode(rs1_data(esel*32+31, esel*32), vs1_fmt)
+      rs2_edata := recode(rs2_data(esel*32+31, esel*32), vs2_fmt)
+      rs3_edata := recode(rs3_data(esel*32+31, esel*32), vd_fmt)
+    } else if (minT == Some(tile.FType.H)) {
+      rs1_edata := recode(rs1_data(esel*16+15, esel*16), vs1_fmt)
+      rs2_edata := recode(rs2_data(esel*16+15, esel*16), vs2_fmt)
+      rs3_edata := recode(rs3_data(esel*16+15, esel*16), vd_fmt)
+    } else {
+      if (esel < 16) {
+        rs1_edata := recode(Mux(vs1_sew === 3.U, rs1_data(esel*64+63, esel*64),
+                            Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32),
+                                                 rs1_data(esel*16+15, esel*16))), vs1_fmt)
+        rs2_edata := recode(Mux(vs2_sew === 3.U, rs2_data(esel*64+63, esel*64),
+                            Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32),
+                                                 rs2_data(esel*16+15, esel*16))), vs2_fmt)
+        rs3_edata := recode(Mux(vd_sew === 3.U,  rs3_data(esel*64+63, esel*64),
+                            Mux(vd_sew === 2.U,  rs3_data(esel*32+31, esel*32),
+                                                 rs3_data(esel*16+15, esel*16))), vd_fmt)
+      } else if (esel < 32) {
+        rs1_edata := recode(Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32),
+                                                 rs1_data(esel*16+15, esel*16)), vs1_fmt)
+        rs2_edata := recode(Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32),
+                                                 rs2_data(esel*16+15, esel*16)), vs2_fmt)
+        rs3_edata := recode(Mux(vd_sew === 2.U,  rs3_data(esel*32+31, esel*32),
+                                                 rs3_data(esel*16+15, esel*16)), vd_fmt)
+      } else {
+        rs1_edata := recode(rs1_data(esel*16+15, esel*16), vs1_fmt)
+        rs2_edata := recode(rs2_data(esel*16+15, esel*16), vs2_fmt)
+        rs3_edata := recode(rs3_data(esel*16+15, esel*16), vd_fmt)
+      }
+    }
+    /* minT match {
+      case Some(tile.FType.D) => rs1_edata := rs1_data(esel*64+63, esel*64)
+      case Some(tile.FType.S) => rs1_edata := rs1_data(esel*32+31, esel*32)
+      case Some(tile.FType.H) => rs1_edata := rs1_data(esel*16+15, esel*16)
+      case _ => if (esel < 16) {
+        rs1_edata := Mux(vs1_sew === 3.U, rs1_data(esel*64+63, esel*64),
+                     Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32), rs1_data(esel*16+15, esel*16)))
+      } else if (esel < 32) {
+        rs1_edata := Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32), rs1_data(esel*16+15, esel*16))
+      } else {
+        rs1_edata := rs1_data(esel*16+15, esel*16)
+      }
+    }
+    minT match {
+      case Some(tile.FType.D) => rs2_edata := rs2_data(esel*64+63, esel*64)
+      case Some(tile.FType.S) => rs2_edata := rs2_data(esel*32+31, esel*32)
+      case Some(tile.FType.H) => rs2_edata := rs2_data(esel*16+15, esel*16)
+      case _ => if (esel < 16) {
+        rs2_edata := Mux(vs2_sew === 3.U, rs2_data(esel*64+63, esel*64),
+                     Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32), rs2_data(esel*16+15, esel*16)))
+      } else if (esel < 32) {
+        rs2_edata := Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32), rs2_data(esel*16+15, esel*16))
+      } else {
+        rs2_edata := rs2_data(esel*16+15, esel*16)
+      }
+    }
+    minT match {
+      case Some(tile.FType.D) => rs3_edata := rs3_data(esel*64+63, esel*64)
+      case Some(tile.FType.S) => rs3_edata := rs3_data(esel*32+31, esel*32)
+      case Some(tile.FType.H) => rs3_edata := rs3_data(esel*16+15, esel*16)
+      case _ => if (esel < 16) {
+        rs3_edata := Mux(vd_sew === 3.U, rs3_data(esel*64+63, esel*64),
+                     Mux(vd_sew === 2.U, rs3_data(esel*32+31, esel*32), rs3_data(esel*16+15, esel*16)))
+      } else if (esel < 32) {
+        rs3_edata := Mux(vd_sew === 2.U, rs3_data(esel*32+31, esel*32), rs3_data(esel*16+15, esel*16))
+      } else {
+        rs3_edata := rs3_data(esel*16+15, esel*16)
+      }
+    } */
+    val unbox_rs1 = Mux(vd_widen^vs1_widen, unbox(rs1_edata, vs1_tag, None), unbox(rs1_edata, tag, minT))
+    val unbox_rs2 = Mux(vd_widen^vs2_widen, unbox(rs2_edata, vs2_tag, None), unbox(rs2_edata, tag, minT))
+    val unbox_rs3 = unbox(rs3_edata, tag, minT)
+    req.rm := Mux(io_req.uop.uopc.isOneOf(uopVFCLASS, uopVFMAX, uopVMFLT, uopVMFGT), 1.U,
+              Mux(io_req.uop.uopc.isOneOf(uopVFMIN, uopVMFLE, uopVMFGE), 0.U,
+              Mux(io_req.uop.uopc.isOneOf(uopVMFEQ, uopVMFNE), 2.U,
+              Mux(io_req.uop.uopc === uopVFSGNJ,  ImmGenRmVSGN(io_req.uop.imm_packed),
+              Mux(io_req.uop.uopc === uopVFCVT_F2F && CheckF2FRm(io_req.uop.imm_packed), 6.U,
+              Mux(io_req.uop.fu_code_is(FU_F2I) && CheckF2IRm(io_req.uop.imm_packed), 1.U,
+              io_req.fcsr_rm))))))
+    req.in1 := unbox_rs1
+    req.in2 := unbox_rs2
+    req.in3 := unbox_rs3
+    // e.g. vfcvt.x.f.v   vd, vs2, vm
+    // e.g. vfsgnj.vv vd, vs2, vs1, vm
+    when (fp_ctrl.swap12) { 
+      req.in1 := unbox_rs2
+      req.in2 := unbox_rs1
+    }
+    when (fp_ctrl.swap23) { req.in3 := req.in2 }
+    //req.typ := ImmGenTyp(io_req.uop.imm_packed)
+    val typ1 = Mux(tag === D, 1.U(1.W), 0.U(1.W))
+    // typ of F2I and I2F
+    req.typ := ImmGenTypRVV(typ1, io_req.uop.imm_packed)
+    req.fmt := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
+    when (io_req.uop.uopc === uopFMV_X_S) {
+      req.fmt := 0.U
+    } .elsewhen (io_req.uop.uopc.isOneOf(uopVFMADD,uopVFNMADD,uopVFMSUB,uopVFNMSUB)) {
+        req.in2 := unbox_rs3
+        req.in3 := unbox_rs2
+    }
+
+    val fma_decoder = Module(new FMADecoder(vector = true))
+    fma_decoder.io.uopc := io_req.uop.uopc
+    req.fmaCmd := fma_decoder.io.cmd // ex_reg_inst(3,2) | (!fp_ctrl.ren3 && ex_reg_inst(27))
+    req
+  }
+
+  val dfma = (0 until vLen/64).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.D)))
+  for (i <- 0 until vLen/64) {
+    dfma(i).io.in.bits := fuInput(Some(tile.FType.D), i)
+    dfma(i).io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === D)
+  }
+
+  val sfma = (0 until vLen/32).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.S)))
+  for (i <- 0 until vLen/32) {
+    sfma(i).io.in.bits := fuInput(Some(tile.FType.S), i)
+    sfma(i).io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === S)
+  }
+
+  val hfma = (0 until vLen/16).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.H)))
+
+  val fpiu = (0 until vLen/16).map(i => Module(new tile.FPToInt))
+  val fpiu_result = Wire(Vec(vLen/16, new tile.FPResult))
+  val fpiu_invert = Pipe(io.req.valid, io_req.uop.uopc === uopVMFNE, fpu_latency).bits
+  val fpiu_out = fpiu.map(m => Pipe(RegNext(m.io.in.valid && !fp_ctrl.fastpipe), m.io.out.bits, fpu_latency-1))
+
+  val fpmu = (0 until vLen/16).map(i => Module(new tile.FPToFP(fpu_latency)))
+  val fpmu_dtype = Pipe(io.req.valid && fp_ctrl.fastpipe, fp_ctrl.typeTagOut, fpu_latency).bits
+  for (i <- 0 until vLen/16) {
+    hfma(i).io.in.bits  := fuInput(Some(tile.FType.H), i)
+    hfma(i).io.in.valid := io.req.valid && fp_ctrl.fma && (fp_ctrl.typeTagOut === H)
+
+    fpiu(i).io.in.bits  := fuInput(None, i)
+    fpiu(i).io.in.valid := io.req.valid && (fp_ctrl.toint || (fp_ctrl.fastpipe && fp_ctrl.wflags)) &&
+                           Mux(fp_ctrl.typeTagOut === D, (i < vLen/64).B,
+                           Mux(fp_ctrl.typeTagOut === S, (i < vLen/32).B, true.B))
+    fpiu_result(i).data := Mux(fpiu_invert, ~fpiu_out(i).bits.toint, fpiu_out(i).bits.toint)
+    fpiu_result(i).exc  := fpiu_out(i).bits.exc
+
+    fpmu(i).io.lt       := fpiu(i).io.out.bits.lt
+    fpmu(i).io.in.bits  := fuInput(None, i)
+    fpmu(i).io.in.valid := io.req.valid && fp_ctrl.fastpipe &&
+                           Mux(fp_ctrl.typeTagOut === D, (i < vLen/64).B,
+                           Mux(fp_ctrl.typeTagOut === S, (i < vLen/32).B, true.B))
+  }
+
+  // inactive elements are handled through vector integer path
+//  when (io_req.uop.is_rvv && !io_req.uop.v_active) {
+//    fpmu.io.in.bits.in1 := fpiu.io.in.bits.in3
+//  }
+
+  // Response (all FP units have been padded out to the same latency)
+  io.resp.valid := fpiu_out(0).valid ||
+                   fpmu(0).io.out.valid ||
+                   hfma(0).io.out.valid ||
+                   sfma(0).io.out.valid ||
+                   dfma(0).io.out.valid
+
+  val fpu_out_data =
+      Mux(dfma(0).io.out.valid, Cat(dfma.map(m => ieee(box(m.io.out.bits.data, D))(63,0)).reverse),
+      Mux(sfma(0).io.out.valid, Cat(sfma.map(m => ieee(box(m.io.out.bits.data, S))(31,0)).reverse),
+      Mux(hfma(0).io.out.valid, Cat(hfma.map(m => ieee(box(m.io.out.bits.data, H))(15,0)).reverse),
+      Mux(fpmu_dtype === D,     Cat(fpmu.slice(0, vLen/64).map(m => ieee(box(m.io.out.bits.data, D))(63,0)).reverse),
+      Mux(fpmu_dtype === S,     Cat(fpmu.slice(0, vLen/32).map(m => ieee(box(m.io.out.bits.data, S))(31,0)).reverse),
+                                Cat(fpmu.map(m => ieee(box(m.io.out.bits.data, H))(15,0)).reverse))))))
+
+  val fpu_out_exc =
+      Mux(dfma(0).io.out.valid, dfma.map(m => Mux(m.io.out.valid, m.io.out.bits.exc, 0.U)).reduce(_ | _),
+      Mux(sfma(0).io.out.valid, sfma.map(m => Mux(m.io.out.valid, m.io.out.bits.exc, 0.U)).reduce(_ | _),
+      Mux(hfma(0).io.out.valid, hfma.map(m => Mux(m.io.out.valid, m.io.out.bits.exc, 0.U)).reduce(_ | _),
+      Mux(fpiu_out(0).valid,    (fpiu_out zip fpiu_result).map{case(o,r)=>Mux(o.valid, r.exc, 0.U)}.reduce(_ | _),
+                                fpmu.map(m => Mux(m.io.out.valid, m.io.out.bits.exc, 0.U)).reduce(_ | _)))))
+
+  io.resp.bits.data := Mux(fpiu_out(0).valid, Mux(fpmu_dtype === D, Cat(fpiu_result.slice(0, vLen/64).map(_.data(63,0)).reverse),
+                                              Mux(fpmu_dtype === S, Cat(fpiu_result.slice(0, vLen/32).map(_.data(31,0)).reverse),
+                                                                    Cat(fpiu_result.slice(0, vLen/16).map(_.data(15,0)).reverse))),
+                                              fpu_out_data)
   io.resp.bits.fflags.valid      := io.resp.valid
   io.resp.bits.fflags.bits.flags := fpu_out_exc
 }

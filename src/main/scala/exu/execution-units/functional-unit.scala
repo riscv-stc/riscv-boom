@@ -1430,3 +1430,32 @@ class VecALUUnit(
   //io.brinfo := DontCare
 }
 
+/**
+ * Functional unit to wrap lower level FPU
+ *
+ * Currently, bypassing is unsupported!
+ * All FP instructions are padded out to the max latency unit for easy
+ * write-port scheduling.
+ */
+class VecFPUUnit(dataWidth: Int)(implicit p: Parameters)
+  extends PipelinedFunctionalUnit(
+    numStages = p(tile.TileKey).core.fpu.get.dfmaLatency,
+    numBypassStages = 0,
+    earliestBypassStage = 0,
+    dataWidth = dataWidth,
+    needsFcsr = true)
+{
+  val fpu = Module(new VecFPU)
+  fpu.io.req.valid         := io.req.valid
+  fpu.io.req.bits.uop      := io.req.bits.uop
+  fpu.io.req.bits.rs1_data := io.req.bits.rs1_data
+  fpu.io.req.bits.rs2_data := io.req.bits.rs2_data
+  fpu.io.req.bits.rs3_data := io.req.bits.rs3_data
+  fpu.io.req.bits.fcsr_rm  := io.fcsr_rm
+
+  io.resp.bits.data              := fpu.io.resp.bits.data
+  io.resp.bits.fflags.valid      := fpu.io.resp.bits.fflags.valid
+  io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
+  io.resp.bits.fflags.bits.flags := fpu.io.resp.bits.fflags.bits.flags // kill me now
+}
+

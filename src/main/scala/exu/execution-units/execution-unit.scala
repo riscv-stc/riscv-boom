@@ -709,13 +709,13 @@ class VecExeUnit(
   }
 
   // FPU Unit -----------------------
-  var fpu: FPUUnit = null
+  var fpu: VecFPUUnit = null
   val fpu_resp_val = WireInit(false.B)
   val fpu_resp_fflags = Wire(new ValidIO(new FFlagsResp()))
   fpu_resp_fflags.valid := false.B
   fpu_resp_fflags.bits  := DontCare
   if (hasFpu) {
-    fpu = Module(new FPUUnit(vector = true))
+    fpu = Module(new VecFPUUnit(vLen))
     fpu.io.req.valid         := io.req.valid &&
                                 (io.req.bits.uop.fu_code_is(FU_FPU) ||
                                 io.req.bits.uop.fu_code_is(FU_F2I)) // TODO move to using a separate unit
