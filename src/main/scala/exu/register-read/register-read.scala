@@ -83,7 +83,8 @@ class RegisterRead(
   val exe_reg_rs1_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
   val exe_reg_rs2_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
   val exe_reg_rs3_data = Reg(Vec(issueWidth, Bits(registerWidth.W)))
-  val exe_reg_rvm_data = if (vector) Reg(Vec(issueWidth, Bits(registerWidth.W))) else null
+  val exe_reg_rvm_data = if (vector) Reg(Vec(issueWidth, Bits((registerWidth).W))) else null
+  val exe_reg_rvm_align = if (vector) Reg(Vec(issueWidth, Bits((registerWidth/8).W))) else null
   //val exe_reg_vmaskInsn_rvm_data = if (vector) Reg(Vec(issueWidth, Bits(registerWidth.W))) else null
   val exe_reg_pred_data = Reg(Vec(issueWidth, Bool()))
 
@@ -234,7 +235,10 @@ class RegisterRead(
   for (w <- 0 until issueWidth) {
     val numReadPorts = numReadPortsArray(w)
     if (vector) {
-      if (numReadPorts > 0) exe_reg_rvm_data(w) := rrd_rvm_data(w)
+      if (numReadPorts > 0) {
+        exe_reg_rvm_data(w) := rrd_rvm_data(w)
+        exe_reg_rvm_align(w) := rrd_rvm_data(w) >> rrd_uops(w).v_eidx
+      }
       if (numReadPorts > 1) exe_reg_rs3_data(w) := rrd_rs3_data(w)
       if (numReadPorts > 2) exe_reg_rs2_data(w) := rrd_rs2_data(w)
       if (numReadPorts > 3) exe_reg_rs1_data(w) := rrd_rs1_data(w)
@@ -258,7 +262,7 @@ class RegisterRead(
     io.exe_reqs(w).valid    := exe_reg_valids(w)
     io.exe_reqs(w).bits.uop := exe_reg_uops(w)
     if (vector) {
-      if (numReadPorts > 0) io.exe_reqs(w).bits.rvm_data := exe_reg_rvm_data(w)
+      if (numReadPorts > 0) io.exe_reqs(w).bits.rvm_data := exe_reg_rvm_align(w)
       if (numReadPorts > 1) io.exe_reqs(w).bits.rs3_data := exe_reg_rs3_data(w)
       if (numReadPorts > 2) io.exe_reqs(w).bits.rs2_data := exe_reg_rs2_data(w)
       if (numReadPorts > 3) io.exe_reqs(w).bits.rs1_data := exe_reg_rs1_data(w)

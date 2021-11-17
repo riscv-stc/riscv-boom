@@ -120,7 +120,7 @@ class FuncUnitReq(val dataWidth: Int, val vector: Boolean = false)(implicit p: P
   val rs1_data = UInt(dataWidth.W)
   val rs2_data = UInt(dataWidth.W)
   val rs3_data = UInt(dataWidth.W) // used for FMA, vector units
-  val rvm_data = UInt(dataWidth.W)
+  val rvm_data = UInt((dataWidth/8).W)
   val pred_data = Bool()
 
   val kill = Bool() // kill everything
@@ -1279,7 +1279,7 @@ class VecALUUnit(
   //body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= csr_vstart && uop.v_eidx + b.U < vl).reverse)
   body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= 0.U && uop.v_eidx + b.U < vl).reverse)
   mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)),
-              Cat((0 until vLen/8).map(b => io.req.bits.rvm_data(uop.v_eidx + b.U)).reverse))
+              Cat((0 until vLen/8).map(b => io.req.bits.rvm_data(b)).reverse))
   tail     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= vl).reverse)
   inactive := prestart | body & ~mask | tail
   val byte_inactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
@@ -1451,6 +1451,7 @@ class VecFPUUnit(dataWidth: Int)(implicit p: Parameters)
   fpu.io.req.bits.rs1_data := io.req.bits.rs1_data
   fpu.io.req.bits.rs2_data := io.req.bits.rs2_data
   fpu.io.req.bits.rs3_data := io.req.bits.rs3_data
+  fpu.io.req.bits.rvm_data := io.req.bits.rvm_data
   fpu.io.req.bits.fcsr_rm  := io.fcsr_rm
 
   io.resp.bits.data              := fpu.io.resp.bits.data
