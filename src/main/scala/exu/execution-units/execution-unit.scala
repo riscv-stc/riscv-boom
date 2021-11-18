@@ -679,14 +679,14 @@ class VecExeUnit(
   }
 
   // Pipelined, FixMulAcc Unit ------------------
-  var xmacc: FixMulAcc = null
+  var vfix: VecFixUnit = null
   if (hasMacc) {
-    xmacc = Module(new FixMulAcc(numStages, eLen))
-    xmacc.suggestName("xmacc")
-    xmacc.io           <> DontCare
-    xmacc.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_MAC)
-    xmacc.io.vxrm      := io.vxrm
-    vec_fu_units += xmacc
+    vfix = Module(new VecFixUnit(numStages, vLen))
+    vfix.suggestName("vfix")
+    vfix.io           <> DontCare
+    vfix.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_MAC)
+    vfix.io.vxrm      := io.vxrm
+    vec_fu_units += vfix
   }
 
   // Pipelined, VMaskUnit ------------------

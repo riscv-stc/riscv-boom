@@ -544,14 +544,14 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
 
   val dfma = (0 until vLen/64).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.D)))
   for (i <- 0 until vLen/64) {
-    val active = io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl
     dfma(i).io.in.bits := fuInput(Some(tile.FType.D), i)
     dfma(i).io.in.valid := active && io.req.valid && reqfue.dfma
   }
 
   val sfma = (0 until vLen/32).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.S)))
   for (i <- 0 until vLen/32) {
-    val active = io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl
     sfma(i).io.in.bits := fuInput(Some(tile.FType.S), i)
     sfma(i).io.in.valid := active && io.req.valid && reqfue.sfma
   }
@@ -566,7 +566,7 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
   val fpmu = (0 until vLen/16).map(i => Module(new tile.FPToFP(fpu_latency)))
   val fpmu_dtype = Pipe(io.req.valid && fp_ctrl.fastpipe, fp_ctrl.typeTagOut, fpu_latency).bits
   for (i <- 0 until vLen/16) {
-    val active = io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl
 
     hfma(i).io.in.bits  := fuInput(Some(tile.FType.H), i)
     hfma(i).io.in.valid := active && io.req.valid && reqfue.hfma

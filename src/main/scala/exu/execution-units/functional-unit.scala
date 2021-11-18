@@ -889,18 +889,71 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
     dataWidth = dataWidth,
     isFixMulAcc = true
 ) with ShouldBeRetimed {
+  val e8 = (dataWidth == 8)
+  val e16= (dataWidth == 16)
+  val e32= (dataWidth == 32)
+  val e64= (dataWidth == 64)
   val in_req = WireInit(io.req)
+  val in = Pipe(in_req.valid, in_req.bits)
+  val io_vs1_eew  = io.req.bits.uop.vs1_eew
+  val io_vs2_eew  = io.req.bits.uop.vs2_eew
+  val io_vd_eew   = io.req.bits.uop.vd_eew
+  val io_unsigned = io.req.bits.uop.rt(RD, isUnsignedV)
+  val u_max = Wire(UInt((dataWidth+1).W))
+  val hi, s_max, s_min, rs1_data, rs2_data, rs3_data = Wire(UInt(dataWidth.W))
+  val stale_rs3_data = Pipe(in_req.valid, rs3_data).bits
+  if (e64) {
+    rs1_data := Mux1H(UIntToOH(io_vs1_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs1_data(7,0),  io.req.bits.rs1_data(7,0).sextTo(dataWidth)),
+                                                     Mux(io_unsigned, io.req.bits.rs1_data(15,0), io.req.bits.rs1_data(15,0).sextTo(dataWidth)),
+                                                     Mux(io_unsigned, io.req.bits.rs1_data(31,0), io.req.bits.rs1_data(31,0).sextTo(dataWidth)),
+                                                     io.req.bits.rs1_data))
+    rs2_data := Mux1H(UIntToOH(io_vs2_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs2_data(7,0),  io.req.bits.rs2_data(7,0).sextTo(dataWidth)),
+                                                     Mux(io_unsigned, io.req.bits.rs2_data(15,0), io.req.bits.rs2_data(15,0).sextTo(dataWidth)),
+                                                     Mux(io_unsigned, io.req.bits.rs2_data(31,0), io.req.bits.rs2_data(31,0).sextTo(dataWidth)),
+                                                     io.req.bits.rs2_data))
+    rs3_data := Mux1H(UIntToOH(io_vd_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs3_data(7,0),  io.req.bits.rs3_data(7,0).sextTo(dataWidth)),
+                                                    Mux(io_unsigned, io.req.bits.rs3_data(15,0), io.req.bits.rs3_data(15,0).sextTo(dataWidth)),
+                                                    Mux(io_unsigned, io.req.bits.rs3_data(31,0), io.req.bits.rs3_data(31,0).sextTo(dataWidth)),
+                                                    io.req.bits.rs3_data))
+  } else if (e32) {
+    rs1_data := Mux1H(UIntToOH(io_vs1_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs1_data(7,0),  io.req.bits.rs1_data(7,0).sextTo(dataWidth)),
+                                                     Mux(io_unsigned, io.req.bits.rs1_data(15,0), io.req.bits.rs1_data(15,0).sextTo(dataWidth)),
+                                                     io.req.bits.rs1_data,
+                                                     io.req.bits.rs1_data))
+    rs2_data := Mux1H(UIntToOH(io_vs2_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs2_data(7,0),  io.req.bits.rs2_data(7,0).sextTo(dataWidth)),
+                                                     Mux(io_unsigned, io.req.bits.rs2_data(15,0), io.req.bits.rs2_data(15,0).sextTo(dataWidth)),
+                                                     io.req.bits.rs2_data,
+                                                     io.req.bits.rs2_data))
+    rs3_data := Mux1H(UIntToOH(io_vd_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs3_data(7,0),  io.req.bits.rs3_data(7,0).sextTo(dataWidth)),
+                                                    Mux(io_unsigned, io.req.bits.rs3_data(15,0), io.req.bits.rs3_data(15,0).sextTo(dataWidth)),
+                                                    io.req.bits.rs3_data,
+                                                    io.req.bits.rs3_data))
+  } else if (e16) {
+    rs1_data := Mux1H(UIntToOH(io_vs1_eew(0)), Seq(Mux(io_unsigned, io.req.bits.rs1_data(7,0),  io.req.bits.rs1_data(7,0).sextTo(dataWidth)),
+                                                   io.req.bits.rs1_data))
+    rs2_data := Mux1H(UIntToOH(io_vs2_eew(0)), Seq(Mux(io_unsigned, io.req.bits.rs2_data(7,0),  io.req.bits.rs2_data(7,0).sextTo(dataWidth)),
+                                                   io.req.bits.rs2_data))
+    rs3_data := Mux1H(UIntToOH(io_vd_eew(0)), Seq(Mux(io_unsigned, io.req.bits.rs3_data(7,0),  io.req.bits.rs3_data(7,0).sextTo(dataWidth)),
+                                                  io.req.bits.rs3_data))
+  } else { // e8
+    rs1_data := io.req.bits.rs1_data
+    rs2_data := io.req.bits.rs2_data
+    rs3_data := io.req.bits.rs3_data
+  }
+
+  in_req.bits.rs1_data := rs1_data
+  in_req.bits.rs2_data := rs2_data
+  in_req.bits.rs3_data := rs3_data
   when (io.req.bits.uop.uopc.isOneOf(uopVMADD, uopVNMSUB)) {
-    in_req.bits.rs2_data := io.req.bits.rs3_data
-    in_req.bits.rs3_data := io.req.bits.rs2_data
+    in_req.bits.rs2_data := rs3_data
+    in_req.bits.rs3_data := rs2_data
   }
   when (io.req.bits.uop.uopc.isOneOf(uopVNMSAC, uopVNMSUB)) {
-    in_req.bits.rs1_data := ~io.req.bits.rs1_data + 1.U
+    in_req.bits.rs1_data := ~rs1_data + 1.U
   }
   when (io.req.bits.uop.uopc.isOneOf(uopVSADDU, uopVSADD, uopVAADDU, uopVAADD, uopVSSUBU, uopVSSUB, uopVASUBU, uopVASUB)) {
-    in_req.bits.rs3_data := io.req.bits.rs1_data
+    in_req.bits.rs3_data := rs1_data
   }
-  val in = Pipe(in_req.valid, in_req.bits)
   val DC2 = BitPat.dontCare(2)
   val table: List[(BitPat, List[BitPat])] = List(
     //                          cmdHi   negAcc accSigned   srType (0, 1, SEW-1, RS1)
@@ -942,15 +995,60 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val sext_rs3 = Cat(cs.accSigned && in.bits.rs3_data(dataWidth-1), in.bits.rs3_data)
   val sub_rs3  = (~sext_rs3 + 1.U(1.W)).asSInt
   val acc = Mux(cs.doAcc, Mux(cs.negAcc, sub_rs3, sext_rs3.asSInt), 0.S)
-  when (in.valid && cs.doAcc) { assert(in.bits.uop.frs3_en, "Incorrect frs3_en") }
+  //when (in.valid && cs.doAcc) { assert(in.bits.uop.frs3_en, "Incorrect frs3_en") }
   val macc = lhs * rhs +& acc
   val macc_msk = ~(0.U((dataWidth*2+3).W))
   val vd_eew = in.bits.uop.vd_eew
   val unsigned = in.bits.uop.rt(RD, isUnsignedV)
-  val hi  = Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Mux(unsigned, 0.U((dataWidth-8).W),  Fill(dataWidth-8,  macc(15))), macc(15,  8)),
-                                             Cat(Mux(unsigned, 0.U((dataWidth-16).W), Fill(dataWidth-16, macc(31))), macc(31, 16)),
-                                             Cat(Mux(unsigned, 0.U((dataWidth-32).W), Fill(dataWidth-32, macc(63))), macc(63, 32)),
-                                             macc(127, 64)))
+  if (e64) {
+    u_max := Cat(0.U(1.W), Mux1H(UIntToOH(vd_eew(1,0)), Seq(0xFF.U(dataWidth.W),
+                                                            0xFFFF.U(dataWidth.W),
+                                                            0xFFFFFFFFL.U(dataWidth.W),
+                                                            Fill(dataWidth, 1.U(1.W)))))
+    s_max := Mux1H(UIntToOH(vd_eew(1,0)), Seq(0x7F.U(dataWidth.W),
+                                              0x7FFF.U(dataWidth.W),
+                                              0x7FFFFFFF.U(dataWidth.W),
+                                              0x7FFFFFFFFFFFFFFFL.U(dataWidth.W)))
+    s_min := Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Fill(dataWidth-8,  1.U(1.W)), 0x80.U(8.W)),
+                                              Cat(Fill(dataWidth-16, 1.U(1.W)), 0x8000.U(16.W)),
+                                              Cat(Fill(dataWidth-32, 1.U(1.W)), 0x80000000L.U(32.W)),
+                                              Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))))
+    hi  := Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Mux(unsigned, 0.U((dataWidth-8).W),  Fill(dataWidth-8,  macc(15))), macc(15,  8)),
+                                            Cat(Mux(unsigned, 0.U((dataWidth-16).W), Fill(dataWidth-16, macc(31))), macc(31, 16)),
+                                            Cat(Mux(unsigned, 0.U((dataWidth-32).W), Fill(dataWidth-32, macc(63))), macc(63, 32)),
+                                            macc(127, 64)))
+  } else if (e32) {
+    u_max := Cat(0.U(1.W), Mux1H(UIntToOH(vd_eew(1,0)), Seq(0xFF.U(dataWidth.W),
+                                                            0xFFFF.U(dataWidth.W),
+                                                            Fill(dataWidth, 1.U(1.W)),
+                                                            Fill(dataWidth, 1.U(1.W)))))
+    s_max := Mux1H(UIntToOH(vd_eew(1,0)), Seq(0x7F.U(dataWidth.W),
+                                              0x7FFF.U(dataWidth.W),
+                                              0x7FFFFFFF.U(dataWidth.W),
+                                              0x7FFFFFFF.U(dataWidth.W)))
+    s_min := Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Fill(dataWidth-8,  1.U(1.W)), 0x80.U(8.W)),
+                                              Cat(Fill(dataWidth-16, 1.U(1.W)), 0x8000.U(16.W)),
+                                              Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W))),
+                                              Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))))
+    hi  := Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Mux(unsigned, 0.U((dataWidth-8).W),  Fill(dataWidth-8,  macc(15))), macc(15,  8)),
+                                            Cat(Mux(unsigned, 0.U((dataWidth-16).W), Fill(dataWidth-16, macc(31))), macc(31, 16)),
+                                            macc(63, 32),
+                                            macc(63, 32)))
+  } else if (e16) {
+    u_max := Cat(0.U(1.W), Mux1H(UIntToOH(vd_eew(0)), Seq(0xFF.U(dataWidth.W),
+                                                          Fill(dataWidth, 1.U(1.W)))))
+    s_max := Mux1H(UIntToOH(vd_eew(0)), Seq(0x7F.U(dataWidth.W),
+                                            0x7FFF.U(dataWidth.W)))
+    s_min := Mux1H(UIntToOH(vd_eew(0)), Seq(Cat(Fill(dataWidth-8,  1.U(1.W)), 0x80.U(8.W)),
+                                            Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))))
+    hi  := Mux1H(UIntToOH(vd_eew(0)), Seq(Cat(Mux(unsigned, 0.U((dataWidth-8).W),  Fill(dataWidth-8,  macc(15))), macc(15,  8)),
+                                          macc(32, 16)))
+  } else { // e8
+    u_max := Fill(dataWidth, 1.U(1.W))
+    s_max := 0x7F.U(dataWidth.W)
+    s_min := Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))
+    hi  := macc(16, 8)
+  }
   val sramt = Mux(!cs.doRO, 0.U,
               Mux1H(UIntToOH(cs.srType), Seq(0.U(6.W),
                                          1.U(6.W),
@@ -968,18 +1066,9 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
                                                 0.U(1.W),
                                                 ~srres(0) & sroff.orR))
   val rores = srres + Cat(0.U, roinc).asSInt
-  val u_max = Cat(0.U(1.W), Mux1H(UIntToOH(vd_eew(1,0)), Seq(0xFF.U(dataWidth.W),
-                                                         0xFFFF.U(dataWidth.W),
-                                                         0xFFFFFFFFL.U(dataWidth.W),
-                                                         Fill(dataWidth, 1.U(1.W)))))
   val uclip_max = rores > u_max.asSInt
   val uclip_min = rores < 0.S
   val uclip = Mux(uclip_max, u_max, Mux(uclip_min, 0.U, rores.asUInt))
-  val s_max = Mux1H(UIntToOH(vd_eew(1,0)), Seq(0x7F.U(dataWidth.W), 0x7FFF.U(dataWidth.W), 0x7FFFFFFF.U(dataWidth.W), 0x7FFFFFFFFFFFFFFFL.U(dataWidth.W)))
-  val s_min = Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Fill(dataWidth-8,  1.U(1.W)), 0x80.U(8.W)),
-                                               Cat(Fill(dataWidth-16, 1.U(1.W)), 0x8000.U(16.W)),
-                                               Cat(Fill(dataWidth-32, 1.U(1.W)), 0x80000000L.U(32.W)),
-                                               Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))))
   val sclip_max = rores > s_max.asSInt
   val sclip_min = rores < s_min.asSInt
   val sclip = Mux(sclip_max, s_max, Mux(sclip_min, s_min, rores.asUInt))
@@ -993,7 +1082,70 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val resp = Pipe(out, numStages-1)
   io.resp.valid := resp.valid
   io.resp.bits.uop.vxsat := resp.bits.uop.vxsat
-  io.resp.bits.data := Pipe(out.valid, muxed, numStages-1).bits
+  val active = (out.bits.uop.v_unmasked || out.bits.rvm_data(0)) && out.bits.uop.v_eidx < out.bits.uop.vconfig.vl
+  io.resp.bits.data := Pipe(out.valid, Mux(active, muxed, stale_rs3_data), numStages-1).bits
+}
+
+class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
+  extends PipelinedFunctionalUnit(
+    numStages = numStages,
+    numBypassStages = 0,
+    earliestBypassStage = 0,
+    dataWidth = dataWidth,
+    isFixMulAcc = true)
+{
+  // FIXME: optimize me by merge fix-point decoders among different FixMulAcc
+  // FIXME: mute corresponding FixMulAcc by mask to save power
+  val uop = io.req.bits.uop
+  val rs1_data = io.req.bits.rs1_data
+  val rs2_data = io.req.bits.rs2_data
+  val rs3_data = io.req.bits.rs3_data
+  val rvm_data = io.req.bits.rvm_data
+  val xma = (0 until vLenb).map(e => {
+      val dw = if (e < vLen/64) {64}
+               else if (e < vLen/32) {32}
+               else if (e < vLen/16) {16}
+               else {8}
+      Module(new FixMulAcc(numStages, dw))
+  })
+  for (e <- 0 until vLenb) {
+
+    if (e < vLen/64) {
+      xma(e).io.req.valid := io.req.valid
+      xma(e).io.req.bits.rs1_data := Mux1H(UIntToOH(uop.vs1_eew), Seq(rs1_data(8*e+7, 8*e), rs1_data(16*e+15, 16*e), rs1_data(32*e+31, 32*e), rs1_data(64*e+63, 64*e)))
+      xma(e).io.req.bits.rs2_data := Mux1H(UIntToOH(uop.vs2_eew), Seq(rs2_data(8*e+7, 8*e), rs2_data(16*e+15, 16*e), rs2_data(32*e+31, 32*e), rs2_data(64*e+63, 64*e)))
+      xma(e).io.req.bits.rs3_data := Mux1H(UIntToOH(uop.vd_eew),  Seq(rs3_data(8*e+7, 8*e), rs3_data(16*e+15, 16*e), rs3_data(32*e+31, 32*e), rs3_data(64*e+63, 64*e)))
+    } else if (e < vLen/32) {
+      xma(e).io.req.valid := io.req.valid && (uop.vd_eew < 3.U)
+      xma(e).io.req.bits.rs1_data := Mux1H(UIntToOH(uop.vs1_eew), Seq(rs1_data(8*e+7, 8*e), rs1_data(16*e+15, 16*e), rs1_data(32*e+31, 32*e), 0.U))
+      xma(e).io.req.bits.rs2_data := Mux1H(UIntToOH(uop.vs2_eew), Seq(rs2_data(8*e+7, 8*e), rs2_data(16*e+15, 16*e), rs2_data(32*e+31, 32*e), 0.U))
+      xma(e).io.req.bits.rs3_data := Mux1H(UIntToOH(uop.vd_eew),  Seq(rs3_data(8*e+7, 8*e), rs3_data(16*e+15, 16*e), rs3_data(32*e+31, 32*e), 0.U))
+    } else if (e < vLen/16) {
+      xma(e).io.req.valid := io.req.valid && (uop.vd_eew < 2.U)
+      xma(e).io.req.bits.rs1_data := Mux1H(UIntToOH(uop.vs1_eew(0)), Seq(rs1_data(8*e+7, 8*e), rs1_data(16*e+15, 16*e)))
+      xma(e).io.req.bits.rs2_data := Mux1H(UIntToOH(uop.vs2_eew(0)), Seq(rs2_data(8*e+7, 8*e), rs2_data(16*e+15, 16*e)))
+      xma(e).io.req.bits.rs3_data := Mux1H(UIntToOH(uop.vd_eew(0)),  Seq(rs3_data(8*e+7, 8*e), rs3_data(16*e+15, 16*e)))
+    } else {
+      xma(e).io.req.valid := io.req.valid && (uop.vd_eew === 0.U)
+      xma(e).io.req.bits.rs1_data := rs1_data(8*e+7, 8*e)
+      xma(e).io.req.bits.rs2_data := rs2_data(8*e+7, 8*e)
+      xma(e).io.req.bits.rs3_data := rs3_data(8*e+7, 8*e)
+    }
+    xma(e).io.vxrm := io.vxrm
+    xma(e).io.req.bits.uop        := uop
+    xma(e).io.req.bits.uop.v_eidx := uop.v_eidx + e.U
+    xma(e).io.req.bits.rvm_data   := rvm_data
+    xma(e).io.req.bits.pred_data  := io.req.bits.pred_data
+    xma(e).io.req.bits.kill       := io.req.bits.kill
+    xma(e).io.brupdate            := io.brupdate
+    xma(e).io.resp.ready          := io.resp.ready
+  }
+  io.resp.valid := xma(0).io.resp.valid
+  io.resp.bits.uop.vxsat := xma.map(m => m.io.resp.valid && m.io.resp.bits.uop.vxsat).reduce(_ || _)
+  io.resp.bits.data := Mux1H(UIntToOH(uop.vd_eew), Seq(Cat(xma.slice(0, vLen/ 8).map(_.io.resp.bits.data( 7,0)).reverse),
+                                                       Cat(xma.slice(0, vLen/16).map(_.io.resp.bits.data(15,0)).reverse),
+                                                       Cat(xma.slice(0, vLen/32).map(_.io.resp.bits.data(31,0)).reverse),
+                                                       Cat(xma.slice(0, vLen/64).map(_.io.resp.bits.data(63,0)).reverse)))
 }
 
 /**
