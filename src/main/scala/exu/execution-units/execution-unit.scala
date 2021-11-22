@@ -24,7 +24,7 @@ import freechips.rocketchip.config.{Parameters}
 import freechips.rocketchip.rocket.{BP, VConfig}
 import freechips.rocketchip.tile.{XLen, RoCCCoreIO}
 import freechips.rocketchip.tile
-import freechips.rocketchip.util.{UIntIsOneOf}
+import freechips.rocketchip.util.{UIntIsOneOf, LCG}
 
 import FUConstants._
 import boom.common._
@@ -909,3 +909,77 @@ class VecExeUnit(
   }
 }
 
+import freechips.rocketchip.rocket._
+import freechips.rocketchip.config._
+import freechips.rocketchip.unittest._
+import freechips.rocketchip.tile._
+import freechips.rocketchip.subsystem._
+import freechips.rocketchip.tilelink.LFSR64
+import boom.ifu._
+import boom.lsu._
+
+class VecExeUT(timeout: Int = 10000)(implicit p: Parameters)
+  extends UnitTest(timeout)
+{
+  val cycle = Reg(UInt(32.W))
+  when (io.start) {
+    cycle := 0.U
+  } .otherwise {
+    cycle := cycle + 1.U
+  }
+
+  val active = RegInit(false.B)
+  when (io.start) {
+    active := true.B
+  }
+
+  val tileParams = p(TilesLocated(InSubsystem))(0).tileParams
+  val coreParams = tileParams.core.asInstanceOf[BoomCoreParams]
+  val vLen = coreParams.vLen
+
+  val dut_req = Wire(DecoupledIO(new FuncUnitReq(vLen, true)))
+  dut_req := DontCare
+  dut_req.bits.uop := NullMicroOp(true)
+  dut_req.bits.uop.uopc := uopVADD
+  dut_req.bits.uop.fu_code := FU_ALU
+  dut_req.bits.uop.rob_idx := LCG(8, active)
+  dut_req.bits.uop.is_rvv  := true.B
+  dut_req.bits.rs1_data := LCG(vLen, active)
+  dut_req.bits.rs2_data := LCG(vLen, active)
+  dut_req.bits.rs3_data := LCG(vLen, active)
+  dut_req.bits.rvm_data := LCG(vLen, active)
+  dut_req.valid := false.B
+  when (cycle === 100.U) {
+    dut_req.valid := active
+  }
+
+  val dut = Module(new VecExeUnit(hasVMX=false, hasIfpu=true, hasFpu=true, hasFdiv=true))
+  dut.io := DontCare
+  dut.io.req <> dut_req
+  dut.io.iresp.ready := true.B
+  dut.io.fresp.ready := true.B
+  dut.io.vresp.ready := true.B
+  dut.io.brupdate := BoomTestUtils.NullBrUpdateInfo
+  dut.io.fcsr_rm := 0.U
+  dut.io.vxrm := 0.U
+  when(dut.io.req.valid) {
+    printf("req(%x): rs1 %x\n", dut.io.req.bits.uop.rob_idx, dut.io.req.bits.rs1_data)
+    printf("         rs2 %x\n", dut.io.req.bits.rs2_data)
+    printf("         rs3 %x\n", dut.io.req.bits.rs3_data)
+    printf("         rvm %x\n", dut.io.req.bits.rvm_data)
+  }
+  when(dut.io.vresp.valid) {
+    printf("rsp(%x): res %x\n", dut.io.vresp.bits.uop.rob_idx, dut.io.vresp.bits.data)
+  }
+}
+
+class WithVecExeUT extends Config((site, here, up) => {
+  case UnitTests => (q: Parameters) => {
+    implicit val p = BoomTestUtils.getBoomParameters("StcBoomConfig", "chipyard")
+    Seq(
+      Module(new VecExeUT(10000))
+    )
+  }
+})
+
+class VecExeUTConfig extends Config(new WithVecExeUT)

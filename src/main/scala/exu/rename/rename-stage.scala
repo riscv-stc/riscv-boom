@@ -732,53 +732,13 @@ class VecRenameUT(timeout: Int = 10000)(implicit p: Parameters)
     active := true.B
   }
 
-  def NullBrUpdateInfo: BrUpdateInfo = {
-    val ret = Wire(new BrUpdateInfo)
-    ret.b1.resolve_mask     := 0.U
-    ret.b1.mispredict_mask  := 0.U
-    ret.b2.uop              := NullMicroOp(true)
-    ret.b2.valid            := false.B
-    ret.b2.mispredict       := false.B
-    ret.b2.taken            := false.B
-    ret.b2.cfi_type         := 0.U
-    ret.b2.pc_sel           := 0.U
-    ret.b2.jalr_target      := 0.U
-    ret.b2.target_offset    := 0.S
-    ret
-  }
-
-  def NullWakeup: Valid[ExeUnitResp] = {
-    val ret = Wire(new Valid(new ExeUnitResp(p(XLen))))
-    ret.valid                   := false.B
-    ret.bits.uop                := NullMicroOp(true)
-    ret.bits.data               := 0.U
-    ret.bits.predicated         := false.B
-    ret.bits.fflags.valid       := false.B
-    ret.bits.fflags.bits.uop    := NullMicroOp(true)
-    ret.bits.fflags.bits.flags  := 0.U
-    ret
-  }
-
-  def NullVConfig: VConfig = {
-    val ret = Wire(new VConfig)
-    ret.vl := 0.U
-    ret.vtype.reserved := DontCare
-    ret.vtype.vill := false.B
-    ret.vtype.vma  := false.B
-    ret.vtype.vta  := false.B
-    ret.vtype.vsew := 0.U
-    ret.vtype.vlmul_sign := false.B
-    ret.vtype.vlmul_mag  := 0.U
-    ret
-  }
-
   val dut = Module(new VecRenameStage(coreWidth, numVecPhysRegs, 1))
 
   //val dec_fire = LCG(coreWidth, active)
   val dec_uops = WireInit(VecInit.tabulate(coreWidth)(x => {
     val ret = Wire(new MicroOp)
     ret := NullMicroOp(true)
-    ret.vconfig := NullVConfig
+    ret.vconfig := BoomTestUtils.NullVConfig
     ret
   }))
   def lreg_mask(emul: UInt): UInt = {
@@ -831,7 +791,7 @@ class VecRenameUT(timeout: Int = 10000)(implicit p: Parameters)
     dis_done := dis_fire
   }
 
-  val brupdate = RegInit(NullBrUpdateInfo)
+  val brupdate = RegInit(BoomTestUtils.NullBrUpdateInfo)
   val dis_uops = Wire(Vec(coreWidth, Valid(new MicroOp)))
   val com = Pipe(
     dis_fire.orR,
@@ -842,13 +802,14 @@ class VecRenameUT(timeout: Int = 10000)(implicit p: Parameters)
     dis_uops(i).bits  := dut.io.ren2_uops(i)
     dut.io.com_valids(i) := com.valid && com.bits(i).valid && com.bits(i).bits.ldst_val && com.bits(i).bits.dst_rtype(4)
     dut.io.com_uops(i)   := com.bits(i).bits
+    dut.io.dis_fire_first(i) := true.B
   }
 
   dut.io.kill       := false.B
   dut.io.dec_fire   := dec_fire.asBools
   dut.io.dec_uops   := dec_queue.bits
   dut.io.brupdate   := brupdate
-  dut.io.wakeups(0) := NullWakeup
+  dut.io.wakeups(0) := BoomTestUtils.NullWakeup
   dut.io.dis_fire   := dis_fire.asBools
   dut.io.dis_ready  := dis_ready
   dut.io.rbk_valids.map(x => x := false.B)

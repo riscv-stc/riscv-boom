@@ -25,7 +25,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem._
 
 import boom.common.{MicroOp}
-import boom.exu.{BrUpdateInfo}
+import boom.exu._
 
 /**
  * Object to XOR fold a input register of fullLength into a compressedLength.
@@ -805,7 +805,49 @@ object lvdGroup
   }
 }
 
-object BoomTestUtils {
+object BoomTestUtils extends boom.common.constants.ScalarOpConstants
+{
+
+  def NullBrUpdateInfo(implicit p: Parameters): BrUpdateInfo = {
+    val ret = Wire(new BrUpdateInfo)
+    ret.b1.resolve_mask     := 0.U
+    ret.b1.mispredict_mask  := 0.U
+    ret.b2.uop              := NullMicroOp(true)
+    ret.b2.valid            := false.B
+    ret.b2.mispredict       := false.B
+    ret.b2.taken            := false.B
+    ret.b2.cfi_type         := 0.U
+    ret.b2.pc_sel           := 0.U
+    ret.b2.jalr_target      := 0.U
+    ret.b2.target_offset    := 0.S
+    ret
+  }
+
+  def NullWakeup(implicit p: Parameters): Valid[ExeUnitResp] = {
+    val ret = Wire(new Valid(new ExeUnitResp(p(XLen))))
+    ret.valid                   := false.B
+    ret.bits.uop                := NullMicroOp(true)
+    ret.bits.data               := 0.U
+    ret.bits.predicated         := false.B
+    ret.bits.fflags.valid       := false.B
+    ret.bits.fflags.bits.uop    := NullMicroOp(true)
+    ret.bits.fflags.bits.flags  := 0.U
+    ret
+  }
+
+  def NullVConfig(implicit p: Parameters): VConfig = {
+    val ret = Wire(new VConfig)
+    ret.vl := 0.U
+    ret.vtype.reserved := DontCare
+    ret.vtype.vill := false.B
+    ret.vtype.vma  := false.B
+    ret.vtype.vta  := false.B
+    ret.vtype.vsew := 0.U
+    ret.vtype.vlmul_sign := false.B
+    ret.vtype.vlmul_mag  := 0.U
+    ret
+  }
+
   private def augment(tp: TileParams)(implicit p: Parameters): Parameters = p.alterPartial {
     case TileKey => tp
     case TileVisibilityNodeKey => TLEphemeralNode()(ValName("fake"))
