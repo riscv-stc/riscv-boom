@@ -1200,6 +1200,7 @@ class FR7Unit(latency: Int)(implicit p: Parameters)
   val fr7 = Module(new tile.FR7(latency))
   fr7.io.in.valid := io.req.valid
   fr7.io.in.bits := req
+  fr7.io.active  := true.B
 
   io.resp.bits.data              := fr7.io.out.bits.data
   io.resp.bits.fflags.valid      := fr7.io.out.valid

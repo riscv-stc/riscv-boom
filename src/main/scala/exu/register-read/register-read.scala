@@ -240,8 +240,26 @@ class RegisterRead(
         exe_reg_rvm_align(w) := rrd_rvm_data(w) >> rrd_uops(w).v_eidx
       }
       if (numReadPorts > 1) exe_reg_rs3_data(w) := rrd_rs3_data(w)
-      if (numReadPorts > 2) exe_reg_rs2_data(w) := rrd_rs2_data(w)
-      if (numReadPorts > 3) exe_reg_rs1_data(w) := rrd_rs1_data(w)
+      if (numReadPorts > 2) {
+        val rs2Align = rrd_rs2_data(w) >> (rrd_uops(w).v_eidx << (rrd_uops(w).vs2_eew +& 3.U))(vLenSz, 0)
+        val rs2SExt = Mux1H(UIntToOH(rrd_uops(w).vs2_eew),
+                            Seq(Cat((0 until numELENinVLEN).map(i -> rs2Align(8*i+7,    8*i).sextTo(eLen).reverse)).reverse,
+                                Cat((0 until numELENinVLEN).map(i -> rs2Align(16*i+15, 16*i).sextTo(eLen).reverse)).reverse,
+                                Cat((0 until numELENinVLEN).map(i -> rs2Align(32*i+31, 32*i).sextTo(eLen).reverse)).reverse,
+                                rs2Align))
+        val rs2ZExt = Mux1H(UIntToOH(rrd_uops(w).vs2_eew),
+                            Seq(Cat((0 until numELENinVLEN).map(i -> rs2Align(8*i+7,    8*i).zextTo(eLen).reverse)).reverse,
+                                Cat((0 until numELENinVLEN).map(i -> rs2Align(16*i+15, 16*i).zextTo(eLen).reverse)).reverse,
+                                Cat((0 until numELENinVLEN).map(i -> rs2Align(32*i+31, 32*i).zextTo(eLen).reverse)).reverse,
+                                rs2Align))
+        exe_reg_rs2_data(w) := Mux(rrd_uops(w).rt(RS2, VNU), rs2ZExt,
+                               Mux(rrd_uops(w).rt(RS2, VN),  rs2SExt,
+                                                             rrd_rs2_data(w)))
+      }
+      if (numReadPorts > 3) {
+        exe_reg_rs1_data(w) := Mux(rrd_uops(w).rt(RS1, RT_X), 0.U,
+                                                              rrd_rs1_data(w))
+      }
     } else {
       if (numReadPorts > 0) exe_reg_rs1_data(w) := bypassed_rs1_data(w)
       if (numReadPorts > 1) exe_reg_rs2_data(w) := bypassed_rs2_data(w)
