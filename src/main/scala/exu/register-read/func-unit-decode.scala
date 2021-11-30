@@ -157,10 +157,10 @@ object VecRRdDecode extends RRdDecodeConstants
         ,BitPat(uopVEXT2)      -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
         ,BitPat(uopVEXT4)      -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
         ,BitPat(uopVEXT8)      -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopVADC)       -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
-        ,BitPat(uopVSBC)       -> List(BR_N, Y, N, N, FN_SUB,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
-        ,BitPat(uopVMADC)      -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
-        ,BitPat(uopVMSBC)      -> List(BR_N, Y, N, N, FN_SUB,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVADC)       -> List(BR_N, Y, N, N, FN_ADC,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVSBC)       -> List(BR_N, Y, N, N, FN_SBC,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMADC)      -> List(BR_N, Y, N, N, FN_ADC,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMSBC)      -> List(BR_N, Y, N, N, FN_SBC,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVAND)       -> List(BR_N, Y, N, N, FN_AND,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVOR )       -> List(BR_N, Y, N, N, FN_OR ,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVXOR)       -> List(BR_N, Y, N, N, FN_XOR,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
@@ -177,8 +177,8 @@ object VecRRdDecode extends RRdDecodeConstants
         ,BitPat(uopVMSGT)      -> List(BR_N, Y, N, N, FN_SLT,   DW_XPR, OP1_RS1,     OP2_RS2,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMINU)      -> List(BR_N, Y, N, N, FN_SLTU,  DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMIN )      -> List(BR_N, Y, N, N, FN_SLT,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
-        ,BitPat(uopVMAXU)      -> List(BR_N, Y, N, N, FN_SLTU,  DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
-        ,BitPat(uopVMAX )      -> List(BR_N, Y, N, N, FN_SLT,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMAXU)      -> List(BR_N, Y, N, N, FN_SGEU,  DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
+        ,BitPat(uopVMAX )      -> List(BR_N, Y, N, N, FN_SGE,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVDIV)       -> List(BR_N, N, Y, N, FN_DIV,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVDIVU)      -> List(BR_N, N, Y, N, FN_DIVU,  DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVREM)       -> List(BR_N, N, Y, N, FN_REM,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
@@ -455,7 +455,6 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
     io.rrd_uop.ctrl.is_vmscmp   := io.rrd_uop.uopc.isOneOf(uopVMSEQ, uopVMSNE, uopVMSLTU, uopVMSLT, uopVMSLEU, uopVMSLE, uopVMSGTU, uopVMSGT)
     when(io.rrd_uop.uopc.isOneOf(uopVDIV, uopVDIVU, uopVREM, uopVREMU)) {
       io.rrd_uop.ctrl.fcn_dw := Mux(io.rrd_uop.vconfig.vtype.vsew === 3.U, true.B, false.B)
-      assert(io.rrd_uop.vconfig.vtype.vsew === 3.U || io.rrd_uop.vconfig.vtype.vsew === 2.U, "vdiv/vrem only support 32 or 64 bits")
     }
   } else {
     io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD)

@@ -167,7 +167,7 @@ class IssueSlot(
     val ret = Wire(Bool())
     val uop = slot_uop
     if (vector) {
-      val v_eidx    = uop.v_eidx
+      val v_eidx    = Mux(uop.rt(RS1, isMaskVD), 0.U, uop.v_eidx)
       val rsel      = VRegSel(v_eidx, uop.vd_eew, eLenSelSz)
       val stale_pvd = uop.stale_pvd(rsel).bits
       ret          := !uop.rt(RD, isVector) || !io.vbusy_status(stale_pvd)
@@ -467,15 +467,21 @@ class IssueSlot(
       }
       //val red_iss_p1 = WireInit(p1)
       when (io.request && io.grant && !io.uop.uopc.isOneOf(/*uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, */uopVSA, uopVSSA, uopVSUXA, uopVSOXA)) {
-        val vsew = slot_uop.vd_eew(1,0)
-        val vLen_ecnt = (vLen.U >> 3.U) >> slot_uop.vd_eew
-        io.uop.v_split_ecnt := vLen_ecnt
+        val vsew = Mux(slot_uop.rt(RS2, isWidenV) || slot_uop.rt(RD, isMaskVD), slot_uop.vs2_eew, slot_uop.vd_eew)
+        val vLen_ecnt = (vLen.U >> 3.U) >> vsew
+        val isSerial  = slot_uop.uopc.isOneOf(uopVDIV, uopVDIVU, uopVREM, uopVREMU, uopVFRDIV, uopVFDIV, uopVFSQRT)
+        val isVLoad   = slot_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
+        io.uop.v_split_ecnt := Mux(isSerial, 1.U, vLen_ecnt)
         io.uop.v_split_first := slot_uop.v_eidx === 0.U
-        io.uop.v_split_last  := slot_uop.v_eidx + io.uop.v_split_ecnt >= slot_uop.v_split_ecnt
-        val vd_idx = VRegSel(slot_uop.v_eidx, slot_uop.vd_eew, eLenSelSz)
+        val vLenEcntSz = vLenSz.asUInt - 3.U - vsew
+        val next_offset = Mux(isVLoad, slot_uop.v_eidx >> vLenEcntSz << vLenEcntSz + vLen_ecnt,
+                                       slot_uop.v_eidx + io.uop.v_split_ecnt)
+        io.uop.v_split_last  := next_offset >= slot_uop.v_split_ecnt
+        val vd_idx = Mux(slot_uop.rt(RD, isMaskVD), 0.U, VRegSel(slot_uop.v_eidx, slot_uop.vd_eew, eLenSelSz))
         io.uop.pdst := slot_uop.pvd(vd_idx).bits
         assert(is_invalid || slot_uop.pvd(vd_idx).valid)
-        io.out_uop.v_eidx := slot_uop.v_eidx + vLen_ecnt
+        io.out_uop.v_eidx := next_offset
+        slot_uop.v_eidx   := next_offset
       }
     } else {
       io.out_uop.prs1_busy  := ~p1

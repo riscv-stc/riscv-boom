@@ -880,9 +880,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   io.lsu.fence_dmem := (dis_valids zip wait_for_empty_pipeline).map {case (v,w) => v && w} .reduce(_||_)
 
   val dis_stalls = dis_hazards.scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
+  val disLast = (0 until coreWidth).map(i => !dis_valids(i) || !dis_split_cand(i) || dis_split_last(i)).andR
   if (usingVector) {
-    dis_ready := !dis_stalls.last &&
-                 (!dis_valids.last || !dis_split_cand.last || dis_split_last.last)
+    //dis_ready := !dis_stalls.last &&
+                 //(!dis_valids.last || !dis_split_cand.last || dis_split_last.last)
+    dis_ready := !dis_stalls.last && disLast
     //dis_ready := dis_fire_fb.last
   } else {
     dis_ready := !dis_stalls.last
@@ -898,7 +900,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       val dis_split_segg  = RegInit(0.U(3.W))
       val vseg_ls         = dis_uops(w).is_rvv && dis_uops(w).v_seg_nf > 1.U
       val vseg_flast      = dis_split_segf + 1.U(4.W) === dis_uops(w).v_seg_nf
-      val dis_total_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, dis_uops(w).vconfig.vl, rename_stage.io.ren2_uops(w).v_split_ecnt)
+      //val dis_total_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, dis_uops(w).v_split_ecnt, rename_stage.io.ren2_uops(w).v_split_ecnt)
+      val dis_total_ecnt  = rename_stage.io.ren2_uops(w).v_split_ecnt
       val dis_split_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, 1.U, dis_total_ecnt)
       val elem_last       = dis_split_eidx + dis_split_ecnt >= dis_total_ecnt
       val vLen_ecnt       = (vLen.U >> 3.U) >> dis_uops(w).vd_eew
@@ -1681,7 +1684,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         reset.asBool) {
     idle_cycles := 0.U
   }
-  assert (!(idle_cycles.value(13)), "Pipeline has hung.")
+  assert (!(idle_cycles.value(14)), "Pipeline has hung.")
 
   if (usingFPU) {
     fp_pipeline.io.debug_tsc_reg := debug_tsc_reg

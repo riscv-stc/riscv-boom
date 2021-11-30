@@ -352,7 +352,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew)))
     val vlmul_value =Cat(vlmul_sign, vlmul_mag)
     val vd_emul    = Mux(isVMVR, instRS1(2,0),
-                     Mux(uop.rt(RD, isReduceV), 0.U,
+                     Mux(uop.rt(RD, isReduceV) || uop.rt(RD, isMaskVD), 0.U,
                      Mux(uop.rt(RD, isWidenV), vlmul_value + vd_wfactor,
                      Mux(uop.rt(RD, isNarrowV), vlmul_value - vd_nfactor,
                      Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew - vsew + vlmul_value,
@@ -424,7 +424,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       //uop.frs3_en := true.B
     //}
 
-    uop.v_seg_nf     := 1.U(4.W) + vseg_nf
+    uop.v_seg_nf     := Mux(is_v_ls_seg, 1.U(4.W) + vseg_nf, 1.U)
     uop.v_idx_ls     := is_v_ls_index
     uop.v_eidx       := 0.U
 

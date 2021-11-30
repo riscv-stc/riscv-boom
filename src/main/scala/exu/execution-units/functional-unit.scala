@@ -898,30 +898,32 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val io_vs1_eew  = io.req.bits.uop.vs1_eew
   val io_vs2_eew  = io.req.bits.uop.vs2_eew
   val io_vd_eew   = io.req.bits.uop.vd_eew
+  val rs1Unsigned = io.req.bits.uop.rt(RS1, isUnsignedV) || io.req.bits.uop.rt(RS1, isIntU)
+  val rs2Unsigned = io.req.bits.uop.rt(RS2, isUnsignedV)
   val io_unsigned = io.req.bits.uop.rt(RD, isUnsignedV)
   val u_max = Wire(UInt((dataWidth+1).W))
   val hi, s_max, s_min, rs1_data, rs2_data, rs3_data = Wire(UInt(dataWidth.W))
   val stale_rs3_data = Pipe(in_req.valid, rs3_data).bits
   if (e64) {
-    rs1_data := Mux1H(UIntToOH(io_vs1_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs1_data(7,0),  io.req.bits.rs1_data(7,0).sextTo(dataWidth)),
-                                                     Mux(io_unsigned, io.req.bits.rs1_data(15,0), io.req.bits.rs1_data(15,0).sextTo(dataWidth)),
-                                                     Mux(io_unsigned, io.req.bits.rs1_data(31,0), io.req.bits.rs1_data(31,0).sextTo(dataWidth)),
+    rs1_data := Mux1H(UIntToOH(io_vs1_eew(1,0)), Seq(Mux(rs1Unsigned, io.req.bits.rs1_data(7,0),  io.req.bits.rs1_data(7,0).sextTo(dataWidth)),
+                                                     Mux(rs1Unsigned, io.req.bits.rs1_data(15,0), io.req.bits.rs1_data(15,0).sextTo(dataWidth)),
+                                                     Mux(rs1Unsigned, io.req.bits.rs1_data(31,0), io.req.bits.rs1_data(31,0).sextTo(dataWidth)),
                                                      io.req.bits.rs1_data))
-    rs2_data := Mux1H(UIntToOH(io_vs2_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs2_data(7,0),  io.req.bits.rs2_data(7,0).sextTo(dataWidth)),
-                                                     Mux(io_unsigned, io.req.bits.rs2_data(15,0), io.req.bits.rs2_data(15,0).sextTo(dataWidth)),
-                                                     Mux(io_unsigned, io.req.bits.rs2_data(31,0), io.req.bits.rs2_data(31,0).sextTo(dataWidth)),
+    rs2_data := Mux1H(UIntToOH(io_vs2_eew(1,0)), Seq(Mux(rs2Unsigned, io.req.bits.rs2_data(7,0),  io.req.bits.rs2_data(7,0).sextTo(dataWidth)),
+                                                     Mux(rs2Unsigned, io.req.bits.rs2_data(15,0), io.req.bits.rs2_data(15,0).sextTo(dataWidth)),
+                                                     Mux(rs2Unsigned, io.req.bits.rs2_data(31,0), io.req.bits.rs2_data(31,0).sextTo(dataWidth)),
                                                      io.req.bits.rs2_data))
     rs3_data := Mux1H(UIntToOH(io_vd_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs3_data(7,0),  io.req.bits.rs3_data(7,0).sextTo(dataWidth)),
                                                     Mux(io_unsigned, io.req.bits.rs3_data(15,0), io.req.bits.rs3_data(15,0).sextTo(dataWidth)),
                                                     Mux(io_unsigned, io.req.bits.rs3_data(31,0), io.req.bits.rs3_data(31,0).sextTo(dataWidth)),
                                                     io.req.bits.rs3_data))
   } else if (e32) {
-    rs1_data := Mux1H(UIntToOH(io_vs1_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs1_data(7,0),  io.req.bits.rs1_data(7,0).sextTo(dataWidth)),
-                                                     Mux(io_unsigned, io.req.bits.rs1_data(15,0), io.req.bits.rs1_data(15,0).sextTo(dataWidth)),
+    rs1_data := Mux1H(UIntToOH(io_vs1_eew(1,0)), Seq(Mux(rs1Unsigned, io.req.bits.rs1_data(7,0),  io.req.bits.rs1_data(7,0).sextTo(dataWidth)),
+                                                     Mux(rs1Unsigned, io.req.bits.rs1_data(15,0), io.req.bits.rs1_data(15,0).sextTo(dataWidth)),
                                                      io.req.bits.rs1_data,
                                                      io.req.bits.rs1_data))
-    rs2_data := Mux1H(UIntToOH(io_vs2_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs2_data(7,0),  io.req.bits.rs2_data(7,0).sextTo(dataWidth)),
-                                                     Mux(io_unsigned, io.req.bits.rs2_data(15,0), io.req.bits.rs2_data(15,0).sextTo(dataWidth)),
+    rs2_data := Mux1H(UIntToOH(io_vs2_eew(1,0)), Seq(Mux(rs2Unsigned, io.req.bits.rs2_data(7,0),  io.req.bits.rs2_data(7,0).sextTo(dataWidth)),
+                                                     Mux(rs2Unsigned, io.req.bits.rs2_data(15,0), io.req.bits.rs2_data(15,0).sextTo(dataWidth)),
                                                      io.req.bits.rs2_data,
                                                      io.req.bits.rs2_data))
     rs3_data := Mux1H(UIntToOH(io_vd_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs3_data(7,0),  io.req.bits.rs3_data(7,0).sextTo(dataWidth)),
@@ -929,9 +931,9 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
                                                     io.req.bits.rs3_data,
                                                     io.req.bits.rs3_data))
   } else if (e16) {
-    rs1_data := Mux1H(UIntToOH(io_vs1_eew(0)), Seq(Mux(io_unsigned, io.req.bits.rs1_data(7,0),  io.req.bits.rs1_data(7,0).sextTo(dataWidth)),
+    rs1_data := Mux1H(UIntToOH(io_vs1_eew(0)), Seq(Mux(rs1Unsigned, io.req.bits.rs1_data(7,0),  io.req.bits.rs1_data(7,0).sextTo(dataWidth)),
                                                    io.req.bits.rs1_data))
-    rs2_data := Mux1H(UIntToOH(io_vs2_eew(0)), Seq(Mux(io_unsigned, io.req.bits.rs2_data(7,0),  io.req.bits.rs2_data(7,0).sextTo(dataWidth)),
+    rs2_data := Mux1H(UIntToOH(io_vs2_eew(0)), Seq(Mux(rs2Unsigned, io.req.bits.rs2_data(7,0),  io.req.bits.rs2_data(7,0).sextTo(dataWidth)),
                                                    io.req.bits.rs2_data))
     rs3_data := Mux1H(UIntToOH(io_vd_eew(0)), Seq(Mux(io_unsigned, io.req.bits.rs3_data(7,0),  io.req.bits.rs3_data(7,0).sextTo(dataWidth)),
                                                   io.req.bits.rs3_data))
@@ -964,9 +966,9 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
     BitPat(uopVMUL)     -> List(N, Y, Y, N, X, X, N, N, X, DC2, N)
    ,BitPat(uopVMULH)    -> List(Y, Y, Y, N, X, X, N, N, X, DC2, N)
    ,BitPat(uopVMULHU)   -> List(Y, N, N, N, X, X, N, N, X, DC2, N)
-   ,BitPat(uopVMULHSU)  -> List(Y, Y, N, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVMULHSU)  -> List(Y, N, Y, N, X, X, N, N, X, DC2, N)
    ,BitPat(uopVWMULU)   -> List(N, N, N, N, X, X, N, N, X, DC2, N)
-   ,BitPat(uopVWMULSU)  -> List(N, Y, N, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVWMULSU)  -> List(N, N, Y, N, X, X, N, N, X, DC2, N)
    ,BitPat(uopVMACC)    -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
    ,BitPat(uopVNMSAC)   -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
    ,BitPat(uopVMADD)    -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
@@ -1142,10 +1144,11 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   }
   io.resp.valid := xma(0).io.resp.valid
   io.resp.bits.uop.vxsat := xma.map(m => m.io.resp.valid && m.io.resp.bits.uop.vxsat).reduce(_ || _)
-  io.resp.bits.data := Mux1H(UIntToOH(uop.vd_eew), Seq(Cat(xma.slice(0, vLen/ 8).map(_.io.resp.bits.data( 7,0)).reverse),
-                                                       Cat(xma.slice(0, vLen/16).map(_.io.resp.bits.data(15,0)).reverse),
-                                                       Cat(xma.slice(0, vLen/32).map(_.io.resp.bits.data(31,0)).reverse),
-                                                       Cat(xma.slice(0, vLen/64).map(_.io.resp.bits.data(63,0)).reverse)))
+  io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew), 
+                             Seq(Cat(xma.slice(0, vLen/ 8).map(_.io.resp.bits.data( 7,0)).reverse),
+                                 Cat(xma.slice(0, vLen/16).map(_.io.resp.bits.data(15,0)).reverse),
+                                 Cat(xma.slice(0, vLen/32).map(_.io.resp.bits.data(31,0)).reverse),
+                                 Cat(xma.slice(0, vLen/64).map(_.io.resp.bits.data(63,0)).reverse)))
 }
 
 /**
@@ -1384,12 +1387,32 @@ class SRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFunct
   div.io.isHi       := io.req.bits.uop.uopc.isOneOf(uopREM, uopREMU, uopREMW, uopREMUW, uopVREM, uopVREMU)
   div.io.isW        := !io.req.bits.uop.ctrl.fcn_dw
   if(usingVector) {
+    val isSigned = !io.req.bits.uop.rt(RS2, isUnsignedV)
     when(io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active) {
-      div.io.src(0) := io.req.bits.rs3_data
+      div.io.isHi   := false.B
+      div.io.src(0) := Mux(isSigned, Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
+                                           Seq(io.req.bits.rs3_data( 7, 0).sextTo(eLen),
+                                               io.req.bits.rs3_data(15, 0).sextTo(eLen),
+                                               io.req.bits.rs3_data(31, 0).sextTo(eLen),
+                                               io.req.bits.rs3_data(63, 0))),
+                                     Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
+                                           Seq(io.req.bits.rs3_data(7, 0), io.req.bits.rs3_data(15, 0), io.req.bits.rs3_data(31, 0), io.req.bits.rs3_data(63, 0))))
       div.io.src(1) := 1.U
     } .elsewhen(io.req.bits.uop.is_rvv) {
-      div.io.src(0) := io.req.bits.rs2_data
-      div.io.src(1) := io.req.bits.rs1_data
+      div.io.src(0) := Mux(isSigned, Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
+                                           Seq(io.req.bits.rs2_data( 7, 0).sextTo(eLen),
+                                               io.req.bits.rs2_data(15, 0).sextTo(eLen),
+                                               io.req.bits.rs2_data(31, 0).sextTo(eLen),
+                                               io.req.bits.rs2_data(63, 0))),
+                                     Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
+                                           Seq(io.req.bits.rs2_data(7, 0), io.req.bits.rs2_data(15, 0), io.req.bits.rs2_data(31, 0), io.req.bits.rs2_data(63, 0))))
+      div.io.src(1) := Mux(isSigned, Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
+                                           Seq(io.req.bits.rs1_data( 7, 0).sextTo(eLen),
+                                               io.req.bits.rs1_data(15, 0).sextTo(eLen),
+                                               io.req.bits.rs1_data(31, 0).sextTo(eLen),
+                                               io.req.bits.rs1_data(63, 0))),
+                                     Mux1H(UIntToOH(io.req.bits.uop.vd_eew), 
+                                           Seq(io.req.bits.rs1_data(7, 0), io.req.bits.rs1_data(15, 0), io.req.bits.rs1_data(31, 0), io.req.bits.rs1_data(63, 0))))
     }
   }
   // response
@@ -1420,19 +1443,24 @@ class VecALUUnit(
   with boom.ifu.HasBoomFrontendParameters
 {
   val uop = io.req.bits.uop
+  val withCarry = uop.uopc.isOneOf(uopVADC, uopVSBC, uopVMADC, uopVMSBC)
+  val isVMADC   = uop.uopc.isOneOf(uopVMADC, uopVMSBC)
+  val isMerge   = uop.uopc.isOneOf(uopMERGE)
+  val isShift   = uop.uopc.isOneOf(uopVSLL, uopVSRL, uopVSRA)
 
   // immediate generation
   val imm_xprlen = ImmGen(uop.imm_packed, uop.ctrl.imm_sel)
   val rs1_data = io.req.bits.rs1_data
   val rs2_data = io.req.bits.rs2_data
   val rs3_data = io.req.bits.rs3_data
+  val rvm_data = io.req.bits.rvm_data
   val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
   val vl = uop.vconfig.vl
   prestart := 0.U // FIXME: Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < csr_vstart).reverse)
   //body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= csr_vstart && uop.v_eidx + b.U < vl).reverse)
   body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= 0.U && uop.v_eidx + b.U < vl).reverse)
-  mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)),
-              Cat((0 until vLen/8).map(b => io.req.bits.rvm_data(b)).reverse))
+  mask     := Mux(uop.v_unmasked || withCarry || isMerge, ~(0.U(vLenb.W)),
+              Cat((0 until vLen/8).map(b => rvm_data(b)).reverse))
   tail     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= vl).reverse)
   inactive := prestart | body & ~mask | tail
   val byte_inactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
@@ -1440,6 +1468,7 @@ class VecALUUnit(
                                 Cat((0 until vLenb/2).map(e => Fill(2, inactive(e))).reverse),
                                 Cat((0 until vLenb/4).map(e => Fill(4, inactive(e))).reverse),
                                 Cat((0 until vLenb/8).map(e => Fill(8, inactive(e))).reverse)))
+  val shiftMask = Fill(eLen, !isShift) | Mux1H(UIntToOH(uop.vs2_eew), Seq("h7".U, "hf".U, "h1f".U, "h3f".U))
 
   // operand 1 select
   val op1_data = WireInit(0.U(vLen.W))
@@ -1458,6 +1487,10 @@ class VecALUUnit(
 
   val op1_eew = Mux(uop.ctrl.op1_sel === OP1_RS1, uop.vs1_eew, uop.vs2_eew)
   val op2_eew = Mux(uop.ctrl.op2_sel === OP2_RS2, uop.vs2_eew, uop.vs1_eew)
+  val isRs1UnSigned = uop.rt(RS1, isUnsignedV) || uop.rt(RS1, isIntU)
+  val isRs2UnSigned = uop.rt(RS2, isUnsignedV) || uop.rt(RS2, isIntU)
+  val op1Signed = Mux(uop.ctrl.op1_sel === OP1_RS1, !isRs1UnSigned, !isRs2UnSigned)
+  val op2Signed = Mux(uop.ctrl.op2_sel === OP2_RS2, !isRs2UnSigned, !isRs1UnSigned)
   val e64_adder_out       = Wire(Vec(numELENinVLEN, UInt(64.W)))
   val e64_cmp_out, e64_co = Wire(Vec(numELENinVLEN, Bool()))
   val e32_adder_out       = Wire(Vec(numELENinVLEN*2, UInt(32.W)))
@@ -1468,49 +1501,106 @@ class VecALUUnit(
   val e8_cmp_out, e8_co   = Wire(Vec(numELENinVLEN*8, Bool()))
   for (e <- 0 until vLenb) {
     // FIXME: parameterize data width of ALU to save area
-    val alu = Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true))
+    val alu = if(e < numELENinVLEN)
+                Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true, dataWidth = eLen))
+              else if(e < numELENinVLEN*2)
+                Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true, dataWidth = eLen >> 1))
+              else if(e < numELENinVLEN*4)
+                Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true, dataWidth = eLen >> 2))
+              else
+                Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true, dataWidth = eLen >> 3))
     // input
     alu.io.fn  := uop.ctrl.op_fcn
     alu.io.dw  := uop.ctrl.fcn_dw
     if (e < numELENinVLEN) {
       // e64 ALU
-      alu.io.in1 := Mux1H(UIntToOH(op1_eew), Seq(op1_data(8*e+7, 8*e), op1_data(16*e+15, 16*e), op1_data(32*e+31, 32*e), op1_data(64*e+63, 64*e)))
-      alu.io.in2 := Mux1H(UIntToOH(op2_eew), Seq(op2_data(8*e+7, 8*e), op2_data(16*e+15, 16*e), op2_data(32*e+31, 32*e), op2_data(64*e+63, 64*e)))
-      alu.io.ci  := false.B // FIXME
+      alu.io.in1 := Mux(isMerge,  0.U,
+                    Mux(op1Signed, Mux1H(UIntToOH(op1_eew), 
+                                         Seq(op1_data( 8*e+7,   8*e).sextTo(eLen),
+                                             op1_data(16*e+15, 16*e).sextTo(eLen),
+                                             op1_data(32*e+31, 32*e).sextTo(eLen),
+                                             op1_data(64*e+63, 64*e))),
+                                   Mux1H(UIntToOH(op1_eew),
+                                         Seq(op1_data(8*e+7, 8*e), op1_data(16*e+15, 16*e), op1_data(32*e+31, 32*e), op1_data(64*e+63, 64*e)))))
+      //alu.io.in1 := Mux1H(UIntToOH(op1_eew), Seq(op1_data(8*e+7, 8*e), op1_data(16*e+15, 16*e), op1_data(32*e+31, 32*e), op1_data(64*e+63, 64*e)))
+      alu.io.in2 := Mux(isMerge,   Mux1H(UIntToOH(op2_eew),
+                                         Seq(op1_data( 8*e+7,   8*e) & Fill( 8, !rvm_data(e)) | op2_data( 8*e+7,   8*e) & Fill( 8, rvm_data(e)),
+                                             op1_data(16*e+15, 16*e) & Fill(16, !rvm_data(e)) | op2_data(16*e+15, 16*e) & Fill(16, rvm_data(e)),
+                                             op1_data(32*e+31, 32*e) & Fill(32, !rvm_data(e)) | op2_data(32*e+31, 32*e) & Fill(32, rvm_data(e)),
+                                             op1_data(64*e+63, 64*e) & Fill(64, !rvm_data(e)) | op2_data(64*e+63, 64*e) & Fill(64, rvm_data(e)))),
+                    Mux(op2Signed, Mux1H(UIntToOH(op2_eew), 
+                                         Seq(op2_data( 8*e+7,   8*e).sextTo(eLen),
+                                             op2_data(16*e+15, 16*e).sextTo(eLen),
+                                             op2_data(32*e+31, 32*e).sextTo(eLen),
+                                             op2_data(64*e+63, 64*e))),
+                                   Mux1H(UIntToOH(op2_eew), 
+                                         Seq(op2_data( 8*e+ 7,  8*e) & shiftMask, 
+                                             op2_data(16*e+15, 16*e) & shiftMask, 
+                                             op2_data(32*e+31, 32*e) & shiftMask, 
+                                             op2_data(64*e+63, 64*e) & shiftMask))))
+      alu.io.ci  := Mux(withCarry && !uop.v_unmasked, rvm_data(e), false.B) // FIXME
     } else if (e < numELENinVLEN*2) {
       // e32 ALU
-      alu.io.in1 := Mux1H(UIntToOH(op1_eew), Seq(op1_data(8*e+7, 8*e), op1_data(16*e+15, 16*e), op1_data(32*e+31, 32*e), 0.U))
-      alu.io.in2 := Mux1H(UIntToOH(op2_eew), Seq(op2_data(8*e+7, 8*e), op2_data(16*e+15, 16*e), op2_data(32*e+31, 32*e), 0.U))
-      alu.io.ci  := false.B // FIXME
+      alu.io.in1 := Mux(isMerge,   0.U,
+                    Mux(op1Signed, Mux1H(UIntToOH(op1_eew), 
+                                         Seq(op1_data( 8*e+7,   8*e).sextTo(eLen >> 1),
+                                             op1_data(16*e+15, 16*e).sextTo(eLen >> 1),
+                                             op1_data(32*e+31, 32*e),
+                                             0.U)),
+                                   Mux1H(UIntToOH(op1_eew),
+                                         Seq(op1_data(8*e+7, 8*e),op1_data(16*e+15, 16*e), op1_data(32*e+31, 32*e), 0.U))))
+      //alu.io.in1 := Mux1H(UIntToOH(op1_eew), Seq(op1_data(8*e+7, 8*e), op1_data(16*e+15, 16*e), op1_data(32*e+31, 32*e), 0.U))
+      alu.io.in2 := Mux(isMerge,   Mux1H(UIntToOH(op2_eew),
+                                         Seq(op1_data( 8*e+7,   8*e) & Fill( 8, !rvm_data(e)) | op2_data( 8*e+7,   8*e) & Fill( 8, rvm_data(e)),
+                                             op1_data(16*e+15, 16*e) & Fill(16, !rvm_data(e)) | op2_data(16*e+15, 16*e) & Fill(16, rvm_data(e)),
+                                             op1_data(32*e+31, 32*e) & Fill(32, !rvm_data(e)) | op2_data(32*e+31, 32*e) & Fill(32, rvm_data(e)),
+                                             0.U)),
+                    Mux(op2Signed, Mux1H(UIntToOH(op2_eew), 
+                                         Seq(op2_data( 8*e+7,   8*e).sextTo(eLen >> 1),
+                                             op2_data(16*e+15, 16*e).sextTo(eLen >> 1),
+                                             op2_data(32*e+31, 32*e),
+                                             0.U)),
+                                   Mux1H(UIntToOH(op2_eew), 
+                                         Seq(op2_data( 8*e+7,   8*e) & shiftMask, 
+                                             op2_data(16*e+15, 16*e) & shiftMask, 
+                                             op2_data(32*e+31, 32*e) & shiftMask, 0.U))))
+      alu.io.ci  := Mux(withCarry && !uop.v_unmasked, rvm_data(e), false.B) // FIXME
     } else if (e < numELENinVLEN*4) {
       // e16 ALU
-      alu.io.in1 := Mux(op1_eew(0), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e))
-      alu.io.in2 := Mux(op2_eew(0), op2_data(16*e+15, 16*e), op2_data(8*e+7, 8*e))
-      alu.io.ci  := false.B // FIXME
+      alu.io.in1 := Mux(isMerge,   0.U,
+                    Mux(op1Signed, Mux(op1_eew(0), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e).sextTo(eLen >> 2)),
+                                   Mux(op1_eew(0), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e))))
+      //alu.io.in1 := Mux(op1_eew(0), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e))
+      alu.io.in2 := Mux(isMerge,   Mux(op2_eew(0), op1_data(16*e+15, 16*e) & Fill(16, !rvm_data(e)) | op2_data(16*e+15, 16*e) & Fill(16, rvm_data(e)),
+                                                     op1_data( 8*e+7,   8*e) & Fill( 8, !rvm_data(e)) | op2_data( 8*e+7,   8*e) & Fill( 8, rvm_data(e))),
+                    Mux(op2Signed, Mux(op2_eew(0), op2_data(16*e+15, 16*e), op2_data(8*e+7, 8*e).sextTo(eLen >> 2)),
+                                   Mux(op2_eew(0), op2_data(16*e+15, 16*e) & shiftMask, op2_data(8*e+7, 8*e) & shiftMask)))
+      alu.io.ci  := Mux(withCarry && !uop.v_unmasked, rvm_data(e), false.B) // FIXME
     } else {
       // e8 ALU
-      alu.io.in1 := op1_data(8*e+7, 8*e)
-      alu.io.in2 := op2_data(8*e+7, 8*e)
-      alu.io.ci  := false.B // FIXME
+      alu.io.in1 := Mux(isMerge, 0.U, op1_data(8*e+7, 8*e))
+      alu.io.in2 := Mux(isMerge, op1_data(8*e+7, 8*e) & Fill(8, !rvm_data(e)) | op2_data(8*e+7, 8*e) & Fill(8, rvm_data(e)),
+                                 op2_data(8*e+7, 8*e) & shiftMask)
+      alu.io.ci  := Mux(withCarry && !uop.v_unmasked, rvm_data(e), false.B) // FIXME
     }
 
     // output
     if (e < numELENinVLEN) {
-      e64_adder_out(e) := alu.io.adder_out
+      e64_adder_out(e) := alu.io.out
       e64_cmp_out(e)   := alu.io.cmp_out
       e64_co(e)        := alu.io.co
     }
     if (e < numELENinVLEN*2) {
-      e32_adder_out(e) := alu.io.adder_out
+      e32_adder_out(e) := alu.io.out
       e32_cmp_out(e)   := alu.io.cmp_out
       e32_co(e)        := alu.io.co
     }
     if (e < numELENinVLEN*4) {
-      e16_adder_out(e) := alu.io.adder_out
+      e16_adder_out(e) := alu.io.out
       e16_cmp_out(e)   := alu.io.cmp_out
       e16_co(e)        := alu.io.co
     }
-    e8_adder_out(e) := alu.io.adder_out
+    e8_adder_out(e) := alu.io.out
     e8_cmp_out(e)   := alu.io.cmp_out
     e8_co(e)        := alu.io.co
   }
@@ -1552,13 +1642,16 @@ class VecALUUnit(
   //when (io.req.valid && (vadc || vsbc)) { assert(!uop.v_unmasked, "Problematic vadc/vsbc") }
   //val alu_co = Mux1H(UIntToOH(uop.vconfig.vtype.vsew(1,0)), Seq(alu.io.out(8), alu.io.out(16), alu.io.out(32), alu.io.co))
 
-  alu_out := Mux1H(UIntToOH(uop.vd_eew), Seq(e8_adder_out.asUInt,
-                                             e16_adder_out.asUInt,
-                                             e32_adder_out.asUInt,
-                                             e64_adder_out.asUInt))
+  alu_out := Mux(isVMADC, Mux1H(UIntToOH(uop.vd_eew),
+                                Seq(e8_co.asUInt, e16_co.asUInt, e32_co.asUInt, e64_co.asUInt)),
+             Mux(uop.rt(RD, isMaskVD), Mux1H(UIntToOH(uop.vd_eew),
+                                Seq(e8_cmp_out.asUInt, e16_cmp_out.asUInt, e32_cmp_out.asUInt, e64_cmp_out.asUInt)),
+                          Mux1H(UIntToOH(uop.vd_eew), 
+                                Seq(e8_adder_out.asUInt, e16_adder_out.asUInt, e32_adder_out.asUInt,e64_adder_out.asUInt))))
 
   r_val (0) := io.req.valid
-  r_data(0) := Cat((0 until vLenb).map(b => Mux(byte_inactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse)
+  r_data(0) := Mux(uop.rt(RD, isMaskVD), rs3_data & inactive | alu_out & ~inactive,
+                   Cat((0 until vLenb).map(b => Mux(byte_inactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse))
   r_pred(0) := uop.is_sfb_shadow && io.req.bits.pred_data
   for (i <- 1 until numStages) {
     r_val(i)  := r_val(i-1)

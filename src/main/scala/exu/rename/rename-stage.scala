@@ -26,6 +26,7 @@ import freechips.rocketchip.tile.{TileKey, XLen}
 
 import boom.common._
 import boom.util._
+import boom.common.MicroOpcodes._
 
 /**
  * IO bundle to interface with the Register Rename logic
@@ -667,11 +668,14 @@ extends AbstractRenameStage(
     busytable.io.rebusy_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && io.dis_fire_first(w)
   }
   for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) {
-    val v_eidx  = wk.bits.uop.v_eidx
-    val vsew    = wk.bits.uop.vd_eew(1,0)
-    val ecnt    = wk.bits.uop.v_split_ecnt
+    val wkUop   = wk.bits.uop
+    val v_eidx  = wkUop.v_eidx
+    val vsew    = wkUop.vd_eew(1,0)
+    val ecnt    = wkUop.v_split_ecnt
     val rmask   = VRegMask(v_eidx, vsew, ecnt, vLenb)
-    bs := rmask
+    val tailMask = Mux(wkUop.rt(RD, isMaskVD), Fill(vLenb, wkUop.v_split_last) << (v_eidx >> 3)(log2Ceil(vLenb)-1, 0),
+                                               Fill(vLenb, wkUop.v_split_last) << (v_eidx << vsew)(log2Ceil(vLenb)-1, 0))
+    bs := rmask | tailMask
   }
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
