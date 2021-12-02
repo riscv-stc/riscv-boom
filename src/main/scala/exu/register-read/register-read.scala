@@ -54,6 +54,7 @@ class RegisterRead(
     // issued micro-ops
     val iss_valids = Input(Vec(issueWidth, Bool()))
     val iss_uops   = Input(Vec(issueWidth, new MicroOp()))
+    val rrd_stall  = Output(Vec(issueWidth, Bool()))
 
     // interface with register file's read ports
     val rf_read_ports = Flipped(Vec(numTotalReadPorts, new RegisterFileReadPortIO(maxPregSz, registerWidth)))
@@ -134,16 +135,50 @@ class RegisterRead(
     val rs3_addr = WireInit(io.iss_uops(w).prs3)
     val rvm_addr = if (vector) WireInit(io.iss_uops(w).pvm) else 0.U
     val pred_addr = io.iss_uops(w).ppred
+    io.rrd_stall(w) := false.B
 
     if (vector) {
-      val rs1_sel = VRegSel(io.iss_uops(w).v_eidx, io.iss_uops(w).vs1_eew, eLenSelSz)
-      val rs2_sel = VRegSel(io.iss_uops(w).v_eidx, io.iss_uops(w).vs2_eew, eLenSelSz)
-      val rs3_sel = Mux(io.iss_uops(w).rt(RD, isMaskVD), VRegSel(io.iss_uops(w).v_eidx >> 3, 0.U, eLenSelSz),
-                                                         VRegSel(io.iss_uops(w).v_eidx, io.iss_uops(w).vd_eew, eLenSelSz))
-      rs1_addr := io.iss_uops(w).pvs1(rs1_sel).bits
-      rs2_addr := io.iss_uops(w).pvs2(rs2_sel).bits
-      rs3_addr := io.iss_uops(w).stale_pvd(rs3_sel).bits
-      rvm_addr := io.iss_uops(w).pvm
+      val iss_uop = Wire(new MicroOp())
+      iss_uop := io.iss_uops(w)
+      if (numReadPorts > 3) { // only for vec pipe, skip for vmx pipe
+        val vs2_nr  = nrVecGroup(io.iss_uops(w).vs2_emul)
+        val vrp_iss = io.iss_valids(w) && (io.iss_uops(w).fu_code & FU_VRP).orR && vs2_nr > 1.U
+        val vrp_val = RegInit(false.B)
+        val vrp_last = Wire(Bool())
+        val vrp_uop = Reg(new MicroOp())
+        vrp_last := false.B
+        when (vrp_val) {
+          val vlen_ecnt = ((vLen/8).U >> vrp_uop.vs2_eew)
+          val rs2_sel = VRegSel(vrp_uop.v_eidx, vrp_uop.vs2_eew, eLenSelSz)
+          vrp_last := (rs2_sel === nrVecGroup(vrp_uop.vs2_emul))
+          when (vrp_last) {
+            vrp_val := false.B
+          }
+          vrp_uop.v_eidx := vrp_uop.v_eidx + vlen_ecnt
+          // loop on vrp_uop
+          iss_uop := vrp_uop
+          iss_uop.v_split_last := vrp_last
+        } .otherwise {
+          val vlen_ecnt = ((vLen/8).U >> io.iss_uops(w).vs2_eew)
+          vrp_val := vrp_iss
+          when(vrp_iss) {
+            vrp_uop := io.iss_uops(w)
+            vrp_uop.v_eidx := io.iss_uops(w).v_eidx + vlen_ecnt
+          }
+        }
+        when (vrp_iss) {
+          assert(!vrp_val)
+        }
+        io.rrd_stall(w) := vrp_val
+      }
+      val rs1_sel = VRegSel(iss_uop.v_eidx, iss_uop.vs1_eew, eLenSelSz)
+      val rs2_sel = VRegSel(iss_uop.v_eidx, iss_uop.vs2_eew, eLenSelSz)
+      val rs3_sel = Mux(iss_uop.rt(RD, isMaskVD), VRegSel(iss_uop.v_eidx >> 3, 0.U, eLenSelSz),
+                                                  VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
+      rs1_addr := iss_uop.pvs1(rs1_sel).bits
+      rs2_addr := iss_uop.pvs2(rs2_sel).bits
+      rs3_addr := iss_uop.stale_pvd(rs3_sel).bits
+      rvm_addr := iss_uop.pvm
     }
 
     if (vector) {

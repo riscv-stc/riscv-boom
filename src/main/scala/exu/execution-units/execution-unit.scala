@@ -116,7 +116,7 @@ abstract class ExecutionUnit(
   val io = IO(new Bundle {
     val fu_types = Output(Bits(FUC_SZ.W))
 
-    val req      = Flipped(new DecoupledIO(new FuncUnitReq(dataWidth, hasVector)))
+    val req      = Flipped(new DecoupledIO(new FuncUnitReq(dataWidth)))
 
     val iresp    = if (writesIrf)   new DecoupledIO(new ExeUnitResp(xLen)) else null
     val fresp    = if (writesFrf)   new DecoupledIO(new ExeUnitResp(xLen)) else null
@@ -654,26 +654,28 @@ class VecExeUnit(
   val vmx_busy  = WireInit(false.B)
   val fdiv_busy = WireInit(false.B)
   val div_busy_dly = RegNext(div_busy)
+  val vrp_busy  = WireInit(false.B)
 
   // The Functional Units --------------------
   val vec_fu_units   = ArrayBuffer[FunctionalUnit]()
   //val vresp_fu_units = ArrayBuffer[FunctionalUnit]()
 
-  io.fu_types := Mux(hasAlu.B,                FU_ALU, 0.U) |
+  io.fu_types := Mux(!vrp_busy && hasAlu.B,   FU_ALU, 0.U) |
                  Mux(hasMacc.B,               FU_MAC, 0.U) |
                  Mux(hasVMaskUnit.B,          FU_VMASKU, 0.U) |
                  Mux(!div_busy && hasDiv.B,   FU_DIV, 0.U) |
                  Mux(hasIfpu.B,               FU_I2F, 0.U) |
-                 Mux(hasFpu.B,       FU_FPU | FU_F2I, 0.U) |
+                 Mux(!vrp_busy && hasFpu.B,   FU_FPU | FU_F2I, 0.U) |
                  Mux(!vmx_busy && hasVMX.B,   FU_VMX, 0.U) |
                  Mux(!fdiv_busy && hasFdiv.B, FU_FDV, 0.U) |
-                 Mux(hasFdiv.B,               FU_FR7, 0.U)
+                 Mux(hasFdiv.B,               FU_FR7, 0.U) |
+                 Mux(!vrp_busy && hasAlu.B,   FU_VRP, 0.U)
 
   // ALU Unit -------------------------------
   var valu: VecALUUnit = null
   if (hasAlu) {
     valu = Module(new VecALUUnit(numStages = numStages, dataWidth = vLen))
-    valu.io.req.valid := io.req.valid && (io.req.bits.uop.fu_code & FU_ALU).orR //&& 
+    //valu.io.req.valid := io.req.valid && (io.req.bits.uop.fu_code & FU_ALU).orR //&& 
                         //(io.req.bits.uop.uopc =/= uopVFMV_F_S) && (io.req.bits.uop.uopc =/= uopVMV_X_S)
     vec_fu_units += valu
   }
@@ -709,23 +711,23 @@ class VecExeUnit(
   }
 
   // FPU Unit -----------------------
-  var fpu: VecFPUUnit = null
+  var vfpu: VecFPUUnit = null
   val fpu_resp_val = WireInit(false.B)
   val fpu_resp_fflags = Wire(new ValidIO(new FFlagsResp()))
   fpu_resp_fflags.valid := false.B
   fpu_resp_fflags.bits  := DontCare
   if (hasFpu) {
-    fpu = Module(new VecFPUUnit(vLen))
-    fpu.io.req.valid         := io.req.valid &&
+    vfpu = Module(new VecFPUUnit(vLen))
+    vfpu.io.req.valid         := io.req.valid &&
                                 (io.req.bits.uop.fu_code_is(FU_FPU) ||
                                 io.req.bits.uop.fu_code_is(FU_F2I)) // TODO move to using a separate unit
-    assert(fpu.io.req.bits.pred_data === false.B, "Expecting operations without predication for FPU")
-    fpu.io.fcsr_rm           := io.fcsr_rm
-    fpu.io.resp.ready        := DontCare
-    fpu_resp_val             := fpu.io.resp.valid
-    fpu_resp_fflags          := fpu.io.resp.bits.fflags
+    assert(vfpu.io.req.bits.pred_data === false.B, "Expecting operations without predication for VFPU")
+    vfpu.io.fcsr_rm           := io.fcsr_rm
+    vfpu.io.resp.ready        := DontCare
+    fpu_resp_val             := vfpu.io.resp.valid
+    fpu_resp_fflags          := vfpu.io.resp.bits.fflags
 
-    vec_fu_units += fpu
+    vec_fu_units += vfpu
   }
 
   // FR7 Unit
@@ -754,28 +756,11 @@ class VecExeUnit(
     vec_fu_units += vmx
   }
 
-  // Div/Rem Unit -----------------------
-  /*
-  var div: DivUnit = null
-  val div_resp_val = WireInit(false.B)
-  if (hasDiv) {
-    div = Module(new DivUnit(xLen))
-    div.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)
-
-    // share write port with the pipelined units
-    div.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
-
-    div_resp_val := div.io.resp.valid
-    div_busy     := !div.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)) || !div_busy_dly
-
-    vec_fu_units += div
-  } */
-
   // Div/Rem Unit with SRT4 Divider --------
-  var div: SRT4DivUnit = null
+  var div: SRT4DivUnit = null //DivUnit = null
   val div_resp_val = WireInit(false.B)
   if (hasDiv) {
-    div = Module(new SRT4DivUnit(xLen))
+    div = Module(new SRT4DivUnit(xLen)) //Module(new DivUnit(xLen))
     div.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)
 
     // share write port with the pipelined units
@@ -821,11 +806,47 @@ class VecExeUnit(
       f.io.resp.ready := io.vresp.ready
   })
 
+  if (hasAlu) {
+    val vrp = Module(new VecRPAssist())
+
+    // Red-Perm Assist and related arbiter
+    vrp.io.exreq.valid    := io.req.valid && (io.req.bits.uop.fu_code & FU_IVRP).orR
+    vrp.io.exreq.bits     := io.req.bits
+    vrp.io.fbreq.ready    := true.B
+    val valu_resp_vrp = valu.io.resp.valid && (valu.io.resp.bits.uop.fu_code & FU_VRP).orR
+    val vfpu_resp_vrp = vfpu.io.resp.valid && (vfpu.io.resp.bits.uop.fu_code & FU_VRP).orR
+    vrp.io.fbrsp.valid    := valu_resp_vrp || vfpu_resp_vrp
+
+    vrp.io.fbrsp.bits     := Mux(vfpu_resp_vrp, vfpu.io.resp.bits, valu.io.resp.bits)
+    vrp.io.brupdate       := io.brupdate
+    vrp_busy              := vrp.io.busy
+
+    val valu_exreq_valid = io.req.valid &&
+                           (io.req.bits.uop.fu_code & FU_ALU).orR &&
+                           !(io.req.bits.uop.fu_code & FU_VRP).orR
+    valu.io.req.valid         := Mux(vrp_busy, vrp.io.fbreq.valid, valu_exreq_valid)
+    valu.io.req.bits.uop      := Mux(vrp_busy, vrp.io.fbreq.bits.uop, io.req.bits.uop)
+    valu.io.req.bits.rs1_data := Mux(vrp_busy, vrp.io.fbreq.bits.rs1_data, io.req.bits.rs1_data)
+    valu.io.req.bits.rs2_data := Mux(vrp_busy, vrp.io.fbreq.bits.rs2_data, io.req.bits.rs2_data)
+    valu.io.req.bits.rs3_data := Mux(vrp_busy, vrp.io.fbreq.bits.rs3_data, io.req.bits.rs3_data)
+    valu.io.req.bits.rvm_data := Mux(vrp_busy, vrp.io.fbreq.bits.rvm_data, io.req.bits.rvm_data)
+
+    val vfpu_exreq_valid = io.req.valid &&
+                           (io.req.bits.uop.fu_code & FU_FPU).orR &&
+                           !(io.req.bits.uop.fu_code & FU_VRP).orR
+    vfpu.io.req.valid         := Mux(vrp_busy, vrp.io.fbreq.valid, vfpu_exreq_valid)
+    vfpu.io.req.bits.uop      := Mux(vrp_busy, vrp.io.fbreq.bits.uop, io.req.bits.uop)
+    vfpu.io.req.bits.rs1_data := Mux(vrp_busy, vrp.io.fbreq.bits.rs1_data, io.req.bits.rs1_data)
+    vfpu.io.req.bits.rs2_data := Mux(vrp_busy, vrp.io.fbreq.bits.rs2_data, io.req.bits.rs2_data)
+    vfpu.io.req.bits.rs3_data := Mux(vrp_busy, vrp.io.fbreq.bits.rs3_data, io.req.bits.rs3_data)
+    vfpu.io.req.bits.rvm_data := Mux(vrp_busy, vrp.io.fbreq.bits.rvm_data, io.req.bits.rvm_data)
+  }
+
   // Outputs (Write Port #0)  ---------------
   if (writesVrf) {
-    val is_not_vpopc = vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVPOPC).foldLeft(true.B)(_ && _)
-    val is_not_vfirst = vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVFIRST).foldLeft(true.B)(_ && _)
-    io.vresp.valid     := vec_fu_units.map(_.io.resp.valid).reduce(_|_) && is_not_vpopc && is_not_vfirst
+    //val is_not_vpopc = vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVPOPC).foldLeft(true.B)(_ && _)
+    //val is_not_vfirst = vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVFIRST).foldLeft(true.B)(_ && _)
+    io.vresp.valid     := vec_fu_units.map(f => f.io.resp.valid && !(f.io.resp.bits.uop.fu_code & FU_VRP).orR).reduce(_||_)
     io.vresp.bits.uop  := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.uop)))
     io.vresp.bits.data := PriorityMux(vec_fu_units.map(f =>
@@ -937,20 +958,182 @@ class VecExeUT(timeout: Int = 10000)(implicit p: Parameters)
   val coreParams = tileParams.core.asInstanceOf[BoomCoreParams]
   val vLen = coreParams.vLen
 
-  val dut_req = Wire(DecoupledIO(new FuncUnitReq(vLen, true)))
-  dut_req := DontCare
-  dut_req.bits.uop := NullMicroOp(true)
-  dut_req.bits.uop.uopc := uopVADD
-  dut_req.bits.uop.fu_code := FU_ALU
-  dut_req.bits.uop.rob_idx := LCG(8, active)
-  dut_req.bits.uop.is_rvv  := true.B
-  dut_req.bits.rs1_data := LCG(vLen, active)
-  dut_req.bits.rs2_data := LCG(vLen, active)
-  dut_req.bits.rs3_data := LCG(vLen, active)
-  dut_req.bits.rvm_data := LCG(vLen, active)
+  val dut_req   = Wire(DecoupledIO(new FuncUnitReq(vLen)))
+  val vsew      = WireInit(0.U(2.W))
+  val vlmul     = WireInit(0.U(3.W))
+  val vlen_ecnt = ((vLen/8).U >> vsew)
+  val vtype     = Wire(new VType)
+  dut_req                             := DontCare
+  dut_req.bits.uop                    := NullMicroOp(true)
+  dut_req.bits.uop.v_eidx             := 0.U
+  dut_req.bits.uop.v_split_ecnt       := vlen_ecnt
+  dut_req.bits.rs1_data               := LCG(vLen, active)
+  dut_req.bits.rs2_data               := LCG(vLen, active)
+  dut_req.bits.rs3_data               := LCG(vLen, active)
+  dut_req.bits.rvm_data               := LCG(vLen, active)
+  dut_req.bits.uop.vd_emul            := 0.U
+  dut_req.bits.uop.vs1_emul           := 0.U
+  dut_req.bits.uop.vs2_emul           := 0.U
+  dut_req.bits.uop.vd_eew             := 0.U
+  dut_req.bits.uop.vs1_eew            := 0.U
+  dut_req.bits.uop.vs2_eew            := 0.U
   dut_req.valid := false.B
-  when (cycle === 100.U) {
-    dut_req.valid := active
+  vtype.vill := false.B
+  vtype.vta := false.B
+  vtype.vma := false.B
+  vtype.vsew := 0.U
+  vtype.vlmul_sign := false.B
+  vtype.vlmul_mag := 0.U
+  vtype.reserved := DontCare
+  val case1_start = 100
+  val case2_start = 200
+  val case3_start = 300
+  val case4_start = 400
+  when (cycle >= case1_start.U && cycle < (case1_start+8).U) {
+    vsew                          := 0.U
+    vlmul                         := 3.U
+    vtype.vsew                    := vsew
+    vtype.vlmul_sign              := false.B
+    vtype.vlmul_mag               := 3.U
+    dut_req.bits.uop.uopc         := uopVADD
+    dut_req.bits.uop.fu_code      := FU_ALU | FU_VRP
+    dut_req.bits.uop.rob_idx      := 0x55.U
+    dut_req.bits.uop.ldst_val     := true.B
+    dut_req.bits.uop.dst_rtype    := RT_VW
+    dut_req.bits.uop.lrs1_rtype   := RT_VRW
+    dut_req.bits.uop.lrs2_rtype   := RT_VEC
+    dut_req.bits.uop.is_rvv       := true.B
+    dut_req.bits.uop.vd_emul      := 0.U
+    dut_req.bits.uop.vs1_emul     := 0.U
+    dut_req.bits.uop.vs2_emul     := 3.U
+    dut_req.bits.uop.vd_eew       := 1.U
+    dut_req.bits.uop.vs1_eew      := 0.U
+    dut_req.bits.uop.vs2_eew      := 0.U
+    dut_req.bits.uop.v_unmasked   := true.B
+    dut_req.bits.uop.vconfig.vtype:= vtype
+    dut_req.bits.uop.vconfig.vl   := vtype.vlMax
+    dut_req.bits.uop.v_split_ecnt := vlen_ecnt
+    dut_req.valid := true.B
+    dut_req.bits.rs1_data         := 1.U
+    dut_req.bits.rs2_data         := Cat((0 until 128).map(i => 1.U(8.W)).reverse)
+    dut_req.bits.rs3_data         := 0.U
+    dut_req.bits.rvm_data         := Cat((0 until 16).map(i => 0x55.U(8.W)).reverse)
+    when (cycle === (case1_start+0).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*0.U
+    } .elsewhen (cycle === (case1_start+1).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*1.U
+    } .elsewhen (cycle === (case1_start+2).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*2.U
+    } .elsewhen (cycle === (case1_start+3).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*3.U
+    } .elsewhen (cycle === (case1_start+4).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*4.U
+    } .elsewhen (cycle === (case1_start+5).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*5.U
+    } .elsewhen (cycle === (case1_start+6).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*6.U
+    } .elsewhen (cycle === (case1_start+7).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*7.U
+    }
+  } .elsewhen (cycle >= (case2_start+0).U && cycle < (case2_start+8).U) {
+    vsew                          := 0.U
+    vlmul                         := 3.U
+    vtype.vsew                    := vsew
+    vtype.vlmul_sign              := false.B
+    vtype.vlmul_mag               := 3.U
+    dut_req.bits.uop.uopc         := uopVADD
+    dut_req.bits.uop.fu_code      := FU_ALU | FU_VRP
+    dut_req.bits.uop.rob_idx      := 0x55.U
+    dut_req.bits.uop.ldst_val     := true.B
+    dut_req.bits.uop.dst_rtype    := RT_VW
+    dut_req.bits.uop.lrs1_rtype   := RT_VRW
+    dut_req.bits.uop.lrs2_rtype   := RT_VEC
+    dut_req.bits.uop.is_rvv       := true.B
+    dut_req.bits.uop.vd_emul      := 0.U
+    dut_req.bits.uop.vs1_emul     := 0.U
+    dut_req.bits.uop.vs2_emul     := 3.U
+    dut_req.bits.uop.vd_eew       := 1.U
+    dut_req.bits.uop.vs1_eew      := 0.U
+    dut_req.bits.uop.vs2_eew      := 0.U
+    dut_req.bits.uop.v_unmasked   := false.B
+    dut_req.bits.uop.vconfig.vtype:= vtype
+    dut_req.bits.uop.vconfig.vl   := vtype.vlMax
+    dut_req.bits.uop.v_split_ecnt := vlen_ecnt
+    dut_req.valid := true.B
+    dut_req.bits.rs1_data         := 1.U
+    dut_req.bits.rs2_data         := Cat((0 until 128).map(i => 1.U(8.W)).reverse)
+    dut_req.bits.rs3_data         := 0.U
+    dut_req.bits.rvm_data         := Cat((0 until 16).map(i => 0x55.U(8.W)).reverse)
+    when (cycle === (case2_start+0).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*0.U
+    } .elsewhen (cycle === (case2_start+1).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*1.U
+    } .elsewhen (cycle === (case2_start+2).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*2.U
+    } .elsewhen (cycle === (case2_start+3).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*3.U
+    } .elsewhen (cycle === (case2_start+4).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*4.U
+    } .elsewhen (cycle === (case2_start+5).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*5.U
+    } .elsewhen (cycle === (case2_start+6).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*6.U
+    } .elsewhen (cycle === (case2_start+7).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*7.U
+    }
+  } .elsewhen (cycle >= (case3_start+0).U && cycle < (case3_start+8).U) {
+    vsew                          := 0.U
+    vlmul                         := 3.U
+    vtype.vsew                    := vsew
+    vtype.vlmul_sign              := false.B
+    vtype.vlmul_mag               := 3.U
+    dut_req.bits.uop.uopc         := uopVADD
+    dut_req.bits.uop.fu_code      := FU_ALU | FU_VRP
+    dut_req.bits.uop.rob_idx      := 0x55.U
+    dut_req.bits.uop.ldst_val     := true.B
+    dut_req.bits.uop.dst_rtype    := RT_VW
+    dut_req.bits.uop.lrs1_rtype   := RT_VRW
+    dut_req.bits.uop.lrs2_rtype   := RT_VEC
+    dut_req.bits.uop.is_rvv       := true.B
+    dut_req.bits.uop.vd_emul      := 0.U
+    dut_req.bits.uop.vs1_emul     := 0.U
+    dut_req.bits.uop.vs2_emul     := 3.U
+    dut_req.bits.uop.vd_eew       := 1.U
+    dut_req.bits.uop.vs1_eew      := 0.U
+    dut_req.bits.uop.vs2_eew      := 0.U
+    dut_req.bits.uop.v_unmasked   := true.B
+    dut_req.bits.uop.vconfig.vtype:= vtype
+    dut_req.bits.uop.vconfig.vl   := vtype.vlMax - 1.U
+    dut_req.bits.uop.v_split_ecnt := vlen_ecnt
+    dut_req.valid := true.B
+    dut_req.bits.rs1_data         := 1.U
+    dut_req.bits.rs2_data         := Cat((0 until 128).map(i => 1.U(8.W)).reverse)
+    dut_req.bits.rs3_data         := 0.U
+    dut_req.bits.rvm_data         := Cat((0 until 16).map(i => 0x55.U(8.W)).reverse)
+    when (cycle === (case3_start+0).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*0.U
+    } .elsewhen (cycle === (case3_start+1).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*1.U
+    } .elsewhen (cycle === (case3_start+2).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*2.U
+    } .elsewhen (cycle === (case3_start+3).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*3.U
+    } .elsewhen (cycle === (case3_start+4).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*4.U
+    } .elsewhen (cycle === (case3_start+5).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*5.U
+    } .elsewhen (cycle === (case3_start+6).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*6.U
+    } .elsewhen (cycle === (case3_start+7).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*7.U
+    }
+  } .elsewhen (cycle >= 400.U && cycle < 408.U) {
+    dut_req.bits.uop.vd_emul      := 3.U
+    dut_req.bits.uop.vs1_emul     := 3.U
+    dut_req.bits.uop.vs2_emul     := 3.U
+    dut_req.bits.uop.vd_eew       := 3.U
+    dut_req.bits.uop.vs1_eew      := 3.U
+    dut_req.bits.uop.vs2_eew      := 3.U
   }
 
   val dut = Module(new VecExeUnit(hasVMX=false, hasIfpu=true, hasFpu=true, hasFdiv=true))
@@ -963,10 +1146,17 @@ class VecExeUT(timeout: Int = 10000)(implicit p: Parameters)
   dut.io.fcsr_rm := 0.U
   dut.io.vxrm := 0.U
   when(dut.io.req.valid) {
-    printf("req(%x): rs1 %x\n", dut.io.req.bits.uop.rob_idx, dut.io.req.bits.rs1_data)
-    printf("         rs2 %x\n", dut.io.req.bits.rs2_data)
-    printf("         rs3 %x\n", dut.io.req.bits.rs3_data)
-    printf("         rvm %x\n", dut.io.req.bits.rvm_data)
+    printf("req: uopc %x, rob %x, vsew %x, vlmul %x, eidx %x, vl %x\n",
+        dut.io.req.bits.uop.uopc,
+        dut.io.req.bits.uop.rob_idx,
+        dut.io.req.bits.uop.vconfig.vtype.vsew,
+        dut.io.req.bits.uop.vconfig.vtype.vlmul,
+        dut.io.req.bits.uop.v_eidx,
+        dut.io.req.bits.uop.vconfig.vl)
+    printf("     rs1 %x\n", dut.io.req.bits.rs1_data)
+    printf("     rs2 %x\n", dut.io.req.bits.rs2_data)
+    printf("     rs3 %x\n", dut.io.req.bits.rs3_data)
+    printf("     rvm %x\n", dut.io.req.bits.rvm_data)
   }
   when(dut.io.vresp.valid) {
     printf("rsp(%x): res %x\n", dut.io.vresp.bits.uop.rob_idx, dut.io.vresp.bits.data)
@@ -977,7 +1167,7 @@ class WithVecExeUT extends Config((site, here, up) => {
   case UnitTests => (q: Parameters) => {
     implicit val p = BoomTestUtils.getBoomParameters("StcBoomConfig", "chipyard")
     Seq(
-      Module(new VecExeUT(10000))
+      Module(new VecExeUT(1000))
     )
   }
 })

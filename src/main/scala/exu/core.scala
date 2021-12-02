@@ -1342,9 +1342,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }.reduce(_ || _)
     val cmt_archlast_rvv = (0 until coreParams.retireWidth).map{i =>
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv &&
-        rob.io.commit.uops(i).v_split_last && // architectural last split
-        !rob.io.commit.uops(i).is_red_vadd && // excluding inserted VADD
-        !rob.io.commit.uops(i).is_perm_vadd
+        rob.io.commit.uops(i).v_split_last // architectural last split
+        //&& !rob.io.commit.uops(i).is_red_vadd && // excluding inserted VADD
+        //!rob.io.commit.uops(i).is_perm_vadd
     }.reduce(_ || _)
     val cmt_sat = (0 until coreParams.retireWidth).map{i =>
       rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat

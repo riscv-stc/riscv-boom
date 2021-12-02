@@ -199,7 +199,9 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   def uses_v_simm5     = rt(RS1, isRvvSImm5)
   def uses_v_uimm5     = rt(RS1, isRvvUImm5)
   def is_perm_vadd     = rt(RS1, isPermVADD)
-  def is_red_vadd      = rt(RS1, isReduceV) && !rt(RD, isReduceV)
+  def is_ureduce       = rt(RS1, isReduceV) && !rt(RD, isReduceV)
+  def is_oreduce       = rt(RS1, isReduceV) && rt(RD, isReduceV)
+  def is_reduce        = rt(RS1, isReduceV)
   def is_v_ls          = is_rvv && (uses_ldq || uses_stq)
   def uses_v_ls_ew     = uopc.isOneOf(MicroOpcodes.uopVL,
                                       MicroOpcodes.uopVLFF,
@@ -207,35 +209,6 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
                                       MicroOpcodes.uopVLS,
                                       MicroOpcodes.uopVSSA)
   def rt(rs: UInt, f: UInt => Bool): Bool = f(Mux1H(UIntToOH(rs), Seq(dst_rtype, lrs1_rtype, lrs2_rtype)))
-
-  /* def vd_eew: UInt = {
-    val vsew   = vconfig.vtype.vsew
-    val vd_sew = Mux(rt(RD, isWidenV ), vsew + 1.U, vsew)
-    //           Mux(rt(RD, isNarrowV), vsew - 1.U, vsew)), no narrow case in VD
-    val eew    = Mux(uses_v_ls_ew, v_ls_ew, vd_sew)
-    eew
-  } */
-
-  /* def vd_emul: UInt = {
-    val emul = Wire(UInt(2.W))
-    val vsew       = vconfig.vtype.vsew
-    val vlmul_sign = vconfig.vtype.vlmul_sign
-    val vlmul_mag  = vconfig.vtype.vlmul_mag
-    val vmlogic_insn = uopc.isOneOf(MicroOpcodes.uopVMAND,
-                                    MicroOpcodes.uopVMNAND,
-                                    MicroOpcodes.uopVMANDNOT,
-                                    MicroOpcodes.uopVMXOR,
-                                    MicroOpcodes.uopVMOR,
-                                    MicroOpcodes.uopVMNOR,
-                                    MicroOpcodes.uopVMORNOT,
-                                    MicroOpcodes.uopVMXNOR)
-    emul := Mux(vlmul_sign || rt(RS1, isReduceV) || rt(RD, isMaskVD) || vmlogic_insn, 0.U,
-            Mux(rt(RD, isWidenV), vlmul_mag + 1.U,
-            Mux(uses_v_ls_ew, Mux(v_ls_ew >= vsew, vlmul_mag + v_ls_ew - vsew,
-                              Mux(vlmul_mag >= vsew - v_ls_ew, vlmul_mag + v_ls_ew - vsew, 0.U)),
-            vlmul_mag)))(1,0)
-    emul
-  } */
 
   def match_group(prd: UInt): Bool = {
     val ret = Wire(Bool())

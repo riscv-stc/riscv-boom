@@ -267,6 +267,17 @@ object Sext
 }
 
 /**
+ * Conditional extension for signed/unsigned UInt
+ */
+object Cext
+{
+  def apply(x: UInt, unsigned: Bool, length: Int): UInt = {
+    if (x.getWidth == length) return x
+    else return Cat(Fill(length-x.getWidth, !unsigned & x(x.getWidth-1)), x)
+  }
+}
+
+/**
  * Object to translate from BOOM's special "packed immediate" to a 32b signed immediate
  * Asking for U-type gives it shifted up 12 bits.
  */

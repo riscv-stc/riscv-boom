@@ -125,8 +125,8 @@ class IssueSlot(
   def last_check: Bool = {
     val ret = Wire(Bool())
     if (vector) {
-      ret := io.uop.v_split_last ||
-             io.uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+      ret := io.uop.v_split_last || io.uop.is_reduce ||
+             io.uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
     } else {
       ret := true.B
     }
@@ -137,7 +137,7 @@ class IssueSlot(
     val ret = Wire(Bool())
     val uop = slot_uop
     if (vector) {
-      val v_eidx = Mux(uop.rt(RS1, isReduceV), 0.U, uop.v_eidx)
+      val v_eidx = Mux(uop.is_reduce, 0.U, uop.v_eidx)
       val rsel   = VRegSel(v_eidx, uop.vs1_eew, eLenSelSz)
       val pvs1   = uop.pvs1(rsel).bits
       ret       := Mux(uop.rt(RS1, isVector), !io.vbusy_status(pvs1),
@@ -270,9 +270,7 @@ class IssueSlot(
   when (io.in_uop.valid) {
     if (usingVector) {
       if (vector) {
-        val in_reduce = io.in_uop.bits.rt(RD, isReduceV)
-        val in_first  = io.in_uop.bits.v_split_first
-        in_p1 := ~io.in_uop.bits.prs1_busy & Fill(vLenb, Mux(in_reduce, in_first, true.B).asUInt)
+        in_p1 := ~io.in_uop.bits.prs1_busy
         in_p2 := ~io.in_uop.bits.prs2_busy
         in_p3 := ~io.in_uop.bits.prs3_busy
         //in_pm := ~io.in_uop.bits.prvm_busy
@@ -465,23 +463,25 @@ class IssueSlot(
       when (vcompress) {
         io.uop.pvm := slot_uop.prs1
       }
-      //val red_iss_p1 = WireInit(p1)
       when (io.request && io.grant && !io.uop.uopc.isOneOf(/*uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, */uopVSA, uopVSSA, uopVSUXA, uopVSOXA)) {
-        val vsew = Mux(slot_uop.rt(RS2, isWidenV) || slot_uop.rt(RD, isMaskVD), slot_uop.vs2_eew, slot_uop.vd_eew)
-        val vLen_ecnt = (vLen.U >> 3.U) >> vsew
-        val isSerial  = slot_uop.uopc.isOneOf(uopVDIV, uopVDIVU, uopVREM, uopVREMU, uopVFRDIV, uopVFDIV, uopVFSQRT)
-        val isVLoad   = slot_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
-        io.uop.v_split_ecnt := Mux(isSerial, 1.U, vLen_ecnt)
-        io.uop.v_split_first := slot_uop.v_eidx === 0.U
-        val vLenEcntSz = vLenSz.asUInt - 3.U - vsew
-        val next_offset = Mux(isVLoad, slot_uop.v_eidx >> vLenEcntSz << vLenEcntSz + vLen_ecnt,
-                                       slot_uop.v_eidx + io.uop.v_split_ecnt)
-        io.uop.v_split_last  := next_offset >= slot_uop.v_split_ecnt
         val vd_idx = Mux(slot_uop.rt(RD, isMaskVD), 0.U, VRegSel(slot_uop.v_eidx, slot_uop.vd_eew, eLenSelSz))
         io.uop.pdst := slot_uop.pvd(vd_idx).bits
         assert(is_invalid || slot_uop.pvd(vd_idx).valid)
-        io.out_uop.v_eidx := next_offset
-        slot_uop.v_eidx   := next_offset
+        when (!io.uop.is_reduce) {
+          val vsew = Mux(slot_uop.rt(RS2, isWidenV) || slot_uop.rt(RD, isMaskVD), slot_uop.vs2_eew, slot_uop.vd_eew)
+          val vLen_ecnt = (vLen.U >> 3.U) >> vsew
+          val isSerial  = slot_uop.uopc.isOneOf(uopVDIV, uopVDIVU, uopVREM, uopVREMU, uopVFRDIV, uopVFDIV, uopVFSQRT)
+          val isVLoad   = slot_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
+          val vLenEcntSz = vLenSz.asUInt - 3.U - vsew
+          val next_offset = Mux(isVLoad, slot_uop.v_eidx >> vLenEcntSz << vLenEcntSz + vLen_ecnt,
+                                         slot_uop.v_eidx + io.uop.v_split_ecnt)
+          io.uop.v_split_ecnt := Mux(isSerial, 1.U, vLen_ecnt)
+          io.uop.v_split_first := slot_uop.v_eidx === 0.U
+          io.uop.v_split_last  := next_offset >= slot_uop.v_split_ecnt
+          io.uop.pdst := slot_uop.pvd(vd_idx).bits
+          io.out_uop.v_eidx := next_offset
+          slot_uop.v_eidx   := next_offset
+        }
       }
     } else {
       io.out_uop.prs1_busy  := ~p1

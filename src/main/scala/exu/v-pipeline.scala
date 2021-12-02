@@ -143,7 +143,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       val fdiv_issued = iss_valids(i) && iss_uops(i).fu_code_is(FU_FDV)
       fu_types = fu_types & RegNext(~Mux(fdiv_issued, FU_FDV, 0.U))
     }
-    vec_issue_unit.io.fu_types(i) := fu_types
+    vec_issue_unit.io.fu_types(i) := fu_types & ~Fill(FUC_SZ, vregister_read.io.rrd_stall.asUInt)
 
     require (exe_units(i).readsVrf)
   }
