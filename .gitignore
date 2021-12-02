@@ -6,3 +6,6 @@ lib
 *#
 *~
 .nfs*
+*.rc
+novas.*
+verdi*
