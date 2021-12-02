@@ -718,9 +718,10 @@ class VecExeUnit(
   fpu_resp_fflags.bits  := DontCare
   if (hasFpu) {
     vfpu = Module(new VecFPUUnit(vLen))
-    vfpu.io.req.valid         := io.req.valid &&
-                                (io.req.bits.uop.fu_code_is(FU_FPU) ||
-                                io.req.bits.uop.fu_code_is(FU_F2I)) // TODO move to using a separate unit
+    vfpu.suggestName("vfpu")
+    //vfpu.io.req.valid         := io.req.valid &&
+                                //(io.req.bits.uop.fu_code_is(FU_FPU) ||
+                                //io.req.bits.uop.fu_code_is(FU_F2I)) // TODO move to using a separate unit
     assert(vfpu.io.req.bits.pred_data === false.B, "Expecting operations without predication for VFPU")
     vfpu.io.fcsr_rm           := io.fcsr_rm
     vfpu.io.resp.ready        := DontCare
@@ -824,7 +825,8 @@ class VecExeUnit(
     val valu_exreq_valid = io.req.valid &&
                            (io.req.bits.uop.fu_code & FU_ALU).orR &&
                            !(io.req.bits.uop.fu_code & FU_VRP).orR
-    valu.io.req.valid         := Mux(vrp_busy, vrp.io.fbreq.valid, valu_exreq_valid)
+    valu.io.req.valid         := Mux(vrp_busy, vrp.io.fbreq.valid && (vrp.io.fbreq.bits.uop.fu_code & FU_ALU).orR,
+                                               valu_exreq_valid)
     valu.io.req.bits.uop      := Mux(vrp_busy, vrp.io.fbreq.bits.uop, io.req.bits.uop)
     valu.io.req.bits.rs1_data := Mux(vrp_busy, vrp.io.fbreq.bits.rs1_data, io.req.bits.rs1_data)
     valu.io.req.bits.rs2_data := Mux(vrp_busy, vrp.io.fbreq.bits.rs2_data, io.req.bits.rs2_data)
@@ -834,7 +836,8 @@ class VecExeUnit(
     val vfpu_exreq_valid = io.req.valid &&
                            (io.req.bits.uop.fu_code & FU_FPU).orR &&
                            !(io.req.bits.uop.fu_code & FU_VRP).orR
-    vfpu.io.req.valid         := Mux(vrp_busy, vrp.io.fbreq.valid, vfpu_exreq_valid)
+    vfpu.io.req.valid         := Mux(vrp_busy, vrp.io.fbreq.valid && (vrp.io.fbreq.bits.uop.fu_code & FU_FPU).orR,
+                                               vfpu_exreq_valid)
     vfpu.io.req.bits.uop      := Mux(vrp_busy, vrp.io.fbreq.bits.uop, io.req.bits.uop)
     vfpu.io.req.bits.rs1_data := Mux(vrp_busy, vrp.io.fbreq.bits.rs1_data, io.req.bits.rs1_data)
     vfpu.io.req.bits.rs2_data := Mux(vrp_busy, vrp.io.fbreq.bits.rs2_data, io.req.bits.rs2_data)
