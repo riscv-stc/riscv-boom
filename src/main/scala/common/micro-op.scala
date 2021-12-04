@@ -172,7 +172,9 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_perm_busy      = if (usingVector) Bool() else false.B         // for vrgather/vslide/vcompress
   val v_perm_wait      = if (usingVector) Bool() else false.B         // wait vecUpdate
   val v_perm_idx       = if (usingVector) UInt(eLen.W) else UInt(0.W) // maximum VLMAX is 65536
-  //val v_phys_last      = if (usingVector) Bool() else null            // the last element of a physical register, for freelist
+  val vstart           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // VSTART CSR
+  val vstartSrc        = if (usingVector) UInt(1.W) else false.B      // vstart source: CSR or speculative zero
+  val vl_mov           = if (usingVector) Bool() else false.B         // for vload instructions, move data from stale-pdst to pdst first
 
   // purely debug information
   val debug_wdata      = UInt(xLen.W)

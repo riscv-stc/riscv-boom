@@ -161,6 +161,12 @@ class VecRemapReq(val lregSz: Int, val pregSz: Int) extends Bundle
   val valid = Bool()
 }
 
+class VecVstartReq() extends Bundle
+{
+  val valid = Bool()
+  val src   = UInt(1.W)
+}
+
 class VecRenameMapTable(
   val plWidth: Int,
   val numLregs: Int,
@@ -177,6 +183,11 @@ class VecRenameMapTable(
 
     // Remapping an ldst to a newly allocated pdst?
     val remap_reqs  = Input(Vec(plWidth, new VecRemapReq(lregSz, pregSz)))
+
+    // vstart source request
+    val vstart_resps = Output(Vec(plWidth, UInt(1.W)))
+    // reset vstart source
+    val vstart_reqs  = Input(Vec(plWidth, new VecVstartReq()))
 
     // Dispatching branches: need to take snapshots of table state.
     val ren_br_tags = Input(Vec(plWidth, Valid(UInt(brTagSz.W))))
@@ -262,6 +273,34 @@ class VecRenameMapTable(
       Mux(bypass.B && io.remap_reqs(curr).valid && io.remap_reqs(curr).ldst === 0.U, io.remap_reqs(curr).pdst(0), prev))
     io.map_resps(i).prs3 := DontCare
   }
+
+  //-------------------------------------------------------------------------------
+  // vstartReset handling
+  //-------------------------------------------------------------------------------
+  // vstart source table
+  val vstartSrc = RegInit(VSTART_CSR)
+  val vstartSrcSnaps = Reg(Vec(maxBrCount, Bool()))
+
+  // The intermediate states of the vstart reset table following modification by each pipeline slot.
+  val vstartSrcNext = io.vstart_reqs.scanLeft(vstartSrc) { case(src, req) => Mux(req.valid, req.src, src)}
+
+  // Create snapshots of new mappings.
+  for (i <- 0 until plWidth) {
+    when (io.ren_br_tags(i).valid) {
+      vstartSrcSnaps(io.ren_br_tags(i).bits) := vstartSrcNext(i+1)
+    }
+  }
+
+  when (io.brupdate.b2.mispredict) {
+    // Restore the vstart reset table to a branch snapshot.
+    vstartSrc := vstartSrcSnaps(io.brupdate.b2.uop.br_tag)
+  } .otherwise {
+    // Update mappings.
+    vstartSrc := vstartSrcNext(plWidth)
+  }
+
+  // Read out mappings.
+  io.vstart_resps := vstartSrcNext.take(plWidth)
 
   // Don't flag the creation of duplicate 'p0' mappings during rollback.
   // These cases may occur soon after reset, as all maptable entries are initialized to 'p0'.

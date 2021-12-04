@@ -199,14 +199,14 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   // Cut up critical path by delaying the write by a cycle.
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
-  fregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, fpregSz, fLen+1, isFloat))
+  fregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, fpregSz, fLen+1, isFloat, false, false))
 
   assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
   when (ifpu_resp.valid) { assert (ifpu_resp.bits.uop.rf_wen && ifpu_resp.bits.uop.rt(RD, isFloat)) }
 
   var w_cnt = 1
   for (i <- 1 until memWidth) {
-    fregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), fpregSz, fLen+1, isFloat))
+    fregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), fpregSz, fLen+1, isFloat, false, false))
     fregfile.io.write_ports(w_cnt).bits.data := RegNext(recode(io.ll_wports(i).bits.data,
                                                                io.ll_wports(i).bits.uop.mem_size - 1.U))
     assert(!io.ll_wports(i).valid || (io.ll_wports(i).bits.uop.mem_size <= 3.U &&

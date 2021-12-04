@@ -1542,7 +1542,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq(idx).bits.committed := true.B
     } .elsewhen (commit_load) {
       assert (ldq(idx).valid, "[lsu] trying to commit an un-allocated load entry.")
-      assert (ldq(idx).bits.vmkilled || ((ldq(idx).bits.executed || ldq(idx).bits.forward_std_val) && ldq(idx).bits.succeeded),
+      assert (ldq(idx).bits.uop.vl_mov || ldq(idx).bits.vmkilled || ((ldq(idx).bits.executed || ldq(idx).bits.forward_std_val) && ldq(idx).bits.succeeded),
         "[lsu] trying to commit an un-executed load entry.")
 
       ldq(idx).valid                 := false.B

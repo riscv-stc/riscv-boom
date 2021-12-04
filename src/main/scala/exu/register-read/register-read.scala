@@ -73,7 +73,6 @@ class RegisterRead(
 
     val kill   = Input(Bool())
     val brupdate = Input(new BrUpdateInfo())
-    val csr_vstart = if (vector) Input(UInt(vLenSz.W)) else null
   })
 
   val rrd_valids       = Wire(Vec(issueWidth, Bool()))
@@ -360,7 +359,7 @@ class RegisterRead(
         //val vslideup           = exe_reg_uops(w).uopc === uopVSLIDEUP
         //val vcompress          = exe_reg_uops(w).uopc === uopVCOMPRESS
         //val perm_idx           = exe_reg_uops(w).v_perm_idx
-        val is_active          = Mux(is_masked, exe_reg_rvm_data(w)(v_eidx), true.B) && v_eidx < vl && v_eidx >= io.csr_vstart
+        val is_active          = Mux(is_masked, exe_reg_rvm_data(w)(v_eidx), true.B) && v_eidx < vl && v_eidx >= exe_reg_uops(w).vstart
                                  //Mux(is_vmaskInsn, vmaskInsn_active,
                                  //Mux(vslideup,  exe_reg_uops(w).v_eidx >= exe_reg_uops(w).v_scalar_data && (exe_reg_rvm_data(w) || !is_masked),
                                  //Mux(is_masked || vcompress, exe_reg_rvm_data(w), true.B))) && Mux(vcompress, perm_idx, v_eidx) < vl && v_eidx >= io.csr_vstart
@@ -396,7 +395,7 @@ class RegisterRead(
         //io.vecUpdate(w).bits.uop.v_active   := false.B //exe_reg_rvm_data(w) && (v_eidx < vl)
         //io.vecUpdate(w).bits.uop.v_perm_idx := 0.U //perm_idx + (v_eidx < vl)
         //io.vecUpdate(w).bits.data           := 0.U //exe_reg_rs1_data(w)
-        io.exe_reqs(w).bits.uop.v_active    := is_active //Mux(vmove, !v_eidx.orR(), is_active)
+        io.exe_reqs(w).bits.uop.v_active := is_active //Mux(vmove, !v_eidx.orR(), is_active)
         //val vdiv_sqrt = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVFDIV, uopVFRDIV, uopVFSQRT, uopVDIV, uopVDIVU, uopVREM, uopVREMU)
         //val is_vmx = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVSA, uopVSMA, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA, uopVSR)
         // forward inactive ops to ALU

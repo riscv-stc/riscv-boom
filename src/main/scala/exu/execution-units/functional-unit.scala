@@ -200,7 +200,9 @@ abstract class FunctionalUnit(
   val isCsrUnit: Boolean = false,
   val isMemAddrCalcUnit: Boolean = false,
   val isFixMulAcc: Boolean = false,
-  val needsFcsr: Boolean = false)
+  val needsVxrm: Boolean = false,
+  val needsFcsr: Boolean = false,
+  val hasDataMask: Boolean = false)
   (implicit p: Parameters) extends BoomModule
 {
   val io = IO(new Bundle {
@@ -216,7 +218,8 @@ abstract class FunctionalUnit(
     val vconfig = if (usingVector & isCsrUnit) Input(new VConfig) else null
 
     // only used by the Fixed unit
-    val vxrm    = if (isFixMulAcc) Input(UInt(2.W)) else null
+    val vxrm    = if (needsVxrm) Input(UInt(2.W)) else null
+    val fixCtrl = if (isFixMulAcc) Input(new FixMulAccCtrlSigs()) else null
 
     // only used by branch unit
     val brinfo     = if (isAluUnit) Output(new BrResolutionInfo()) else null
@@ -227,6 +230,9 @@ abstract class FunctionalUnit(
     val bp = if (isMemAddrCalcUnit) Input(Vec(nBreakpoints, new BP)) else null
     val mcontext = if (isMemAddrCalcUnit) Input(UInt(coreParams.mcontextWidth.W)) else null
     val scontext = if (isMemAddrCalcUnit) Input(UInt(coreParams.scontextWidth.W)) else null
+
+    // only used in VMX Unit
+    val mask = if(hasDataMask) Output(UInt((dataWidth/8).W)) else null
 
   })
 }
@@ -253,6 +259,7 @@ abstract class PipelinedFunctionalUnit(
   isCsrUnit: Boolean = false,
   isMemAddrCalcUnit: Boolean = false,
   isFixMulAcc: Boolean = false,
+  needsVxrm: Boolean = false,
   needsFcsr: Boolean = false
   )(implicit p: Parameters) extends FunctionalUnit(
     isPipelined = true,
@@ -264,6 +271,7 @@ abstract class PipelinedFunctionalUnit(
     isCsrUnit = isCsrUnit,
     isMemAddrCalcUnit = isMemAddrCalcUnit,
     isFixMulAcc = isFixMulAcc,
+    needsVxrm = needsVxrm,
     needsFcsr = needsFcsr)
 {
   // Pipelined functional unit is always ready.
@@ -887,6 +895,7 @@ class FixMulAccCtrlSigs extends Bundle
  * @param numStages number of pipeline stages
  * @param dataWidth size of the data being passed into the functional unit
  */
+/*
 class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   extends PipelinedFunctionalUnit (
     numStages = numStages,
@@ -1090,7 +1099,138 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val resp = Pipe(out, numStages-1)
   io.resp.valid := resp.valid
   io.resp.bits.uop.vxsat := resp.bits.uop.vxsat
-  val active = (out.bits.uop.v_unmasked || out.bits.rvm_data(0)) && out.bits.uop.v_eidx < out.bits.uop.vconfig.vl
+  val active = (out.bits.uop.v_unmasked || out.bits.rvm_data(0)) && out.bits.uop.v_eidx >= out.bits.uop.vstart && out.bits.uop.v_eidx < out.bits.uop.vconfig.vl
+  io.resp.bits.data := Pipe(out.valid, Mux(active, muxed, stale_rs3_data), numStages-1).bits
+}
+*/
+class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
+  extends PipelinedFunctionalUnit (
+    numStages = numStages,
+    numBypassStages = 0,
+    earliestBypassStage = 0,
+    dataWidth = dataWidth,
+    isFixMulAcc = true,
+    needsVxrm = true
+) with ShouldBeRetimed {
+  val e8 = (dataWidth == 8)
+  val e16= (dataWidth == 16)
+  val e32= (dataWidth == 32)
+  val e64= (dataWidth == 64)
+  val in_req = WireInit(io.req)
+  val in = Pipe(in_req.valid, in_req.bits)
+  val cs = io.fixCtrl
+  val uop = io.req.bits.uop
+  val rs1_data = io.req.bits.rs1_data
+  val rs2_data = io.req.bits.rs2_data
+  val rs3_data = io.req.bits.rs3_data
+  val u_max = Wire(UInt((dataWidth+1).W))
+  val hi, s_max, s_min = Wire(UInt(dataWidth.W))
+  val stale_rs3_data = Pipe(in_req.valid, rs3_data).bits
+
+  when (uop.uopc.isOneOf(uopVMADD, uopVNMSUB)) {
+    in_req.bits.rs2_data := rs3_data
+    in_req.bits.rs3_data := rs2_data
+  }
+  when (uop.uopc.isOneOf(uopVNMSAC, uopVNMSUB)) {
+    in_req.bits.rs1_data := ~rs1_data + 1.U
+  }
+  when (uop.uopc.isOneOf(uopVSADDU, uopVSADD, uopVAADDU, uopVAADD, uopVSSUBU, uopVSSUB, uopVASUBU, uopVASUB)) {
+    in_req.bits.rs3_data := rs1_data
+  }
+
+  val lhs = Mux(cs.lhsOne, 1.S, Cat(cs.lhsSigned && in.bits.rs1_data(dataWidth-1), in.bits.rs1_data).asSInt)
+  val rhs = Cat(cs.rhsSigned && in.bits.rs2_data(dataWidth-1), in.bits.rs2_data).asSInt
+  val sext_rs3 = Cat(cs.accSigned && in.bits.rs3_data(dataWidth-1), in.bits.rs3_data)
+  val sub_rs3  = (~sext_rs3 + 1.U(1.W)).asSInt
+  val acc = Mux(cs.doAcc, Mux(cs.negAcc, sub_rs3, sext_rs3.asSInt), 0.S)
+  //when (in.valid && cs.doAcc) { assert(in.bits.uop.frs3_en, "Incorrect frs3_en") }
+  val macc = lhs * rhs +& acc
+  val macc_msk = ~(0.U((dataWidth*2+3).W))
+  val vd_eew = in.bits.uop.vd_eew
+  val unsigned = in.bits.uop.rt(RD, isUnsignedV)
+  if (e64) {
+    u_max := Cat(0.U(1.W), Mux1H(UIntToOH(vd_eew(1,0)), Seq(0xFF.U(dataWidth.W),
+                                                            0xFFFF.U(dataWidth.W),
+                                                            0xFFFFFFFFL.U(dataWidth.W),
+                                                            Fill(dataWidth, 1.U(1.W)))))
+    s_max := Mux1H(UIntToOH(vd_eew(1,0)), Seq(0x7F.U(dataWidth.W),
+                                              0x7FFF.U(dataWidth.W),
+                                              0x7FFFFFFF.U(dataWidth.W),
+                                              0x7FFFFFFFFFFFFFFFL.U(dataWidth.W)))
+    s_min := Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Fill(dataWidth-8,  1.U(1.W)), 0x80.U(8.W)),
+                                              Cat(Fill(dataWidth-16, 1.U(1.W)), 0x8000.U(16.W)),
+                                              Cat(Fill(dataWidth-32, 1.U(1.W)), 0x80000000L.U(32.W)),
+                                              Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))))
+    hi  := Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Mux(unsigned, 0.U((dataWidth-8).W),  Fill(dataWidth-8,  macc(15))), macc(15,  8)),
+                                            Cat(Mux(unsigned, 0.U((dataWidth-16).W), Fill(dataWidth-16, macc(31))), macc(31, 16)),
+                                            Cat(Mux(unsigned, 0.U((dataWidth-32).W), Fill(dataWidth-32, macc(63))), macc(63, 32)),
+                                            macc(127, 64)))
+  } else if (e32) {
+    u_max := Cat(0.U(1.W), Mux1H(UIntToOH(vd_eew(1,0)), Seq(0xFF.U(dataWidth.W),
+                                                            0xFFFF.U(dataWidth.W),
+                                                            Fill(dataWidth, 1.U(1.W)),
+                                                            Fill(dataWidth, 1.U(1.W)))))
+    s_max := Mux1H(UIntToOH(vd_eew(1,0)), Seq(0x7F.U(dataWidth.W),
+                                              0x7FFF.U(dataWidth.W),
+                                              0x7FFFFFFF.U(dataWidth.W),
+                                              0x7FFFFFFF.U(dataWidth.W)))
+    s_min := Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Fill(dataWidth-8,  1.U(1.W)), 0x80.U(8.W)),
+                                              Cat(Fill(dataWidth-16, 1.U(1.W)), 0x8000.U(16.W)),
+                                              Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W))),
+                                              Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))))
+    hi  := Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Mux(unsigned, 0.U((dataWidth-8).W),  Fill(dataWidth-8,  macc(15))), macc(15,  8)),
+                                            Cat(Mux(unsigned, 0.U((dataWidth-16).W), Fill(dataWidth-16, macc(31))), macc(31, 16)),
+                                            macc(63, 32),
+                                            macc(63, 32)))
+  } else if (e16) {
+    u_max := Cat(0.U(1.W), Mux1H(UIntToOH(vd_eew(0)), Seq(0xFF.U(dataWidth.W),
+                                                          Fill(dataWidth, 1.U(1.W)))))
+    s_max := Mux1H(UIntToOH(vd_eew(0)), Seq(0x7F.U(dataWidth.W),
+                                            0x7FFF.U(dataWidth.W)))
+    s_min := Mux1H(UIntToOH(vd_eew(0)), Seq(Cat(Fill(dataWidth-8,  1.U(1.W)), 0x80.U(8.W)),
+                                            Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))))
+    hi  := Mux1H(UIntToOH(vd_eew(0)), Seq(Cat(Mux(unsigned, 0.U((dataWidth-8).W),  Fill(dataWidth-8,  macc(15))), macc(15,  8)),
+                                          macc(32, 16)))
+  } else { // e8
+    u_max := Fill(dataWidth, 1.U(1.W))
+    s_max := 0x7F.U(dataWidth.W)
+    s_min := Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))
+    hi  := macc(16, 8)
+  }
+  val sramt = Mux(!cs.doRO, 0.U,
+              Mux1H(UIntToOH(cs.srType), Seq(0.U(6.W),
+                                         1.U(6.W),
+                                         ((8.U << vd_eew) - 1.U)(5,0),
+                                         Mux1H(UIntToOH(vd_eew(1,0)), Seq(in.bits.rs1_data(2,0),
+                                                                          in.bits.rs1_data(3,0),
+                                                                          in.bits.rs1_data(4,0),
+                                                                          in.bits.rs1_data(5,0))))))
+  val srres = macc >> sramt
+  val sroff = (macc.asUInt & ~(macc_msk << sramt))(dataWidth-1, 0)
+  val sroff_msb = Mux(sramt === 0.U, 0.U, macc(sramt-1.U))
+  val sroff_rem = Mux(sramt <=  1.U, 0.U, sroff & ~(macc_msk << (sramt-1.U)))
+  val roinc = Mux1H(UIntToOH(io.vxrm(1,0)), Seq(sroff_msb,
+                                                sroff_msb & (sroff_rem.orR | srres(0)),
+                                                0.U(1.W),
+                                                ~srres(0) & sroff.orR))
+  val rores = srres + Cat(0.U, roinc).asSInt
+  val uclip_max = rores > u_max.asSInt
+  val uclip_min = rores < 0.S
+  val uclip = Mux(uclip_max, u_max, Mux(uclip_min, 0.U, rores.asUInt))
+  val sclip_max = rores > s_max.asSInt
+  val sclip_min = rores < s_min.asSInt
+  val sclip = Mux(sclip_max, s_max, Mux(sclip_min, s_min, rores.asUInt))
+  val muxed = Mux(cs.cmdHi,   hi,
+              Mux(cs.doClip,  Mux(cs.roSigned, sclip(dataWidth-1,0), uclip(dataWidth-1,0)),
+              Mux(cs.doRO,    rores(dataWidth-1,0),
+                              macc(dataWidth-1, 0))))
+
+  val out  = WireInit(in)
+  out.bits.uop.vxsat := cs.doClip && Mux(cs.roSigned, sclip_max || sclip_min, uclip_max || uclip_min)
+  val resp = Pipe(out, numStages-1)
+  io.resp.valid := resp.valid
+  io.resp.bits.uop.vxsat := resp.bits.uop.vxsat
+  val active = (out.bits.uop.v_unmasked || out.bits.rvm_data(0)) && out.bits.uop.v_eidx >= out.bits.uop.vstart && out.bits.uop.v_eidx < out.bits.uop.vconfig.vl
   io.resp.bits.data := Pipe(out.valid, Mux(active, muxed, stale_rs3_data), numStages-1).bits
 }
 
@@ -1100,7 +1240,7 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
     numBypassStages = 0,
     earliestBypassStage = 0,
     dataWidth = dataWidth,
-    isFixMulAcc = true)
+    needsVxrm = true)
 {
   // FIXME: optimize me by merge fix-point decoders among different FixMulAcc
   // FIXME: mute corresponding FixMulAcc by mask to save power
@@ -1109,52 +1249,143 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val rs2_data = io.req.bits.rs2_data
   val rs3_data = io.req.bits.rs3_data
   val rvm_data = io.req.bits.rvm_data
-  val xma = (0 until vLenb).map(e => {
-      val dw = if (e < vLen/64) {64}
-               else if (e < vLen/32) {32}
-               else if (e < vLen/16) {16}
-               else {8}
-      Module(new FixMulAcc(numStages, dw))
-  })
-  for (e <- 0 until vLenb) {
+  val rs1Unsigned = uop.rt(RS1, isUnsignedV) || uop.rt(RS1, isIntU)
+  val rs2Unsigned = uop.rt(RS2, isUnsignedV)
+  val rdUnsigned  = uop.rt(RD, isUnsignedV)
 
-    if (e < vLen/64) {
-      xma(e).io.req.valid := io.req.valid
-      xma(e).io.req.bits.rs1_data := Mux1H(UIntToOH(uop.vs1_eew), Seq(rs1_data(8*e+7, 8*e), rs1_data(16*e+15, 16*e), rs1_data(32*e+31, 32*e), rs1_data(64*e+63, 64*e)))
-      xma(e).io.req.bits.rs2_data := Mux1H(UIntToOH(uop.vs2_eew), Seq(rs2_data(8*e+7, 8*e), rs2_data(16*e+15, 16*e), rs2_data(32*e+31, 32*e), rs2_data(64*e+63, 64*e)))
-      xma(e).io.req.bits.rs3_data := Mux1H(UIntToOH(uop.vd_eew),  Seq(rs3_data(8*e+7, 8*e), rs3_data(16*e+15, 16*e), rs3_data(32*e+31, 32*e), rs3_data(64*e+63, 64*e)))
-    } else if (e < vLen/32) {
-      xma(e).io.req.valid := io.req.valid && (uop.vd_eew < 3.U)
-      xma(e).io.req.bits.rs1_data := Mux1H(UIntToOH(uop.vs1_eew), Seq(rs1_data(8*e+7, 8*e), rs1_data(16*e+15, 16*e), rs1_data(32*e+31, 32*e), 0.U))
-      xma(e).io.req.bits.rs2_data := Mux1H(UIntToOH(uop.vs2_eew), Seq(rs2_data(8*e+7, 8*e), rs2_data(16*e+15, 16*e), rs2_data(32*e+31, 32*e), 0.U))
-      xma(e).io.req.bits.rs3_data := Mux1H(UIntToOH(uop.vd_eew),  Seq(rs3_data(8*e+7, 8*e), rs3_data(16*e+15, 16*e), rs3_data(32*e+31, 32*e), 0.U))
-    } else if (e < vLen/16) {
-      xma(e).io.req.valid := io.req.valid && (uop.vd_eew < 2.U)
-      xma(e).io.req.bits.rs1_data := Mux1H(UIntToOH(uop.vs1_eew(0)), Seq(rs1_data(8*e+7, 8*e), rs1_data(16*e+15, 16*e)))
-      xma(e).io.req.bits.rs2_data := Mux1H(UIntToOH(uop.vs2_eew(0)), Seq(rs2_data(8*e+7, 8*e), rs2_data(16*e+15, 16*e)))
-      xma(e).io.req.bits.rs3_data := Mux1H(UIntToOH(uop.vd_eew(0)),  Seq(rs3_data(8*e+7, 8*e), rs3_data(16*e+15, 16*e)))
+  val e64Out = Wire(Vec(numELENinVLEN, UInt(64.W)))
+  val e32Out = Wire(Vec(numELENinVLEN*2, UInt(32.W)))
+  val e16Out = Wire(Vec(numELENinVLEN*4, UInt(16.W)))
+  val e8Out  = Wire(Vec(numELENinVLEN*8, UInt(8.W)))
+  val vxsatOut = Wire(Vec(vLenb, Bool()))
+
+  val DC2 = BitPat.dontCare(2)
+  val table: List[(BitPat, List[BitPat])] = List(
+    //                          cmdHi   negAcc accSigned   srType (0, 1, SEW-1, RS1)
+    //                          |  lhsSigned|  |  lhsOne   |    doClip
+    //                          |  |  rhsSigned|  doRO  |    |
+    //                          |  |  |  doAcc | |  |  roSigned|
+    //                          |  |  |  |  |  |  |  |  |  |    |
+    BitPat(uopVMUL)     -> List(N, Y, Y, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVMULH)    -> List(Y, Y, Y, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVMULHU)   -> List(Y, N, N, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVMULHSU)  -> List(Y, N, Y, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVWMULU)   -> List(N, N, N, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVWMULSU)  -> List(N, N, Y, N, X, X, N, N, X, DC2, N)
+   ,BitPat(uopVMACC)    -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
+   ,BitPat(uopVNMSAC)   -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
+   ,BitPat(uopVMADD)    -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
+   ,BitPat(uopVNMSUB)   -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
+   ,BitPat(uopVWMACCU)  -> List(N, N, N, Y, N, N, N, N, X, DC2, N)
+   ,BitPat(uopVWMACCSU) -> List(N, Y, N, Y, N, Y, N, N, X, DC2, N)
+   ,BitPat(uopVWMACCUS) -> List(N, N, Y, Y, N, Y, N, N, X, DC2, N)
+   ,BitPat(uopVSADDU)   -> List(N, X, N, Y, N, N, Y, Y, N, U_0, Y) // vs2 + rs1
+   ,BitPat(uopVSADD)    -> List(N, X, Y, Y, N, Y, Y, Y, Y, U_0, Y)
+   ,BitPat(uopVSSUBU)   -> List(N, X, N, Y, Y, N, Y, Y, N, U_0, Y)
+   ,BitPat(uopVSSUB)    -> List(N, X, Y, Y, Y, Y, Y, Y, Y, U_0, Y)
+   ,BitPat(uopVAADDU)   -> List(N, X, N, Y, N, N, Y, Y, N, U_1, N)
+   ,BitPat(uopVAADD)    -> List(N, X, Y, Y, N, Y, Y, Y, Y, U_1, N)
+   ,BitPat(uopVASUBU)   -> List(N, X, N, Y, Y, N, Y, Y, N, U_1, N)
+   ,BitPat(uopVASUB)    -> List(N, X, Y, Y, Y, Y, Y, Y, Y, U_1, N)
+   ,BitPat(uopVSMUL)    -> List(N, Y, Y, N, X, X, N, Y, Y, U_2, Y)
+   ,BitPat(uopVSSRL)    -> List(N, X, N, N, X, X, Y, Y, N, U_3, N)
+   ,BitPat(uopVSSRA)    -> List(N, X, Y, N, X, X, Y, Y, Y, U_3, N)
+   ,BitPat(uopVNCLIPU)  -> List(N, X, N, N, X, X, Y, Y, N, U_3, Y)
+   ,BitPat(uopVNCLIP)   -> List(N, X, Y, N, X, X, Y, Y, Y, U_3, Y)
+  )
+  val cs = Wire(new FixMulAccCtrlSigs()).decoder(uop.uopc, table)
+
+  for(e <- 0 until vLenb) {
+    // instants
+    val xma = if(e < numELENinVLEN)        Module(new FixMulAcc(numStages, eLen))
+              else if(e < numELENinVLEN*2) Module(new FixMulAcc(numStages, eLen >> 1))
+              else if(e < numELENinVLEN*4) Module(new FixMulAcc(numStages, eLen >> 2))
+              else                         Module(new FixMulAcc(numStages, eLen >> 3))
+                
+    xma.io.vxrm                := io.vxrm
+    xma.io.req.bits.uop        := uop
+    xma.io.req.valid           := io.req.valid
+    xma.io.req.bits.uop.v_eidx := uop.v_eidx + e.U
+    xma.io.req.bits.rvm_data   := rvm_data(e)
+    xma.io.req.bits.pred_data  := io.req.bits.pred_data
+    xma.io.req.bits.kill       := io.req.bits.kill
+    xma.io.brupdate            := io.brupdate
+    xma.io.resp.ready          := io.resp.ready
+    xma.io.fixCtrl             := cs
+    // inputs
+    if(e < numELENinVLEN) {
+      xma.io.req.bits.rs1_data := Mux(rs1Unsigned, Mux1H(UIntToOH(uop.vs1_eew),
+                                                         Seq(rs1_data(8*e+7, 8*e), rs1_data(16*e+15, 16*e), rs1_data(32*e+31, 32*e), rs1_data(64*e+63, 64*e))),
+                                                   Mux1H(UIntToOH(uop.vs1_eew),
+                                                         Seq(rs1_data( 8*e+7,   8*e).sextTo(eLen),
+                                                             rs1_data(16*e+15, 16*e).sextTo(eLen),
+                                                             rs1_data(32*e+31, 32*e).sextTo(eLen),
+                                                             rs1_data(64*e+63, 64*e))))
+      xma.io.req.bits.rs2_data := Mux(rs2Unsigned, Mux1H(UIntToOH(uop.vs2_eew),
+                                                         Seq(rs2_data(8*e+7, 8*e), rs2_data(16*e+15, 16*e), rs2_data(32*e+31, 32*e), rs2_data(64*e+63, 64*e))),
+                                                   Mux1H(UIntToOH(uop.vs2_eew),
+                                                         Seq(rs2_data( 8*e+7,   8*e).sextTo(eLen),
+                                                             rs2_data(16*e+15, 16*e).sextTo(eLen),
+                                                             rs2_data(32*e+31, 32*e).sextTo(eLen),
+                                                             rs2_data(64*e+63, 64*e))))
+      xma.io.req.bits.rs3_data := Mux(rdUnsigned,  Mux1H(UIntToOH(uop.vd_eew),
+                                                         Seq(rs3_data(8*e+7, 8*e), rs3_data(16*e+15, 16*e), rs3_data(32*e+31, 32*e), rs3_data(64*e+63, 64*e))),
+                                                   Mux1H(UIntToOH(uop.vd_eew),
+                                                         Seq(rs3_data( 8*e+7,   8*e).sextTo(eLen),
+                                                             rs3_data(16*e+15, 16*e).sextTo(eLen),
+                                                             rs3_data(32*e+31, 32*e).sextTo(eLen),
+                                                             rs3_data(64*e+63, 64*e))))
+    } else if(e < numELENinVLEN*2) {
+      xma.io.req.bits.rs1_data := Mux(rs1Unsigned, Mux1H(UIntToOH(uop.vs1_eew),
+                                                         Seq(rs1_data(8*e+7, 8*e), rs1_data(16*e+15, 16*e), rs1_data(32*e+31, 32*e), 0.U)),
+                                                   Mux1H(UIntToOH(uop.vs1_eew),
+                                                         Seq(rs1_data( 8*e+7,   8*e).sextTo(eLen >> 1),
+                                                             rs1_data(16*e+15, 16*e).sextTo(eLen >> 1),
+                                                             rs1_data(32*e+31, 32*e),
+                                                             0.U)))
+      xma.io.req.bits.rs2_data := Mux(rs2Unsigned, Mux1H(UIntToOH(uop.vs2_eew),
+                                                         Seq(rs2_data(8*e+7, 8*e), rs2_data(16*e+15, 16*e), rs2_data(32*e+31, 32*e), 0.U)),
+                                                   Mux1H(UIntToOH(uop.vs2_eew),
+                                                         Seq(rs2_data( 8*e+7,   8*e).sextTo(eLen >> 1),
+                                                             rs2_data(16*e+15, 16*e).sextTo(eLen >> 1),
+                                                             rs2_data(32*e+31, 32*e),
+                                                             0.U)))
+      xma.io.req.bits.rs3_data := Mux(rdUnsigned,  Mux1H(UIntToOH(uop.vd_eew),
+                                                         Seq(rs3_data(8*e+7, 8*e), rs3_data(16*e+15, 16*e), rs3_data(32*e+31, 32*e), 0.U)),
+                                                   Mux1H(UIntToOH(uop.vd_eew),
+                                                         Seq(rs3_data( 8*e+7,   8*e).sextTo(eLen >> 1),
+                                                             rs3_data(16*e+15, 16*e).sextTo(eLen >> 1),
+                                                             rs3_data(32*e+31, 32*e),
+                                                             0.U)))
+    } else if(e < numELENinVLEN*4) {
+      xma.io.req.bits.rs1_data := Mux(rs1Unsigned, Mux(uop.vs1_eew(0), rs1_data(16*e+15, 16*e), rs1_data(8*e+7, 8*e)),
+                                                   Mux(uop.vs1_eew(0), rs1_data(16*e+15, 16*e), rs1_data(8*e+7, 8*e).sextTo(eLen >> 2)))
+      xma.io.req.bits.rs2_data := Mux(rs2Unsigned, Mux(uop.vs2_eew(0), rs2_data(16*e+15, 16*e), rs2_data(8*e+7, 8*e)),
+                                                   Mux(uop.vs2_eew(0), rs2_data(16*e+15, 16*e), rs2_data(8*e+7, 8*e).sextTo(eLen >> 2)))
+      xma.io.req.bits.rs3_data := Mux(rdUnsigned,  Mux(uop.vd_eew(0),  rs3_data(16*e+15, 16*e), rs3_data(8*e+7, 8*e)),
+                                                   Mux(uop.vd_eew(0),  rs3_data(16*e+15, 16*e), rs3_data(8*e+7, 8*e).sextTo(eLen >> 2)))
     } else {
-      xma(e).io.req.valid := io.req.valid && (uop.vd_eew === 0.U)
-      xma(e).io.req.bits.rs1_data := rs1_data(8*e+7, 8*e)
-      xma(e).io.req.bits.rs2_data := rs2_data(8*e+7, 8*e)
-      xma(e).io.req.bits.rs3_data := rs3_data(8*e+7, 8*e)
+      xma.io.req.bits.rs1_data := rs1_data(8*e+7, 8*e)
+      xma.io.req.bits.rs2_data := rs2_data(8*e+7, 8*e)
+      xma.io.req.bits.rs3_data := rs3_data(8*e+7, 8*e)
     }
-    xma(e).io.vxrm := io.vxrm
-    xma(e).io.req.bits.uop        := uop
-    xma(e).io.req.bits.uop.v_eidx := uop.v_eidx + e.U
-    xma(e).io.req.bits.rvm_data   := rvm_data
-    xma(e).io.req.bits.pred_data  := io.req.bits.pred_data
-    xma(e).io.req.bits.kill       := io.req.bits.kill
-    xma(e).io.brupdate            := io.brupdate
-    xma(e).io.resp.ready          := io.resp.ready
+    // outputs
+    if(e < numELENinVLEN) {
+      e64Out(e) := xma.io.resp.bits.data
+    }
+    if(e < numELENinVLEN*2) {
+      e32Out(e) := xma.io.resp.bits.data
+    }
+    if(e < numELENinVLEN*4) {
+      e16Out(e) := xma.io.resp.bits.data
+    }
+    e8Out(e)    := xma.io.resp.bits.data
+    vxsatOut(e) := xma.io.resp.valid && xma.io.resp.bits.uop.vxsat
   }
-  io.resp.valid := xma(0).io.resp.valid
-  io.resp.bits.uop.vxsat := xma.map(m => m.io.resp.valid && m.io.resp.bits.uop.vxsat).reduce(_ || _)
+
+  io.resp.bits.uop.vxsat := vxsatOut.orR
   io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew), 
-                             Seq(Cat(xma.slice(0, vLen/ 8).map(_.io.resp.bits.data( 7,0)).reverse),
-                                 Cat(xma.slice(0, vLen/16).map(_.io.resp.bits.data(15,0)).reverse),
-                                 Cat(xma.slice(0, vLen/32).map(_.io.resp.bits.data(31,0)).reverse),
-                                 Cat(xma.slice(0, vLen/64).map(_.io.resp.bits.data(63,0)).reverse)))
+                             Seq(e8Out.asUInt, e16Out.asUInt, e32Out.asUInt, e64Out.asUInt))
 }
 
 /**
@@ -1445,6 +1676,19 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   io.resp.bits.data := vmaskUnit_out
 }
 
+
+/**
+ * Response from Execution Unit. Bundles a MicroOp with data
+ *
+ * @param dataWidth width of the data coming from the execution unit
+ */
+class VMXResp(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
+  with HasBoomUOP
+{
+  val data = Bits(dataWidth.W)
+  val mask = Bits((dataWidth/8).W)
+}
+
 /**
  * VMX functional unit with back-pressure machanism.
  *
@@ -1455,19 +1699,18 @@ class VMXUnit(dataWidth: Int)(implicit p: Parameters) extends FunctionalUnit(
     isPipelined = false,
     numStages = 4,
     numBypassStages = 0,
-    dataWidth = dataWidth)
+    dataWidth = dataWidth,
+    hasDataMask = true)
 {
   require (numStages > 1)
   // buffer up results since we share write-port on integer regfile.
-  val queue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth), entries = numStages))
+  val queue = Module(new BranchKillableQueue(new VMXResp(dataWidth), entries = numStages))
   // enque
   io.req.ready                   := queue.io.enq.ready && (queue.io.count < (numStages-1).U)
   queue.io.enq.valid             := io.req.valid && !IsKilledByBranch(io.brupdate, io.req.bits.uop) && !io.req.bits.kill
   queue.io.enq.bits.uop          := io.req.bits.uop
   queue.io.enq.bits.data         := io.req.bits.rs3_data
-  queue.io.enq.bits.predicated   := false.B
-  queue.io.enq.bits.fflags.valid := false.B
-  queue.io.enq.bits.fflags.bits  := DontCare
+  queue.io.enq.bits.mask         := io.req.bits.rvm_data
   queue.io.brupdate              := io.brupdate
   queue.io.flush                 := io.req.bits.kill
   // deque
@@ -1476,8 +1719,9 @@ class VMXUnit(dataWidth: Int)(implicit p: Parameters) extends FunctionalUnit(
   io.resp.bits.uop               := queue.io.deq.bits.uop
   io.resp.bits.uop.br_mask       := GetNewBrMask(io.brupdate, queue.io.deq.bits.uop)
   io.resp.bits.data              := queue.io.deq.bits.data
-  io.resp.bits.predicated        := queue.io.deq.bits.predicated
-  io.resp.bits.fflags            := queue.io.deq.bits.fflags
+  io.resp.bits.predicated        := DontCare
+  io.resp.bits.fflags            := DontCare
+  io.mask                        := queue.io.deq.bits.mask
 }
 
 /**
@@ -1570,9 +1814,10 @@ class VecALUUnit(
   val rvm_data = io.req.bits.rvm_data
   val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
   val vl = uop.vconfig.vl
-  prestart := 0.U // FIXME: Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < csr_vstart).reverse)
+  //prestart := 0.U // FIXME: Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < csr_vstart).reverse)
+  prestart := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < uop.vstart).reverse)
   //body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= csr_vstart && uop.v_eidx + b.U < vl).reverse)
-  body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= 0.U && uop.v_eidx + b.U < vl).reverse)
+  body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= uop.vstart && uop.v_eidx + b.U < vl).reverse)
   mask     := Mux(uop.v_unmasked || withCarry || isMerge, ~(0.U(vLenb.W)),
               Cat((0 until vLen/8).map(b => rvm_data(b)).reverse))
   tail     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= vl).reverse)
@@ -2067,4 +2312,141 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   io.fbreq.bits.rs2_data := v2uredmux
   io.fbreq.bits.rs3_data := Mux(is_reduce, vdbuf(0), vdbuf(progress))
   io.busy := !is_idle
+/**
+ * Vector Divide functional units wrapper.
+ *
+ * @param dataWidth data to be passed into the functional unit
+ */
+class VecSRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFunctionalUnit(dataWidth)
+{
+  val uop = io.req.bits.uop
+  val rs1_data = io.req.bits.rs1_data
+  val rs2_data = io.req.bits.rs2_data
+  val rs3_data = io.req.bits.rs3_data
+  val rvm_data = io.req.bits.rvm_data
+  val isSigned = uop.rt(RS2, isUnsignedV)
+  val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
+  val vl = uop.vconfig.vl
+  prestart := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < uop.vstart).reverse)
+  body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= uop.vstart && uop.v_eidx + b.U < vl).reverse)
+  mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)), Cat((0 until vLen/8).map(b => rvm_data(b)).reverse))
+  tail     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= vl).reverse)
+  inactive := prestart | body & ~mask | tail
+  
+  val divValid = Wire(Vec(vLenb, Bool()))
+  val e64Out   = Wire(Vec(numELENinVLEN, UInt(64.W)))
+  val e32Out   = Wire(Vec(numELENinVLEN*2, UInt(32.W)))
+  val e16Out   = Wire(Vec(numELENinVLEN*4, UInt(16.W)))
+  val e8Out    = Wire(Vec(numELENinVLEN*8, UInt(8.W)))
+
+  val s_idle :: s_work :: s_done :: Nil = Enum(3)
+  val state = RegInit(s_idle)
+  switch(state) {
+    is(s_idle) {
+      when(io.req.valid && !this.do_kill) {
+        state := s_work
+      }
+    }
+    is(s_work) {
+      when(divValid.andR && io.resp.ready) {
+        state := s_idle
+      } .elsewhen(divValid.andR) {
+        state := s_done
+      }
+    }
+    is(s_done) {
+      when(io.resp.ready) { state := s_idle }
+    }
+  }
+  when(this.do_kill) { state := s_idle }
+
+  for(e <- 0 until vLenb) {
+    val div = if(e < numELENinVLEN) Module(new SRT4DividerDataModule(len = eLen))
+              else                  Module(new SRT4DividerDataModule(len = eLen >> 1))
+    div.io.valid  := io.req.valid && !this.do_kill
+    div.io.sign   := uop.uopc.isOneOf(uopVDIV, uopVREM)
+    div.io.isHi   := Mux(inactive(e), false.B, uop.uopc.isOneOf(uopVREM, uopVREMU))
+    div.io.isW    := !uop.ctrl.fcn_dw
+    div.io.kill_w := this.do_kill
+    div.io.kill_r := this.do_kill && !div.io.in_ready
+    divValid(e)   := div.io.out_valid
+    div.io.out_ready := (divValid.andR && io.resp.ready)
+
+    if(e < numELENinVLEN) {
+      div.io.src(0) := Mux(inactive(e), Mux(isSigned, Mux1H(UIntToOH(uop.vd_eew),
+                                                            Seq(rs3_data( 8*e+7,   8*e).sextTo(eLen),
+                                                                rs3_data(16*e+15, 16*e).sextTo(eLen),
+                                                                rs3_data(32*e+31, 32*e).sextTo(eLen),
+                                                                rs3_data(64*e+63, 64*e))),
+                                                      Mux1H(UIntToOH(uop.vd_eew),
+                                                            Seq(rs3_data(8*e+7, 8*e), rs3_data(16*e+15, 16*e), rs3_data(32*e+31, 32*e), rs3_data(64*e+63, 64*e)))),
+                                        Mux(isSigned, Mux1H(UIntToOH(uop.vd_eew),
+                                                            Seq(rs2_data( 8*e+7,   8*e).sextTo(eLen),
+                                                                rs2_data(16*e+15, 16*e).sextTo(eLen),
+                                                                rs2_data(32*e+31, 32*e).sextTo(eLen),
+                                                                rs2_data(64*e+63, 64*e))),
+                                                      Mux1H(UIntToOH(uop.vd_eew),
+                                                            Seq(rs2_data(8*e+7, 8*e), rs2_data(16*e+15, 16*e), rs2_data(32*e+31, 32*e), rs2_data(64*e+63, 64*e)))))
+      div.io.src(1) := Mux(inactive(e), 1.U,
+                                        Mux(isSigned, Mux1H(UIntToOH(uop.vd_eew),
+                                                            Seq(rs1_data( 8*e+7,   8*e).sextTo(eLen),
+                                                                rs1_data(16*e+15, 16*e).sextTo(eLen),
+                                                                rs1_data(32*e+31, 32*e).sextTo(eLen),
+                                                                rs1_data(64*e+63, 64*e))),
+                                                      Mux1H(UIntToOH(uop.vd_eew),
+                                                            Seq(rs1_data(8*e+7, 8*e), rs1_data(16*e+15, 16*e), rs1_data(32*e+31, 32*e), rs1_data(64*e+63, 64*e)))))
+    } else if(e < numELENinVLEN*2) {
+      div.io.src(0) := Mux(inactive(e), Mux(isSigned, Mux1H(UIntToOH(uop.vd_eew),
+                                                            Seq(rs3_data( 8*e+7,   8*e).sextTo(eLen >> 1),
+                                                                rs3_data(16*e+15, 16*e).sextTo(eLen >> 1),
+                                                                rs3_data(32*e+31, 32*e),
+                                                                0.U)),
+                                                      Mux1H(UIntToOH(uop.vd_eew),
+                                                            Seq(rs3_data(8*e+7, 8*e), rs3_data(16*e+15, 16*e), rs3_data(32*e+31, 32*e), 0.U))),
+                                        Mux(isSigned, Mux1H(UIntToOH(uop.vd_eew),
+                                                            Seq(rs2_data( 8*e+7,   8*e).sextTo(eLen >> 1),
+                                                                rs2_data(16*e+15, 16*e).sextTo(eLen >> 1),
+                                                                rs2_data(32*e+31, 32*e),
+                                                                0.U)),
+                                                      Mux1H(UIntToOH(uop.vd_eew),
+                                                            Seq(rs2_data(8*e+7, 8*e), rs2_data(16*e+15, 16*e), rs2_data(32*e+31, 32*e), 0.U))))
+      div.io.src(1) := Mux(inactive(e), 1.U,
+                                        Mux(isSigned, Mux1H(UIntToOH(uop.vd_eew),
+                                                            Seq(rs1_data( 8*e+7,   8*e).sextTo(eLen >> 1),
+                                                                rs1_data(16*e+15, 16*e).sextTo(eLen >> 1),
+                                                                rs1_data(32*e+31, 32*e),
+                                                                1.U)),
+                                                      Mux1H(UIntToOH(uop.vd_eew),
+                                                            Seq(rs1_data(8*e+7, 8*e), rs1_data(16*e+15, 16*e), rs1_data(32*e+31, 32*e), 1.U))))
+    } else if(e < numELENinVLEN*4) {
+      div.io.src(0) := Mux(inactive(e), Mux(isSigned, Mux(uop.vd_eew(0), rs3_data(16*e+15, 16*e), rs3_data(8*e+7, 8*e).sextTo(eLen >> 2)),
+                                                      Mux(uop.vd_eew(0), rs3_data(16*e+15, 16*e), rs3_data(8*e+7, 8*e))),
+                                        Mux(isSigned, Mux(uop.vd_eew(0), rs2_data(16*e+15, 16*e), rs2_data(8*e+7, 8*e).sextTo(eLen >> 2)),
+                                                      Mux(uop.vd_eew(0), rs2_data(16*e+15, 16*e), rs2_data(8*e+7, 8*e))))
+      div.io.src(1) := Mux(inactive(e), 1.U,
+                                        Mux(isSigned, Mux(uop.vd_eew(0), rs1_data(16*e+15, 16*e), rs1_data(8*e+7, 8*e).sextTo(eLen >> 2)),
+                                                      Mux(uop.vd_eew(0), rs1_data(16*e+15, 16*e), rs1_data(8*e+7, 8*e))))
+    } else {
+      div.io.src(0) := Mux(inactive(e), rs3_data(8*e+7, 8*e), rs2_data(8*e+7, 8*e))
+      div.io.src(1) := Mux(inactive(e), 1.U, rs1_data(8*e+7, 8*e))
+    }
+
+    // output
+    if (e < numELENinVLEN) {
+      e64Out(e) := div.io.out_data
+    }
+    if(e < numELENinVLEN*2) {
+      e32Out(e) := div.io.out_data
+    }
+    if(e < numELENinVLEN*4) {
+      e16Out(e) := div.io.out_data
+    }
+    e8Out(e) := div.io.out_data
+  }
+
+  // output
+  io.req.ready  := (state === s_idle)
+  io.resp.valid := divValid.andR && !this.do_kill
+  io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
+                             Seq(e8Out.asUInt, e16Out.asUInt, e32Out.asUInt, e64Out.asUInt))
 }

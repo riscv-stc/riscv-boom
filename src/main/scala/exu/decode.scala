@@ -245,6 +245,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.uopc       := cs.uopc
   uop.iq_type    := cs.iq_type
   uop.fu_code    := cs.fu_code
+  uop.ctrl.csr_cmd := cs.csr_cmd
 
   // x-registers placed in 0-31, f-registers placed in 32-63.
   // This allows us to straight-up compare register specifiers and not need to
@@ -444,6 +445,10 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     //}
 
     uop.v_xls_offset := 0.U
+    // vstart control
+    uop.vstart    := 0.U
+    uop.vstartSrc := VSTART_ZERO
+    uop.vl_mov    := false.B
 
     //io.enq_stall := cs.can_be_split && !split_last
     io.enq_stall := false.B
@@ -493,10 +498,6 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                                 illegal_reg_emul        ||
                                 illegal_regnum_multiple_emul ||
                                 illegal_vs2_overlap_vd_lowpart)
-    when (cs.is_rvv && io.csr_vstart =/= 0.U) {
-      uop.is_unique := true.B
-    }
-
   } // if usingvector
   io.deq.uop := uop
 

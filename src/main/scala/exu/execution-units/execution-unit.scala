@@ -151,6 +151,8 @@ abstract class ExecutionUnit(
 
     // TODO move this out of ExecutionUnit
     val com_exception = if (hasMem || hasRocc) Input(Bool()) else null
+
+    val mask = if(hasVMX) Output(UInt((dataWidth/8).W)) else null
   })
 
   if (writesIrf)   {
@@ -758,7 +760,8 @@ class VecExeUnit(
   }
 
   // Div/Rem Unit with SRT4 Divider --------
-  var div: SRT4DivUnit = null //DivUnit = null
+  /*
+  var div: SRT4DivUnit = null
   val div_resp_val = WireInit(false.B)
   if (hasDiv) {
     div = Module(new SRT4DivUnit(xLen)) //Module(new DivUnit(xLen))
@@ -771,7 +774,24 @@ class VecExeUnit(
     div_busy     := !div.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)) || !div_busy_dly
 
     vec_fu_units += div
+  }*/
+
+  var vdiv: VecSRT4DivUnit = null
+  val div_resp_val = WireInit(false.B)
+  if (hasDiv) {
+    vdiv = Module(new VecSRT4DivUnit(vLen))
+    vdiv.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)
+
+    // share write port with the pipelined units
+    vdiv.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
+
+    div_resp_val := vdiv.io.resp.valid
+    div_busy     := !vdiv.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)) || !div_busy_dly
+
+    vec_fu_units += vdiv
   }
+
+
 
   // FDiv/FSqrt Unit -----------------------
   var fdivsqrt: FDivSqrtUnit = null
@@ -803,7 +823,7 @@ class VecExeUnit(
     f.io.req.bits.pred_data := io.req.bits.pred_data
     f.io.req.bits.kill      := io.req.bits.kill
     f.io.brupdate           := io.brupdate
-    if (f != div && f != fdivsqrt && f!= vmx) 
+    if (f != vdiv && f != fdivsqrt && f!= vmx) 
       f.io.resp.ready := io.vresp.ready
   })
 
@@ -907,6 +927,10 @@ class VecExeUnit(
     vecToIntQueue.io.flush := io.req.bits.kill
     io.iresp <> vecToIntQueue.io.deq
     assert(!(vecToIntQueue.io.enq.valid && !vecToIntQueue.io.enq.ready))
+  }
+
+  if(hasVMX) {
+    io.mask := vmx.io.mask
   }
 
   /*

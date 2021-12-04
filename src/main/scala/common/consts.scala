@@ -319,3 +319,12 @@ trait ExcCauseConstants
 
   require (!freechips.rocketchip.rocket.Causes.all.contains(16))
 }
+
+/**
+ * Mixin for vstart source: CSR or speculative ZERO
+ */
+trait VStartSourceConstants
+{
+  val VSTART_CSR  = 0.U(1.W)
+  val VSTART_ZERO = 1.U(1.W)
+}

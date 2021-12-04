@@ -470,12 +470,11 @@ class IssueSlot(
         when (!io.uop.is_reduce) {
           val vsew = Mux(slot_uop.rt(RS2, isWidenV) || slot_uop.rt(RD, isMaskVD), slot_uop.vs2_eew, slot_uop.vd_eew)
           val vLen_ecnt = (vLen.U >> 3.U) >> vsew
-          val isSerial  = slot_uop.uopc.isOneOf(uopVDIV, uopVDIVU, uopVREM, uopVREMU, uopVFRDIV, uopVFDIV, uopVFSQRT)
           val isVLoad   = slot_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           val vLenEcntSz = vLenSz.asUInt - 3.U - vsew
-          val next_offset = Mux(isVLoad, slot_uop.v_eidx >> vLenEcntSz << vLenEcntSz + vLen_ecnt,
-                                         slot_uop.v_eidx + io.uop.v_split_ecnt)
-          io.uop.v_split_ecnt := Mux(isSerial, 1.U, vLen_ecnt)
+          val next_offset = Mux(isVLoad, (slot_uop.v_eidx >> vLenEcntSz << vLenEcntSz) + vLen_ecnt,
+                                         slot_uop.v_eidx + vLen_ecnt)
+          io.uop.v_split_ecnt := vLen_ecnt
           io.uop.v_split_first := slot_uop.v_eidx === 0.U
           io.uop.v_split_last  := next_offset >= slot_uop.v_split_ecnt
           io.uop.pdst := slot_uop.pvd(vd_idx).bits

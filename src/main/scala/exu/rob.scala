@@ -149,6 +149,7 @@ class CommitExceptionSignals(implicit p: Parameters) extends BoomBundle
 // The ROB needs to tell the FTQ if there's a pipeline flush (and what type)
 // so the FTQ can drive the frontend with the correct redirected PC.
   val flush_typ  = FlushTypes()
+  val vls_xcpt   = if(usingVector) Valid(UInt(vLenSz.W)) else null
 }
 
 /**
@@ -351,7 +352,9 @@ class Rob(
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
           val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           val wb_rvv_sta  = wb_uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
-          rob_bsy(row_idx)      := Mux(wb_rvv_load, Mux(wb_uop.uses_ldq, false.B, rob_bsy(row_idx)),
+          //rob_bsy(row_idx)      := Mux(wb_rvv_load, Mux(wb_uop.uses_ldq, false.B, rob_bsy(row_idx)),
+          //                         Mux(wb_rvv_sta,  false.B, wb_uop.v_is_split && !wb_uop.v_split_last))
+          rob_bsy(row_idx)      := Mux(wb_rvv_load, Mux(wb_uop.vl_mov, !wb_uop.v_split_last, false.B),
                                    Mux(wb_rvv_sta,  false.B, wb_uop.v_is_split && !wb_uop.v_split_last))
           rob_unsafe(row_idx)   := false.B
           rob_predicated(row_idx)  := wb_resp.bits.predicated
@@ -631,6 +634,12 @@ class Rob(
   io.com_xcpt.bits.edge_inst := com_xcpt_uop.edge_inst
   io.com_xcpt.bits.is_rvc    := com_xcpt_uop.is_rvc
   io.com_xcpt.bits.pc_lob    := com_xcpt_uop.pc_lob
+  if(usingVector) {
+    io.com_xcpt.bits.vls_xcpt.valid := io.com_xcpt.valid && com_xcpt_uop.is_rvv && (com_xcpt_uop.uses_ldq || com_xcpt_uop.uses_stq)
+    io.com_xcpt.bits.vls_xcpt.bits  := com_xcpt_uop.v_eidx
+    //io.commit.valids(0) := io.com_xcpt.valid && com_xcpt_uop.is_rvv && (com_xcpt_uop.uses_ldq || com_xcpt_uop.uses_stq)
+    //io.commit.uops(0)   := com_xcpt_uop
+  }
 
   val flush_commit_mask = Range(0,coreWidth).map{i => io.commit.valids(i) && io.commit.uops(i).flush_on_commit}
   val flush_commit = flush_commit_mask.reduce(_|_)

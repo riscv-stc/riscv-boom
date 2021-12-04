@@ -23,6 +23,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util._
 import freechips.rocketchip.tile.{TileKey, XLen}
+import freechips.rocketchip.rocket.{CSRs, CSR}
 
 import boom.common._
 import boom.util._
@@ -571,9 +572,9 @@ extends AbstractRenameStage(
 
     val com_uop = io.com_uops(w)
     com_valids(w) := io.com_valids(w) && com_uop.ldst_val && com_uop.rt(RD, rtype) &&
-                     (!(com_uop.uses_ldq || com_uop.uses_stq) || com_uop.v_split_last)
+                     (!(com_uop.uses_ldq || com_uop.uses_stq) || com_uop.v_split_last)  && !com_uop.vl_mov
     rbk_valids(w) := io.rbk_valids(w) && com_uop.ldst_val && com_uop.rt(RD, rtype) &&
-                     (!(com_uop.uses_ldq || com_uop.uses_stq) || com_uop.v_split_first)
+                     (!(com_uop.uses_ldq || com_uop.uses_stq) || com_uop.v_split_first) && !com_uop.vl_mov
     ren2_br_tags(w).bits  := ren2_uops(w).br_tag
   }
 
@@ -581,8 +582,9 @@ extends AbstractRenameStage(
   // Rename Table
 
   // Maptable inputs.
-  val map_reqs   = Wire(Vec(plWidth, new VecMapReq(lregSz)))
-  val remap_reqs = Wire(Vec(plWidth, new VecRemapReq(lregSz, pregSz)))
+  val map_reqs    = Wire(Vec(plWidth, new VecMapReq(lregSz)))
+  val remap_reqs  = Wire(Vec(plWidth, new VecRemapReq(lregSz, pregSz)))
+  val vstart_reqs = Wire(Vec(plWidth, new VecVstartReq()))
 
   // Generate maptable requests.
   for ((((ren1,ren2),com),w) <- ren1_uops zip ren2_uops zip io.com_uops.reverse zipWithIndex) {
@@ -601,6 +603,11 @@ extends AbstractRenameStage(
     }
     remap_reqs(w).vd_emul  := Mux(io.rollback, com.vd_emul,  ren2.vd_emul)
     remap_reqs(w).v_seg_nf := Mux(io.rollback, com.v_seg_nf, ren2.v_seg_nf)
+
+    // reset vstart source request
+    val vstartCSRW = ren1.ctrl.csr_cmd.isOneOf(CSR.S, CSR.C, CSR.W) && ren1.inst(31,20) === CSRs.vstart.asUInt
+    vstart_reqs(w).valid := Mux(io.rollback, true.B, ren1_fire(w) & (ren1.is_rvv | vstartCSRW))
+    vstart_reqs(w).src   := Mux(io.rollback || vstartCSRW, VSTART_CSR, VSTART_ZERO)
   }
   ren2_alloc_reqs zip rbk_valids.reverse zip remap_reqs map {
     case ((a,r),rr) => rr.valid := a || r}
@@ -608,6 +615,7 @@ extends AbstractRenameStage(
   // Hook up inputs.
   maptable.io.map_reqs    := map_reqs
   maptable.io.remap_reqs  := remap_reqs
+  maptable.io.vstart_reqs := vstart_reqs
   maptable.io.ren_br_tags := ren2_br_tags
   maptable.io.brupdate    := io.brupdate
   maptable.io.rollback    := io.rollback
@@ -623,6 +631,8 @@ extends AbstractRenameStage(
     when(!uop.rt(RS2, rtype)) {uop.pvs2.map(_.valid := false.B)}
     when(!uop.rt(RD , rtype)) {uop.pvd.map( _.valid := false.B)}
     when(!uop.rt(RD , rtype)) {uop.stale_pvd.map( _.valid := false.B)}
+    // vstart control
+    uop.vstartSrc  := maptable.io.vstart_resps(w)
   }
 
   //-------------------------------------------------------------
@@ -661,7 +671,7 @@ extends AbstractRenameStage(
   // Busy Table
 
   busytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
-  busytable.io.wb_valids := io.wakeups.map(_.valid)
+  busytable.io.wb_valids := io.wakeups.map(wk => wk.valid && !wk.bits.uop.vl_mov)
   busytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
   io.vbusy_status := busytable.io.vbusy_status
   for (w <- 0 until plWidth) {
