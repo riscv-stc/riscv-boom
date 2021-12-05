@@ -1217,6 +1217,114 @@ class FR7Unit(latency: Int)(implicit p: Parameters)
   io.resp.bits.fflags.bits.flags := fr7.io.out.bits.exc
 }
 
+
+class VecFR7Unit(latency: Int, dataWidth: Int)(implicit p: Parameters)
+  extends PipelinedFunctionalUnit(
+    numStages = latency,
+    numBypassStages = 0,
+    earliestBypassStage = 0,
+    dataWidth = dataWidth,
+    needsFcsr = true
+  ) with tile.HasFPUParameters
+{
+  val io_req = io.req.bits
+  val vsew = io_req.uop.vconfig.vtype.vsew
+  val tag = Mux(vsew === 3.U, D, Mux(vsew === 2.U, S, H))
+  val fp_ctrl = Wire(new FPUCtrlSigs())
+  fp_ctrl.typeTagIn := tag
+  fp_ctrl.typeTagOut:= tag
+  fp_ctrl.ldst      := DontCare
+  fp_ctrl.wen       := DontCare
+  fp_ctrl.ren1      := DontCare
+  fp_ctrl.ren2      := DontCare
+  fp_ctrl.ren3      := DontCare
+  fp_ctrl.swap12    := DontCare
+  fp_ctrl.swap23    := DontCare
+  fp_ctrl.fromint   := DontCare
+  fp_ctrl.toint     := DontCare
+  fp_ctrl.fastpipe  := DontCare
+  fp_ctrl.fma       := DontCare
+  fp_ctrl.div       := DontCare
+  fp_ctrl.sqrt      := DontCare
+  fp_ctrl.wflags    := DontCare
+
+  // FUE: function-unit-enable
+  class fre extends Bundle {
+    val dfr7 = Bool()
+    val sfr7 = Bool()
+    val hfr7 = Bool()
+  }
+
+  val reqfre = Wire(new fre);
+  reqfre.dfr7 := (tag === D)
+  reqfre.sfr7 := (tag === S)
+  reqfre.hfr7 := (tag === H)
+
+  val reqpipe  = Pipe(io.req.valid, io_req, latency)
+  val frepipe = Pipe(io.req.valid, reqfre, latency).bits
+
+  def fr7Input(minT: Option[tile.FType], esel: Int): tile.FPInput = {
+    val req = Wire(new tile.FPInput(true))
+    val rs1_edata, rs2_edata = WireInit(0.U(65.W))
+    if (minT == Some(tile.FType.D)) {
+      rs1_edata := unbox(recode(io_req.rs2_data(esel * 64 + 63, esel * 64), tag), tag, None)
+      rs2_edata := io_req.rs2_data(esel * 64 + 63, esel * 64)
+    } else if (minT == Some(tile.FType.S)) {
+      rs1_edata := unbox(recode(io_req.rs2_data(esel * 32 + 31, esel * 32), tag), tag, None)
+      rs2_edata :=io_req.rs2_data(esel * 32 + 31, esel * 32)
+    } else { //FType.H
+      rs1_edata := unbox(recode(io_req.rs2_data(esel * 16 + 15, esel * 16), tag), tag, None)
+      rs2_edata := io_req.rs2_data(esel * 16 + 15, esel * 16)
+    }
+    req <> fp_ctrl
+    req.in1 := rs1_edata
+    req.in2 := rs2_edata
+    req.in3 := DontCare
+    req.rm := io.fcsr_rm
+    req.typ := Mux(io_req.uop.uopc === uopVFRSQRT7, 0.U, 1.U)
+    req.fmt := DontCare
+    req.fmaCmd := DontCare
+    req
+  }
+
+  val dfr7 = (0 until vLen / 64).map(i => Module(new tile.FR7(latency, supportD = true, supportS = false)))
+  for (i <- 0 until vLen / 64) {
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl
+    dfr7(i).io.in.bits  := fr7Input(Some(tile.FType.D), i)
+    dfr7(i).io.in.valid := active && io.req.valid && reqfre.dfr7
+    dfr7(i).io.active   := active
+  }
+  val sfr7 = (0 until vLen / 32).map(i => Module(new tile.FR7(latency, supportD = false, supportS = true)))
+  for (i <- 0 until vLen / 32) {
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl
+    sfr7(i).io.in.bits  := fr7Input(Some(tile.FType.S), i)
+    sfr7(i).io.in.valid := active && io.req.valid && reqfre.sfr7
+    sfr7(i).io.active   := active
+  }
+  val hfr7 = (0 until vLen / 16).map(i => Module(new tile.FR7(latency, supportD = false, supportS = false)))
+  for (i <- 0 until vLen / 16) {
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl
+    hfr7(i).io.in.bits  := fr7Input(Some(tile.FType.H), i)
+    hfr7(i).io.in.valid := active && io.req.valid && reqfre.hfr7
+    hfr7(i).io.active   := active
+  }
+  io.resp.valid := reqpipe.valid
+  val fr7_out_data =
+    Mux(frepipe.dfr7, Cat(dfr7.zipWithIndex.map{case(m,i) => Mux(m.io.out.valid, m.io.out.bits.data(63,0), reqpipe.bits.rs3_data(i*64+63, i*64))}.reverse),
+      Mux(frepipe.sfr7, Cat(sfr7.zipWithIndex.map{case(m,i) => Mux(m.io.out.valid, m.io.out.bits.data(31,0), reqpipe.bits.rs3_data(i*32+31, i*32))}.reverse),
+        Cat(hfr7.zipWithIndex.map{case(m,i) => Mux(m.io.out.valid, m.io.out.bits.data(15,0), reqpipe.bits.rs3_data(i*16+15, i*16))}.reverse)))
+
+  io.resp.bits.data := fr7_out_data
+  io.resp.bits.fflags.valid := io.resp.valid
+  io.resp.bits.fflags.bits.flags :=
+    Mux(frepipe.dfr7, dfr7.map(m => Mux(m.io.out.valid, m.io.out.bits.exc, 0.U)).reduce(_ | _),
+      Mux(frepipe.sfr7, sfr7.map(m => Mux(m.io.out.valid, m.io.out.bits.exc, 0.U)).reduce(_ | _),
+        hfr7.map(m => Mux(m.io.out.valid, m.io.out.bits.exc, 0.U)).reduce(_ | _)))
+
+  io.resp.bits.predicated := DontCare
+}
+
+
 /**
   * Pipelined vmask computing functional unit that wraps around the VMaskUnit
   *

@@ -732,9 +732,9 @@ class VecExeUnit(
   }
 
   // FR7 Unit
-  var fr7: FR7Unit = null
+  var fr7: VecFR7Unit = null
   if(hasFdiv) {
-    fr7 = Module(new FR7Unit(latency=numStages))
+    fr7 = Module(new VecFR7Unit(latency=numStages, dataWidth=vLen))
     fr7.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_FR7)
     fr7.io.fcsr_rm    := io.fcsr_rm
     fr7.io.resp.ready := DontCare
