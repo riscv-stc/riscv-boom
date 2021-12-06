@@ -280,7 +280,11 @@ class SRT4DividerDataModule(len: Int) extends Module {
     Mux(divZeroReg, ws(len - 1, 0), remainder),
     Mux(divZeroReg, Fill(len, 1.U(1.W)), quotient)
   )
-  io.out_data := Mux(isW, res(31, 0).sextTo(len), res)
+  if(len >= 32){
+    io.out_data := Mux(isW, res(31, 0).sextTo(len), res)
+  } else {
+    io.out_data := res
+  }
   io.in_ready := state === s_idle
   io.out_valid := finished // state === s_finish
 }

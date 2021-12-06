@@ -201,8 +201,7 @@ abstract class FunctionalUnit(
   val isMemAddrCalcUnit: Boolean = false,
   val isFixMulAcc: Boolean = false,
   val needsVxrm: Boolean = false,
-  val needsFcsr: Boolean = false,
-  val hasDataMask: Boolean = false)
+  val needsFcsr: Boolean = false)
   (implicit p: Parameters) extends BoomModule
 {
   val io = IO(new Bundle {
@@ -230,10 +229,6 @@ abstract class FunctionalUnit(
     val bp = if (isMemAddrCalcUnit) Input(Vec(nBreakpoints, new BP)) else null
     val mcontext = if (isMemAddrCalcUnit) Input(UInt(coreParams.mcontextWidth.W)) else null
     val scontext = if (isMemAddrCalcUnit) Input(UInt(coreParams.scontextWidth.W)) else null
-
-    // only used in VMX Unit
-    val mask = if(hasDataMask) Output(UInt((dataWidth/8).W)) else null
-
   })
 }
 
@@ -1118,7 +1113,7 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val e64= (dataWidth == 64)
   val in_req = WireInit(io.req)
   val in = Pipe(in_req.valid, in_req.bits)
-  val cs = io.fixCtrl
+  val cs = Pipe(in_req.valid, io.fixCtrl).bits
   val uop = io.req.bits.uop
   val rs1_data = io.req.bits.rs1_data
   val rs2_data = io.req.bits.rs2_data
@@ -1676,19 +1671,6 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   io.resp.bits.data := vmaskUnit_out
 }
 
-
-/**
- * Response from Execution Unit. Bundles a MicroOp with data
- *
- * @param dataWidth width of the data coming from the execution unit
- */
-class VMXResp(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
-  with HasBoomUOP
-{
-  val data = Bits(dataWidth.W)
-  val mask = Bits((dataWidth/8).W)
-}
-
 /**
  * VMX functional unit with back-pressure machanism.
  *
@@ -1699,18 +1681,19 @@ class VMXUnit(dataWidth: Int)(implicit p: Parameters) extends FunctionalUnit(
     isPipelined = false,
     numStages = 4,
     numBypassStages = 0,
-    dataWidth = dataWidth,
-    hasDataMask = true)
+    dataWidth = dataWidth)
 {
   require (numStages > 1)
   // buffer up results since we share write-port on integer regfile.
-  val queue = Module(new BranchKillableQueue(new VMXResp(dataWidth), entries = numStages))
+  val queue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth), entries = numStages))
   // enque
   io.req.ready                   := queue.io.enq.ready && (queue.io.count < (numStages-1).U)
   queue.io.enq.valid             := io.req.valid && !IsKilledByBranch(io.brupdate, io.req.bits.uop) && !io.req.bits.kill
   queue.io.enq.bits.uop          := io.req.bits.uop
   queue.io.enq.bits.data         := io.req.bits.rs3_data
-  queue.io.enq.bits.mask         := io.req.bits.rvm_data
+  queue.io.enq.bits.predicated   := false.B
+  queue.io.enq.bits.fflags.valid := false.B
+  queue.io.enq.bits.fflags.bits  := DontCare
   queue.io.brupdate              := io.brupdate
   queue.io.flush                 := io.req.bits.kill
   // deque
@@ -1719,9 +1702,8 @@ class VMXUnit(dataWidth: Int)(implicit p: Parameters) extends FunctionalUnit(
   io.resp.bits.uop               := queue.io.deq.bits.uop
   io.resp.bits.uop.br_mask       := GetNewBrMask(io.brupdate, queue.io.deq.bits.uop)
   io.resp.bits.data              := queue.io.deq.bits.data
-  io.resp.bits.predicated        := DontCare
-  io.resp.bits.fflags            := DontCare
-  io.mask                        := queue.io.deq.bits.mask
+  io.resp.bits.predicated        := queue.io.deq.bits.predicated
+  io.resp.bits.fflags            := queue.io.deq.bits.fflags
 }
 
 /**
@@ -2324,7 +2306,7 @@ class VecSRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFu
   val rs2_data = io.req.bits.rs2_data
   val rs3_data = io.req.bits.rs3_data
   val rvm_data = io.req.bits.rvm_data
-  val isSigned = uop.rt(RS2, isUnsignedV)
+  val isSigned = !uop.rt(RS2, isUnsignedV)
   val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
   val vl = uop.vconfig.vl
   prestart := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < uop.vstart).reverse)
@@ -2361,8 +2343,10 @@ class VecSRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFu
   when(this.do_kill) { state := s_idle }
 
   for(e <- 0 until vLenb) {
-    val div = if(e < numELENinVLEN) Module(new SRT4DividerDataModule(len = eLen))
-              else                  Module(new SRT4DividerDataModule(len = eLen >> 1))
+    val div = if(e < numELENinVLEN)        Module(new SRT4DividerDataModule(len = eLen))
+              else if(e < numELENinVLEN*2) Module(new SRT4DividerDataModule(len = eLen >> 1))
+              else if(e < numELENinVLEN*4) Module(new SRT4DividerDataModule(len = eLen >> 2))
+              else                         Module(new SRT4DividerDataModule(len = eLen >> 3))
     div.io.valid  := io.req.valid && !this.do_kill
     div.io.sign   := uop.uopc.isOneOf(uopVDIV, uopVREM)
     div.io.isHi   := Mux(inactive(e), false.B, uop.uopc.isOneOf(uopVREM, uopVREMU))

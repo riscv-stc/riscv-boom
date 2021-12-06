@@ -826,6 +826,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dis_uops(w).pvs1      := v_uop.pvs1
       dis_uops(w).pvs2      := v_uop.pvs2
       dis_uops(w).pvm       := v_uop.pvm
+      dis_uops(w).vstartSrc := v_uop.vstartSrc
       dis_uops(w).vstart    := Mux(v_uop.vstartSrc === VSTART_ZERO, 0.U, csr.io.vector.get.vstart)
       dis_uops(w).v_scalar_busy := dis_uops(w).is_rvv && dis_uops(w).uses_scalar
     } else {
@@ -899,7 +900,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       val dis_split_eidx  = RegInit(0.U((vLenSz+1).W))
       val dis_split_segf  = RegInit(0.U(3.W))
       val dis_split_segg  = RegInit(0.U(3.W))
-      val isVload           = dis_uops(w).is_rvv && dis_uops(w).uses_ldq
       val vseg_ls         = dis_uops(w).is_rvv && dis_uops(w).v_seg_nf > 1.U
       val vseg_flast      = dis_split_segf + 1.U(4.W) === dis_uops(w).v_seg_nf
       //val dis_total_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, dis_uops(w).vconfig.vl, rename_stage.io.ren2_uops(w).v_split_ecnt)
@@ -907,16 +907,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       val dis_split_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, 1.U, dis_total_ecnt)
       val elem_last       = dis_split_eidx + dis_split_ecnt >= dis_total_ecnt
       val vLen_ecnt       = (vLen.U >> 3.U) >> dis_uops(w).vd_eew
-      val dis_undisturb   = !dis_uops(w).v_unmasked ||
-                            dis_uops(w).vconfig.vl < dis_uops(w).vconfig.vtype.vlMax ||
+      val dis_undisturb   = dis_uops(w).vconfig.vl < dis_uops(w).vconfig.vtype.vlMax ||
                             dis_uops(w).vconfig.vtype.vlMax < vLen_ecnt
-      val dis_fired_vl_mov = RegInit(false.B)
-
-      when (io.ifu.redirect_flush || dis_ready) {
-        dis_fired_vl_mov := false.B
-      } .elsewhen (dis_fire(w) && isVload && dis_split_eidx === 0.U) {
-        dis_fired_vl_mov := true.B
-      }
 
       when (io.ifu.redirect_flush) {
         dis_split_eidx := 0.U
@@ -928,7 +920,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         dis_split_segf := 0.U
         dis_split_segg := 0.U
         //dis_fired(w) := false.B
-      } .elsewhen (dis_fire(w) && (!isVload || dis_fired_vl_mov)) {
+      } .elsewhen (dis_fire(w)) {
         when (vseg_ls) {
           dis_split_eidx := dis_split_eidx + Mux(vseg_flast, dis_split_ecnt, 0.U)
           dis_split_segf := dis_split_segf + Mux(vseg_flast, 0.U, 1.U)
@@ -952,21 +944,15 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dis_fire_fb(w) := dis_fire(w) && (!dis_split_cand(w) || dis_split_last(w))
       when (dis_split_cand(w) && dis_valids(w)) {
         when (vseg_ls) { dis_uops(w).v_seg_f := dis_split_segf }
-        dis_uops(w).v_eidx  := dis_split_eidx
+        dis_uops(w).v_eidx := dis_split_eidx
       }
       dis_uops(w).v_split_first := dis_split_eidx === 0.U
       dis_uops(w).v_split_last  := dis_split_last(w)
       dis_uops(w).v_split_ecnt  := dis_split_ecnt
       // for partial load (including prestart/body masked/tail not empty), 
       // shoot first split to vector pipe to get undisturb part
-      when (dis_uops(w).is_rvv && dis_uops(w).uses_ldq && dis_split_eidx === 0.U && dis_undisturb && !dis_fired_vl_mov) {
-        dis_uops(w).iq_type   := IQT_VMX
-        dis_uops(w).fu_code   := FU_VMX
-        dis_uops(w).vl_mov    := true.B
-        dis_uops(w).v_eidx    := 0.U
-        dis_uops(w).prs1_busy := 0.U
-        dis_uops(w).prs2_busy := 0.U
-        dis_uops(w).v_split_ecnt := rename_stage.io.ren2_uops(w).v_split_ecnt
+      when (dis_uops(w).is_rvv && dis_uops(w).uses_ldq && dis_split_eidx === 0.U && dis_undisturb) {
+        dis_uops(w).iq_type := IQT_MVMX
       }
       // TODO: for masked load/store, dispatch every split to vector pipe to get mask update
 
@@ -1471,11 +1457,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
 
   var w_cnt = 1
-  iregfile.io.write_ports(0) := WritePort(ll_wbarb.io.out, ipregSz, xLen, isInt, false, false)
+  iregfile.io.write_ports(0) := WritePort(ll_wbarb.io.out, ipregSz, xLen, isInt)
   ll_wbarb.io.in(0) <> mem_resps(0)
   assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
   for (i <- 1 until memWidth) {
-    iregfile.io.write_ports(w_cnt) := WritePort(mem_resps(i), ipregSz, xLen, isInt, false, false)
+    iregfile.io.write_ports(w_cnt) := WritePort(mem_resps(i), ipregSz, xLen, isInt)
     w_cnt += 1
   }
 

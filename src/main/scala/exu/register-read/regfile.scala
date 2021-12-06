@@ -88,40 +88,6 @@ object WritePort
     enq.ready := true.B
     wport
   }
-
-  def apply(
-    enq: DecoupledIO[ExeUnitResp],
-    addrWidth: Int,
-    dataWidth: Int,
-    mask: UInt,
-  ) (implicit p: Parameters): Valid[RegisterFileWritePort] = {
-    val wport = Wire(Valid(new RegisterFileWritePort(addrWidth, dataWidth, vector = true)))
-    val enq_uop = enq.bits.uop
-    wport.valid := enq.valid && enq_uop.rt(RD, isVector)
-    wport.bits.addr := enq_uop.pdst
-    wport.bits.data := enq.bits.data
-
-    val vLen = p(TileKey).core.vLen
-    val eLen = p(TileKey).core.eLen
-    val vLenSz = log2Ceil(vLen)
-    val vLenb = vLen >> 3
-
-    val vl = enq_uop.vconfig.vl
-    val prestart = Cat((0 until vLenb).map(b => enq_uop.v_eidx + b.U < enq_uop.vstart).reverse)
-    val body     = Cat((0 until vLenb).map(b => enq_uop.v_eidx + b.U >= enq_uop.vstart && enq_uop.v_eidx + b.U < vl).reverse)
-    val rmask    = Mux(enq_uop.v_unmasked, ~(0.U(vLenb.W)), Cat((0 until vLenb).map(b => mask(b)).reverse))
-    val tail     = Cat((0 until vLenb).map(b => enq_uop.v_eidx + b.U >= vl).reverse)
-    val inactive = prestart | body & ~rmask | tail
-    val byteMask = Mux1H(UIntToOH(enq_uop.vd_eew(1,0)),
-                              Seq(inactive,
-                                  Cat((0 until vLenb/2).map(e => Fill(2, inactive(e))).reverse),
-                                  Cat((0 until vLenb/4).map(e => Fill(4, inactive(e))).reverse),
-                                  Cat((0 until vLenb/8).map(e => Fill(8, inactive(e))).reverse)))
-    wport.bits.mask := Cat((0 until dataWidth/8).map(i => Fill(8, byteMask(i.U))).reverse)
-    
-    enq.ready := true.B
-    wport
-  }
 }
 
 /**

@@ -151,8 +151,6 @@ abstract class ExecutionUnit(
 
     // TODO move this out of ExecutionUnit
     val com_exception = if (hasMem || hasRocc) Input(Bool()) else null
-
-    val mask = if(hasVMX) Output(UInt((dataWidth/8).W)) else null
   })
 
   if (writesIrf)   {
@@ -927,10 +925,6 @@ class VecExeUnit(
     vecToIntQueue.io.flush := io.req.bits.kill
     io.iresp <> vecToIntQueue.io.deq
     assert(!(vecToIntQueue.io.enq.valid && !vecToIntQueue.io.enq.ready))
-  }
-
-  if(hasVMX) {
-    io.mask := vmx.io.mask
   }
 
   /*

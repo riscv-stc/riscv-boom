@@ -239,12 +239,11 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
         eu_vresp.valid    := eu.io.vresp.valid && eu_vresp_uop.rf_wen && !eu_vresp_uop.ctrl.is_sta
         eu.io.vresp.ready := Mux(eu_vresp_uop.ctrl.is_sta, io.to_sdq.ready, true.B)
         when (eu.io.vresp.valid) { assert(eu_vresp_uop.is_rvv) }
-        vregfile.io.write_ports(w_cnt) := WritePort(eu_vresp, vpregSz, vLen, eu.io.mask)
       } else {
         eu_vresp.valid    := eu.io.vresp.valid && eu_vresp_uop.rf_wen
         eu.io.vresp.ready := true.B
-        vregfile.io.write_ports(w_cnt) := WritePort(eu_vresp, vpregSz, vLen, isVector, true, false)
       }
+      vregfile.io.write_ports(w_cnt) := WritePort(eu_vresp, vpregSz, vLen, isVector, true)
       when (eu_vresp.valid && !(eu_vresp_uop.is_rvv && eu_vresp_uop.ctrl.is_sta)) {
         //assert(eu.io.vresp.ready, "No backpressuring the Vec EUs")
         assert(eu.io.vresp.bits.uop.rf_wen, "rf_wen must be high here")
