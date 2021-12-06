@@ -125,13 +125,8 @@ class IssueSlot(
   def last_check: Bool = {
     val ret = Wire(Bool())
     if (vector) {
-<<<<<<< HEAD
       ret := io.uop.v_split_last || io.uop.is_reduce ||
              io.uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
-=======
-      ret := io.uop.v_split_last ||
-             io.uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
->>>>>>> d0e5411c (add non-zero vstart support (speculative))
     } else {
       ret := true.B
     }

@@ -890,214 +890,6 @@ class FixMulAccCtrlSigs extends Bundle
  * @param numStages number of pipeline stages
  * @param dataWidth size of the data being passed into the functional unit
  */
-/*
-class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
-  extends PipelinedFunctionalUnit (
-    numStages = numStages,
-    numBypassStages = 0,
-    earliestBypassStage = 0,
-    dataWidth = dataWidth,
-    isFixMulAcc = true
-) with ShouldBeRetimed {
-  val e8 = (dataWidth == 8)
-  val e16= (dataWidth == 16)
-  val e32= (dataWidth == 32)
-  val e64= (dataWidth == 64)
-  val in_req = WireInit(io.req)
-  val in = Pipe(in_req.valid, in_req.bits)
-  val io_vs1_eew  = io.req.bits.uop.vs1_eew
-  val io_vs2_eew  = io.req.bits.uop.vs2_eew
-  val io_vd_eew   = io.req.bits.uop.vd_eew
-  val rs1Unsigned = io.req.bits.uop.rt(RS1, isUnsignedV) || io.req.bits.uop.rt(RS1, isIntU)
-  val rs2Unsigned = io.req.bits.uop.rt(RS2, isUnsignedV)
-  val io_unsigned = io.req.bits.uop.rt(RD, isUnsignedV)
-  val u_max = Wire(UInt((dataWidth+1).W))
-  val hi, s_max, s_min, rs1_data, rs2_data, rs3_data = Wire(UInt(dataWidth.W))
-  val stale_rs3_data = Pipe(in_req.valid, rs3_data).bits
-  if (e64) {
-    rs1_data := Mux1H(UIntToOH(io_vs1_eew(1,0)), Seq(Mux(rs1Unsigned, io.req.bits.rs1_data(7,0),  io.req.bits.rs1_data(7,0).sextTo(dataWidth)),
-                                                     Mux(rs1Unsigned, io.req.bits.rs1_data(15,0), io.req.bits.rs1_data(15,0).sextTo(dataWidth)),
-                                                     Mux(rs1Unsigned, io.req.bits.rs1_data(31,0), io.req.bits.rs1_data(31,0).sextTo(dataWidth)),
-                                                     io.req.bits.rs1_data))
-    rs2_data := Mux1H(UIntToOH(io_vs2_eew(1,0)), Seq(Mux(rs2Unsigned, io.req.bits.rs2_data(7,0),  io.req.bits.rs2_data(7,0).sextTo(dataWidth)),
-                                                     Mux(rs2Unsigned, io.req.bits.rs2_data(15,0), io.req.bits.rs2_data(15,0).sextTo(dataWidth)),
-                                                     Mux(rs2Unsigned, io.req.bits.rs2_data(31,0), io.req.bits.rs2_data(31,0).sextTo(dataWidth)),
-                                                     io.req.bits.rs2_data))
-    rs3_data := Mux1H(UIntToOH(io_vd_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs3_data(7,0),  io.req.bits.rs3_data(7,0).sextTo(dataWidth)),
-                                                    Mux(io_unsigned, io.req.bits.rs3_data(15,0), io.req.bits.rs3_data(15,0).sextTo(dataWidth)),
-                                                    Mux(io_unsigned, io.req.bits.rs3_data(31,0), io.req.bits.rs3_data(31,0).sextTo(dataWidth)),
-                                                    io.req.bits.rs3_data))
-  } else if (e32) {
-    rs1_data := Mux1H(UIntToOH(io_vs1_eew(1,0)), Seq(Mux(rs1Unsigned, io.req.bits.rs1_data(7,0),  io.req.bits.rs1_data(7,0).sextTo(dataWidth)),
-                                                     Mux(rs1Unsigned, io.req.bits.rs1_data(15,0), io.req.bits.rs1_data(15,0).sextTo(dataWidth)),
-                                                     io.req.bits.rs1_data,
-                                                     io.req.bits.rs1_data))
-    rs2_data := Mux1H(UIntToOH(io_vs2_eew(1,0)), Seq(Mux(rs2Unsigned, io.req.bits.rs2_data(7,0),  io.req.bits.rs2_data(7,0).sextTo(dataWidth)),
-                                                     Mux(rs2Unsigned, io.req.bits.rs2_data(15,0), io.req.bits.rs2_data(15,0).sextTo(dataWidth)),
-                                                     io.req.bits.rs2_data,
-                                                     io.req.bits.rs2_data))
-    rs3_data := Mux1H(UIntToOH(io_vd_eew(1,0)), Seq(Mux(io_unsigned, io.req.bits.rs3_data(7,0),  io.req.bits.rs3_data(7,0).sextTo(dataWidth)),
-                                                    Mux(io_unsigned, io.req.bits.rs3_data(15,0), io.req.bits.rs3_data(15,0).sextTo(dataWidth)),
-                                                    io.req.bits.rs3_data,
-                                                    io.req.bits.rs3_data))
-  } else if (e16) {
-    rs1_data := Mux1H(UIntToOH(io_vs1_eew(0)), Seq(Mux(rs1Unsigned, io.req.bits.rs1_data(7,0),  io.req.bits.rs1_data(7,0).sextTo(dataWidth)),
-                                                   io.req.bits.rs1_data))
-    rs2_data := Mux1H(UIntToOH(io_vs2_eew(0)), Seq(Mux(rs2Unsigned, io.req.bits.rs2_data(7,0),  io.req.bits.rs2_data(7,0).sextTo(dataWidth)),
-                                                   io.req.bits.rs2_data))
-    rs3_data := Mux1H(UIntToOH(io_vd_eew(0)), Seq(Mux(io_unsigned, io.req.bits.rs3_data(7,0),  io.req.bits.rs3_data(7,0).sextTo(dataWidth)),
-                                                  io.req.bits.rs3_data))
-  } else { // e8
-    rs1_data := io.req.bits.rs1_data
-    rs2_data := io.req.bits.rs2_data
-    rs3_data := io.req.bits.rs3_data
-  }
-
-  in_req.bits.rs1_data := rs1_data
-  in_req.bits.rs2_data := rs2_data
-  in_req.bits.rs3_data := rs3_data
-  when (io.req.bits.uop.uopc.isOneOf(uopVMADD, uopVNMSUB)) {
-    in_req.bits.rs2_data := rs3_data
-    in_req.bits.rs3_data := rs2_data
-  }
-  when (io.req.bits.uop.uopc.isOneOf(uopVNMSAC, uopVNMSUB)) {
-    in_req.bits.rs1_data := ~rs1_data + 1.U
-  }
-  when (io.req.bits.uop.uopc.isOneOf(uopVSADDU, uopVSADD, uopVAADDU, uopVAADD, uopVSSUBU, uopVSSUB, uopVASUBU, uopVASUB)) {
-    in_req.bits.rs3_data := rs1_data
-  }
-  val DC2 = BitPat.dontCare(2)
-  val table: List[(BitPat, List[BitPat])] = List(
-    //                          cmdHi   negAcc accSigned   srType (0, 1, SEW-1, RS1)
-    //                          |  lhsSigned|  |  lhsOne   |    doClip
-    //                          |  |  rhsSigned|  doRO  |    |
-    //                          |  |  |  doAcc | |  |  roSigned|
-    //                          |  |  |  |  |  |  |  |  |  |    |
-    BitPat(uopVMUL)     -> List(N, Y, Y, N, X, X, N, N, X, DC2, N)
-   ,BitPat(uopVMULH)    -> List(Y, Y, Y, N, X, X, N, N, X, DC2, N)
-   ,BitPat(uopVMULHU)   -> List(Y, N, N, N, X, X, N, N, X, DC2, N)
-   ,BitPat(uopVMULHSU)  -> List(Y, N, Y, N, X, X, N, N, X, DC2, N)
-   ,BitPat(uopVWMULU)   -> List(N, N, N, N, X, X, N, N, X, DC2, N)
-   ,BitPat(uopVWMULSU)  -> List(N, N, Y, N, X, X, N, N, X, DC2, N)
-   ,BitPat(uopVMACC)    -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
-   ,BitPat(uopVNMSAC)   -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
-   ,BitPat(uopVMADD)    -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
-   ,BitPat(uopVNMSUB)   -> List(N, Y, Y, Y, N, Y, N, N, X, DC2, N)
-   ,BitPat(uopVWMACCU)  -> List(N, N, N, Y, N, N, N, N, X, DC2, N)
-   ,BitPat(uopVWMACCSU) -> List(N, Y, N, Y, N, Y, N, N, X, DC2, N)
-   ,BitPat(uopVWMACCUS) -> List(N, N, Y, Y, N, Y, N, N, X, DC2, N)
-   ,BitPat(uopVSADDU)   -> List(N, X, N, Y, N, N, Y, Y, N, U_0, Y) // vs2 + rs1
-   ,BitPat(uopVSADD)    -> List(N, X, Y, Y, N, Y, Y, Y, Y, U_0, Y)
-   ,BitPat(uopVSSUBU)   -> List(N, X, N, Y, Y, N, Y, Y, N, U_0, Y)
-   ,BitPat(uopVSSUB)    -> List(N, X, Y, Y, Y, Y, Y, Y, Y, U_0, Y)
-   ,BitPat(uopVAADDU)   -> List(N, X, N, Y, N, N, Y, Y, N, U_1, N)
-   ,BitPat(uopVAADD)    -> List(N, X, Y, Y, N, Y, Y, Y, Y, U_1, N)
-   ,BitPat(uopVASUBU)   -> List(N, X, N, Y, Y, N, Y, Y, N, U_1, N)
-   ,BitPat(uopVASUB)    -> List(N, X, Y, Y, Y, Y, Y, Y, Y, U_1, N)
-   ,BitPat(uopVSMUL)    -> List(N, Y, Y, N, X, X, N, Y, Y, U_2, Y)
-   ,BitPat(uopVSSRL)    -> List(N, X, N, N, X, X, Y, Y, N, U_3, N)
-   ,BitPat(uopVSSRA)    -> List(N, X, Y, N, X, X, Y, Y, Y, U_3, N)
-   ,BitPat(uopVNCLIPU)  -> List(N, X, N, N, X, X, Y, Y, N, U_3, Y)
-   ,BitPat(uopVNCLIP)   -> List(N, X, Y, N, X, X, Y, Y, Y, U_3, Y)
-  )
-  val cs = Wire(new FixMulAccCtrlSigs()).decoder(in.bits.uop.uopc, table)
-
-  val lhs = Mux(cs.lhsOne, 1.S, Cat(cs.lhsSigned && in.bits.rs1_data(dataWidth-1), in.bits.rs1_data).asSInt)
-  val rhs = Cat(cs.rhsSigned && in.bits.rs2_data(dataWidth-1), in.bits.rs2_data).asSInt
-  val sext_rs3 = Cat(cs.accSigned && in.bits.rs3_data(dataWidth-1), in.bits.rs3_data)
-  val sub_rs3  = (~sext_rs3 + 1.U(1.W)).asSInt
-  val acc = Mux(cs.doAcc, Mux(cs.negAcc, sub_rs3, sext_rs3.asSInt), 0.S)
-  //when (in.valid && cs.doAcc) { assert(in.bits.uop.frs3_en, "Incorrect frs3_en") }
-  val macc = lhs * rhs +& acc
-  val macc_msk = ~(0.U((dataWidth*2+3).W))
-  val vd_eew = in.bits.uop.vd_eew
-  val unsigned = in.bits.uop.rt(RD, isUnsignedV)
-  if (e64) {
-    u_max := Cat(0.U(1.W), Mux1H(UIntToOH(vd_eew(1,0)), Seq(0xFF.U(dataWidth.W),
-                                                            0xFFFF.U(dataWidth.W),
-                                                            0xFFFFFFFFL.U(dataWidth.W),
-                                                            Fill(dataWidth, 1.U(1.W)))))
-    s_max := Mux1H(UIntToOH(vd_eew(1,0)), Seq(0x7F.U(dataWidth.W),
-                                              0x7FFF.U(dataWidth.W),
-                                              0x7FFFFFFF.U(dataWidth.W),
-                                              0x7FFFFFFFFFFFFFFFL.U(dataWidth.W)))
-    s_min := Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Fill(dataWidth-8,  1.U(1.W)), 0x80.U(8.W)),
-                                              Cat(Fill(dataWidth-16, 1.U(1.W)), 0x8000.U(16.W)),
-                                              Cat(Fill(dataWidth-32, 1.U(1.W)), 0x80000000L.U(32.W)),
-                                              Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))))
-    hi  := Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Mux(unsigned, 0.U((dataWidth-8).W),  Fill(dataWidth-8,  macc(15))), macc(15,  8)),
-                                            Cat(Mux(unsigned, 0.U((dataWidth-16).W), Fill(dataWidth-16, macc(31))), macc(31, 16)),
-                                            Cat(Mux(unsigned, 0.U((dataWidth-32).W), Fill(dataWidth-32, macc(63))), macc(63, 32)),
-                                            macc(127, 64)))
-  } else if (e32) {
-    u_max := Cat(0.U(1.W), Mux1H(UIntToOH(vd_eew(1,0)), Seq(0xFF.U(dataWidth.W),
-                                                            0xFFFF.U(dataWidth.W),
-                                                            Fill(dataWidth, 1.U(1.W)),
-                                                            Fill(dataWidth, 1.U(1.W)))))
-    s_max := Mux1H(UIntToOH(vd_eew(1,0)), Seq(0x7F.U(dataWidth.W),
-                                              0x7FFF.U(dataWidth.W),
-                                              0x7FFFFFFF.U(dataWidth.W),
-                                              0x7FFFFFFF.U(dataWidth.W)))
-    s_min := Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Fill(dataWidth-8,  1.U(1.W)), 0x80.U(8.W)),
-                                              Cat(Fill(dataWidth-16, 1.U(1.W)), 0x8000.U(16.W)),
-                                              Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W))),
-                                              Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))))
-    hi  := Mux1H(UIntToOH(vd_eew(1,0)), Seq(Cat(Mux(unsigned, 0.U((dataWidth-8).W),  Fill(dataWidth-8,  macc(15))), macc(15,  8)),
-                                            Cat(Mux(unsigned, 0.U((dataWidth-16).W), Fill(dataWidth-16, macc(31))), macc(31, 16)),
-                                            macc(63, 32),
-                                            macc(63, 32)))
-  } else if (e16) {
-    u_max := Cat(0.U(1.W), Mux1H(UIntToOH(vd_eew(0)), Seq(0xFF.U(dataWidth.W),
-                                                          Fill(dataWidth, 1.U(1.W)))))
-    s_max := Mux1H(UIntToOH(vd_eew(0)), Seq(0x7F.U(dataWidth.W),
-                                            0x7FFF.U(dataWidth.W)))
-    s_min := Mux1H(UIntToOH(vd_eew(0)), Seq(Cat(Fill(dataWidth-8,  1.U(1.W)), 0x80.U(8.W)),
-                                            Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))))
-    hi  := Mux1H(UIntToOH(vd_eew(0)), Seq(Cat(Mux(unsigned, 0.U((dataWidth-8).W),  Fill(dataWidth-8,  macc(15))), macc(15,  8)),
-                                          macc(32, 16)))
-  } else { // e8
-    u_max := Fill(dataWidth, 1.U(1.W))
-    s_max := 0x7F.U(dataWidth.W)
-    s_min := Cat(1.U(1.W), Fill(dataWidth-1, 0.U(1.W)))
-    hi  := macc(16, 8)
-  }
-  val sramt = Mux(!cs.doRO, 0.U,
-              Mux1H(UIntToOH(cs.srType), Seq(0.U(6.W),
-                                         1.U(6.W),
-                                         ((8.U << vd_eew) - 1.U)(5,0),
-                                         Mux1H(UIntToOH(vd_eew(1,0)), Seq(in.bits.rs1_data(2,0),
-                                                                          in.bits.rs1_data(3,0),
-                                                                          in.bits.rs1_data(4,0),
-                                                                          in.bits.rs1_data(5,0))))))
-  val srres = macc >> sramt
-  val sroff = (macc.asUInt & ~(macc_msk << sramt))(dataWidth-1, 0)
-  val sroff_msb = Mux(sramt === 0.U, 0.U, macc(sramt-1.U))
-  val sroff_rem = Mux(sramt <=  1.U, 0.U, sroff & ~(macc_msk << (sramt-1.U)))
-  val roinc = Mux1H(UIntToOH(io.vxrm(1,0)), Seq(sroff_msb,
-                                                sroff_msb & (sroff_rem.orR | srres(0)),
-                                                0.U(1.W),
-                                                ~srres(0) & sroff.orR))
-  val rores = srres + Cat(0.U, roinc).asSInt
-  val uclip_max = rores > u_max.asSInt
-  val uclip_min = rores < 0.S
-  val uclip = Mux(uclip_max, u_max, Mux(uclip_min, 0.U, rores.asUInt))
-  val sclip_max = rores > s_max.asSInt
-  val sclip_min = rores < s_min.asSInt
-  val sclip = Mux(sclip_max, s_max, Mux(sclip_min, s_min, rores.asUInt))
-  val muxed = Mux(cs.cmdHi,   hi,
-              Mux(cs.doClip,  Mux(cs.roSigned, sclip(dataWidth-1,0), uclip(dataWidth-1,0)),
-              Mux(cs.doRO,    rores(dataWidth-1,0),
-                              macc(dataWidth-1, 0))))
-
-  val out  = WireInit(in)
-  out.bits.uop.vxsat := cs.doClip && Mux(cs.roSigned, sclip_max || sclip_min, uclip_max || uclip_min)
-  val resp = Pipe(out, numStages-1)
-  io.resp.valid := resp.valid
-  io.resp.bits.uop.vxsat := resp.bits.uop.vxsat
-  val active = (out.bits.uop.v_unmasked || out.bits.rvm_data(0)) && out.bits.uop.v_eidx >= out.bits.uop.vstart && out.bits.uop.v_eidx < out.bits.uop.vconfig.vl
-  io.resp.bits.data := Pipe(out.valid, Mux(active, muxed, stale_rs3_data), numStages-1).bits
-}
-*/
 class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   extends PipelinedFunctionalUnit (
     numStages = numStages,
@@ -1105,8 +897,8 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
     earliestBypassStage = 0,
     dataWidth = dataWidth,
     isFixMulAcc = true,
-    needsVxrm = true
-) with ShouldBeRetimed {
+    needsVxrm = true) with ShouldBeRetimed 
+{
   val e8 = (dataWidth == 8)
   val e16= (dataWidth == 16)
   val e32= (dataWidth == 32)
@@ -2294,6 +2086,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   io.fbreq.bits.rs2_data := v2uredmux
   io.fbreq.bits.rs3_data := Mux(is_reduce, vdbuf(0), vdbuf(progress))
   io.busy := !is_idle
+}
 /**
  * Vector Divide functional units wrapper.
  *
