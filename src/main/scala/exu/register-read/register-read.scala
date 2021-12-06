@@ -89,19 +89,6 @@ class RegisterRead(
   val exe_reg_pred_data = Reg(Vec(issueWidth, Bool()))
 
   //-------------------------------------------------------------
-  // hook up inputs
-
-  for (w <- 0 until issueWidth) {
-    val rrd_decode_unit = Module(new RegisterReadDecode(supportedUnitsArray(w)))
-    rrd_decode_unit.io.iss_valid := io.iss_valids(w)
-    rrd_decode_unit.io.iss_uop   := io.iss_uops(w)
-
-    rrd_valids(w) := RegNext(rrd_decode_unit.io.rrd_valid &&
-                !IsKilledByBranch(io.brupdate, rrd_decode_unit.io.rrd_uop))
-    rrd_uops(w)   := RegNext(GetNewUopAndBrMask(rrd_decode_unit.io.rrd_uop, io.brupdate))
-  }
-
-  //-------------------------------------------------------------
   // read ports
 
   require (numTotalReadPorts == numReadPortsArray.reduce(_+_))
@@ -123,6 +110,16 @@ class RegisterRead(
 
   var idx = 0 // index into flattened read_ports array
   for (w <- 0 until issueWidth) {
+    //-------------------------------------------------------------
+    // hook up inputs
+    val rrd_decode_unit = Module(new RegisterReadDecode(supportedUnitsArray(w)))
+    rrd_decode_unit.io.iss_valid := io.iss_valids(w)
+    rrd_decode_unit.io.iss_uop   := io.iss_uops(w)
+
+    rrd_valids(w) := RegNext(rrd_decode_unit.io.rrd_valid &&
+                !IsKilledByBranch(io.brupdate, rrd_decode_unit.io.rrd_uop))
+    rrd_uops(w)   := RegNext(GetNewUopAndBrMask(rrd_decode_unit.io.rrd_uop, io.brupdate))
+
     val numReadPorts = numReadPortsArray(w)
 
     // NOTE:
@@ -145,11 +142,12 @@ class RegisterRead(
         val vrp_val = RegInit(false.B)
         val vrp_last = Wire(Bool())
         val vrp_uop = Reg(new MicroOp())
+        val vlen_ecnt = Wire(UInt((vLen/8).W))
         vrp_last := false.B
         when (vrp_val) {
-          val vlen_ecnt = ((vLen/8).U >> vrp_uop.vs2_eew)
           val rs2_sel = VRegSel(vrp_uop.v_eidx, vrp_uop.vs2_eew, eLenSelSz)
-          vrp_last := (rs2_sel === nrVecGroup(vrp_uop.vs2_emul))
+          vlen_ecnt := ((vLen/8).U >> vrp_uop.vs2_eew)
+          vrp_last := (rs2_sel +& 1.U === nrVecGroup(vrp_uop.vs2_emul))
           when (vrp_last) {
             vrp_val := false.B
           }
@@ -158,7 +156,7 @@ class RegisterRead(
           iss_uop := vrp_uop
           iss_uop.v_split_last := vrp_last
         } .otherwise {
-          val vlen_ecnt = ((vLen/8).U >> io.iss_uops(w).vs2_eew)
+          vlen_ecnt := ((vLen/8).U >> io.iss_uops(w).vs2_eew)
           vrp_val := vrp_iss
           when(vrp_iss) {
             vrp_uop := io.iss_uops(w)
@@ -169,6 +167,11 @@ class RegisterRead(
           assert(!vrp_val)
         }
         io.rrd_stall(w) := vrp_val
+        rrd_decode_unit.io.iss_valid := io.iss_valids(w) | vrp_val
+        rrd_decode_unit.io.iss_uop   := Mux(vrp_val, vrp_uop, io.iss_uops(w))
+        when (vrp_val || vrp_iss) {
+          rrd_decode_unit.io.iss_uop.v_split_ecnt := vlen_ecnt
+        }
       }
       val rs1_sel = VRegSel(iss_uop.v_eidx, iss_uop.vs1_eew, eLenSelSz)
       val rs2_sel = VRegSel(iss_uop.v_eidx, iss_uop.vs2_eew, eLenSelSz)

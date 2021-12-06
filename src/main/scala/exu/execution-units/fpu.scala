@@ -602,7 +602,6 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
       Mux(fuepipe.fpiu, (fpiu_out zip fpiu_result).map{case(o,r)=>Mux(o.valid, r.exc, 0.U)}.reduce(_ | _),
                         fpmu.map(m => Mux(m.io.out.valid, m.io.out.bits.exc, 0.U)).reduce(_ | _)))))
 
-  // FIXME: handle masked ops
   io.resp.bits.data := Mux(fuepipe.fpiu, Mux(fpmu_dtype === D, Cat(fpiu_result.slice(0, vLen/64).zipWithIndex.map{case(r,i) => Mux(fpiu(i).io.out.valid, r.data(63,0), reqpipe.bits.rs3_data(i*64+63,i*64))}.reverse),
                                          Mux(fpmu_dtype === S, Cat(fpiu_result.slice(0, vLen/32).zipWithIndex.map{case(r,i) => Mux(fpiu(i).io.out.valid, r.data(31,0), reqpipe.bits.rs3_data(i*32+31,i*32))}.reverse),
                                                                Cat(fpiu_result.slice(0, vLen/16).zipWithIndex.map{case(r,i) => Mux(fpiu(i).io.out.valid, r.data(15,0), reqpipe.bits.rs3_data(i*16+15,i*16))}.reverse))),

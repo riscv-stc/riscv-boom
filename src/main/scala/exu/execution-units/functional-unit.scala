@@ -1867,12 +1867,12 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   val filling     = (state === s_fill)
   val working     = (state === s_work)
   val is_last     = WireInit(false.B)
-  val vlen_ecnt = vLenb.U >> uop.vd_eew
+  val vlen_ecnt   = vLenb.U >> uop.vd_eew
   val is_reduce   = uop.is_reduce
   // unordered reduce phase1: compress between vreg: v2buf[]
   // unordered reduce phase2: compress within vreg: fbrsp
   val ured_ph1_prgrs = nrVecGroup(uop.vs2_emul) << uop.rt(RD, isWidenV).asUInt
-  val ured_ph2_prgrs = (vLenSz-3).U - uop.vd_eew + uop.rt(RD, isWidenV).asUInt - 1.U
+  val ured_ph2_prgrs = (vLenSz-3).U - uop.vd_eew //+ uop.rt(RD, isWidenV).asUInt - 1.U
   val is_vrgather = uop.uopc === uopVRGATHER
   val is_vcompress= uop.uopc === uopVCOMPRESS
   val is_slide1up = uop.uopc === uopVSLIDE1UP
@@ -1939,32 +1939,6 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     ))
     ret
   }
-  /* def v2masked(p: UInt, ew: UInt): UInt = {
-    val ret = Wire(UInt(vLen.W))
-    ret := Mux1H(Seq(
-      (ew(1,0) === 0.U) -> Cat((0 until vLen/8).map(i => {
-        val eidx = Cat(p(2,0), i.U((vLenSz-3).W))
-        val actv = (uop.v_unmasked || vmbuf(p)(i)) && eidx < uop.vconfig.vl
-        Mux(actv, v2buf(p)(i*8+7, i*8), e8red_identity(7,0))
-      }).reverse),
-      (ew(1,0) === 1.U) -> Cat((0 until vLen/16).map(i => {
-        val eidx = Cat(p(2,0), i.U((vLenSz-4).W))
-        val actv = (uop.v_unmasked || vmbuf(p)(i)) && eidx < uop.vconfig.vl
-        Mux(actv, v2buf(p)(i*16+15, i*16), e16red_identity(15,0))
-      }).reverse),
-      (ew(1,0) === 2.U) -> Cat((0 until vLen/32).map(i => {
-        val eidx = Cat(p(2,0), i.U((vLenSz-5).W))
-        val actv = (uop.v_unmasked || vmbuf(p)(i)) && eidx < uop.vconfig.vl
-        Mux(actv, v2buf(p)(i*32+31, i*32), e32red_identity(31,0))
-      }).reverse),
-      (ew(1,0) === 3.U) -> Cat((0 until vLen/64).map(i => {
-        val eidx = Cat(p(2,0), i.U((vLenSz-6).W))
-        val actv = (uop.v_unmasked || vmbuf(p)(i)) && eidx < uop.vconfig.vl
-        Mux(actv, v2buf(p)(i*64+63, i*64), e64red_identity(63,0))
-      }).reverse)
-    ))
-    ret
-  } */
 
   when (io.exreq.valid && !working) {
     vmbuf(v2buf_wp) := io.exreq.bits.rvm_data
