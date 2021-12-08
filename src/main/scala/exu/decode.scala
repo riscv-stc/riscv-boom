@@ -187,6 +187,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   if (usingFPU) {
     decode_table ++= getTable("Float")
     if (usingFDivSqrt) decode_table ++= getTable("FDivSqrt")
+    if (usingzfhExt) decode_table ++= getTable("zfhExt")
   }
   if (usingRoCC) decode_table ++= getTable("RoCC")
   if (usingVector) {

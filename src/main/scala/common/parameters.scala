@@ -181,6 +181,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   //************************************
   // Functional Units
   val usingFDivSqrt = boomParams.fpu.isDefined && boomParams.fpu.get.divSqrt
+  val usingzfhExt   = boomParams.fpu.isDefined && boomParams.fpu.get.zfhExt
 
   val mulDivParams = boomParams.mulDiv.getOrElse(MulDivParams())
   // TODO: Allow RV32IF
@@ -192,6 +193,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val imulLatency = boomParams.imulLatency
   val dfmaLatency = if (boomParams.fpu.isDefined) boomParams.fpu.get.dfmaLatency else 3
   val sfmaLatency = if (boomParams.fpu.isDefined) boomParams.fpu.get.sfmaLatency else 3
+  val hfmaLatency = if (boomParams.fpu.isDefined) boomParams.fpu.get.hfmaLatency else 3
   // All FPU ops padded out to same delay for writeport scheduling.
   require (sfmaLatency == dfmaLatency)
 
