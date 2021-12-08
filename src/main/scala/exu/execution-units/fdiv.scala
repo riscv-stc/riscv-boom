@@ -291,11 +291,119 @@ class FDivSqrtUnit(vector: Boolean = false)(implicit p: Parameters)
 
   if(vector) {
     io.resp.bits.data := Mux(r_divsqrt_uop.v_active, ieee(fdiv_out_data), r_divsqrt_fin.in3)
+    io.resp.bits.fflags.bits.flags := Mux(r_divsqrt_uop.v_active, out_flags, 0.U)
   } else {
     io.resp.bits.data := fdiv_out_data
+    io.resp.bits.fflags.bits.flags := out_flags
   }
   io.resp.bits.fflags.valid := io.resp.valid
   io.resp.bits.fflags.bits.uop := r_out_uop
   io.resp.bits.fflags.bits.uop.br_mask := GetNewBrMask(io.brupdate, r_out_uop)
-  io.resp.bits.fflags.bits.flags := out_flags
+}
+
+
+/**
+ * Vector Floating Divide and Sqrt functional units wrapper.
+ *
+ * @param dataWidth data to be passed into the functional unit
+ */
+class VecFDivSqrtUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFunctionalUnit(dataWidth, needsFcsr = true)
+{
+  val uop = io.req.bits.uop
+  val rs1_data = io.req.bits.rs1_data
+  val rs2_data = io.req.bits.rs2_data
+  val rs3_data = io.req.bits.rs3_data
+  val rvm_data = io.req.bits.rvm_data
+  val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
+  val vl = uop.vconfig.vl
+  prestart := Cat((0 until vLen/16).map(b => uop.v_eidx + b.U < uop.vstart).reverse)
+  body     := Cat((0 until vLen/16).map(b => uop.v_eidx + b.U >= uop.vstart && uop.v_eidx + b.U < vl).reverse)
+  mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)), Cat((0 until vLen/16).map(b => rvm_data(b)).reverse))
+  tail     := Cat((0 until vLen/16).map(b => uop.v_eidx + b.U >= vl).reverse)
+  inactive := prestart | body & ~mask | tail
+  
+  val fdivValid  = Wire(Vec(vLen/16, Bool()))
+  val e64DataOut = Wire(Vec(numELENinVLEN,   UInt(64.W)))
+  val e32DataOut = Wire(Vec(numELENinVLEN*2, UInt(32.W)))
+  val e16DataOut = Wire(Vec(numELENinVLEN*4, UInt(16.W)))
+  val e64FlagOut = Wire(Vec(numELENinVLEN,   Bits(tile.FPConstants.FLAGS_SZ.W)))
+  val e32FlagOut = Wire(Vec(numELENinVLEN*2, Bits(tile.FPConstants.FLAGS_SZ.W)))
+  val e16FlagOut = Wire(Vec(numELENinVLEN*4, Bits(tile.FPConstants.FLAGS_SZ.W)))
+
+  Bits(tile.FPConstants.FLAGS_SZ.W)
+
+  val s_idle :: s_work :: s_done :: Nil = Enum(3)
+  val state = RegInit(s_idle)
+  switch(state) {
+    is(s_idle) {
+      when(io.req.valid && !this.do_kill) {
+        state := s_work
+      }
+    }
+    is(s_work) {
+      when(fdivValid.andR && io.resp.ready) {
+        state := s_idle
+      } .elsewhen(fdivValid.andR) {
+        state := s_done
+      }
+    }
+    is(s_done) {
+      when(io.resp.ready) { state := s_idle }
+    }
+  }
+  when(this.do_kill) { state := s_idle }
+
+  for(e <- 0 until vLen/16) {
+    val fdiv = Module(new FDivSqrtUnit(vector = true))
+    // inputs
+    fdiv.io.req.valid          := io.req.valid && !this.do_kill
+    fdiv.io.fcsr_rm            := io.fcsr_rm
+    fdiv.io.req.bits.uop       := io.req.bits.uop
+    fdiv.io.req.bits.pred_data := io.req.bits.pred_data
+    fdiv.io.req.bits.kill      := io.req.bits.kill
+    fdiv.io.brupdate           := io.brupdate
+    fdiv.io.resp.ready         := (fdivValid.andR && io.resp.ready)
+    if(e < numELENinVLEN) {
+      fdiv.io.req.bits.rs1_data  := Mux1H(UIntToOH(uop.vd_eew),
+                                        Seq(0.U, rs1_data(16*e+15, 16*e), rs1_data(32*e+31, 32*e), rs1_data(64*e+63, 64*e)))
+      fdiv.io.req.bits.rs2_data  := Mux1H(UIntToOH(uop.vd_eew),
+                                          Seq(0.U, rs2_data(16*e+15, 16*e), rs2_data(32*e+31, 32*e), rs2_data(64*e+63, 64*e)))
+      fdiv.io.req.bits.rs3_data  := Mux1H(UIntToOH(uop.vd_eew),
+                                          Seq(0.U, rs3_data(16*e+15, 16*e), rs3_data(32*e+31, 32*e), rs3_data(64*e+63, 64*e)))
+    } else if(e < numELENinVLEN*2) {
+      fdiv.io.req.bits.rs1_data  := Mux(uop.vd_eew(1), rs1_data(32*e+31, 32*e), rs1_data(16*e+15, 16*e))
+      fdiv.io.req.bits.rs2_data  := Mux(uop.vd_eew(1), rs2_data(32*e+31, 32*e), rs2_data(16*e+15, 16*e))
+      fdiv.io.req.bits.rs3_data  := Mux(uop.vd_eew(1), rs3_data(32*e+31, 32*e), rs3_data(16*e+15, 16*e))
+    } else {
+      fdiv.io.req.bits.rs1_data  := rs1_data(16*e+15, 16*e)
+      fdiv.io.req.bits.rs2_data  := rs2_data(16*e+15, 16*e)
+      fdiv.io.req.bits.rs3_data  := rs3_data(16*e+15, 16*e)
+    }
+    fdiv.io.req.bits.uop.v_active := !inactive(e)
+    fdiv.io.req.bits.rvm_data     := inactive(e)
+    // output
+    fdivValid(e) := fdiv.io.resp.valid
+    if (e < numELENinVLEN) {
+      e64DataOut(e) := fdiv.io.resp.bits.data
+      e64FlagOut(e) := fdiv.io.resp.bits.fflags.bits.flags
+    }
+    if(e < numELENinVLEN*2) {
+      e32DataOut(e) := fdiv.io.resp.bits.data
+      e32FlagOut(e) := fdiv.io.resp.bits.fflags.bits.flags
+    }
+    e16DataOut(e) := fdiv.io.resp.bits.data
+    e16FlagOut(e) := fdiv.io.resp.bits.fflags.bits.flags
+  }
+
+  // output
+  io.req.ready     := (state === s_idle)
+  io.resp.valid    := fdivValid.andR && !this.do_kill
+  io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
+                             Seq(0.U, e16DataOut.asUInt, e32DataOut.asUInt, e64DataOut.asUInt))
+  io.resp.bits.fflags.valid := io.resp.valid
+  io.resp.bits.fflags.bits.flags := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
+                                          Seq(0.U, 
+                                              e16FlagOut.reduce(_ | _),
+                                              e32FlagOut.reduce(_ | _),
+                                              e64FlagOut.reduce(_ | _)))
 }

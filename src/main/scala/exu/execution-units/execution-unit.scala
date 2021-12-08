@@ -792,12 +792,33 @@ class VecExeUnit(
 
 
   // FDiv/FSqrt Unit -----------------------
+  /*
   var fdivsqrt: FDivSqrtUnit = null
   val fdiv_resp_fflags = Wire(new ValidIO(new FFlagsResp()))
   fdiv_resp_fflags := DontCare
   fdiv_resp_fflags.valid := false.B
   if (hasFdiv) {
     fdivsqrt = Module(new FDivSqrtUnit(vector = true))
+    fdivsqrt.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_FDV)
+    fdivsqrt.io.fcsr_rm   := io.fcsr_rm
+
+    // share write port with the pipelined units
+    fdivsqrt.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready  // TODO PERF will get blocked by fpiu.
+
+    fdiv_busy := !fdivsqrt.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_FDV))
+
+    fdiv_resp_fflags := fdivsqrt.io.resp.bits.fflags
+
+    vec_fu_units += fdivsqrt
+    //vresp_fu_units += fdivsqrt
+  }*/
+
+  var fdivsqrt: VecFDivSqrtUnit = null
+  val fdiv_resp_fflags = Wire(new ValidIO(new FFlagsResp()))
+  fdiv_resp_fflags := DontCare
+  fdiv_resp_fflags.valid := false.B
+  if (hasFdiv) {
+    fdivsqrt = Module(new VecFDivSqrtUnit(dataWidth = vLen))
     fdivsqrt.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_FDV)
     fdivsqrt.io.fcsr_rm   := io.fcsr_rm
 

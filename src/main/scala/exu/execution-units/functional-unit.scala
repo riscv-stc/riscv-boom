@@ -770,12 +770,13 @@ class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
  *
  * @param dataWidth width of the data to be passed into the functional unit
  */
-abstract class IterativeFunctionalUnit(dataWidth: Int)(implicit p: Parameters)
+abstract class IterativeFunctionalUnit(dataWidth: Int, needsFcsr: Boolean = false)(implicit p: Parameters)
   extends FunctionalUnit(
     isPipelined = false,
     numStages = 1,
     numBypassStages = 0,
-    dataWidth = dataWidth)
+    dataWidth = dataWidth,
+    needsFcsr = needsFcsr)
 {
   val r_uop = Reg(new MicroOp())
 

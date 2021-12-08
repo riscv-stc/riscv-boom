@@ -484,13 +484,19 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
     req <> fp_ctrl
     val rs1_edata, rs2_edata, rs3_edata = WireInit(0.U(65.W))
     if (minT == Some(tile.FType.D)) {
-      rs1_edata := recode(rs1_data(esel*64+63, esel*64), vs1_fmt)
-      rs2_edata := recode(rs2_data(esel*64+63, esel*64), vs2_fmt)
-      rs3_edata := recode(rs3_data(esel*64+63, esel*64), vd_fmt)
+      rs1_edata := Mux(vs1_sew === 3.U, recode(rs1_data(esel*64+63, esel*64), vs1_fmt),
+                                        recode(rs1_data(esel*32+31, esel*32), vs1_fmt))
+      rs2_edata := Mux(vs2_sew === 3.U, recode(rs2_data(esel*64+63, esel*64), vs2_fmt),
+                                        recode(rs2_data(esel*32+31, esel*32), vs2_fmt))
+      rs3_edata := Mux(vd_sew  === 3.U, recode(rs3_data(esel*64+63, esel*64), vd_fmt),
+                                        recode(rs3_data(esel*32+31, esel*32), vd_fmt))
     } else if (minT == Some(tile.FType.S)) {
-      rs1_edata := recode(rs1_data(esel*32+31, esel*32), vs1_fmt)
-      rs2_edata := recode(rs2_data(esel*32+31, esel*32), vs2_fmt)
-      rs3_edata := recode(rs3_data(esel*32+31, esel*32), vd_fmt)
+      rs1_edata := Mux(vs1_sew === 2.U, recode(rs1_data(esel*32+31, esel*32), vs1_fmt),
+                                        recode(rs1_data(esel*16+15, esel*16), vs1_fmt))
+      rs2_edata := Mux(vs2_sew === 2.U, recode(rs2_data(esel*32+31, esel*32), vs2_fmt),
+                                        recode(rs2_data(esel*16+15, esel*16), vs2_fmt))
+      rs3_edata := Mux(vd_sew  === 2.U, recode(rs3_data(esel*32+31, esel*32), vd_fmt),
+                                        recode(rs3_data(esel*16+15, esel*16), vd_fmt))
     } else if (minT == Some(tile.FType.H)) {
       rs1_edata := recode(rs1_data(esel*16+15, esel*16), vs1_fmt)
       rs2_edata := recode(rs2_data(esel*16+15, esel*16), vs2_fmt)
@@ -519,8 +525,8 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
         rs3_edata := recode(rs3_data(esel*16+15, esel*16), vd_fmt)
       }
     }
-    val unbox_rs1 = Mux(vd_widen^vs1_widen, unbox(rs1_edata, vs1_tag, None), unbox(rs1_edata, tag, minT))
-    val unbox_rs2 = Mux(vd_widen^vs2_widen, unbox(rs2_edata, vs2_tag, None), unbox(rs2_edata, tag, minT))
+    val unbox_rs1 = Mux(vd_widen^vs1_widen, Mux((vs1_tag === H) && fp_ctrl.fma, unboxh(rs1_edata, vs1_tag, None), unbox(rs1_edata, vs1_tag, None)), unbox(rs1_edata, tag, minT))
+    val unbox_rs2 = Mux(vd_widen^vs2_widen, Mux((vs2_tag === H) && fp_ctrl.fma, unboxh(rs2_edata, vs2_tag, None), unbox(rs2_edata, vs2_tag, None)), unbox(rs2_edata, tag, minT))
     val unbox_rs3 = unbox(rs3_edata, tag, minT)
     req.rm := Mux(io_req.uop.uopc.isOneOf(uopVFCLASS, uopVFMAX, uopVMFLT, uopVMFGT), 1.U,
               Mux(io_req.uop.uopc.isOneOf(uopVFMIN, uopVMFLE, uopVMFGE), 0.U,
@@ -577,14 +583,14 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
 
   val dfma = (0 until vLen/64).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.D)))
   for (i <- 0 until vLen/64) {
-    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && ((io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl) && ((io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart)
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl && (io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart
     dfma(i).io.in.bits := fuInput(Some(tile.FType.D), i)
     dfma(i).io.in.valid := active && io.req.valid && reqfue.dfma
   }
 
   val sfma = (0 until vLen/32).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.S)))
   for (i <- 0 until vLen/32) {
-    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && ((io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl) && ((io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart)
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl && (io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart
     sfma(i).io.in.bits := fuInput(Some(tile.FType.S), i)
     sfma(i).io.in.valid := active && io.req.valid && reqfue.sfma
   }
@@ -602,7 +608,7 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
   val fpmu = (0 until vLen/16).map(i => Module(new tile.FPToFP(fpu_latency)))
   val fpmu_dtype = Pipe(io.req.valid && fp_ctrl.fastpipe, fp_ctrl.typeTagOut, fpu_latency).bits
   for (i <- 0 until vLen/16) {
-    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && ((io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl)  && ((io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart)
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl && (io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart
 
     hfma(i).io.in.bits  := fuInput(Some(tile.FType.H), i)
     hfma(i).io.in.valid := active && io.req.valid && reqfue.hfma
