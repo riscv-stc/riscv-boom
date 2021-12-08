@@ -103,6 +103,39 @@ class UOPCodeFPUDecoder(vector: Boolean = false)(implicit p: Parameters) extends
     BitPat(uopFNMSUB_D) -> List(X,X,Y,Y,Y, N,N,D,D,N,N,N, Y,N,N,Y)
     )
 
+  val h_table: Array[(BitPat, List[BitPat])] =
+    Array(
+    BitPat(uopFCLASS_H) -> List(X,X,Y,N,N, N,X,H,H,N,Y,N, N,N,N,N),
+    BitPat(uopFMV_H_X)  -> List(X,X,N,N,N, X,X,H,D,Y,N,N, N,N,N,N),
+    BitPat(uopFMV_X_H)  -> List(X,X,Y,N,N, N,X,D,H,N,Y,N, N,N,N,N),
+
+    BitPat(uopFCVT_H_S) -> List(X,X,Y,N,N, N,X,S,H,N,N,Y, N,N,N,Y),
+    BitPat(uopFCVT_H_D) -> List(X,X,Y,N,N, N,X,D,H,N,N,Y, N,N,N,Y),
+    BitPat(uopFCVT_S_H) -> List(X,X,Y,N,N, N,X,H,S,N,N,Y, N,N,N,Y),
+    BitPat(uopFCVT_D_H) -> List(X,X,Y,N,N, N,X,H,D,N,N,Y, N,N,N,Y),
+
+    BitPat(uopFCVT_H_W) -> List(X,X,N,N,N, X,X,S,H,Y,N,N, N,N,N,Y),
+    BitPat(uopFCVT_H_L) -> List(X,X,N,N,N, X,X,D,H,Y,N,N, N,N,N,Y),
+
+    BitPat(uopFCVT_W_H) -> List(X,X,Y,N,N, N,X,H,S,N,Y,N, N,N,N,Y),
+    BitPat(uopFCVT_L_H) -> List(X,X,Y,N,N, N,X,H,D,N,Y,N, N,N,N,Y),
+
+    BitPat(uopCMPR_H)   -> List(X,X,Y,Y,N, N,N,H,H,N,Y,N, N,N,N,Y),
+
+    BitPat(uopFSGNJ_H)  -> List(X,X,Y,Y,N, N,N,H,H,N,N,Y, N,N,N,N),
+
+    BitPat(uopFMINMAX_H)-> List(X,X,Y,Y,N, N,N,H,H,N,N,Y, N,N,N,Y),
+
+    BitPat(uopFADD_H)   -> List(X,X,Y,Y,N, N,Y,H,H,N,N,N, Y,N,N,Y),
+    BitPat(uopFSUB_H)   -> List(X,X,Y,Y,N, N,Y,H,H,N,N,N, Y,N,N,Y),
+    BitPat(uopFMUL_H)   -> List(X,X,Y,Y,N, N,N,H,H,N,N,N, Y,N,N,Y),
+
+    BitPat(uopFMADD_H)  -> List(X,X,Y,Y,Y, N,N,H,H,N,N,N, Y,N,N,Y),
+    BitPat(uopFMSUB_H)  -> List(X,X,Y,Y,Y, N,N,H,H,N,N,N, Y,N,N,Y),
+    BitPat(uopFNMADD_H) -> List(X,X,Y,Y,Y, N,N,H,H,N,N,N, Y,N,N,Y),
+    BitPat(uopFNMSUB_H) -> List(X,X,Y,Y,Y, N,N,H,H,N,N,N, Y,N,N,Y)
+    )
+
     //                                     swap12         fma
     //                                     | swap32       | div
     //                                     | | typeTagIn  | | sqrt
@@ -147,7 +180,7 @@ class UOPCodeFPUDecoder(vector: Boolean = false)(implicit p: Parameters) extends
 //      case 32 => f_table
 //      case 64 => f_table ++ d_table
 //   }
-  val insns = if (vector) v_table else f_table ++ d_table
+  val insns = if (vector) v_table else f_table ++ d_table ++ h_table
   val decoder = rocket.DecodeLogic(io.uopc, default, insns)
 
   val s = io.sigs
@@ -544,14 +577,14 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
 
   val dfma = (0 until vLen/64).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.D)))
   for (i <- 0 until vLen/64) {
-    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && ((io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl) && ((io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart)
     dfma(i).io.in.bits := fuInput(Some(tile.FType.D), i)
     dfma(i).io.in.valid := active && io.req.valid && reqfue.dfma
   }
 
   val sfma = (0 until vLen/32).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.S)))
   for (i <- 0 until vLen/32) {
-    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && ((io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl) && ((io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart)
     sfma(i).io.in.bits := fuInput(Some(tile.FType.S), i)
     sfma(i).io.in.valid := active && io.req.valid && reqfue.sfma
   }
@@ -562,11 +595,14 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
   val fpiu_result = Wire(Vec(vLen/16, new tile.FPResult))
   val fpiu_out = fpiu.map(m => Pipe(RegNext(m.io.in.valid && !fp_ctrl.fastpipe), m.io.out.bits, fpu_latency-1))
   val fpiu_invert = reqpipe.bits.uop.uopc === uopVMFNE
+  val fpiu_dtype = Pipe(io.req.valid && !fp_ctrl.fastpipe, fp_ctrl.typeTagOut, fpu_latency).bits
+  val pipe_fastpipe = Pipe(io.req.valid, fp_ctrl.fastpipe, fpu_latency).bits
+  val fpiu_out_valid = fpiu.map(m => m.io.out.valid).reduce(_ | _) && !pipe_fastpipe
 
   val fpmu = (0 until vLen/16).map(i => Module(new tile.FPToFP(fpu_latency)))
   val fpmu_dtype = Pipe(io.req.valid && fp_ctrl.fastpipe, fp_ctrl.typeTagOut, fpu_latency).bits
   for (i <- 0 until vLen/16) {
-    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && ((io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl)  && ((io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart)
 
     hfma(i).io.in.bits  := fuInput(Some(tile.FType.H), i)
     hfma(i).io.in.valid := active && io.req.valid && reqfue.hfma
@@ -591,9 +627,12 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
       Mux(fuepipe.dfma, Cat(dfma.zipWithIndex.map{case(m,i) => Mux(m.io.out.valid, ieee(box(m.io.out.bits.data, D))(63,0), reqpipe.bits.rs3_data(i*64+63,i*64))}.reverse),
       Mux(fuepipe.sfma, Cat(sfma.zipWithIndex.map{case(m,i) => Mux(m.io.out.valid, ieee(box(m.io.out.bits.data, S))(31,0), reqpipe.bits.rs3_data(i*32+31,i*32))}.reverse),
       Mux(fuepipe.hfma, Cat(hfma.zipWithIndex.map{case(m,i) => Mux(m.io.out.valid, ieee(box(m.io.out.bits.data, H))(15,0), reqpipe.bits.rs3_data(i*16+15,i*16))}.reverse),
+      Mux(fuepipe.fpiu && (fpiu_dtype === D) && fpiu_out_valid, Cat(fpiu_result.slice(0, vLen/64).zipWithIndex.map{case(r,i) => Mux(fpiu(i).io.out.valid, r.data(63,0), reqpipe.bits.rs3_data(i*64+63,i*64))}.reverse),
+      Mux(fuepipe.fpiu && (fpiu_dtype === S) && fpiu_out_valid, Cat(fpiu_result.slice(0, vLen/32).zipWithIndex.map{case(r,i) => Mux(fpiu(i).io.out.valid, r.data(31,0), reqpipe.bits.rs3_data(i*32+31,i*32))}.reverse),
+      Mux(fuepipe.fpiu && (fpiu_dtype === H) && fpiu_out_valid, Cat(fpiu_result.slice(0, vLen/16).zipWithIndex.map{case(r,i) => Mux(fpiu(i).io.out.valid, r.data(15,0), reqpipe.bits.rs3_data(i*16+15,i*16))}.reverse),
       Mux(fuepipe.fpmu && fpmu_dtype === D, Cat(fpmu.slice(0, vLen/64).zipWithIndex.map{case(m,i) => Mux(m.io.out.valid, ieee(box(m.io.out.bits.data, D))(63,0), reqpipe.bits.rs3_data(i*64+63,i*64))}.reverse),
       Mux(fuepipe.fpmu && fpmu_dtype === S, Cat(fpmu.slice(0, vLen/32).zipWithIndex.map{case(m,i) => Mux(m.io.out.valid, ieee(box(m.io.out.bits.data, S))(31,0), reqpipe.bits.rs3_data(i*32+31,i*32))}.reverse),
-                                            Cat(fpmu.zipWithIndex.map{                  case(m,i) => Mux(m.io.out.valid, ieee(box(m.io.out.bits.data, H))(15,0), reqpipe.bits.rs3_data(i*16+15,i*16))}.reverse))))))
+                                            Cat(fpmu.zipWithIndex.map{                  case(m,i) => Mux(m.io.out.valid, ieee(box(m.io.out.bits.data, H))(15,0), reqpipe.bits.rs3_data(i*16+15,i*16))}.reverse)))))))))
 
   val fpu_out_exc =
       Mux(fuepipe.dfma, dfma.map(m => Mux(m.io.out.valid, m.io.out.bits.exc, 0.U)).reduce(_ | _),
@@ -602,10 +641,8 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
       Mux(fuepipe.fpiu, (fpiu_out zip fpiu_result).map{case(o,r)=>Mux(o.valid, r.exc, 0.U)}.reduce(_ | _),
                         fpmu.map(m => Mux(m.io.out.valid, m.io.out.bits.exc, 0.U)).reduce(_ | _)))))
 
-  io.resp.bits.data := Mux(fuepipe.fpiu, Mux(fpmu_dtype === D, Cat(fpiu_result.slice(0, vLen/64).zipWithIndex.map{case(r,i) => Mux(fpiu(i).io.out.valid, r.data(63,0), reqpipe.bits.rs3_data(i*64+63,i*64))}.reverse),
-                                         Mux(fpmu_dtype === S, Cat(fpiu_result.slice(0, vLen/32).zipWithIndex.map{case(r,i) => Mux(fpiu(i).io.out.valid, r.data(31,0), reqpipe.bits.rs3_data(i*32+31,i*32))}.reverse),
-                                                               Cat(fpiu_result.slice(0, vLen/16).zipWithIndex.map{case(r,i) => Mux(fpiu(i).io.out.valid, r.data(15,0), reqpipe.bits.rs3_data(i*16+15,i*16))}.reverse))),
-                                         fpu_out_data)
+  // FIXME: handle masked ops
+  io.resp.bits.data              := fpu_out_data
   io.resp.bits.fflags.valid      := io.resp.valid
   io.resp.bits.fflags.bits.flags := fpu_out_exc
 }

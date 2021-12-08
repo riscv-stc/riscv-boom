@@ -1307,21 +1307,21 @@ class VecFR7Unit(latency: Int, dataWidth: Int)(implicit p: Parameters)
 
   val dfr7 = (0 until vLen / 64).map(i => Module(new tile.FR7(latency, supportD = true, supportS = false)))
   for (i <- 0 until vLen / 64) {
-    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && ((io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl) && ((io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart)
     dfr7(i).io.in.bits  := fr7Input(Some(tile.FType.D), i)
     dfr7(i).io.in.valid := active && io.req.valid && reqfre.dfr7
     dfr7(i).io.active   := active
   }
   val sfr7 = (0 until vLen / 32).map(i => Module(new tile.FR7(latency, supportD = false, supportS = true)))
   for (i <- 0 until vLen / 32) {
-    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && ((io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl) && ((io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart)
     sfr7(i).io.in.bits  := fr7Input(Some(tile.FType.S), i)
     sfr7(i).io.in.valid := active && io.req.valid && reqfre.sfr7
     sfr7(i).io.active   := active
   }
   val hfr7 = (0 until vLen / 16).map(i => Module(new tile.FR7(latency, supportD = false, supportS = false)))
   for (i <- 0 until vLen / 16) {
-    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl
+    val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && ((io.req.bits.uop.v_eidx + i.U) < io.req.bits.uop.vconfig.vl) && ((io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart)
     hfr7(i).io.in.bits  := fr7Input(Some(tile.FType.H), i)
     hfr7(i).io.in.valid := active && io.req.valid && reqfre.hfr7
     hfr7(i).io.active   := active

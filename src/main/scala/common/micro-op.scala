@@ -254,7 +254,7 @@ class DebugStageEvents extends Bundle()
 // Micro-op opcodes
 object MicroOpcodes extends Enumeration {
   type MicroOpcodes = Value
-  val UOPC_SZ       = 8
+  val UOPC_SZ       = 9
 
   val uopNOP_enum   = Value
   val uopNOP        = uopNOP_enum.id.U(UOPC_SZ.W)
@@ -479,6 +479,63 @@ object MicroOpcodes extends Enumeration {
   val uopFSQRT_S        = uopFSQRT_S_enum.id.U(UOPC_SZ.W)
   val uopFSQRT_D_enum   = Value
   val uopFSQRT_D        = uopFSQRT_D_enum.id.U(UOPC_SZ.W)
+
+  //zfh-extension
+  val uopFMV_H_X_enum   = Value
+  val uopFMV_H_X        = uopFMV_H_X_enum.id.U(UOPC_SZ.W)
+  val uopFMV_X_H_enum   = Value
+  val uopFMV_X_H        = uopFMV_X_H_enum.id.U(UOPC_SZ.W)
+
+  val uopFSGNJ_H_enum   = Value
+  val uopFSGNJ_H        = uopFSGNJ_H_enum.id.U(UOPC_SZ.W)
+
+  val uopFCVT_H_D_enum  = Value
+  val uopFCVT_H_D       = uopFCVT_H_D_enum.id.U(UOPC_SZ.W)
+  val uopFCVT_H_S_enum  = Value
+  val uopFCVT_H_S       = uopFCVT_H_S_enum.id.U(UOPC_SZ.W)
+  val uopFCVT_D_H_enum  = Value
+  val uopFCVT_D_H       = uopFCVT_D_H_enum.id.U(UOPC_SZ.W)
+  val uopFCVT_S_H_enum  = Value
+  val uopFCVT_S_H       = uopFCVT_S_H_enum.id.U(UOPC_SZ.W)
+  val uopFCVT_H_W_enum  = Value
+  val uopFCVT_H_W       = uopFCVT_H_W_enum.id.U(UOPC_SZ.W)
+  val uopFCVT_W_H_enum  = Value
+  val uopFCVT_W_H      = uopFCVT_W_H_enum.id.U(UOPC_SZ.W)
+  val uopFCVT_H_L_enum  = Value
+  val uopFCVT_H_L       = uopFCVT_H_L_enum.id.U(UOPC_SZ.W)
+  val uopFCVT_L_H_enum  = Value
+  val uopFCVT_L_H      = uopFCVT_L_H_enum.id.U(UOPC_SZ.W)
+
+
+  val uopCMPR_H_enum    = Value
+  val uopCMPR_H         = uopCMPR_H_enum.id.U(UOPC_SZ.W)
+
+  val uopFCLASS_H_enum  = Value
+  val uopFCLASS_H       = uopFCLASS_H_enum.id.U(UOPC_SZ.W)
+
+  val uopFMINMAX_H_enum = Value
+  val uopFMINMAX_H      = uopFMINMAX_H_enum.id.U(UOPC_SZ.W)
+
+  val uopFADD_H_enum    = Value
+  val uopFADD_H         = uopFADD_H_enum.id.U(UOPC_SZ.W)
+  val uopFSUB_H_enum    = Value
+  val uopFSUB_H         = uopFSUB_H_enum.id.U(UOPC_SZ.W)
+  val uopFMUL_H_enum    = Value
+  val uopFMUL_H         = uopFMUL_H_enum.id.U(UOPC_SZ.W)
+
+  val uopFMADD_H_enum   = Value
+  val uopFMADD_H        = uopFMADD_H_enum.id.U(UOPC_SZ.W)
+  val uopFMSUB_H_enum   = Value
+  val uopFMSUB_H        = uopFMSUB_H_enum.id.U(UOPC_SZ.W)
+  val uopFNMADD_H_enum  = Value
+  val uopFNMADD_H       = uopFNMADD_H_enum.id.U(UOPC_SZ.W)
+  val uopFNMSUB_H_enum  = Value
+  val uopFNMSUB_H       = uopFNMSUB_H_enum.id.U(UOPC_SZ.W)
+
+  val uopFDIV_H_enum    = Value
+  val uopFDIV_H         = uopFDIV_H_enum.id.U(UOPC_SZ.W)
+  val uopFSQRT_H_enum   = Value
+  val uopFSQRT_H        = uopFSQRT_H_enum.id.U(UOPC_SZ.W)
 
   val uopWFI_enum       = Value
   val uopWFI            = uopWFI_enum.id.U(UOPC_SZ.W) // pass uop down the CSR pipeline
