@@ -507,6 +507,11 @@ class IssueSlot(
 
   when (io.in_uop.valid) {
     slot_uop := io.in_uop.bits
+    if (usingVector && !vector && iqType == IQT_MEM.litValue) {
+      when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === io.in_uop.bits.rob_idx).reduce(_||_)) {
+        slot_uop.v_unmasked := true.B
+      }
+    }
     assert (is_invalid || io.clear || io.kill, "trying to overwrite a valid issue slot.")
   }
 
