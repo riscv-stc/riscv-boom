@@ -1031,6 +1031,7 @@ class VecExeUT(timeout: Int = 10000)(implicit p: Parameters)
   val case2_start = 200
   val case3_start = 300
   val case4_start = 400
+  val case5_start = 500
   when (cycle >= case1_start.U && cycle < (case1_start+8).U) {
     vsew                          := 0.U
     vlmul                         := 3.U
@@ -1049,7 +1050,7 @@ class VecExeUT(timeout: Int = 10000)(implicit p: Parameters)
     dut_req.bits.uop.vs1_emul     := 0.U
     dut_req.bits.uop.vs2_emul     := 3.U
     dut_req.bits.uop.vd_eew       := 1.U
-    dut_req.bits.uop.vs1_eew      := 0.U
+    dut_req.bits.uop.vs1_eew      := 1.U
     dut_req.bits.uop.vs2_eew      := 0.U
     dut_req.bits.uop.v_unmasked   := true.B
     dut_req.bits.uop.vconfig.vtype:= vtype
@@ -1095,7 +1096,7 @@ class VecExeUT(timeout: Int = 10000)(implicit p: Parameters)
     dut_req.bits.uop.vs1_emul     := 0.U
     dut_req.bits.uop.vs2_emul     := 3.U
     dut_req.bits.uop.vd_eew       := 1.U
-    dut_req.bits.uop.vs1_eew      := 0.U
+    dut_req.bits.uop.vs1_eew      := 1.U
     dut_req.bits.uop.vs2_eew      := 0.U
     dut_req.bits.uop.v_unmasked   := false.B
     dut_req.bits.uop.vconfig.vtype:= vtype
@@ -1141,7 +1142,7 @@ class VecExeUT(timeout: Int = 10000)(implicit p: Parameters)
     dut_req.bits.uop.vs1_emul     := 0.U
     dut_req.bits.uop.vs2_emul     := 3.U
     dut_req.bits.uop.vd_eew       := 1.U
-    dut_req.bits.uop.vs1_eew      := 0.U
+    dut_req.bits.uop.vs1_eew      := 1.U
     dut_req.bits.uop.vs2_eew      := 0.U
     dut_req.bits.uop.v_unmasked   := true.B
     dut_req.bits.uop.vconfig.vtype:= vtype
@@ -1214,6 +1215,53 @@ class VecExeUT(timeout: Int = 10000)(implicit p: Parameters)
     } .elsewhen (cycle === (case4_start+6).U) {
       dut_req.bits.uop.v_eidx := vlen_ecnt*6.U
     } .elsewhen (cycle === (case4_start+7).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*7.U
+    }
+  } .elsewhen (cycle >= (case5_start).U && cycle < (case5_start+8).U) {
+    vsew                          := 1.U
+    vlmul                         := 3.U
+    vtype.vsew                    := vsew
+    vtype.vlmul_sign              := false.B
+    vtype.vlmul_mag               := 2.U
+    dut_req.bits.uop.uopc         := uopVFADD
+    dut_req.bits.uop.fu_code      := FU_FPU | FU_VRP
+    dut_req.bits.uop.rob_idx      := 0x55.U
+    dut_req.bits.uop.ldst_val     := true.B
+    dut_req.bits.uop.dst_rtype    := RT_VW
+    dut_req.bits.uop.lrs1_rtype   := RT_VRW
+    dut_req.bits.uop.lrs2_rtype   := RT_VEC
+    dut_req.bits.uop.is_rvv       := true.B
+    dut_req.bits.uop.fp_val       := true.B
+    dut_req.bits.uop.vd_emul      := 0.U
+    dut_req.bits.uop.vs1_emul     := 0.U
+    dut_req.bits.uop.vs2_emul     := 3.U
+    dut_req.bits.uop.vd_eew       := 2.U
+    dut_req.bits.uop.vs1_eew      := 2.U
+    dut_req.bits.uop.vs2_eew      := 1.U
+    dut_req.bits.uop.v_unmasked   := true.B
+    dut_req.bits.uop.vconfig.vtype:= vtype
+    dut_req.bits.uop.vconfig.vl   := vtype.vlMax - 1.U
+    dut_req.bits.uop.v_split_ecnt := vlen_ecnt
+    dut_req.valid := true.B
+    dut_req.bits.rs1_data         := 0x3f800000.U
+    dut_req.bits.rs2_data         := Cat((0 until 64).map(i => 0x3c00.U(16.W)).reverse)
+    dut_req.bits.rs3_data         := 0.U
+    dut_req.bits.rvm_data         := Cat((0 until 16).map(i => 0x55.U(8.W)).reverse)
+    when (cycle === (case5_start+0).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*0.U
+    } .elsewhen (cycle === (case5_start+1).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*1.U
+    } .elsewhen (cycle === (case5_start+2).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*2.U
+    } .elsewhen (cycle === (case5_start+3).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*3.U
+    } .elsewhen (cycle === (case5_start+4).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*4.U
+    } .elsewhen (cycle === (case5_start+5).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*5.U
+    } .elsewhen (cycle === (case5_start+6).U) {
+      dut_req.bits.uop.v_eidx := vlen_ecnt*6.U
+    } .elsewhen (cycle === (case5_start+7).U) {
       dut_req.bits.uop.v_eidx := vlen_ecnt*7.U
     }
   }

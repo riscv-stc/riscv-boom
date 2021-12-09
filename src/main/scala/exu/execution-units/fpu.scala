@@ -474,60 +474,53 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
     fp_ctrl.typeTagOut:= vd_fmt
   }
 
-  // FIXME: S->H widening operation must be fixed
+  // FIXME: H->S widening operation must be fixed
   def fuInput(minT: Option[tile.FType], esel: Int): tile.FPInput = {
-    val req     = Wire(new tile.FPInput)
+    val req     = Wire(new tile.FPInput())
     val tagIn   = fp_ctrl.typeTagIn
     val tag     = fp_ctrl.typeTagOut
     val vs1_tag = Mux((vd_widen ^ vs1_widen), tagIn, tag)
     val vs2_tag = Mux((vd_widen ^ vs2_widen), tagIn, tag)
     req <> fp_ctrl
-    val rs1_edata, rs2_edata, rs3_edata = WireInit(0.U(65.W))
+    val outT = minT.getOrElse(tile.FType.D)
+    val rs1_edata, rs2_edata, rs3_edata = WireInit(0.U(outT.recodedWidth.W))
+    val rec_rs1, rec_rs2, rec_rs3 = WireInit(0.U(outT.recodedWidth.W))
     if (minT == Some(tile.FType.D)) {
-      rs1_edata := Mux(vs1_sew === 3.U, recode(rs1_data(esel*64+63, esel*64), vs1_fmt),
-                                        recode(rs1_data(esel*32+31, esel*32), vs1_fmt))
-      rs2_edata := Mux(vs2_sew === 3.U, recode(rs2_data(esel*64+63, esel*64), vs2_fmt),
-                                        recode(rs2_data(esel*32+31, esel*32), vs2_fmt))
-      rs3_edata := Mux(vd_sew  === 3.U, recode(rs3_data(esel*64+63, esel*64), vd_fmt),
-                                        recode(rs3_data(esel*32+31, esel*32), vd_fmt))
+      rs1_edata := Mux(vs1_sew === 3.U, rs1_data(esel*64+63, esel*64), rs1_data(esel*32+31, esel*32))
+      rs2_edata := Mux(vs2_sew === 3.U, rs2_data(esel*64+63, esel*64), rs2_data(esel*32+31, esel*32))
+      rs3_edata := rs3_data(esel*64+63, esel*64)
     } else if (minT == Some(tile.FType.S)) {
-      rs1_edata := Mux(vs1_sew === 2.U, recode(rs1_data(esel*32+31, esel*32), vs1_fmt),
-                                        recode(rs1_data(esel*16+15, esel*16), vs1_fmt))
-      rs2_edata := Mux(vs2_sew === 2.U, recode(rs2_data(esel*32+31, esel*32), vs2_fmt),
-                                        recode(rs2_data(esel*16+15, esel*16), vs2_fmt))
-      rs3_edata := Mux(vd_sew  === 2.U, recode(rs3_data(esel*32+31, esel*32), vd_fmt),
-                                        recode(rs3_data(esel*16+15, esel*16), vd_fmt))
+      rs1_edata := Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32), rs1_data(esel*16+15, esel*16))
+      rs2_edata := Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32), rs2_data(esel*16+15, esel*16))
+      rs3_edata := rs3_data(esel*32+31, esel*32)
     } else if (minT == Some(tile.FType.H)) {
-      rs1_edata := recode(rs1_data(esel*16+15, esel*16), vs1_fmt)
-      rs2_edata := recode(rs2_data(esel*16+15, esel*16), vs2_fmt)
-      rs3_edata := recode(rs3_data(esel*16+15, esel*16), vd_fmt)
+      rs1_edata := rs1_data(esel*16+15, esel*16)
+      rs2_edata := rs2_data(esel*16+15, esel*16)
+      rs3_edata := rs3_data(esel*16+15, esel*16)
     } else {
       if (esel < 16) {
-        rs1_edata := recode(Mux(vs1_sew === 3.U, rs1_data(esel*64+63, esel*64),
-                            Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32),
-                                                 rs1_data(esel*16+15, esel*16))), vs1_fmt)
-        rs2_edata := recode(Mux(vs2_sew === 3.U, rs2_data(esel*64+63, esel*64),
-                            Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32),
-                                                 rs2_data(esel*16+15, esel*16))), vs2_fmt)
-        rs3_edata := recode(Mux(vd_sew === 3.U,  rs3_data(esel*64+63, esel*64),
-                            Mux(vd_sew === 2.U,  rs3_data(esel*32+31, esel*32),
-                                                 rs3_data(esel*16+15, esel*16))), vd_fmt)
+        rs1_edata := Mux(vs1_sew === 3.U, rs1_data(esel*64+63, esel*64),
+                     Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32), rs1_data(esel*16+15, esel*16)))
+        rs2_edata := Mux(vs2_sew === 3.U, rs2_data(esel*64+63, esel*64),
+                     Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32), rs2_data(esel*16+15, esel*16)))
+        rs3_edata := Mux(vd_sew === 3.U,  rs3_data(esel*64+63, esel*64),
+                     Mux(vd_sew === 2.U,  rs3_data(esel*32+31, esel*32), rs3_data(esel*16+15, esel*16)))
       } else if (esel < 32) {
-        rs1_edata := recode(Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32),
-                                                 rs1_data(esel*16+15, esel*16)), vs1_fmt)
-        rs2_edata := recode(Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32),
-                                                 rs2_data(esel*16+15, esel*16)), vs2_fmt)
-        rs3_edata := recode(Mux(vd_sew === 2.U,  rs3_data(esel*32+31, esel*32),
-                                                 rs3_data(esel*16+15, esel*16)), vd_fmt)
+        rs1_edata := Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32), rs1_data(esel*16+15, esel*16))
+        rs2_edata := Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32), rs2_data(esel*16+15, esel*16))
+        rs3_edata := Mux(vd_sew === 2.U,  rs3_data(esel*32+31, esel*32), rs3_data(esel*16+15, esel*16))
       } else {
-        rs1_edata := recode(rs1_data(esel*16+15, esel*16), vs1_fmt)
-        rs2_edata := recode(rs2_data(esel*16+15, esel*16), vs2_fmt)
-        rs3_edata := recode(rs3_data(esel*16+15, esel*16), vd_fmt)
+        rs1_edata := rs1_data(esel*16+15, esel*16)
+        rs2_edata := rs2_data(esel*16+15, esel*16)
+        rs3_edata := rs3_data(esel*16+15, esel*16)
       }
     }
-    val unbox_rs1 = Mux(vd_widen^vs1_widen, Mux((vs1_tag === H) && fp_ctrl.fma, unboxh(rs1_edata, vs1_tag, None), unbox(rs1_edata, vs1_tag, None)), unbox(rs1_edata, tag, minT))
-    val unbox_rs2 = Mux(vd_widen^vs2_widen, Mux((vs2_tag === H) && fp_ctrl.fma, unboxh(rs2_edata, vs2_tag, None), unbox(rs2_edata, vs2_tag, None)), unbox(rs2_edata, tag, minT))
-    val unbox_rs3 = unbox(rs3_edata, tag, minT)
+    rec_rs1 := recode(rs1_edata, vs1_fmt, minT)
+    rec_rs2 := recode(rs2_edata, vs2_fmt, minT)
+    rec_rs3 := recode(rs3_edata, vd_fmt, minT)
+    val unbox_rs1 = unbox(rec_rs1, vs1_tag, minT)
+    val unbox_rs2 = unbox(rec_rs2, vs2_tag, minT)
+    val unbox_rs3 = unbox(rec_rs3, tag, minT)
     req.rm := Mux(io_req.uop.uopc.isOneOf(uopVFCLASS, uopVFMAX, uopVMFLT, uopVMFGT), 1.U,
               Mux(io_req.uop.uopc.isOneOf(uopVFMIN, uopVMFLE, uopVMFGE), 0.U,
               Mux(io_req.uop.uopc.isOneOf(uopVMFEQ, uopVMFNE), 2.U,
@@ -540,7 +533,7 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
     req.in3 := unbox_rs3
     // e.g. vfcvt.x.f.v   vd, vs2, vm
     // e.g. vfsgnj.vv vd, vs2, vs1, vm
-    when (fp_ctrl.swap12) { 
+    when (fp_ctrl.swap12) {
       req.in1 := unbox_rs2
       req.in2 := unbox_rs1
     }
