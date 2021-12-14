@@ -188,7 +188,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   def allocate_brtag   = (is_br && !is_sfb) || is_jalr
 
   // Does this register write-back
-  def rf_wen           = dst_rtype =/= RT_X
+  def rf_wen           = ldst_val && (dst_rtype =/= RT_X)
 
   // Is it possible for this uop to misspeculate, preventing the commit of subsequent uops?
   def unsafe           = uses_ldq || (uses_stq && !is_fence) || is_br || is_jalr

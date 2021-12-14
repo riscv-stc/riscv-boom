@@ -1474,6 +1474,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       def wbIsValid(rtype: UInt => Bool) =
         wbresp.valid && wbresp.bits.uop.rf_wen && wbresp.bits.uop.rt(RD, rtype)
       val wbReadsCSR = wbresp.bits.uop.ctrl.csr_cmd =/= freechips.rocketchip.rocket.CSR.N
+      val wbWritesCSR =freechips.rocketchip.rocket.CSR.maskCmd(wbresp.valid, wbresp.bits.uop.ctrl.csr_cmd)(2)
 
       iregfile.io.write_ports(w_cnt).valid     := wbIsValid(isInt)
       iregfile.io.write_ports(w_cnt).bits.addr := wbpdst
@@ -1487,7 +1488,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       assert (!wbIsValid(isFloat), "[fppipeline] An FP writeback is being attempted to the Int Regfile.")
 
       assert (!(wbresp.valid &&
-        !wbresp.bits.uop.rf_wen &&
+        !(wbresp.bits.uop.rf_wen || wbWritesCSR || wbresp.bits.uop.pdst === 0.U) &&
         wbresp.bits.uop.rt(RD, isInt)),
         "[fppipeline] An Int writeback is being attempted with rf_wen disabled.")
 

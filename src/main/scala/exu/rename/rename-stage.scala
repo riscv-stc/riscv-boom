@@ -469,7 +469,7 @@ class VecRenameBypass(
        matchGroup(uop.lrs2 + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
     }
     val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (o,a) =>
-      (Fill(8, (a && i.U < grpCount(uop.vd_emul, 1.U) && uop.rt(RD, isVector) &&
+      (Fill(8, ((a || uop.uses_stq) && i.U < grpCount(uop.vd_emul, 1.U) && uop.rt(RD, isVector) &&
                o.rt(RD, isVector) && o.ldst_val).asUInt) &
        matchGroup(uop.ldst + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
     }
