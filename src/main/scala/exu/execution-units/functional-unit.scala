@@ -935,6 +935,7 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val macc = lhs * rhs +& acc
   val macc_msk = ~(0.U((dataWidth*2+3).W))
   val vd_eew = in.bits.uop.vd_eew
+  val vs2_eew = in.bits.uop.vs2_eew
   val unsigned = in.bits.uop.rt(RD, isUnsignedV)
   if (e64) {
     u_max := Cat(0.U(1.W), Mux1H(UIntToOH(vd_eew(1,0)), Seq(0xFF.U(dataWidth.W),
@@ -986,13 +987,15 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
     hi  := macc(16, 8)
   }
   val sramt = Mux(!cs.doRO, 0.U,
-              Mux1H(UIntToOH(cs.srType), Seq(0.U(6.W),
-                                         1.U(6.W),
-                                         ((8.U << vd_eew) - 1.U)(5,0),
-                                         Mux1H(UIntToOH(vd_eew(1,0)), Seq(in.bits.rs1_data(2,0),
-                                                                          in.bits.rs1_data(3,0),
-                                                                          in.bits.rs1_data(4,0),
-                                                                          in.bits.rs1_data(5,0))))))
+              Mux1H(UIntToOH(cs.srType),
+                Seq(0.U(6.W),
+                    1.U(6.W),
+                    ((8.U << vd_eew) - 1.U)(5,0),
+                    Mux1H(UIntToOH(Mux(cs.doClip, vs2_eew(1,0), vd_eew(1,0))),
+                      Seq(in.bits.rs1_data(2,0),
+                          in.bits.rs1_data(3,0),
+                          in.bits.rs1_data(4,0),
+                          in.bits.rs1_data(5,0))))))
   val srres = macc >> sramt
   val sroff = (macc.asUInt & ~(macc_msk << sramt))(dataWidth-1, 0)
   val sroff_msb = Mux(sramt === 0.U, 0.U, macc(sramt-1.U))
@@ -1051,8 +1054,8 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val table: List[(BitPat, List[BitPat])] = List(
     //                          cmdHi   negAcc accSigned   srType (0, 1, SEW-1, RS1)
     //                          |  lhsSigned|  |  lhsOne   |    doClip
-    //                          |  |  rhsSigned|  doRO  |    |
-    //                          |  |  |  doAcc | |  |  roSigned|
+    //                          |  |  rhsSigned|  doRO     |    |
+    //                          |  |  |  doAcc |  |  |  roSigned|
     //                          |  |  |  |  |  |  |  |  |  |    |
     BitPat(uopVMUL)     -> List(N, Y, Y, N, X, X, N, N, X, DC2, N)
    ,BitPat(uopVMULH)    -> List(Y, Y, Y, N, X, X, N, N, X, DC2, N)
