@@ -178,7 +178,7 @@ class RegisterRead(
       val rs3_sel = Mux(iss_uop.rt(RD, isMaskVD), VRegSel(iss_uop.v_eidx >> 3, 0.U, eLenSelSz),
                                                   VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
       rs1_addr := iss_uop.pvs1(rs1_sel).bits
-      rs2_addr := iss_uop.pvs2(rs2_sel).bits
+      rs2_addr := Mux(iss_uop.uopc === uopVIOTA, iss_uop.pvs2(0).bits, iss_uop.pvs2(rs2_sel).bits)
       rs3_addr := iss_uop.stale_pvd(rs3_sel).bits
       rvm_addr := iss_uop.pvm
     }
@@ -283,17 +283,20 @@ class RegisterRead(
                                    rrd_rs3_data(w) >> (rrd_uops(w).v_eidx << (rrd_uops(w).vd_eew +& 3.U))(vLenSz-1, 0)))
       }
       if (numReadPorts > 2) {
-        //exe_reg_rs2_data(w) := Mux(rrd_uops(w).rt(RS2, isNarrowV), rs2Align, rrd_rs2_data(w))
-        exe_reg_rs2_data(w) := rrd_rs2_data(w) >> (rrd_uops(w).v_eidx << (rrd_uops(w).vs2_eew +& 3.U))(vLenSz-1, 0)
+        val isViotaId = rrd_uops(w).uopc.isOneOf(uopVIOTA, uopVID)
+        exe_reg_rs2_data(w) := Mux(isViotaId, rrd_rs2_data(w) >> rrd_uops(w).v_eidx,
+                                              rrd_rs2_data(w) >> (rrd_uops(w).v_eidx << (rrd_uops(w).vs2_eew +& 3.U))(vLenSz-1, 0))
       }
       if (numReadPorts > 3) {
         val useScalar = rrd_uops(w).uses_scalar || rrd_uops(w).uses_v_simm5 || rrd_uops(w).uses_v_uimm5
+        val isVmask   = rrd_uops(w).uopc.isOneOf(uopVPOPC, uopVFIRST, uopVMSBF, uopVMSIF, uopVMSOF)
         exe_reg_rs1_data(w) := Mux(useScalar, Mux1H(UIntToOH(rrd_uops(w).vs1_eew),
                                                     Seq(Fill(8*numELENinVLEN, rrd_uops(w).v_scalar_data(7,  0)),
                                                         Fill(4*numELENinVLEN, rrd_uops(w).v_scalar_data(15, 0)),
                                                         Fill(2*numELENinVLEN, rrd_uops(w).v_scalar_data(31, 0)),
                                                         Fill(numELENinVLEN,   rrd_uops(w).v_scalar_data(63, 0)))),
-                                              rrd_rs1_data(w) >> (rrd_uops(w).v_eidx << (rrd_uops(w).vs1_eew +& 3.U))(vLenSz-1, 0))
+                               Mux(isVmask,   rrd_rvm_data(w),
+                                              rrd_rs1_data(w) >> (rrd_uops(w).v_eidx << (rrd_uops(w).vs1_eew +& 3.U))(vLenSz-1, 0)))
       }
     } else {
       if (numReadPorts > 0) exe_reg_rs1_data(w) := bypassed_rs1_data(w)

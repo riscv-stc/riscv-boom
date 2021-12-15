@@ -325,11 +325,17 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val csr_vsew  = io.csr_vconfig.vtype.vsew
     val csr_vlmax = io.csr_vconfig.vtype.vlMax
     val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
-    val isVMVR: Bool = cs.uopc.isOneOf(uopVMVR)
-    val is_v_ls_index = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
-    val is_v_mask_ld = cs.uopc.isOneOf(uopVLM)
-    val is_v_mask_st = cs.uopc.isOneOf(uopVSMA)
-    val is_v_reg_ls = cs.uopc.isOneOf(uopVLR, uopVSR)
+    val isVMVR: Bool   = cs.uopc.isOneOf(uopVMVR)
+    val is_v_ls_index  = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+    val is_v_mask_ld   = cs.uopc.isOneOf(uopVLM)
+    val is_v_mask_st   = cs.uopc.isOneOf(uopVSMA)
+    val is_v_reg_ls    = cs.uopc.isOneOf(uopVLR, uopVSR)
+    val is_viota_m     = cs.uopc.isOneOf(uopVIOTA)
+    val vmlogic_insn   = cs.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
+    val is_vmask_cnt_m = cs.uopc.isOneOf(uopVPOPC, uopVFIRST)
+    val is_vmask_set_m = cs.uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
+    val is_v_mask_insn = vmlogic_insn || is_vmask_cnt_m || is_vmask_set_m
+    
     val vseg_nf = inst(NF_MSB, NF_LSB)
     val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) && !is_v_reg_ls
 
@@ -345,53 +351,44 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(uop.uopc === uopVEXT4 , 2.U,
                      Mux(uop.rt(RS2, isNarrowV), 1.U, 0.U))) // uopVEXT2 is included
     val vd_sew     = Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew,
+                     Mux(is_v_mask_insn, 3.U,
                      Mux(uop.rt(RD,  isWidenV ), csr_vsew + vd_wfactor,
-                     Mux(uop.rt(RD,  isNarrowV), csr_vsew - vd_nfactor, csr_vsew)))
+                     Mux(uop.rt(RD,  isNarrowV), csr_vsew - vd_nfactor, csr_vsew))))
     val vs1_sew    = Mux(cs.uopc === uopVRGATHEREI16, 1.U,
-                     Mux(uop.rt(RS1, isWidenV ), csr_vsew + vd_wfactor, csr_vsew))
+                     Mux(is_v_mask_insn, 3.U,
+                     Mux(uop.rt(RS1, isWidenV ), csr_vsew + vd_wfactor, csr_vsew)))
     val vs2_sew    = Mux(is_v_ls_index, Cat(0.U(1.W), cs.v_ls_ew),
+                     Mux(is_v_mask_insn, 3.U,
                      Mux(uop.rt(RS2, isWidenV ), csr_vsew + vs2_wfactor,
-                     Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew)))
-    val vlmul_value =Cat(vlmul_sign, vlmul_mag)
+                     Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew))))
+    val vlmul_value = Mux(is_v_mask_insn, 0.U, Cat(vlmul_sign, vlmul_mag))
     val vd_emul    = Mux(isVMVR, instRS1(2,0),
-                     Mux(is_v_mask_ld || uop.rt(RD, isReduceV) || uop.rt(RD, isMaskVD), 0.U,
+                     Mux(is_v_mask_ld || vmlogic_insn || uop.rt(RD, isReduceV) || uop.rt(RD, isMaskVD), 0.U,
                      Mux(uop.rt(RD, isWidenV), vlmul_value + vd_wfactor,
                      Mux(uop.rt(RD, isNarrowV), vlmul_value - vd_nfactor,
+                     Mux(is_v_reg_ls, Log2(vreg_nf + 1.U),
                      Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew - vsew + vlmul_value,
-                     Mux(cs.allow_vd_is_v0, 0.U, vlmul_value))))))
+                     Mux(cs.allow_vd_is_v0, 0.U, vlmul_value)))))))
     val vs1_emul   = Mux(cs.uopc === uopVRGATHEREI16, vlmul_value + 1.U - vsew,
                      Mux(uop.rt(RS1, isReduceV), 0.U,
                      Mux(uop.rt(RS1, isWidenV ), vlmul_value + 1.U, vlmul_value)))
     val vs2_emul   = Mux(uop.rt(RS2, isWidenV), vlmul_value + vs2_wfactor,
-                     Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor, vlmul_value))
+                     Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor, 
+                     Mux(is_viota_m, 0.U, vlmul_value)))
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
       //assert(vsew >= vd_nfactor  && vsew + vd_wfactor  <= 3.U, "Unsupported vd_sew")
       //assert(vsew >= vs2_nfactor && vsew + vs2_wfactor <= 3.U, "Unsupported vs2_sew")
     }
 
-    // vmasklogic
-    val vmlogic_insn = cs.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
-    val byteWidth = 3.U
-    val vsew64bit = 3.U
-    val vmlogic_split_ecnt = vLen.U >> (byteWidth +& vsew64bit)
-    // vsew => element num
-    val vmlogic_tolal_ecnt = vLen.U >> (byteWidth +& vsew64bit)
-
-    val is_vmask_cnt_m = cs.uopc.isOneOf(uopVPOPC, uopVFIRST)
-    val is_vmask_set_m = cs.uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
-    val is_v_mask_insn = vmlogic_insn || is_vmask_cnt_m || is_vmask_set_m
-
     val vLen_ecnt  = Mux(!is_v_ls && vs2_sew > vd_sew, vLen.U >> (vs2_sew+3.U), vLen.U >> (vd_sew+3.U))
-    val split_ecnt = Mux(is_v_mask_insn, vmlogic_split_ecnt, vLen_ecnt)
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     // for fractional lmul, we need visit at least one entire vreg
     // for undisturbing move before reduction, we need visit at most one vreg
     val total_ecnt = Mux(is_v_mask_ld, vLenb.U,
                      Mux(is_v_reg_ls, vLenb.U << Log2(vreg_nf + 1.U) >> cs.v_ls_ew,
                      Mux(cs.uses_stq, Mux(is_v_mask_st, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl),
-                     Mux(is_v_mask_insn, vmlogic_tolal_ecnt,
-                     Mux(vlmul_sign || csr_vlmax < vLen_ecnt, vLen_ecnt, csr_vlmax)))))
+                     Mux(is_v_mask_insn || vlmul_sign || csr_vlmax < vLen_ecnt, vLen_ecnt, csr_vlmax))))
     uop.is_rvv      := cs.is_rvv
     uop.v_ls_ew     := cs.v_ls_ew
     when (is_v_ls) {
@@ -431,19 +428,21 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.v_eidx       := 0.U
 
     when (cs.is_rvv && is_v_mask_ld) {
-      uop.uopc := uopVL
+      //uop.uopc := uopVL
       // make elements >= ceil(vl/8) inactive
       uop.vconfig.vl := (io.csr_vconfig.vl + 7.U) >> 3.U
     }
     when (cs.is_rvv && is_v_mask_st) {
       uop.uopc := uopVSA
     }
-    ////when (cs.is_rvv && cs.uopc === uopVLR) {
+    when (cs.is_rvv && cs.uopc === uopVLR) {
       //uop.uopc := uopVL
-    //}
-    //when (cs.is_rvv && cs.uopc === uopVSR) {
-      //uop.uopc := uopVSA
-    //}
+      uop.vconfig.vl := total_ecnt
+    }
+    when (cs.is_rvv && cs.uopc === uopVSR) {
+      uop.uopc := uopVSA
+      uop.vconfig.vl := total_ecnt
+    }
 
     uop.v_xls_offset := 0.U
     // vstart control

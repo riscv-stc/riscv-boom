@@ -692,13 +692,21 @@ class VecExeUnit(
   }
 
   // Pipelined, VMaskUnit ------------------
-  var vmaskunit: PipelinedVMaskUnit = null
+  /*var vmaskunit: PipelinedVMaskUnit = null
   if (hasVMaskUnit) {
     vmaskunit = Module(new PipelinedVMaskUnit(numStages, eLen)).suggestName("vmaskunit")
     vmaskunit.io <> DontCare
     vmaskunit.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMASKU)
 
     vec_fu_units += vmaskunit
+  }*/
+  var vmaskUnit: VecMaskUnit = null
+  if (hasVMaskUnit) {
+    vmaskUnit = Module(new VecMaskUnit(dataWidth = vLen)).suggestName("vmaskunit")
+    vmaskUnit.io <> DontCare
+    vmaskUnit.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMASKU)
+
+    vec_fu_units += vmaskUnit
   }
 
   var ifpu: IntToFPUnit = null
@@ -850,7 +858,8 @@ class VecExeUnit(
     val vrp = Module(new VecRPAssist())
 
     // Red-Perm Assist and related arbiter
-    vrp.io.exreq.valid    := io.req.valid && (io.req.bits.uop.fu_code & FU_IVRP).orR
+    //vrp.io.exreq.valid    := io.req.valid && (io.req.bits.uop.fu_code & FU_IVRP).orR
+    vrp.io.exreq.valid    := io.req.valid && (io.req.bits.uop.fu_code & FU_ALU).orR && (io.req.bits.uop.fu_code & FU_VRP).orR
     vrp.io.exreq.bits     := io.req.bits
     vrp.io.fbreq.ready    := true.B
     val valu_resp_vrp = valu.io.resp.valid && (valu.io.resp.bits.uop.fu_code & FU_VRP).orR
@@ -886,9 +895,8 @@ class VecExeUnit(
 
   // Outputs (Write Port #0)  ---------------
   if (writesVrf) {
-    //val is_not_vpopc = vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVPOPC).foldLeft(true.B)(_ && _)
-    //val is_not_vfirst = vec_fu_units.map(f => f.io.resp.bits.uop.uopc =/= uopVFIRST).foldLeft(true.B)(_ && _)
-    io.vresp.valid     := vec_fu_units.map(f => f.io.resp.valid && !(f.io.resp.bits.uop.fu_code & FU_VRP).orR).reduce(_||_)
+    io.vresp.valid     := vec_fu_units.map(f => 
+      f.io.resp.valid && !(f.io.resp.bits.uop.fu_code & FU_VRP).orR && !f.io.resp.bits.uop.uopc.isOneOf(uopVPOPC, uopVFIRST)).reduce(_||_)
     io.vresp.bits.uop  := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.uop)))
     io.vresp.bits.data := PriorityMux(vec_fu_units.map(f =>
@@ -924,22 +932,18 @@ class VecExeUnit(
     val vmv_valid = io.req.valid && (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.v_eidx.orR()
     val vmv_is_last = (io.req.bits.uop.uopc === uopVMV_X_S) && !io.req.bits.uop.v_eidx.orR()
     val vl         = io.req.bits.uop.vconfig.vl
-    val byteWidth  = 3.U
-    val vsew64bit  = 3.U
-    val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
-    val vmaskInsn_is_last = io.req.bits.uop.v_eidx === (vmaskInsn_vl-1.U)
-    val vmaskInsn_valid = vmaskunit.io.resp.valid & io.req.bits.uop.uopc.isOneOf(uopVPOPC, uopVFIRST) & vmaskInsn_is_last
-    val vmaskInsn_result = vmaskunit.io.resp.bits.data
+    val vmaskUop   = vmaskUnit.io.resp.bits.uop
+    val vmaskValid = vmaskUnit.io.resp.valid && vmaskUop.uopc.isOneOf(uopVPOPC, uopVFIRST)
     val vsew = io.req.bits.uop.vconfig.vtype.vsew(1,0)
     val rs2_data_elem0 = Mux1H(UIntToOH(vsew), Seq(io.req.bits.rs2_data(63, 0),
                                                    io.req.bits.rs2_data(31, 0),
                                                    io.req.bits.rs2_data(15, 0),
                                                    io.req.bits.rs2_data(7, 0)))
 
-    vecToIntQueue.io.enq.valid := vmv_valid | vmaskInsn_valid
-    vecToIntQueue.io.enq.bits.uop := io.req.bits.uop
-    vecToIntQueue.io.enq.bits.data := Mux(vmv_valid, rs2_data_elem0, Mux(vmaskInsn_valid, vmaskInsn_result, 0.U))
-    vecToIntQueue.io.enq.bits.uop.v_split_last := Mux(vmv_valid, vmv_is_last, Mux(vmaskInsn_valid, vmaskInsn_is_last, false.B))
+    vecToIntQueue.io.enq.valid := vmv_valid | vmaskValid
+    vecToIntQueue.io.enq.bits.uop := Mux(vmv_valid, io.req.bits.uop, vmaskUop)
+    vecToIntQueue.io.enq.bits.data := Mux(vmv_valid, rs2_data_elem0, Mux(vmaskValid, vmaskUnit.io.resp.bits.data, 0.U))
+    vecToIntQueue.io.enq.bits.uop.v_split_last := Mux(vmv_valid, vmv_is_last, vmaskUop.v_split_last)
     vecToIntQueue.io.enq.bits.predicated := false.B
     vecToIntQueue.io.enq.bits.fflags := DontCare
     vecToIntQueue.io.brupdate := io.brupdate

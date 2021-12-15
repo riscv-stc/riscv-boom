@@ -1353,6 +1353,7 @@ class VecFR7Unit(latency: Int, dataWidth: Int)(implicit p: Parameters)
   * @param numStages number of pipeline stages
   * @param dataWidth size of the data being passed into the functional unit
   */
+/*
 class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   extends PipelinedFunctionalUnit(
     numStages = 0,
@@ -1466,7 +1467,7 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   // vl => last
   io.resp.bits.data := vmaskUnit_out
 }
-
+*/
 /**
  * VMX functional unit with back-pressure machanism.
  *
@@ -1583,6 +1584,8 @@ class VecALUUnit(
   val isVMADC   = uop.uopc.isOneOf(uopVMADC, uopVMSBC)
   val isMerge   = uop.uopc.isOneOf(uopMERGE)
   val isShift   = uop.uopc.isOneOf(uopVSLL, uopVSRL, uopVSRA)
+  val isVMask   = uop.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
+  val isInvert  = uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR)
 
   // immediate generation
   val imm_xprlen = ImmGen(uop.imm_packed, uop.ctrl.imm_sel)
@@ -1591,9 +1594,10 @@ class VecALUUnit(
   val rs3_data = io.req.bits.rs3_data
   val rvm_data = io.req.bits.rvm_data
   val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
-  val vl = uop.vconfig.vl
+  val vl = Mux(isVMask, uop.vconfig.vl >> 3.U, uop.vconfig.vl)
   //prestart := 0.U // FIXME: Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < csr_vstart).reverse)
-  prestart := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < uop.vstart).reverse)
+  val vstart = Mux(isVMask, uop.vstart >> 3.U, uop.vstart)
+  prestart := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < vstart).reverse)
   //body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= csr_vstart && uop.v_eidx + b.U < vl).reverse)
   body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= uop.vstart && uop.v_eidx + b.U < vl).reverse)
   mask     := Mux(uop.v_unmasked || withCarry || isMerge, ~(0.U(vLenb.W)),
@@ -1605,7 +1609,16 @@ class VecALUUnit(
                                 Cat((0 until vLenb/2).map(e => Fill(2, inactive(e))).reverse),
                                 Cat((0 until vLenb/4).map(e => Fill(4, inactive(e))).reverse),
                                 Cat((0 until vLenb/8).map(e => Fill(8, inactive(e))).reverse)))
-  val shiftMask = Fill(eLen, !isShift) | Mux1H(UIntToOH(uop.vs2_eew), Seq("h7".U, "hf".U, "h1f".U, "h3f".U))
+  val shiftMask   = Fill(eLen, !isShift) | Mux1H(UIntToOH(uop.vs2_eew), Seq("h7".U, "hf".U, "h1f".U, "h3f".U))
+  val bitPreStart = Cat((0 until vLenb).map(i => Fill(8, prestart(i.U))).reverse)
+  val bitTail     = Cat((0 until vLenb).map(i => Fill(8, tail(i.U))).reverse)
+  val bitPreMask  = Mux1H(UIntToOH(uop.vstart(2, 0)), 
+                          Seq(0.U(8.W), 1.U, 3.U, 7.U, "hf".U, "h1f".U, "h3f".U, "h7f".U))
+  val bitTailMask = Cat(Fill(vLen-8, 1.U(1.W)), 
+                        Mux1H(UIntToOH(uop.vconfig.vl(2, 0)), 
+                              Seq("hff".U, "hfe".U, "hfc".U, "hf8".U, "hf0".U, "he0".U, "hc0".U, "h80".U)))
+  val bitInactive = bitPreStart | bitPreMask << Cat(uop.vstart(vLenSz-1, 3), 0.U(3.W)) | 
+                    bitTail & (bitTailMask << Cat(uop.vconfig.vl(vLenSz-1, 3), 0.U(3.W)))(vLen-1, 0)
 
   // operand 1 select
   val op1_data = WireInit(0.U(vLen.W))
@@ -1723,21 +1736,21 @@ class VecALUUnit(
 
     // output
     if (e < numELENinVLEN) {
-      e64_adder_out(e) := alu.io.out
+      e64_adder_out(e) := Mux(isInvert, ~alu.io.out, alu.io.out)
       e64_cmp_out(e)   := alu.io.cmp_out
       e64_co(e)        := alu.io.co
     }
     if (e < numELENinVLEN*2) {
-      e32_adder_out(e) := alu.io.out
+      e32_adder_out(e) := Mux(isInvert, ~alu.io.out, alu.io.out)
       e32_cmp_out(e)   := alu.io.cmp_out
       e32_co(e)        := alu.io.co
     }
     if (e < numELENinVLEN*4) {
-      e16_adder_out(e) := alu.io.out
+      e16_adder_out(e) := Mux(isInvert, ~alu.io.out, alu.io.out)
       e16_cmp_out(e)   := alu.io.cmp_out
       e16_co(e)        := alu.io.co
     }
-    e8_adder_out(e) := alu.io.out
+    e8_adder_out(e) := Mux(isInvert, ~alu.io.out, alu.io.out)
     e8_cmp_out(e)   := alu.io.cmp_out
     e8_co(e)        := alu.io.co
   }
@@ -1787,8 +1800,9 @@ class VecALUUnit(
                                 Seq(e8_adder_out.asUInt, e16_adder_out.asUInt, e32_adder_out.asUInt,e64_adder_out.asUInt))))
 
   r_val (0) := io.req.valid && !killed
-  r_data(0) := Mux(uop.rt(RD, isMaskVD), rs3_data & inactive | alu_out & ~inactive,
-                   Cat((0 until vLenb).map(b => Mux(byte_inactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse))
+  r_data(0) := Mux(isVMask,              rs3_data & bitInactive | alu_out & ~bitInactive,
+               Mux(uop.rt(RD, isMaskVD), rs3_data & inactive | alu_out & ~inactive,
+                   Cat((0 until vLenb).map(b => Mux(byte_inactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse)))
   r_pred(0) := uop.is_sfb_shadow && io.req.bits.pred_data
   for (i <- 1 until numStages) {
     r_val(i)  := r_val(i-1)
@@ -2216,4 +2230,193 @@ class VecSRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFu
   io.resp.valid := divValid.andR && !this.do_kill
   io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
                              Seq(e8Out.asUInt, e16Out.asUInt, e32Out.asUInt, e64Out.asUInt))
+}
+
+/**
+ * Vector VMASK_UNIT Wrapper
+ *
+ * @param numStages how many pipeline stages does the functional unit have
+ * @param dataWidth width of the data being operated on in the functional unit
+ */
+@chiselName
+class VecMaskUnit(
+  numStages: Int = 2,
+  dataWidth: Int)
+(implicit p: Parameters)
+  extends PipelinedFunctionalUnit(
+    numStages = numStages,
+    numBypassStages = 0,
+    earliestBypassStage = 0,
+    dataWidth = dataWidth)
+  with boom.ifu.HasBoomFrontendParameters
+{
+  val uop = io.req.bits.uop
+  val rs1_data = io.req.bits.rs1_data      // rvm data in vpopc/vfirst/vmsbf/vmsof/vmsif instructions
+  val rs2_data = io.req.bits.rs2_data
+  val rs3_data = io.req.bits.rs3_data
+  val rvm_data = io.req.bits.rvm_data
+
+  val vmaskOut = Wire(Vec(numELENinVLEN, UInt(eLen.W)))
+  val indexOut = Wire(Vec(numELENinVLEN, UInt(vLenSz.W)))
+  val indexVal = Wire(Vec(numELENinVLEN, Bool()))
+
+  // ---------------------------------------------------
+  // vpopc, vfirst, vmsbf, vmsof, vmsif
+  // ---------------------------------------------------
+  val tailBits   = (Fill(vLen, 1.U(1.W)) << uop.vconfig.vl)(vLen-1, 0)
+  val activeBits = Mux(uop.v_unmasked, ~tailBits, rs1_data & ~tailBits)
+  for (e <- 0 until numELENinVLEN) {
+    val vmaskUnit = Module(new VMaskUnit(offset = eLen*e))
+    vmaskUnit.io.in1  := rs2_data(64*e+63, 64*e)
+    vmaskUnit.io.in2  := rs3_data(64*e+63, 64*e)
+    vmaskUnit.io.mask := activeBits(64*e+63, 64*e)
+    vmaskUnit.io.fn   := uop.ctrl.op_fcn
+
+    vmaskOut(e) := vmaskUnit.io.out
+    indexOut(e) := vmaskUnit.io.index.bits
+    indexVal(e) := vmaskUnit.io.index.valid
+  }
+  // special vmask output
+  val hasNoSets    = (rs2_data & activeBits).orR === 0.U
+  val vmaskOutTail = rs3_data & ~activeBits
+  val vmaskOutSpc  = Mux(uop.uopc === uopVMSOF, vmaskOutTail, rs3_data | activeBits)
+
+  // stage1
+  val vpopcSt1 = Reg(Vec(numELENinVLEN/4, UInt(vLenSz.W)))
+  for(e <- 0 until numELENinVLEN/4) {
+    vpopcSt1(e) := (0 until 4).map(j => indexOut(e*4+j)).reduce(_ + _)
+  }
+  val indexOutSt1  = RegNext(indexOut)
+  val indexValSt1  = RegNext(indexVal)
+  val vfirstIdxMux = PriorityEncoder(indexValSt1)
+  val vfirstIdxSt1 = Mux(indexValSt1.orR, indexOutSt1(vfirstIdxMux), Fill(xLen, 1.U(1.W)))
+  val vmaskOutNorm = Reg(Vec(numELENinVLEN, UInt(eLen.W)))
+  vmaskOutNorm(0) := vmaskOut(0)
+  for(e <- 1 until numELENinVLEN) {
+    vmaskOutNorm(e) := Mux((0 until e).map(j => indexVal(j)).orR, 0.U, vmaskOut(e))
+  }
+  val vmaskOutSt1 = Mux(RegNext(hasNoSets), RegNext(vmaskOutSpc), vmaskOutNorm.asUInt | RegNext(vmaskOutTail))
+
+  // stage2
+  val vpopcSt2 = Reg(UInt(xLen.W))
+  vpopcSt2 := vpopcSt1.reduce(_ + _)
+
+  val vfirstIdxSt2 = RegNext(vfirstIdxSt1)
+  val vmaskOutSt2  = RegNext(vmaskOutSt1)
+
+  // ---------------------------------------------------
+  // viota, vid
+  // ---------------------------------------------------
+  val vstart = Mux(uop.uopc === uopVID, uop.vstart, 0.U)
+  val body   = Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= vstart && uop.v_eidx + b.U < uop.vconfig.vl).reverse)
+  val maskIn = Mux(uop.v_unmasked, body, body & rvm_data)
+  val e64Out = Wire(Vec(numELENinVLEN,   UInt(64.W)))
+  val e32Out = Wire(Vec(numELENinVLEN*2, UInt(32.W)))
+  val e16Out = Wire(Vec(numELENinVLEN*4, UInt(16.W)))
+  val e8Out  = Wire(Vec(numELENinVLEN*8, UInt( 8.W)))
+  val baseIdx = RegInit(0.U(eLen.W))
+  when(io.req.valid && uop.v_split_last) {
+    baseIdx := 0.U
+  } .elsewhen(io.req.valid && uop.uopc === uopVID) {
+    baseIdx := baseIdx + uop.v_split_ecnt
+  } .elsewhen(io.req.valid && uop.uopc === uopVIOTA) {
+    baseIdx := Mux1H(UIntToOH(uop.vd_eew),
+                     Seq(e8Out(numELENinVLEN*4-1) + e8Out(vLenb-1) + (maskIn(vLenb-1) & rs2_data(vLenb-1)), 
+                         e16Out(numELENinVLEN*4-1) + (maskIn(numELENinVLEN*4-1) & rs2_data(numELENinVLEN*4-1)),
+                         e32Out(numELENinVLEN*2-1) + (maskIn(numELENinVLEN*2-1) & rs2_data(numELENinVLEN*2-1)),
+                         e64Out(numELENinVLEN-1)   + (maskIn(numELENinVLEN-1)   & rs2_data(numELENinVLEN-1))))
+  }
+  for (e <- 0 until vLenb) {
+    // instants
+    val viotaUnit = if(e < numELENinVLEN)
+                      Module(new VIotaUnit(maskWidth = e%eLen+1, offset = e, dataWidth = eLen))
+                    else if(e < numELENinVLEN*2)
+                      Module(new VIotaUnit(maskWidth = e%eLen+1, offset = e, dataWidth = eLen >> 1))
+                    else if(e < numELENinVLEN*4) 
+                      Module(new VIotaUnit(maskWidth = e%eLen+1, offset = e, dataWidth = eLen >> 2))
+                    else
+                      Module(new VIotaUnit(maskWidth = e%eLen+2, offset = e, dataWidth = eLen >> 3))
+    // inputs
+    viotaUnit.io.fn := uop.ctrl.op_fcn
+    if(e < numELENinVLEN) {
+      viotaUnit.io.in   := rs2_data(e, 0)
+      viotaUnit.io.mask := maskIn(e, 0)
+      viotaUnit.io.base := baseIdx
+    } else if(e < numELENinVLEN*2) {
+      viotaUnit.io.in   := rs2_data(e, 0)
+      viotaUnit.io.mask := maskIn(e, 0)
+      viotaUnit.io.base := baseIdx
+    } else if(e < numELENinVLEN*4) {
+      viotaUnit.io.in   := rs2_data(e, 0)
+      viotaUnit.io.mask := maskIn(e, 0)
+      viotaUnit.io.base := baseIdx
+    } else {
+      viotaUnit.io.in   := rs2_data(e, numELENinVLEN*4-1)
+      viotaUnit.io.mask := maskIn(e, numELENinVLEN*4-1)
+      viotaUnit.io.base := Mux(uop.uopc === uopVID, baseIdx, 0.U)
+    }
+
+    // output
+    if(e < numELENinVLEN) {
+      e64Out(e) := viotaUnit.io.out
+    }
+    if(e < numELENinVLEN*2) {
+      e32Out(e) := viotaUnit.io.out
+    }
+    if(e < numELENinVLEN*4) {
+      e16Out(e) := viotaUnit.io.out
+    }
+    e8Out(e) := viotaUnit.io.out
+  }
+
+  // stage1
+  val e64OutSt1  = RegNext(e64Out)
+  val e32OutSt1  = RegNext(e32Out)
+  val e16OutSt1  = RegNext(e16Out)
+  val e8OutSt1   = RegNext(e8Out)
+  val maskInSt1  = RegNext(maskIn)
+  val rs3DataSt1 = RegNext(rs3_data)
+
+  val e64OutMux = Wire(Vec(numELENinVLEN,   UInt(64.W)))
+  val e32OutMux = Wire(Vec(numELENinVLEN*2, UInt(32.W)))
+  val e16OutMux = Wire(Vec(numELENinVLEN*4, UInt(16.W)))
+  val e8OutMux  = Wire(Vec(numELENinVLEN*8, UInt( 8.W)))
+  for(e <- 0 until vLenb) {
+    if(e < numELENinVLEN) {
+      e64OutMux(e) := Mux(maskInSt1(e), e64OutSt1(e), rs3DataSt1(64*e+63, 64*e))
+    }
+    if(e < numELENinVLEN*2) {
+      e32OutMux(e) := Mux(maskInSt1(e), e32OutSt1(e), rs3DataSt1(32*e+31, 32*e))
+    }
+    if(e < numELENinVLEN*4) {
+      e16OutMux(e) := Mux(maskInSt1(e), e16OutSt1(e), rs3DataSt1(16*e+15, 16*e))
+      e8OutMux(e)  := Mux(maskInSt1(e), e8OutSt1(e),  rs3DataSt1( 8*e+7,   8*e))
+    }
+    else {
+      e8OutMux(e)  := Mux(maskInSt1(e), Mux(RegNext(uop.uopc === uopVID), e8OutSt1(e), e8OutSt1(e) + e8OutSt1(numELENinVLEN*4-1)), 
+                                        rs3DataSt1(8*e+7, 8*e))
+    }
+  }
+
+  // stage2
+  val e64OutSt2 = RegNext(e64OutMux)
+  val e32OutSt2 = RegNext(e32OutMux)
+  val e16OutSt2 = RegNext(e16OutMux)
+  val e8OutSt2  = RegNext(e8OutMux)
+
+  val respUop = io.resp.bits.uop
+  val viotaOut = Mux1H(UIntToOH(respUop.vd_eew),
+                       Seq(e8OutSt2.asUInt, e16OutSt2.asUInt, e32OutSt2.asUInt, e64OutSt2.asUInt))
+
+  // ----------------------------
+  // output mux
+  // ----------------------------
+  val out = Mux(respUop.uopc === uopVPOPC,  vpopcSt2,
+            Mux(respUop.uopc === uopVFIRST, vfirstIdxSt2,
+            Mux(respUop.uopc.isOneOf(uopVID, uopVIOTA), viotaOut,
+            Mux(respUop.uopc.isOneOf(uopVMSBF, uopVMSIF, uopVMSOF), vmaskOutSt2,
+                0.U))))
+  io.resp.bits.data         := out
+  io.resp.bits.predicated   := false.B
+  io.resp.bits.fflags.valid := false.B
 }

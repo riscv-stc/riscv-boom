@@ -829,6 +829,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dis_uops(w).vstartSrc := v_uop.vstartSrc
       dis_uops(w).vstart    := Mux(v_uop.vstartSrc === VSTART_ZERO, 0.U, csr.io.vector.get.vstart)
       dis_uops(w).v_scalar_busy := dis_uops(w).is_rvv && dis_uops(w).uses_scalar
+      dis_uops(w).uopc      := Mux(i_uop.uopc.isOneOf(uopVLM, uopVLR), uopVL, i_uop.uopc)
     } else {
       dis_uops(w).prs1_busy := i_uop.prs1_busy & (dis_uops(w).rt(RS1, isInt)) |
                                f_uop.prs1_busy & (dis_uops(w).rt(RS1, isFloat))
@@ -907,8 +908,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       val dis_split_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, 1.U, dis_total_ecnt)
       val elem_last       = dis_split_eidx + dis_split_ecnt >= dis_total_ecnt
       val vLen_ecnt       = (vLen.U >> 3.U) >> dis_uops(w).vd_eew
-      val dis_undisturb   = dis_uops(w).vconfig.vl < dis_uops(w).vconfig.vtype.vlMax ||
-                            dis_uops(w).vconfig.vtype.vlMax < vLen_ecnt
+      val dis_undisturb   = (dis_uops(w).vconfig.vl < dis_uops(w).vconfig.vtype.vlMax ||
+                            dis_uops(w).vconfig.vtype.vlMax < vLen_ecnt) && !rename_stage.io.ren2_uops(w).uopc.isOneOf(uopVLM, uopVLR)
 
       when (io.ifu.redirect_flush) {
         dis_split_eidx := 0.U

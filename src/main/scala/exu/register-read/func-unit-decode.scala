@@ -24,6 +24,7 @@ import freechips.rocketchip.rocket.CSR
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.exu.VMaskUnit._
+import boom.exu.VIotaUnit._
 import boom.util._
 
 /**
@@ -199,8 +200,8 @@ object VecRRdDecode extends RRdDecodeConstants
         ,BitPat(uopVMSBF)      -> List(BR_N, Y, N, N, FN_SBF,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMSIF)      -> List(BR_N, Y, N, N, FN_SIF,   DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
         ,BitPat(uopVMSOF)      -> List(BR_N, Y, N, N, FN_SOF,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopVIOTA)      -> List(BR_N, Y, N, N, FN_X,     DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopVID)        -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_ZERO,    OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopVIOTA)      -> List(BR_N, Y, N, N, FN_IOTA,  DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopVID)        -> List(BR_N, Y, N, N, FN_INDEX, DW_XPR, OP1_ZERO,    OP2_ZERO,    IS_X, REN_1, CSR.N)
         ,BitPat(uopVSLIDEUP)   -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2 ,    OP2_ZERO,    IS_X, REN_1, CSR.N)
         ,BitPat(uopVSLIDE1UP)  -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2 ,    OP2_ZERO,    IS_X, REN_1, CSR.N)
         ,BitPat(uopVSLIDEDOWN) -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2 ,    OP2_ZERO,    IS_X, REN_1, CSR.N)
