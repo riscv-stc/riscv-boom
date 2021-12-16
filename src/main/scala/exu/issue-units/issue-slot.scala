@@ -374,6 +374,7 @@ class IssueSlot(
   }
 
   if (usingVector && !vector && iqType == IQT_MEM.litValue) {
+    //next_pm := io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx).reduce(_||_)
     when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx).reduce(_||_)) {
       slot_uop.v_unmasked := true.B
     }
@@ -508,7 +509,7 @@ class IssueSlot(
 
   when (io.in_uop.valid) {
     slot_uop := io.in_uop.bits
-    if (usingVector && !vector && iqType == IQT_MEM.litValue) {
+    if(usingVector && !vector && iqType == IQT_MEM.litValue) {
       when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === io.in_uop.bits.rob_idx).reduce(_||_)) {
         slot_uop.v_unmasked := true.B
       }
