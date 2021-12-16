@@ -156,7 +156,8 @@ class IssueSlot(
       val eew    = Mux(uop.uses_v_ls_ew, uop.v_ls_ew, uop.vs2_eew)
       val rsel   = VRegSel(v_eidx, eew, eLenSelSz)
       val pvs2   = uop.pvs2(rsel).bits
-      ret       := !uop.rt(RS2, isVector) || !io.vbusy_status(pvs2)
+      val reduce_busy = uop.pvs2.map(pvs2 => pvs2.valid && io.vbusy_status(pvs2.bits)).reduce(_ || _)
+      ret       := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))
     } else {
       ret := p2(0)
     }

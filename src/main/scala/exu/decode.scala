@@ -363,14 +363,14 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew))))
     val vlmul_value = Mux(is_v_mask_insn, 0.U, Cat(vlmul_sign, vlmul_mag))
     val vd_emul    = Mux(isVMVR, instRS1(2,0),
-                     Mux(is_v_mask_ld || vmlogic_insn || uop.rt(RD, isReduceV) || uop.rt(RD, isMaskVD), 0.U,
+                     Mux(is_v_mask_ld || vmlogic_insn || uop.is_reduce || uop.rt(RD, isMaskVD), 0.U,
                      Mux(uop.rt(RD, isWidenV), vlmul_value + vd_wfactor,
                      Mux(uop.rt(RD, isNarrowV), vlmul_value - vd_nfactor,
                      Mux(is_v_reg_ls, Log2(vreg_nf + 1.U),
                      Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew - vsew + vlmul_value,
                      Mux(cs.allow_vd_is_v0, 0.U, vlmul_value)))))))
     val vs1_emul   = Mux(cs.uopc === uopVRGATHEREI16, vlmul_value + 1.U - vsew,
-                     Mux(uop.rt(RS1, isReduceV), 0.U,
+                     Mux(uop.is_reduce, 0.U,
                      Mux(uop.rt(RS1, isWidenV ), vlmul_value + 1.U, vlmul_value)))
     val vs2_emul   = Mux(uop.rt(RS2, isWidenV), vlmul_value + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor, 
