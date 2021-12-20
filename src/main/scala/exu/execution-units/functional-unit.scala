@@ -1886,7 +1886,6 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   val working     = (state === s_work)
   val is_last     = WireInit(false.B)
   val vlen_ecnt   = vLenb.U >> uop.vd_eew
-  val is_reduce   = uop.is_reduce
   // unordered reduce phase1: compress between vreg: v2buf[]
   // unordered reduce phase2: compress within vreg: fbrsp
   val ured_ph1_prgrs = nrVecGroup(uop.vs2_emul) << uop.rt(RD, isWidenV).asUInt
@@ -1986,10 +1985,10 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     }
     is (s_work) {
       when (io.fbreq.fire) {
-        is_last := Mux(uop.is_ureduce, ured_ph1_prgrs + ured_ph2_prgrs,
-                   Mux(uop.is_oreduce, uop.vconfig.vl,
-                   Mux(is_vrgather,    nrVecGroup(uop.vs1_emul),
-                                       nrVecGroup(uop.vd_emul)))) === progress
+        is_last := Mux(uop.is_ureduce, ured_ph1_prgrs + ured_ph2_prgrs === progress,
+                   Mux(uop.is_oreduce, uop.vconfig.vl <= progress + 1.U,
+                   Mux(is_vrgather,    nrVecGroup(uop.vs1_emul) === progress,
+                                       nrVecGroup(uop.vd_emul) === progress)))
         when (is_last) {
           state := s_idle
         }
@@ -2012,7 +2011,8 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
 
   io.exreq.ready := true.B
   io.fbrsp.ready := true.B
-  io.fbreq.valid := working && (uop.is_ureduce && (io.fbrsp.valid || progress === 1.U) || uop.is_oreduce || io.fbrsp.valid)
+  io.fbreq.valid := working && (uop.is_ureduce && (io.fbrsp.valid || progress === 1.U) ||
+                                uop.is_oreduce && (io.fbrsp.valid || progress === 0.U))
   io.fbreq.bits.uop := uop
   io.fbreq.bits.uop.v_split_last := is_last
   when (uop.is_ureduce) {
@@ -2023,10 +2023,15 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     io.fbreq.bits.uop.v_unmasked    := true.B // treat unordered REDops as unmasked
     io.fbreq.bits.uop.v_eidx        := 0.U
     io.fbreq.bits.uop.vconfig.vl    := Mux(progress < ured_ph1_prgrs, vlen_ecnt,
-                                       Mux(is_last, 1.U, vlen_ecnt >> (1.U + progress - ured_ph1_prgrs)))
+                                       Mux(is_last, Mux(uop.vconfig.vl === 0.U, 0.U, 1.U), vlen_ecnt >> (1.U + progress - ured_ph1_prgrs)))
+    io.fbreq.bits.uop.v_split_ecnt  := vlen_ecnt
+  } .elsewhen (uop.is_oreduce) {
+    io.fbreq.bits.uop.v_unmasked    := true.B // treat ordered REDops as unmasked
+    io.fbreq.bits.uop.v_eidx        := 0.U
+    io.fbreq.bits.uop.vconfig.vl    := Mux(uop.vconfig.vl === 0.U, 0.U, 1.U)
     io.fbreq.bits.uop.v_split_ecnt  := vlen_ecnt
   }
-  when(is_reduce && is_last) {
+  when(uop.is_reduce && is_last) {
     io.fbreq.bits.uop.fu_code       := uop.fu_code & (~FU_VRP)
   }
   val v1uredmux = Mux1H(Seq(
@@ -2090,9 +2095,21 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
       Cat(0.U((vLen/2).W),  Cat((0 until vLen/128).map(i => io.fbrsp.bits.data(i*128+63, i*128)).reverse))))
     }
   ))
-  io.fbreq.bits.rs1_data := Mux(uop.is_ureduce, v1uredmux, v1buf)
-  io.fbreq.bits.rs2_data := v2uredmux
-  io.fbreq.bits.rs3_data := Mux(is_reduce, vdbuf(0), vdbuf(progress))
+  val v1oredmux = Mux1H(Seq(
+    (uop.vd_eew(1,0) === 1.U) -> Cat(0.U((vLen-16).W), Mux(progress === 0.U, v1buf(15, 0), io.fbrsp.bits.data(15, 0))),
+    (uop.vd_eew(1,0) === 2.U) -> Cat(0.U((vLen-32).W), Mux(progress === 0.U, v1buf(31, 0), io.fbrsp.bits.data(31, 0))),
+    (uop.vd_eew(1,0) === 3.U) -> Cat(0.U((vLen-64).W), Mux(progress === 0.U, v1buf(63, 0), io.fbrsp.bits.data(63, 0)))
+  ))
+  val v2oredmux = Mux1H(Seq(
+    (uop.vs2_eew(1,0) === 1.U) -> Cat(0.U((vLen-16).W), v2buf((progress>>6.U)(2,0))>>Cat(progress(5,0),0.U(4.W))),
+    (uop.vs2_eew(1,0) === 2.U) -> Cat(0.U((vLen-32).W), v2buf((progress>>5.U)(2,0))>>Cat(progress(4,0),0.U(5.W))),
+    (uop.vs2_eew(1,0) === 3.U) -> Cat(0.U((vLen-64).W), v2buf((progress>>4.U)(2,0))>>Cat(progress(3,0),0.U(6.W)))
+  ))
+  io.fbreq.bits.rs1_data := Mux(uop.is_ureduce, v1uredmux,
+                            Mux(uop.is_oreduce, v1oredmux, v1buf))
+  io.fbreq.bits.rs2_data := Mux(uop.is_ureduce, v2uredmux,
+                            Mux(uop.is_oreduce, v2oredmux, v2buf(0)))
+  io.fbreq.bits.rs3_data := Mux(uop.is_reduce,  vdbuf(0),  vdbuf(progress))
   io.busy := !is_idle
 }
 /**

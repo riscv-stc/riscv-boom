@@ -859,7 +859,7 @@ class VecExeUnit(
 
     // Red-Perm Assist and related arbiter
     //vrp.io.exreq.valid    := io.req.valid && (io.req.bits.uop.fu_code & FU_IVRP).orR
-    vrp.io.exreq.valid    := io.req.valid && (io.req.bits.uop.fu_code & FU_ALU).orR && (io.req.bits.uop.fu_code & FU_VRP).orR
+    vrp.io.exreq.valid    := io.req.valid && (io.req.bits.uop.fu_code & (FU_ALU | FU_FPU)).orR && (io.req.bits.uop.fu_code & FU_VRP).orR
     vrp.io.exreq.bits     := io.req.bits
     vrp.io.fbreq.ready    := true.B
     val valu_resp_vrp = valu.io.resp.valid && (valu.io.resp.bits.uop.fu_code & FU_VRP).orR
@@ -1184,7 +1184,7 @@ class VecExeUT(timeout: Int = 10000)(implicit p: Parameters)
     dut_req.bits.uop.fu_code      := FU_FPU | FU_VRP
     dut_req.bits.uop.rob_idx      := 0x55.U
     dut_req.bits.uop.ldst_val     := true.B
-    dut_req.bits.uop.dst_rtype    := RT_VEC
+    dut_req.bits.uop.dst_rtype    := RT_VRED
     dut_req.bits.uop.lrs1_rtype   := RT_VRED
     dut_req.bits.uop.lrs2_rtype   := RT_VEC
     dut_req.bits.uop.is_rvv       := true.B
@@ -1246,7 +1246,7 @@ class VecExeUT(timeout: Int = 10000)(implicit p: Parameters)
     dut_req.bits.uop.vconfig.vtype:= vtype
     dut_req.bits.uop.vconfig.vl   := vtype.vlMax - 1.U
     dut_req.bits.uop.v_split_ecnt := vlen_ecnt
-    dut_req.valid := true.B
+    dut_req.valid := false.B //true.B
     dut_req.bits.rs1_data         := 0x3f800000.U
     dut_req.bits.rs2_data         := Cat((0 until 64).map(i => 0x3c00.U(16.W)).reverse)
     dut_req.bits.rs3_data         := 0.U
@@ -1301,7 +1301,7 @@ class WithVecExeUT extends Config((site, here, up) => {
   case UnitTests => (q: Parameters) => {
     implicit val p = BoomTestUtils.getBoomParameters("StcBoomConfig", "chipyard")
     Seq(
-      Module(new VecExeUT(1000))
+      Module(new VecExeUT(4000))
     )
   }
 })
