@@ -896,7 +896,7 @@ class VecExeUnit(
   // Outputs (Write Port #0)  ---------------
   if (writesVrf) {
     io.vresp.valid     := vec_fu_units.map(f => 
-      f.io.resp.valid && !(f.io.resp.bits.uop.fu_code & FU_VRP).orR && !f.io.resp.bits.uop.uopc.isOneOf(uopVPOPC, uopVFIRST)).reduce(_||_)
+      f.io.resp.valid && !(f.io.resp.bits.uop.fu_code & FU_VRP).orR && !f.io.resp.bits.uop.uopc.isOneOf(uopVPOPC, uopVFIRST, uopVFMV_F_S, uopVMV_X_S)).reduce(_||_)
     io.vresp.bits.uop  := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.uop)))
     io.vresp.bits.data := PriorityMux(vec_fu_units.map(f =>
@@ -908,10 +908,10 @@ class VecExeUnit(
   if (writesFrf){
     val vecToFPQueue = Module(new BranchKillableQueue(new ExeUnitResp(eLen), numStages))
     val vsew = io.req.bits.uop.vconfig.vtype.vsew(1,0)
-    val rs2_data_elem0 = Mux1H(UIntToOH(vsew), Seq(io.req.bits.rs2_data(63, 0),
-                                                   io.req.bits.rs2_data(31, 0),
-                                                   io.req.bits.rs2_data(15, 0),
-                                                   0.U))
+    val rs2_data_elem0 = Mux1H(UIntToOH(vsew-1.U), Seq(io.req.bits.rs2_data(15, 0),
+                                                       io.req.bits.rs2_data(31, 0),
+                                                       io.req.bits.rs2_data(63, 0),
+                                                       0.U))
     vecToFPQueue.io.enq.valid := io.req.valid && (io.req.bits.uop.uopc === uopVFMV_F_S) && !io.req.bits.uop.v_eidx.orR()
     vecToFPQueue.io.enq.bits.uop := io.req.bits.uop
     /* @fixme: FIXME: fix elen 64bits currently, flexible sew need to be supported. */
