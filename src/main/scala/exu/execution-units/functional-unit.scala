@@ -1652,13 +1652,13 @@ class VecALUUnit(
   for (e <- 0 until vLenb) {
     // FIXME: parameterize data width of ALU to save area
     val alu = if(e < numELENinVLEN)
-                Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true, dataWidth = eLen))
+                Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true, vector = true, dataWidth = eLen))
               else if(e < numELENinVLEN*2)
-                Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true, dataWidth = eLen >> 1))
+                Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true, vector = true, dataWidth = eLen >> 1))
               else if(e < numELENinVLEN*4)
-                Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true, dataWidth = eLen >> 2))
+                Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true, vector = true, dataWidth = eLen >> 2))
               else
-                Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true, dataWidth = eLen >> 3))
+                Module(new freechips.rocketchip.rocket.ALU(withCarryIO = true, vector = true, dataWidth = eLen >> 3))
     // input
     alu.io.fn  := uop.ctrl.op_fcn
     alu.io.dw  := uop.ctrl.fcn_dw

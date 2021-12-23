@@ -119,7 +119,8 @@ abstract class ExecutionUnit(
     val req      = Flipped(new DecoupledIO(new FuncUnitReq(dataWidth)))
 
     val iresp    = if (writesIrf)   new DecoupledIO(new ExeUnitResp(xLen)) else null
-    val fresp    = if (writesFrf)   new DecoupledIO(new ExeUnitResp(xLen)) else null
+    val fresp    = if (hasVector && writesFrf) new DecoupledIO(new ExeUnitResp(xLen)) 
+                   else if(writesFrf)          new DecoupledIO(new ExeUnitResp(xLen+1)) else null
     val vresp    = if (writesVrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_iresp = if (writesLlIrf) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_fresp = if (writesLlFrf) new DecoupledIO(new ExeUnitResp(dataWidth)) else null

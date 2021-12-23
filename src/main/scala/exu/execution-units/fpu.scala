@@ -518,9 +518,9 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
     rec_rs1 := recode(rs1_edata, vs1_fmt, minT)
     rec_rs2 := recode(rs2_edata, vs2_fmt, minT)
     rec_rs3 := recode(rs3_edata, vd_fmt, minT)
-    val unbox_rs1 = unbox(rec_rs1, vs1_tag, minT)
-    val unbox_rs2 = unbox(rec_rs2, vs2_tag, minT)
-    val unbox_rs3 = unbox(rec_rs3, tag, minT)
+    val unbox_rs1 = unbox(rec_rs1, vs1_tag, minT, false)
+    val unbox_rs2 = unbox(rec_rs2, vs2_tag, minT, false)
+    val unbox_rs3 = unbox(rec_rs3, tag,     minT, false)
     req.rm := Mux(io_req.uop.uopc.isOneOf(uopVFCLASS, uopVFMAX, uopVMFLT, uopVMFGT), 1.U,
               Mux(io_req.uop.uopc.isOneOf(uopVFMIN, uopVMFLE, uopVMFGE), 0.U,
               Mux(io_req.uop.uopc.isOneOf(uopVMFEQ, uopVMFNE), 2.U,
