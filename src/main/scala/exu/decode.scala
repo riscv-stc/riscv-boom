@@ -363,7 +363,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(uop.rt(RS2, isWidenV ), csr_vsew + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew))))
     val vlmul_value = Mux(is_v_mask_insn, 0.U, Cat(vlmul_sign, vlmul_mag))
-    val vd_emul    = Mux(isVMVR, instRS1(2,0),
+    val vmvr_emul  = Mux(instRS1(2), 3.U, Mux(instRS1(1), 2.U, Mux(instRS1(0), 1.U, 0.U)))
+    val vd_emul    = Mux(isVMVR, vmvr_emul,
                      Mux(is_v_mask_ld || vmlogic_insn || uop.is_reduce || uop.rt(RD, isMaskVD), 0.U,
                      Mux(uop.rt(RD, isWidenV), vlmul_value + vd_wfactor,
                      Mux(uop.rt(RD, isNarrowV), vlmul_value - vd_nfactor,
@@ -389,7 +390,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val total_ecnt = Mux(is_v_mask_ld, vLenb.U,
                      Mux(is_v_reg_ls, vLenb.U << Log2(vreg_nf + 1.U) >> cs.v_ls_ew,
                      Mux(cs.uses_stq, Mux(is_v_mask_st, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl),
-                     Mux(is_v_mask_insn || vlmul_sign || csr_vlmax < vLen_ecnt, vLen_ecnt, csr_vlmax))))
+                     Mux(isVMVR, vLen_ecnt << vmvr_emul,
+                     Mux(is_v_mask_insn || vlmul_sign || csr_vlmax < vLen_ecnt, vLen_ecnt, csr_vlmax)))))
     uop.is_rvv      := cs.is_rvv
     uop.v_ls_ew     := cs.v_ls_ew
     when (is_v_ls) {
@@ -436,7 +438,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     when (cs.is_rvv && is_v_mask_st) {
       uop.uopc := uopVSA
     }
-    when (cs.is_rvv && cs.uopc === uopVLR) {
+    when (cs.is_rvv && cs.uopc.isOneOf(uopVLR, uopVMVR)) {
       //uop.uopc := uopVL
       uop.vconfig.vl := total_ecnt
     }
