@@ -304,6 +304,7 @@ class VecRenameMapTable(
 
   // Don't flag the creation of duplicate 'p0' mappings during rollback.
   // These cases may occur soon after reset, as all maptable entries are initialized to 'p0'.
+  /* uop_exception is set in these cases
   io.remap_reqs.map(req => {
     when(req.valid) {
       when(req.vd_emul === 1.U) { assert(req.ldst(0)   === 0.U) }
@@ -311,6 +312,7 @@ class VecRenameMapTable(
       when(req.vd_emul === 3.U) { assert(req.ldst(2,0) === 0.U) }
     }
   })
+  */
   io.remap_reqs map {req =>
     val nr = req.v_seg_nf << Mux(req.vd_emul(2), 0.U(2.W), req.vd_emul(1,0))
     for (i <- 0 until 8) {

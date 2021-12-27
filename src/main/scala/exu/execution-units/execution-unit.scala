@@ -710,6 +710,7 @@ class VecExeUnit(
     vec_fu_units += vmaskUnit
   }
 
+  /*
   var ifpu: IntToFPUnit = null
   if (hasIfpu) {
     ifpu = Module(new IntToFPUnit(latency=numStages, vector = true))
@@ -717,7 +718,16 @@ class VecExeUnit(
     ifpu.io.fcsr_rm    := io.fcsr_rm
     ifpu.io.resp.ready := DontCare
     vec_fu_units += ifpu
+  } */
+  var ifpu: VecIntToFPUnit = null
+  if (hasIfpu) {
+    ifpu = Module(new VecIntToFPUnit(dataWidth = vLen, latency=numStages))
+    ifpu.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_I2F)
+    ifpu.io.fcsr_rm    := io.fcsr_rm
+    ifpu.io.resp.ready := DontCare
+    vec_fu_units += ifpu
   }
+
 
   // FPU Unit -----------------------
   var vfpu: VecFPUUnit = null

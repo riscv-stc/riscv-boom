@@ -2441,3 +2441,121 @@ class VecMaskUnit(
   io.resp.bits.predicated   := false.B
   io.resp.bits.fflags.valid := false.B
 }
+
+/**
+ * Vector Int to FP conversion functional unit
+ *
+ * @param latency the amount of stages to delay by
+ */
+class VecIntToFPUnit(dataWidth: Int, latency: Int)(implicit p: Parameters)
+  extends PipelinedFunctionalUnit(
+    numStages = latency,
+    numBypassStages = 0,
+    earliestBypassStage = 0,
+    dataWidth = dataWidth,
+    needsFcsr = true)
+  with tile.HasFPUParameters
+{
+  val uop = io.req.bits.uop
+  val rs1_data = io.req.bits.rs1_data
+  val rs2_data = io.req.bits.rs2_data
+  val rs3_data = io.req.bits.rs3_data
+  val rvm_data = io.req.bits.rvm_data
+  val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
+  val vl = uop.vconfig.vl
+  prestart := Cat((0 until vLen/16).map(b => uop.v_eidx + b.U < uop.vstart).reverse)
+  body     := Cat((0 until vLen/16).map(b => uop.v_eidx + b.U >= uop.vstart && uop.v_eidx + b.U < vl).reverse)
+  mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)), Cat((0 until vLen/16).map(b => rvm_data(b)).reverse))
+  tail     := Cat((0 until vLen/16).map(b => uop.v_eidx + b.U >= vl).reverse)
+  inactive := prestart | body & ~mask | tail
+  val outInactive = Pipe(io.req.valid, inactive, latency).bits
+  val outRs3Data  = Pipe(io.req.valid, rs3_data, latency).bits
+  val isUnsigned  = uop.rt(RS2, isUnsignedV)
+
+  val fp_decoder = Module(new UOPCodeFPUDecoder(vector = true)) // TODO use a simpler decoder
+  fp_decoder.io.uopc := uop.uopc
+  val fp_ctrl = WireInit(fp_decoder.io.sigs)
+  val vsew    = uop.vconfig.vtype.vsew
+  val vd_fmt  = Mux(uop.vd_eew  === 3.U, D, Mux(uop.vd_eew  === 2.U, S, H))
+  val vs2_fmt = Mux(uop.vs2_eew === 3.U, D, Mux(uop.vs2_eew === 2.U, S, H))
+  fp_ctrl.typeTagIn  := vs2_fmt
+  fp_ctrl.typeTagOut := vd_fmt
+  when (io.req.valid) {
+    assert(uop.fp_val, "unexpected fp_val")
+    assert(vsew <= 3.U, "unsupported vsew")
+    assert(uop.vd_eew >= 1.U && uop.vd_eew <= 3.U, "unsupported vd_eew")
+  }
+
+  val tag  = fp_ctrl.typeTagIn
+  val typ1 = Mux(tag === D, 1.U(1.W), 0.U(1.W))
+  val req  = Wire(new tile.FPInput)
+  req <> fp_ctrl
+  req.rm  := io.fcsr_rm
+  req.in1 := DontCare
+  req.in2 := DontCare
+  req.in3 := DontCare
+  when(fp_ctrl.wflags) {
+    req.typeTagIn := fp_ctrl.typeTagOut      // IntToFP typeTagIn, based on float width, not integer
+  }
+  req.typ    := ImmGenTypRVV(typ1, uop.imm_packed)
+  req.fmt    := Mux(tag === H, 2.U, Mux(tag === S, 0.U, 1.U)) // TODO support Zfh and avoid special-case below
+  req.fmaCmd := DontCare
+
+  val e64DataOut = Wire(Vec(numELENinVLEN,   UInt(64.W)))
+  val e32DataOut = Wire(Vec(numELENinVLEN*2, UInt(32.W)))
+  val e16DataOut = Wire(Vec(numELENinVLEN*4, UInt(16.W)))
+  val e64FlagOut = Wire(Vec(numELENinVLEN,   Bits(tile.FPConstants.FLAGS_SZ.W)))
+  val e32FlagOut = Wire(Vec(numELENinVLEN*2, Bits(tile.FPConstants.FLAGS_SZ.W)))
+  val e16FlagOut = Wire(Vec(numELENinVLEN*4, Bits(tile.FPConstants.FLAGS_SZ.W)))
+
+  for (e <- 0 until vLen/16) {
+    // instants
+    val ifpu = if(e < numELENinVLEN)        Module(new tile.IntToFP(latency, vector = true, supportD = true))
+               else if(e < numELENinVLEN*2) Module(new tile.IntToFP(latency, vector = true, supportD = false, supportS = true ))
+               else                         Module(new tile.IntToFP(latency, vector = true, supportD = false, supportS = false))
+    // inputs
+    ifpu.io.in.valid := io.req.valid
+    ifpu.io.in.bits  := req
+    if(e < numELENinVLEN) {
+      ifpu.io.in.bits.in1 := Mux(isUnsigned, Mux1H(UIntToOH(uop.vs2_eew),
+                                                   Seq(rs2_data(8*e+7, 8*e), rs2_data(16*e+15, 16*e), rs2_data(32*e+31, 32*e), rs2_data(64*e+63, 64*e))),
+                                             Mux1H(UIntToOH(uop.vs2_eew),
+                                                   Seq(rs2_data( 8*e+7,   8*e).sextTo(xLen),
+                                                       rs2_data(16*e+15, 16*e).sextTo(xLen),
+                                                       rs2_data(32*e+31, 32*e).sextTo(xLen),
+                                                       rs2_data(64*e+63, 64*e))))
+    } else if(e < numELENinVLEN*2) {
+      ifpu.io.in.bits.in1 := Mux(isUnsigned, Mux1H(UIntToOH(uop.vs2_eew),
+                                                   Seq(rs2_data(8*e+7, 8*e), rs2_data(16*e+15, 16*e), rs2_data(32*e+31, 32*e), 0.U)),
+                                             Mux1H(UIntToOH(uop.vs2_eew),
+                                                   Seq(rs2_data( 8*e+7,   8*e).sextTo(xLen),
+                                                       rs2_data(16*e+15, 16*e).sextTo(xLen),
+                                                       rs2_data(32*e+31, 32*e).sextTo(xLen),
+                                                       0.U)))
+    } else {
+      ifpu.io.in.bits.in1 := Mux(isUnsigned, Mux(uop.vs2_eew(0), rs2_data(16*e+15, 16*e), rs2_data(8*e+7, 8*e)),
+                                             Mux(uop.vs2_eew(0), rs2_data(16*e+15, 16*e).sextTo(xLen), rs2_data(8*e+7, 8*e).sextTo(xLen)))
+    }
+    // outputs
+    if(e < numELENinVLEN) {
+      e64DataOut(e) := Mux(outInactive(e), outRs3Data(64*e+63, 64*e), ieee(box(ifpu.io.out.bits.data, D)))
+      e64FlagOut(e) := Mux(outInactive(e), 0.U, ifpu.io.out.bits.exc)
+    }
+    if(e < numELENinVLEN*2) {
+      e32DataOut(e) := Mux(outInactive(e), outRs3Data(32*e+31, 32*e), ieee(box(ifpu.io.out.bits.data, S)))
+      e32FlagOut(e) := Mux(outInactive(e), 0.U, ifpu.io.out.bits.exc)
+    }
+    e16DataOut(e) := Mux(outInactive(e), outRs3Data(16*e+15, 16*e), ieee(box(ifpu.io.out.bits.data, H)))
+    e16FlagOut(e) := Mux(outInactive(e), 0.U, ifpu.io.out.bits.exc)
+  }
+
+  io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
+                             Seq(0.U, e16DataOut.asUInt, e32DataOut.asUInt, e64DataOut.asUInt))
+  io.resp.bits.fflags.valid      := io.resp.valid
+  io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
+  io.resp.bits.fflags.bits.flags := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
+                                          Seq(0.U, 
+                                              e16FlagOut.reduce(_ | _),
+                                              e32FlagOut.reduce(_ | _),
+                                              e64FlagOut.reduce(_ | _)))
+}

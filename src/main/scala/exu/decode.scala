@@ -382,7 +382,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       //assert(vsew >= vs2_nfactor && vsew + vs2_wfactor <= 3.U, "Unsupported vs2_sew")
     }
 
-    val vLen_ecnt  = Mux(!is_v_ls && vs2_sew > vd_sew, vLen.U >> (vs2_sew+3.U), vLen.U >> (vd_sew+3.U))
+    val vLen_ecnt  = Mux(!is_v_ls && vs2_sew > vd_sew && !vlmul_sign, vLen.U >> (vs2_sew+3.U), vLen.U >> (vd_sew+3.U))
     // for store, we can skip inactive locations; otherwise, we have to visit every element
     // for fractional lmul, we need visit at least one entire vreg
     // for undisturbing move before reduction, we need visit at most one vreg
@@ -467,10 +467,13 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     //basic SEW and LMUL configuration illegal is judged by CSR module and will set vill
     //vill and instruction depend on vtype, V-FP sew = 8 but not INT_TO_FP instruction
-    val illegal_vtype_configure = cs.is_rvv && ((io.csr_vconfig.vtype.vill && !cs.not_use_vtype ||
-                                                (csr_vsew === 0.U) && cs.fp_val && cs.uopc =/= uopVFCVT_I2F))
+    val illegal_vtype_configure = cs.is_rvv && io.csr_vconfig.vtype.vill && !cs.not_use_vtype
+    // illegal floating vsew settings
+    val illegal_vsew_vfloat = cs.is_rvv && cs.fp_val && Mux(cs.uopc === uopVFCVT_I2F, vd_sew  === 0.U,
+                                                        Mux(cs.uopc === uopVFCVT_F2I, vs2_sew === 0.U,
+                                                                                      vs1_sew === 0.U || vs2_sew === 0.U && vd_sew === 0.U))
     //register EEW > 64
-    val illegal_reg_sew = cs.not_use_vtype && (vd_sew(2) || vs2_sew(2) || vs1_sew(2))
+    val illegal_reg_sew = !cs.not_use_vtype && (vd_sew(2) || vs2_sew(2) || vs1_sew(2))
     //vd/vs2 EMUL should be illegal
     val vd_emul_legal = Mux(vd_emul(2), vd_emul(1,0) =/= 0.U && ~vd_emul(1,0) < (3.U - vd_sew), true.B)
     val vs1_emul_legal = Mux(vs1_emul(2), vs1_emul(1,0) =/= 0.U && ~vs1_emul(1,0) < 3.U - vs1_sew, true.B)
@@ -489,15 +492,16 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     val illegal_vs2_overlap_vd_lowpart = (uop.ldst === (uop.lrs2 + vs2_emul(1,0))) && uop.rt(RD, isNarrowV)
 
-        illegal_vector_case :=  !vsetvl && (illegal_vstart_not_zero ||
-                                illegal_vd_unequal_vs1  ||
-                                illegal_vd_unequal_vs2  ||
-                                illegal_vd_overlap_v0   ||
-                               // illegal_vtype_configure ||
-                                illegal_reg_sew         ||
-                                illegal_reg_emul        ||
-                                illegal_regnum_multiple_emul ||
-                                illegal_vs2_overlap_vd_lowpart)
+    illegal_vector_case :=  !vsetvl && (illegal_vstart_not_zero ||
+                            illegal_vd_unequal_vs1              ||
+                            illegal_vd_unequal_vs2              ||
+                            illegal_vd_overlap_v0               ||
+                            illegal_vtype_configure             ||
+                            illegal_vsew_vfloat                 ||
+                            illegal_reg_sew                     ||
+                            illegal_reg_emul                    ||
+                            illegal_regnum_multiple_emul        ||
+                            illegal_vs2_overlap_vd_lowpart)
   } // if usingvector
   io.deq.uop := uop
 

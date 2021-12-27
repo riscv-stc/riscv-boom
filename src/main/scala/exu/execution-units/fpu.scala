@@ -467,7 +467,7 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
   val vs2_fmt = Mux(vs2_sew === 3.U, D, Mux(vs2_sew === 2.U, S, H))
   when (io.req.valid && io_req.uop.is_rvv) {
     assert(io_req.uop.fp_val, "unexpected fp_val")
-    assert(vd_sew >= 1.U && vd_sew <= 3.U, "unsupported vd_sew")
+    //assert(vd_sew >= 1.U && vd_sew <= 3.U, "unsupported vd_sew"),  //vd_sew can be 0.U in vfncvt instructions
   }
   when (io_req.uop.is_rvv) {
     fp_ctrl.typeTagIn := Mux(fp_ctrl.swap12 || vs1_widen && !vs2_widen, vs2_fmt, vs1_fmt)
@@ -599,12 +599,13 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
 
   val hfma = (0 until vLen/16).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.H)))
 
-  val fpiu = (0 until vLen/16).map(i => Module(new tile.FPToInt))
+  val fpiu = (0 until vLen/16).map(i => Module(new tile.FPToInt(vector = true)))
   val fpiu_result = Wire(Vec(vLen/16, new tile.FPResult))
   val fpiu_out_valid = Wire(Vec(vLen/16, Bool()))
   val fpiu_out = fpiu.map(m => Pipe(RegNext(m.io.in.valid && !fp_ctrl.fastpipe), m.io.out.bits, fpu_latency-1))
   val fpiu_invert = reqpipe.bits.uop.uopc === uopVMFNE
-  val fpiu_dtype = Pipe(io.req.valid && !fp_ctrl.fastpipe, fp_ctrl.typeTagOut, fpu_latency).bits
+  val fpiu_dtype  = Pipe(io.req.valid && !fp_ctrl.fastpipe, fp_ctrl.typeTagOut, fpu_latency).bits
+  val fpiu_vd_sew = Pipe(io.req.valid && !fp_ctrl.fastpipe, vd_sew(0), fpu_latency).bits
 
   val fpmu = (0 until vLen/16).map(i => Module(new tile.FPToFP(fpu_latency)))
   val fpmu_dtype = Pipe(io.req.valid && fp_ctrl.fastpipe, fp_ctrl.typeTagOut, fpu_latency).bits
@@ -617,6 +618,7 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
     hfma(i).io.in.valid := active && io.req.valid && reqfue.hfma
 
     fpiu(i).io.in.bits  := fuInput(None, i)
+    fpiu(i).io.in.bits.wen := io.req.valid && reqfue.fpiu && fp_ctrl.typeTagOut === H && vd_sew === 0.U          // for vfncvt to int8/uint8 only
     fpiu(i).io.in.valid := active && io.req.valid && reqfue.fpiu &&
                            Mux(fp_ctrl.typeTagOut === D, (i < vLen/64).B,
                            Mux(fp_ctrl.typeTagOut === S, (i < vLen/32).B, true.B))
@@ -640,10 +642,11 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
       Mux(fuepipe.fpiu_vmf, Cat(reqpipe.bits.rs3_data(vLen-1,vLen/16), Cat(fpiu_result.slice(0, vLen/16).zipWithIndex.map{case(r,i) => Mux(fpiu_out_valid(i), r.data(0), reqpipe.bits.rs3_data(i))}.reverse)),
       Mux(fuepipe.fpiu_out && (fpiu_dtype === D), Cat(fpiu_result.slice(0, vLen/64).zipWithIndex.map{case(r,i) => Mux(fpiu_out_valid(i), r.data(63,0), reqpipe.bits.rs3_data(i*64+63,i*64))}.reverse),
       Mux(fuepipe.fpiu_out && (fpiu_dtype === S), Cat(fpiu_result.slice(0, vLen/32).zipWithIndex.map{case(r,i) => Mux(fpiu_out_valid(i), r.data(31,0), reqpipe.bits.rs3_data(i*32+31,i*32))}.reverse),
-      Mux(fuepipe.fpiu_out && (fpiu_dtype === H), Cat(fpiu_result.slice(0, vLen/16).zipWithIndex.map{case(r,i) => Mux(fpiu_out_valid(i), r.data(15,0), reqpipe.bits.rs3_data(i*16+15,i*16))}.reverse),
+      Mux(fuepipe.fpiu_out && (fpiu_dtype === H && fpiu_vd_sew === 1.U), Cat(fpiu_result.slice(0, vLen/16).zipWithIndex.map{case(r,i) => Mux(fpiu_out_valid(i), r.data(15,0), reqpipe.bits.rs3_data(i*16+15,i*16))}.reverse),
+      Mux(fuepipe.fpiu_out && (fpiu_dtype === H), Cat(fpiu_result.slice(0, vLen/16).zipWithIndex.map{case(r,i) => Mux(fpiu_out_valid(i), r.data(7,0), reqpipe.bits.rs3_data(i*8+7,i*8))}.reverse),
       Mux(fuepipe.fpmu && fpmu_dtype === D, Cat(fpmu.slice(0, vLen/64).zipWithIndex.map{case(m,i) => Mux(m.io.out.valid, ieee(box(m.io.out.bits.data, D))(63,0), reqpipe.bits.rs3_data(i*64+63,i*64))}.reverse),
       Mux(fuepipe.fpmu && fpmu_dtype === S, Cat(fpmu.slice(0, vLen/32).zipWithIndex.map{case(m,i) => Mux(m.io.out.valid, ieee(box(m.io.out.bits.data, S))(31,0), reqpipe.bits.rs3_data(i*32+31,i*32))}.reverse),
-                                            Cat(fpmu.zipWithIndex.map{                  case(m,i) => Mux(m.io.out.valid, ieee(box(m.io.out.bits.data, H))(15,0), reqpipe.bits.rs3_data(i*16+15,i*16))}.reverse))))))))))
+                                            Cat(fpmu.zipWithIndex.map{                  case(m,i) => Mux(m.io.out.valid, ieee(box(m.io.out.bits.data, H))(15,0), reqpipe.bits.rs3_data(i*16+15,i*16))}.reverse)))))))))))
 
   val fpu_out_exc =
       Mux(fuepipe.dfma, dfma.map(m => Mux(m.io.out.valid, m.io.out.bits.exc, 0.U)).reduce(_ | _),
