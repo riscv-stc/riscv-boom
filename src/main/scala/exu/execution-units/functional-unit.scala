@@ -1586,6 +1586,7 @@ class VecALUUnit(
   val isShift   = uop.uopc.isOneOf(uopVSLL, uopVSRL, uopVSRA)
   val isVMask   = uop.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
   val isInvert  = uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR)
+  val isScalarMove = uop.uopc.isOneOf(uopVMV_S_X, uopVFMV_S_F)
 
   // immediate generation
   val imm_xprlen = ImmGen(uop.imm_packed, uop.ctrl.imm_sel)
@@ -1603,7 +1604,7 @@ class VecALUUnit(
   mask     := Mux(uop.v_unmasked || withCarry || isMerge, ~(0.U(vLenb.W)),
               Cat((0 until vLen/8).map(b => rvm_data(b)).reverse))
   tail     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= vl).reverse)
-  inactive := prestart | body & ~mask | tail
+  inactive := Mux(isScalarMove, Cat(Fill(vLen/8-1, 1.U(1.W)), vstart >= vl), prestart | body & ~mask | tail)
   val byte_inactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
                             Seq(inactive,
                                 Cat((0 until vLenb/2).map(e => Fill(2, inactive(e))).reverse),

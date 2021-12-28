@@ -405,6 +405,9 @@ class RegisterRead(
         //io.vecUpdate(w).bits.uop.v_perm_idx := 0.U //perm_idx + (v_eidx < vl)
         //io.vecUpdate(w).bits.data           := 0.U //exe_reg_rs1_data(w)
         io.exe_reqs(w).bits.uop.v_active := is_active //Mux(vmove, !v_eidx.orR(), is_active)
+        when(io.exe_reqs(w).bits.uop.is_rvv && io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVFMV_V_F, uopVFMV_S_F)) {
+          io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
+        }
         //val vdiv_sqrt = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVFDIV, uopVFRDIV, uopVFSQRT, uopVDIV, uopVDIVU, uopVREM, uopVREMU)
         //val is_vmx = io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVSA, uopVSMA, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA, uopVSR)
         // forward inactive ops to ALU

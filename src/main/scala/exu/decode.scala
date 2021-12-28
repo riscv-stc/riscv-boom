@@ -323,10 +323,10 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   // vector stuff
   //
   if (usingVector) {
-    val csr_vsew  = io.csr_vconfig.vtype.vsew
-    val csr_vlmax = io.csr_vconfig.vtype.vlMax
-    val is_v_ls = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
-    val isVMVR: Bool   = cs.uopc.isOneOf(uopVMVR)
+    val csr_vsew       = io.csr_vconfig.vtype.vsew
+    val csr_vlmax      = io.csr_vconfig.vtype.vlMax
+    val is_v_ls        = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
+    val isVMVR         = cs.uopc.isOneOf(uopVMVR)
     val is_v_ls_index  = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     val is_v_mask_ld   = cs.uopc.isOneOf(uopVLM)
     val is_v_mask_st   = cs.uopc.isOneOf(uopVSMA)
@@ -336,7 +336,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_vmask_cnt_m = cs.uopc.isOneOf(uopVPOPC, uopVFIRST)
     val is_vmask_set_m = cs.uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
     val is_v_mask_insn = vmlogic_insn || is_vmask_cnt_m || is_vmask_set_m
-
+    val isScalarMove   = cs.uopc.isOneOf(uopVMV_X_S, uopVMV_S_X, uopVFMV_F_S, uopVFMV_S_F)
+    
     val vseg_nf = inst(NF_MSB, NF_LSB)
     val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) && !is_v_reg_ls
 
@@ -365,7 +366,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vlmul_value = Mux(is_v_mask_insn, 0.U, Cat(vlmul_sign, vlmul_mag))
     val vmvr_emul  = Mux(instRS1(2), 3.U, Mux(instRS1(1), 2.U, Mux(instRS1(0), 1.U, 0.U)))
     val vd_emul    = Mux(isVMVR, vmvr_emul,
-                     Mux(is_v_mask_ld || vmlogic_insn || uop.is_reduce || uop.rt(RD, isMaskVD), 0.U,
+                     Mux(isScalarMove || is_v_mask_ld || vmlogic_insn || uop.is_reduce || uop.rt(RD, isMaskVD), 0.U,
                      Mux(uop.rt(RD, isWidenV), vlmul_value + vd_wfactor,
                      Mux(uop.rt(RD, isNarrowV), vlmul_value - vd_nfactor,
                      Mux(is_v_reg_ls, Log2(vreg_nf + 1.U),
@@ -392,7 +393,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(is_v_reg_ls, vLenb.U << Log2(vreg_nf + 1.U) >> cs.v_ls_ew,
                      Mux(cs.uses_stq, Mux(is_v_mask_st, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl),
                      Mux(isVMVR, vLen_ecnt << vmvr_emul,
-                     Mux(is_v_mask_insn || vlmul_sign || csr_vlmax < vLen_ecnt, vLen_ecnt, csr_vlmax)))))
+                     Mux(isScalarMove || is_v_mask_insn || vlmul_sign || csr_vlmax < vLen_ecnt, vLen_ecnt, csr_vlmax)))))
     uop.is_rvv      := cs.is_rvv
     uop.v_ls_ew     := cs.v_ls_ew
     when (is_v_ls) {
@@ -507,7 +508,6 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                             illegal_vs2_overlap_vd_lowpart)
   } // if usingvector
   io.deq.uop := uop
-
   //assert(!id_illegal_insn)
 }
 

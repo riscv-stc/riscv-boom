@@ -777,20 +777,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   dis_valids := rename_stage.io.ren2_mask
   ren_stalls := rename_stage.io.ren_stalls
 
-  /*
-  // clear the unique flag in dispatched uops caused by vstart > 0 in the decode stage
-  // as only the first rvv inst is required to execute in unique mode
-  if(usingVector) {
-    val rvv_commit = (0 until coreParams.retireWidth).map{i => rob.io.commit.arch_valids(i) & rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).v_split_last}.reduce(_ || _)
-
-    for (w <- 0 until coreWidth) {
-      when (dis_uops(w).is_rvv && !dis_uops(w).uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)) {
-        dis_uops(w).is_unique := false.B
-      }
-    }
-  }
-  */
-
   /**
    * TODO This is a bit nasty, but it's currently necessary to
    * split the INT/FP rename pipelines into separate instantiations.
