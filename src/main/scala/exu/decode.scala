@@ -336,7 +336,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_vmask_cnt_m = cs.uopc.isOneOf(uopVPOPC, uopVFIRST)
     val is_vmask_set_m = cs.uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
     val is_v_mask_insn = vmlogic_insn || is_vmask_cnt_m || is_vmask_set_m
-    
+
     val vseg_nf = inst(NF_MSB, NF_LSB)
     val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) && !is_v_reg_ls
 
@@ -372,11 +372,12 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew - vsew + vlmul_value,
                      Mux(cs.allow_vd_is_v0, 0.U, vlmul_value)))))))
     val vs1_emul   = Mux(cs.uopc === uopVRGATHEREI16, vlmul_value + 1.U - vsew,
-                     Mux(uop.is_reduce, 0.U,
+                     Mux(vmlogic_insn || uop.is_reduce, 0.U,
                      Mux(uop.rt(RS1, isWidenV ), vlmul_value + 1.U, vlmul_value)))
-    val vs2_emul   = Mux(uop.rt(RS2, isWidenV), vlmul_value + vs2_wfactor,
+    val vs2_emul   = Mux(isVMVR, vmvr_emul,
+                     Mux(uop.rt(RS2, isWidenV), vlmul_value + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor, 
-                     Mux(is_viota_m, 0.U, vlmul_value)))
+                     Mux(vmlogic_insn || is_viota_m, 0.U, vlmul_value))))
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
       //assert(vsew >= vd_nfactor  && vsew + vd_wfactor  <= 3.U, "Unsupported vd_sew")
