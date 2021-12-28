@@ -777,6 +777,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   dis_valids := rename_stage.io.ren2_mask
   ren_stalls := rename_stage.io.ren_stalls
 
+  /*
   // clear the unique flag in dispatched uops caused by vstart > 0 in the decode stage
   // as only the first rvv inst is required to execute in unique mode
   if(usingVector) {
@@ -788,6 +789,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       }
     }
   }
+  */
 
   /**
    * TODO This is a bit nasty, but it's currently necessary to
