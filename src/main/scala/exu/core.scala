@@ -44,11 +44,12 @@ import boom.common.MicroOpcodes._
 import boom.ifu.{GlobalHistory, HasBoomFrontendParameters}
 import boom.exu.FUConstants._
 import boom.util._
+import boom.vlsu.{VLSUArchitecturalParams, VLSUTopBundle}
 
 /**
  * Top level core object that connects the Frontend to the rest of the pipeline.
  */
-class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
+class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(implicit p: Parameters) extends BoomModule
   with HasBoomFrontendParameters // TODO: Don't add this trait
 {
   val io = new freechips.rocketchip.tile.CoreBundle
@@ -62,6 +63,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     val ptw_tlb = new freechips.rocketchip.rocket.TLBPTWIO()
     val trace = Output(Vec(coreParams.retireWidth, new ExtendedTracedInstruction))
     val fcsr_rm = UInt(freechips.rocketchip.tile.FPConstants.RM_SZ.W)
+    val vlsu = if(usingVector) Some(Flipped(new VLSUTopBundle(vlsuparam.get))) else None
   }
   //**********************************
   // construct all of the modules
