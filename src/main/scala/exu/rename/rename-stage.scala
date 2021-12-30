@@ -468,20 +468,23 @@ class VecRenameBypass(
                o.rt(RD, isVector) && o.ldst_val).asUInt) &
        matchGroup(uop.lrs2 + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
     }
+    // FIXME: segment load/store
     val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (o,a) =>
-      //(Fill(8, ((a || uop.uses_stq) && i.U < grpCount(uop.vd_emul, 1.U) && uop.rt(RD, isVector) &&
       (Fill(8, (a && i.U < grpCount(uop.vd_emul, 1.U) && uop.rt(RD, isVector) &&
                o.rt(RD, isVector) && o.ldst_val).asUInt) &
        matchGroup(uop.ldst + i.U, o.ldst, o.vd_emul, o.v_seg_nf).asUInt).asBools
     }
 
-    val bypass_sel_rs1 = bypass_hits_rs1.map(x => PriorityEncoderOH(x.reverse).reverse)
-    val bypass_sel_rs2 = bypass_hits_rs2.map(x => PriorityEncoderOH(x.reverse).reverse)
-    val bypass_sel_dst = bypass_hits_dst.map(x => PriorityEncoderOH(x.reverse).reverse)
+    bypass_hits_rs1.map(x => assert(PopCount(x) <= 1.U))
+    bypass_hits_rs2.map(x => assert(PopCount(x) <= 1.U))
+    bypass_hits_dst.map(x => assert(PopCount(x) <= 1.U))
+    val bypass_sel_rs1 = bypass_hits_rs1
+    val bypass_sel_rs2 = bypass_hits_rs2
+    val bypass_sel_dst = bypass_hits_dst
 
-    val do_bypass_rs1 = bypass_hits_rs1.map(x => x.orR)
-    val do_bypass_rs2 = bypass_hits_rs2.map(x => x.orR)
-    val do_bypass_dst = bypass_hits_dst.map(x => x.orR)
+    val do_bypass_rs1 = PriorityEncoderOH(bypass_hits_rs1.map(x => x.orR).reverse).reverse
+    val do_bypass_rs2 = PriorityEncoderOH(bypass_hits_rs2.map(x => x.orR).reverse).reverse
+    val do_bypass_dst = PriorityEncoderOH(bypass_hits_dst.map(x => x.orR).reverse).reverse
 
     val bypass_pvd = older_uops.map(_.pvd)
     when (do_bypass_rs1.reduce(_ || _)) {
