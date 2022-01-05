@@ -136,8 +136,10 @@ class RegisterRead(
     if (vector) {
       val iss_uop = Wire(new MicroOp())
       iss_uop := io.iss_uops(w)
+      val vs1_nr  = nrVecGroup(iss_uop.vs1_emul)
+      val vs2_nr  = nrVecGroup(iss_uop.vs2_emul)
+      val vd_nr   = nrVecGroup(iss_uop.vd_emul)
       if (numReadPorts > 3) { // only for vec pipe, skip for vmx pipe
-        val vs2_nr  = nrVecGroup(io.iss_uops(w).vs2_emul)
         val vrp_iss = io.iss_valids(w) && (io.iss_uops(w).fu_code & FU_VRP).orR && vs2_nr > 1.U
         val vrp_val = RegInit(false.B)
         val vrp_last = Wire(Bool())
@@ -173,12 +175,13 @@ class RegisterRead(
           rrd_decode_unit.io.iss_uop.v_split_ecnt := vlen_ecnt
         }
       }
-      val rs1_sel = VRegSel(iss_uop.v_eidx, iss_uop.vs1_eew, eLenSelSz)
-      val rs2_sel = VRegSel(iss_uop.v_eidx, iss_uop.vs2_eew, eLenSelSz)
-      val rs3_sel = Mux(iss_uop.rt(RD, isMaskVD), VRegSel(iss_uop.v_eidx >> 3, 0.U, eLenSelSz),
-                                                  VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
+      val rs1_sel = Mux(vs1_nr === 0.U, 0.U, VRegSel(iss_uop.v_eidx, iss_uop.vs1_eew, eLenSelSz))
+      val rs2_sel = Mux(vs2_nr === 0.U, 0.U, VRegSel(iss_uop.v_eidx, iss_uop.vs2_eew, eLenSelSz))
+      val rs3_sel = Mux(vd_nr  === 0.U, 0.U, VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
+//    val rs3_sel = Mux(iss_uop.rt(RD, isMaskVD), VRegSel(iss_uop.v_eidx >> 3, 0.U, eLenSelSz),
+//                                                VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
       rs1_addr := iss_uop.pvs1(rs1_sel).bits
-      rs2_addr := Mux(iss_uop.uopc === uopVIOTA, iss_uop.pvs2(0).bits, iss_uop.pvs2(rs2_sel).bits)
+      rs2_addr := Mux(iss_uop.is_vmv_s2v, 0.U, iss_uop.pvs2(rs2_sel).bits)
       rs3_addr := iss_uop.stale_pvd(rs3_sel).bits
       rvm_addr := iss_uop.pvm
     }

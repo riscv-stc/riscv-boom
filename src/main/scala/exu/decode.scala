@@ -377,7 +377,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vs2_emul   = Mux(isVMVR, vmvr_emul,
                      Mux(uop.rt(RS2, isWidenV), vlmul_value + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor, 
-                     Mux(vmlogic_insn || is_viota_m, 0.U, vlmul_value))))
+                     Mux(vmlogic_insn || is_viota_m || uop.is_vmv_s2v, 0.U, vlmul_value))))
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
       //assert(vsew >= vd_nfactor  && vsew + vd_wfactor  <= 3.U, "Unsupported vd_sew")

@@ -209,6 +209,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
                                       MicroOpcodes.uopVLS,
                                       MicroOpcodes.uopVSSA)
   def rt(rs: UInt, f: UInt => Bool): Bool = f(Mux1H(UIntToOH(rs), Seq(dst_rtype, lrs1_rtype, lrs2_rtype)))
+  def is_vmv_s2v       = uopc.isOneOf(MicroOpcodes.uopVMV_V, MicroOpcodes.uopVFMV_V_F) && !rt(RS1, isVector)
 
   def match_group(prd: UInt): Bool = {
     val ret = Wire(Bool())
