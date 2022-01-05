@@ -36,6 +36,7 @@ case class BoomCoreParams(
   numIntPhysRegisters: Int = 96,
   numFpPhysRegisters: Int = 64,
   maxBrCount: Int = 4,
+  maxVconfigCount: Int = 4,
   numFetchBufferEntries: Int = 16,
   enableAgePriorityIssue: Boolean = true,
   enablePrefetching: Boolean = false,
@@ -47,6 +48,7 @@ case class BoomCoreParams(
   enableBTBFastRepair: Boolean = true,
   useAtomicsOnlyForIO: Boolean = false,
   ftq: FtqParameters = FtqParameters(),
+  vcq: VcqParameters = VcqParameters(),
   intToFpLatency: Int = 2,
   imulLatency: Int = 3,
   nPerfCounters: Int = 0,
@@ -174,7 +176,9 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val numLdqEntries = boomParams.numLdqEntries       // number of LAQ entries
   val numStqEntries = boomParams.numStqEntries       // number of SAQ/SDQ entries
   val maxBrCount    = boomParams.maxBrCount          // number of branches we can speculate simultaneously
+  val maxVconfigCount  = boomParams.maxVconfigCount  // number of vconfigs we can speculate simultaneously
   val ftqSz         = boomParams.ftq.nEntries        // number of FTQ entries
+  val vcqSz         = boomParams.vcq.nEntries        // number of FTQ entries
   val numFetchBufferEntries = boomParams.numFetchBufferEntries // number of instructions that stored between fetch&decode
 
   val numIntPhysRegs= boomParams.numIntPhysRegisters // size of the integer physical register file
@@ -277,6 +281,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val stqAddrSz       = log2Ceil(numStqEntries)
   val lsuAddrSz       = ldqAddrSz max stqAddrSz
   val brTagSz         = log2Ceil(maxBrCount)
+  val vconfigTagSz    = log2Ceil(maxVconfigCount)
 
   //************************************
   // vector stuff

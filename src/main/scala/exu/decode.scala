@@ -260,8 +260,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.lrs2       := instRS2
   uop.lrs3       := instRS3
 
-  //uop.ldst_val   := isSomeReg(cs.dst_type) && Mux(cs.is_rvv, !cs.uses_stq, !(uop.ldst === 0.U && uop.rt(RD, isInt)))
-  uop.ldst_val   := isSomeReg(cs.dst_type) && !(uop.ldst === 0.U && uop.rt(RD, isInt)) && Mux(cs.is_rvv, !cs.uses_stq, true.B)
+  uop.ldst_val   := isSomeReg(cs.dst_type) && !(uop.ldst === 0.U && uop.rt(RD, isInt)) && Mux(cs.is_rvv, !cs.uses_stq, true.B) 
   uop.dst_rtype  := cs.dst_type
   uop.lrs1_rtype := cs.rs1_type
   uop.lrs2_rtype := cs.rs2_type
@@ -297,7 +296,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.is_sys_pc2epc   := cs.is_sys_pc2epc
   uop.is_unique  := cs.inst_unique
   uop.flush_on_commit := cs.flush_on_commit || (csr_en && !csr_ren && io.csr_decode.write_flush)
-
+  uop.is_vsetivli := (cs.uopc === uopVSETIVLI)
+  uop.is_vsetvli := (cs.uopc === uopVSETVLI)
+  uop.vl_ready   := Mux(cs.not_use_vtype, true.B, io.enq.uop.vl_ready)
   uop.bypassable   := cs.bypassable
 
   //-------------------------------------------------------------
@@ -704,4 +705,109 @@ class BranchMaskGenerationLogic(val pl_width: Int)(implicit p: Parameters) exten
   }
 
   io.debug_branch_mask := branch_mask
+}
+
+
+class VconfigDecodeSignals(implicit p: Parameters) extends BoomBundle
+{
+  val vl_ready = Bool()
+  val vconfig    = new VConfig
+}
+
+class VconfigDecode(implicit p: Parameters) extends BoomModule
+{
+  val io = IO(new Bundle {
+    val inst    = Input(UInt(32.W))
+
+    val vconfig  = Output(new VConfig())
+    val vl_ready = Output(Bool())
+  })
+
+  val vtypei = io.inst(27,20)
+
+  io.vl_ready   := io.inst(31)
+  io.vconfig.vl := io.inst(19,15)
+  io.vconfig.vtype := VType.fromUInt(vtypei)
+}
+
+/**
+ * Track the current "vconfig mask", and give out the vconfig mask to each micro-op in Decode
+ * (each micro-op in the machine has a vconfig mask which says which vconfig it
+ * is being speculated under).
+ *
+ * @param pl_width pipeline width for the processor
+ */
+class VconfigMaskGenerationLogic(val pl_width: Int)(implicit p: Parameters) extends BoomModule
+{
+  val io = IO(new Bundle {
+    // guess if the uop is a vsetvli/vsetivli (we'll catch this later)
+    val is_vconfig = Input(Vec(pl_width, Bool()))
+    // lock in that it's actually a vconfig and will fire, so we update
+    // the vconfig_masks.
+    val will_fire = Input(Vec(pl_width, Bool()))
+
+    // give out tag immediately (needed in rename)
+    // mask can come later in the cycle
+    val vconfig_tag    = Output(Vec(pl_width, UInt(vconfigTagSz.W)))
+    val vconfig_mask   = Output(Vec(pl_width, UInt(maxVconfigCount.W)))
+
+    // tell decoders the vconfig mask has filled up, but on the granularity
+    // of an individual micro-op (so some micro-ops can go through)
+    val is_full   = Output(Vec(pl_width, Bool()))
+
+    //deadallocate the committed vconfig
+    val vconfig_mask_update  = Input(UInt(maxVconfigCount.W))
+    val flush_pipeline = Input(Bool())
+
+    val debug_vconfig_mask = Output(UInt(maxVconfigCount.W))
+  })
+
+  val spcvconfig_mask = RegInit(0.U(maxVconfigCount.W))
+
+  //-------------------------------------------------------------
+  // Give out the branch tag to each speculative vconfig micro-op
+
+  var allocate_mask = spcvconfig_mask
+  val tag_masks = Wire(Vec(pl_width, UInt(maxVconfigCount.W)))
+
+  for (w <- 0 until pl_width) {
+    // TODO this is a loss of performance as we're blocking vconfig based on potentially fake branches
+    io.is_full(w) := (allocate_mask === ~(0.U(maxVconfigCount.W))) && io.is_vconfig(w)
+
+    // find vconfig_tag and compute next vconfig_mask
+    val new_vconfig_tag = Wire(UInt(vconfigTagSz.W))
+    new_vconfig_tag := 0.U
+    tag_masks(w) := 0.U
+
+    for (i <- maxVconfigCount-1 to 0 by -1) {
+      when (~allocate_mask(i)) {
+        new_vconfig_tag := i.U
+        tag_masks(w) := (1.U << i.U)
+      }
+    }
+
+    io.vconfig_tag(w) := new_vconfig_tag
+    allocate_mask = Mux(io.is_vconfig(w), tag_masks(w) | allocate_mask, allocate_mask)
+  }
+
+  //-------------------------------------------------------------
+  // Give out the branch mask to each micro-op
+  // (kill off the bits that corresponded to branches that aren't going to fire)
+
+  var curr_mask = spcvconfig_mask
+  for (w <- 0 until pl_width) {
+    io.vconfig_mask(w) := io.vconfig_mask_update & curr_mask
+    curr_mask = Mux(io.will_fire(w), tag_masks(w) | curr_mask, curr_mask)
+  }
+
+  //-------------------------------------------------------------
+  // Update the current vconfig_mask
+
+  when (io.flush_pipeline) {
+    spcvconfig_mask := 0.U
+  } .otherwise {
+    spcvconfig_mask := io.vconfig_mask_update & curr_mask
+  }
+
+  io.debug_vconfig_mask := spcvconfig_mask
 }

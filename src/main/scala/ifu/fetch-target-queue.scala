@@ -18,13 +18,12 @@ package boom.ifu
 
 import chisel3._
 import chisel3.util._
-
-import freechips.rocketchip.config.{Parameters}
-import freechips.rocketchip.util.{Str}
-
+import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.util.Str
 import boom.common._
 import boom.exu._
 import boom.util._
+import freechips.rocketchip.rocket.VConfig
 
 /**
  * FTQ Parameters used in configurations
@@ -368,4 +367,83 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
 
   // perf event
   io.perf.full := full
+}
+
+
+case class VcqParameters(
+   nEntries: Int = 4
+)
+
+class VCQBundle(implicit p:Parameters) extends BoomBundle
+  with HasBoomFrontendParameters
+{
+  val vconfig = new VconfigDecodeSignals()
+}
+
+class GetVconfigFromVcqIO(implicit p: Parameters) extends BoomBundle
+{
+  val vcq_idx = Valid(UInt(log2Ceil(vcqSz).W))
+  val entry   = Output(new VCQBundle)
+}
+/**
+ * Queue to store the vconfig info that are inflight in the processor.
+ *
+ * @param num_entries # of entries in the VCQ
+ */
+class VconfigQueue(implicit p: Parameters) extends BoomModule
+  with HasBoomCoreParameters
+  with HasBoomFrontendParameters {
+  val num_entries = vcqSz
+  private val idx_sz = log2Ceil(num_entries)
+
+  val io = IO(new BoomBundle {
+    //Enqueue one entry when decode a vconfig instruction.
+    val enq = Flipped(Decoupled(new VconfigDecodeSignals()))
+    val enq_idx = Output(UInt(idx_sz.W))
+    val deq   = Input(Bool())
+    val flush = Input(Bool())
+
+    val get_vconfig = Output(new VconfigDecodeSignals())
+    val empty = Output(Bool())
+  })
+
+  val ram = Reg(Vec(num_entries, new VconfigDecodeSignals()))
+  ram.suggestName("vconfig_table")
+
+  val enq_ptr = RegInit(0.U(num_entries.W))
+  val deq_ptr = RegInit(0.U(num_entries.W))
+  val maybe_full = RegInit(false.B)
+
+  val ptr_match = enq_ptr === deq_ptr
+  val empty = ptr_match && !maybe_full
+  val full = ptr_match && maybe_full
+  val do_enq = WireDefault(io.enq.fire())
+  val do_deq = WireDefault(io.deq)
+
+  def inc(ptr: UInt) = {
+    val n = ptr.getWidth
+    Cat(ptr(n-2,0), ptr(n-1))
+  }
+
+  when(do_enq) {
+    ram(enq_ptr) := io.enq.bits
+    enq_ptr := inc(enq_ptr)
+  }
+  io.enq_idx := enq_ptr
+
+  when(do_deq) {
+    deq_ptr := inc(deq_ptr)
+  }
+  when(do_enq =/= do_deq) {
+    maybe_full := do_enq
+  }
+  when(io.flush) {
+    enq_ptr := 1.U
+    deq_ptr := 1.U
+    maybe_full := false.B
+  }
+
+  io.enq.ready := !full
+  io.get_vconfig := ram(deq_ptr)
+  io.empty := empty
 }
