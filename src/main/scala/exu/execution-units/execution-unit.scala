@@ -654,7 +654,6 @@ class VecExeUnit(
   val div_busy  = WireInit(false.B)
   val vmx_busy  = WireInit(false.B)
   val fdiv_busy = WireInit(false.B)
-  val div_busy_dly = RegNext(div_busy)
   val vrp_busy  = WireInit(false.B)
 
   // The Functional Units --------------------
@@ -788,7 +787,7 @@ class VecExeUnit(
     div.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
 
     div_resp_val := div.io.resp.valid
-    div_busy     := !div.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)) || !div_busy_dly
+    div_busy     := !div.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV))
 
     vec_fu_units += div
   }*/
@@ -803,7 +802,7 @@ class VecExeUnit(
     vdiv.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
 
     div_resp_val := vdiv.io.resp.valid
-    div_busy     := !vdiv.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)) || !div_busy_dly
+    div_busy     := !vdiv.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV))
 
     vec_fu_units += vdiv
   }

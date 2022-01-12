@@ -114,14 +114,21 @@ class IssueUnitCollapsing(
     port_issued(w) = false.B
   }
 
+  val iss_valids_prev = RegNext(io.iss_valids)
+  val iss_fucode_prev = RegNext(io.iss_uops)
+
   for (i <- 0 until numIssueSlots) {
     issue_slots(i).grant := false.B
     var uop_issued = false.B
 
     for (w <- 0 until issueWidth) {
       val can_allocate = (issue_slots(i).uop.fu_code & io.fu_types(w)) =/= 0.U
+      // Div (vdiv) cannot be issued continously
+      val isDivPrev = iss_valids_prev(w) && iss_fucode_prev(w).fu_code === FU_DIV
+      val isDivCurr = issue_slots(i).uop.fu_code === FU_DIV
+      val canDivIss = !(isDivCurr && isDivPrev)
 
-      when (requests(i) && !uop_issued && can_allocate && !port_issued(w)) {
+      when (requests(i) && !uop_issued && can_allocate && !port_issued(w) && canDivIss) {
         issue_slots(i).grant := true.B
         io.iss_valids(w) := true.B
         io.iss_uops(w) := issue_slots(i).uop
