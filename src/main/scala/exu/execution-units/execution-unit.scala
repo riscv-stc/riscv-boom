@@ -154,7 +154,8 @@ abstract class ExecutionUnit(
     val com_exception = if (hasMem || hasRocc) Input(Bool()) else null
 
     val perf = Output(new Bundle {
-      val div_busy = if (hasDiv) Output(Bool()) else null
+      val div_busy  = if (hasDiv) Output(Bool())  else null
+      val fdiv_busy = if (hasFdiv) Output(Bool()) else null
     })
   })
 
@@ -552,6 +553,8 @@ class FPUExeUnit(
     fdiv_resp_fflags := fdivsqrt.io.resp.bits.fflags
 
     fu_units += fdivsqrt
+
+    io.perf.fdiv_busy := fdiv_busy
   }
 
   // Outputs (Write Port #0)  ---------------
@@ -813,6 +816,8 @@ class VecExeUnit(
     div_busy     := !vdiv.io.req.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV))
 
     vec_fu_units += vdiv
+
+    io.perf.div_busy := div_busy
   }
 
 
@@ -857,6 +862,8 @@ class VecExeUnit(
 
     vec_fu_units += fdivsqrt
     //vresp_fu_units += fdivsqrt
+
+    io.perf.fdiv_busy := fdiv_busy
   }
 
   vec_fu_units.map(f => {

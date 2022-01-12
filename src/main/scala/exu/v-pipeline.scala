@@ -61,6 +61,19 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
     val debug_wb_wdata   = Output(Vec(numWakeupPorts, UInt((eLen).W)))
+
+    val perf = Output(new Bundle {
+      val vec_iss_valids      = Vec(vecIssueParams.issueWidth, Bool())
+      val vec_req_valids      = Vec(vecIssueParams.issueWidth, Bool())
+      val vec_iss_slots_empty = Bool()
+      val vec_iss_slots_full  = Bool()
+      val vmx_iss_valids      = Vec(vmxIssueParams.issueWidth, Bool())
+      val vmx_req_valids      = Vec(vmxIssueParams.issueWidth, Bool())
+      val vmx_iss_slots_empty = Bool()
+      val vmx_iss_slots_full  = Bool()
+      val div_busy            = Vec(vecIssueParams.issueWidth, Bool())
+      val fdiv_busy           = Vec(vecIssueParams.issueWidth, Bool())
+    })
   })
 
   //**********************************
@@ -131,6 +144,17 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
   // **** Issue Stage ****
   //-------------------------------------------------------------
+  io.perf.vec_iss_valids := vec_issue_unit.io.iss_valids
+  io.perf.vec_req_valids := (0 until vecWidth).map(i => exe_units(i).io.req.valid)
+  io.perf.vec_iss_slots_empty := vec_issue_unit.io.perf.empty
+  io.perf.vec_iss_slots_full  := vec_issue_unit.io.perf.full
+  io.perf.div_busy  := (0 until vecWidth).map(i => if(exe_units(i).hasDiv)  exe_units(i).io.perf.div_busy  else false.B)
+  io.perf.fdiv_busy := (0 until vecWidth).map(i => if(exe_units(i).hasFdiv) exe_units(i).io.perf.fdiv_busy else false.B)
+
+  io.perf.vmx_iss_valids := vmx_issue_unit.io.iss_valids
+  io.perf.vmx_req_valids := (vecWidth until vecWidth+1).map(i => exe_units(i).io.req.valid)
+  io.perf.vmx_iss_slots_empty := vmx_issue_unit.io.perf.empty
+  io.perf.vmx_iss_slots_full  := vmx_issue_unit.io.perf.full
 
   // Output (Issue)
   for (i <- 0 until vecWidth) {

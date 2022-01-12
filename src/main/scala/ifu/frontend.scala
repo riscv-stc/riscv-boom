@@ -259,7 +259,13 @@ class IFUPerfEvents extends FrontendPerfEvents {
   val f4_clear = Bool()
 
   val fb_full = Bool()
+  val fb_empty = Bool()
   val ftq_full = Bool()
+
+  val iCache_stalls  = Bool() 
+  val iTLB_stalls    = Bool() 
+  val badResteers    = Bool()
+  val unknownsBranchCycles = Bool()
 }
 
 
@@ -1048,7 +1054,50 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   io.cpu.perf.f4_clear := f4_clear
 
   io.cpu.perf.fb_full  := fb.io.perf.maybe_full
+  io.cpu.perf.fb_empty  := fb.io.perf.amost_empty
   io.cpu.perf.ftq_full := ftq.io.perf.full
+
+  val badResteers_flag = RegInit(false.B)
+  when (io.cpu.redirect_flush) {
+    badResteers_flag := true.B
+  } .elsewhen(!io.cpu.perf.fb_empty){
+    badResteers_flag := false.B
+  }
+  io.cpu.perf.badResteers    := badResteers_flag & io.cpu.perf.fb_empty
+
+  val icache_stall_scope = RegInit(false.B)
+  val icache_stall_find = RegInit(false.B)
+  when(io.cpu.perf.acquire & ~icache.io.resp.valid){
+    icache_stall_scope := true.B
+  } .elsewhen(f4_clear){
+    icache_stall_scope := false.B
+  } .elsewhen(icache.io.resp.valid){
+    icache_stall_scope := false.B
+  }
+
+  when(RegNext(RegNext(icache_stall_scope)) & io.cpu.perf.fb_empty){
+    icache_stall_find := true.B
+  } .elsewhen(~io.cpu.perf.fb_empty){
+    icache_stall_find := false.B
+  }
+  io.cpu.perf.iCache_stalls  := icache_stall_find
+
+  io.cpu.perf.iTLB_stalls    := false.B
+
+  val unknownsBranch_scope = RegInit(false.B)
+  when(f4_clear || badResteers_flag){
+    unknownsBranch_scope := false.B
+  } .elsewhen(ShiftRegister(f2_clear, 3) && io.cpu.perf.fb_empty){
+    unknownsBranch_scope := true.B
+  } .elsewhen(ShiftRegister(f1_clear, 4) && io.cpu.perf.fb_empty){
+    unknownsBranch_scope := true.B
+  } .elsewhen(ShiftRegister(f1_do_redirect, 3) && ShiftRegister(f2_do_redirect, 2) && io.cpu.perf.fb_empty){
+    unknownsBranch_scope := true.B
+  } .elsewhen(~io.cpu.perf.fb_empty){
+    unknownsBranch_scope := false.B
+  }
+
+  io.cpu.perf.unknownsBranchCycles := unknownsBranch_scope
 
   override def toString: String =
     (BoomCoreStringPrefix("====Overall Frontend Params====") + "\n"

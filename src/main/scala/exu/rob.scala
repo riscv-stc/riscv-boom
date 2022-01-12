@@ -116,6 +116,7 @@ class RobIo(
     val empty = Bool()
     val full  = Bool()
     val ready = Bool()
+    val com_load_is_at_rob_head = Bool()
   })
 }
 
@@ -879,6 +880,7 @@ class Rob(
   io.perf.empty := empty
   io.perf.full  := full
   io.perf.ready := io.ready
+  io.perf.com_load_is_at_rob_head := io.com_load_is_at_rob_head
 
   //-----------------------------------------------
   //-----------------------------------------------

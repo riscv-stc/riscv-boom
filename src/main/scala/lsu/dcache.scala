@@ -800,8 +800,8 @@ class BoomNonBlockingDCacheModule(outer: BoomNonBlockingDCache) extends LazyModu
 
   tl_out.e <> mshrs.io.mem_finish
 
-  io.lsu.perf.mshrs_has_busy := mshrs.io.perf.mshr_busy_vec.reduce(_&&_)
-  io.lsu.perf.mshrs_all_busy := mshrs.io.perf.mshr_busy_vec.reduce(_||_)
+  io.lsu.perf.mshrs_has_busy := mshrs.io.perf.mshr_busy_vec.reduce(_||_)
+  io.lsu.perf.mshrs_all_busy := mshrs.io.perf.mshr_busy_vec.reduce(_&&_)
   io.lsu.perf.mshrs_load_establish := mshrs.io.perf.mshr_load_establish_vec.reduce(_||_)
   io.lsu.perf.mshrs_load_reuse := mshrs.io.perf.mshr_load_reuse_vec.reduce(_||_)
   io.lsu.perf.mshrs_store_establish := mshrs.io.perf.mshr_store_establish_vec.reduce(_||_)

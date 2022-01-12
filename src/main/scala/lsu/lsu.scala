@@ -179,6 +179,7 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
     val mshrs_store_reuse = Bool()
     val iomshrs_has_busy = Bool()
     val iomshrs_all_busy = Bool()
+    val in_flight_load   = Bool()
   })
 }
 
@@ -288,7 +289,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   io.core.perf.mshrs_store_reuse := io.dmem.perf.mshrs_store_reuse
   io.core.perf.iomshrs_has_busy := io.dmem.perf.iomshrs_has_busy
   io.core.perf.iomshrs_all_busy := io.dmem.perf.iomshrs_all_busy
-
+  io.core.perf.in_flight_load := (0 until numLdqEntries).map(i => ldq(i).valid && ldq(i).bits.executed && !ldq(i).bits.succeeded).reduce(_ || _)
 
   val clear_store     = WireInit(false.B)
   val live_store_mask = RegInit(0.U(numStqEntries.W))
@@ -318,9 +319,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   var ld_enq_idx = ldq_tail
   var st_enq_idx = stq_tail
 
-  val ldq_nonempty = (0 until numStqEntries).map{ i => ldq(i).valid }.reduce(_||_) =/= 0.U
-  io.core.perf.ldq_nonempty := ldq_nonempty
+  val ldq_nonempty = (0 until numLdqEntries).map{ i => ldq(i).valid }.reduce(_||_) =/= 0.U
   val stq_nonempty = (0 until numStqEntries).map{ i => stq(i).valid }.reduce(_||_) =/= 0.U
+  io.core.perf.ldq_nonempty := ldq_nonempty
   io.core.perf.stq_nonempty := stq_nonempty
 
   var ldq_full = Bool()

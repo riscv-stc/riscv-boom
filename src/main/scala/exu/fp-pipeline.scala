@@ -60,6 +60,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
       val exe_units_req_valids = Vec(fpIssueParams.issueWidth, Bool())
       val iss_slots_empty = Bool()
       val iss_slots_full  = Bool()
+      val fdiv_busy       = Vec(fpIssueParams.issueWidth, Bool())
     })
   })
 
@@ -100,6 +101,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   io.perf.exe_units_req_valids := exe_units.map(u => u.io.req.valid)
   io.perf.iss_slots_full := issue_unit.io.perf.full
   io.perf.iss_slots_empty := issue_unit.io.perf.empty
+  io.perf.fdiv_busy := exe_units.map(u => if(u.hasFdiv) u.io.perf.fdiv_busy else false.B)
 
   issue_unit.io.tsc_reg := io.debug_tsc_reg
   issue_unit.io.brupdate := io.brupdate

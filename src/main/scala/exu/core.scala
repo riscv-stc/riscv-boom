@@ -177,6 +177,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dec_valids = Wire(Vec(coreWidth, Bool()))  // are the decoded instruction valid? It may be held up though.
   val dec_uops   = Wire(Vec(coreWidth, new MicroOp()))
   val dec_hazards= Wire(Vec(coreWidth, Bool()))
+  val dec_stalls = Wire(Vec(coreWidth, Bool()))
   val dec_fe_fire= Wire(Vec(coreWidth, Bool()))  // can the instruction pop from instruction buffer
   val dec_fire   = Wire(Vec(coreWidth, Bool()))  // can the instruction fire beyond decode?
                                                     // (can still be stopped in ren or dis)
@@ -282,53 +283,88 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   //-------------------------------------------------------------
   // Uarch Hardware Performance Events (HPEs)
-  val retired_store = Wire(Vec(coreWidth, Bool()))
-  val retired_load = Wire(Vec(coreWidth, Bool()))
-  val retired_amo = Wire(Vec(coreWidth, Bool()))
-  val retired_system = Wire(Vec(coreWidth, Bool()))
-  val csr_insn = Wire(Vec(coreWidth, Bool()))
-  val int_insn = Wire(Vec(coreWidth, Bool()))
-  val retired_arith = Wire(Vec(coreWidth, Bool()))
-  val retired_branch = Wire(Vec(coreWidth, Bool()))
-  val retired_jal = Wire(Vec(coreWidth, Bool()))
-  val retired_jalr = Wire(Vec(coreWidth, Bool()))
-  val retired_mul = Wire(Vec(coreWidth, Bool()))
-  val retired_div = Wire(Vec(coreWidth, Bool()))
+  // scalar int instructions
+  val retired_int       = Wire(Vec(coreWidth, Bool()))
+  val retired_load      = Wire(Vec(coreWidth, Bool()))
+  val retired_store     = Wire(Vec(coreWidth, Bool()))
+  val retired_amo       = Wire(Vec(coreWidth, Bool()))
+  val retired_system    = Wire(Vec(coreWidth, Bool()))
+  val retired_fence     = Wire(Vec(coreWidth, Bool()))
+  val retired_fencei    = Wire(Vec(coreWidth, Bool()))
+  val retired_branch    = Wire(Vec(coreWidth, Bool()))
+  val retired_jal       = Wire(Vec(coreWidth, Bool()))
+  val retired_jalr      = Wire(Vec(coreWidth, Bool()))
+  val retired_alu       = Wire(Vec(coreWidth, Bool()))
+  val retired_mul       = Wire(Vec(coreWidth, Bool()))
+  val retired_div       = Wire(Vec(coreWidth, Bool()))
+  // scalar float instuctions
+  val retired_fp        = Wire(Vec(coreWidth, Bool()))
+  val retired_fp_load   = Wire(Vec(coreWidth, Bool()))
+  val retired_fp_store  = Wire(Vec(coreWidth, Bool()))
+  val retired_fp_fpu    = Wire(Vec(coreWidth, Bool()))
+  val retired_fp_div    = Wire(Vec(coreWidth, Bool()))
+  // vector instructions
+  val retired_rvv       = Wire(Vec(coreWidth, Bool()))
+  val retired_rvv_vset  = Wire(Vec(coreWidth, Bool()))
+  val retired_rvv_load  = Wire(Vec(coreWidth, Bool()))
+  val retired_rvv_store = Wire(Vec(coreWidth, Bool()))
+  val retired_rvv_int   = Wire(Vec(coreWidth, Bool()))
+  val retired_rvv_float = Wire(Vec(coreWidth, Bool()))
+  val retired_rvv_div   = Wire(Vec(coreWidth, Bool()))
+  val retired_rvv_fdiv  = Wire(Vec(coreWidth, Bool()))
+  val retired_rvv_red   = Wire(Vec(coreWidth, Bool()))
 
-  val retired_fp_store = Wire(Vec(coreWidth, Bool()))
-  val retired_fp_load = Wire(Vec(coreWidth, Bool()))
-  val retired_fp_add = Wire(Vec(coreWidth, Bool()))
-  val retired_fp_mul = Wire(Vec(coreWidth, Bool()))
-  val retired_fp_madd = Wire(Vec(coreWidth, Bool()))
-  val retired_fp_div = Wire(Vec(coreWidth, Bool()))
-  val retired_fp_other = Wire(Vec(coreWidth, Bool()))
-
-  val branch_cnt = RegInit(0.U(64.W))
-  val store_cnt = RegInit(0.U(64.W))
-  val load_cnt = RegInit(0.U(64.W))
+  val branch_cnt     = RegInit(0.U(64.W))
+  val store_cnt      = RegInit(0.U(64.W))
+  val load_cnt       = RegInit(0.U(64.W))
+  val retire_cnt     = RegInit(0.U(64.W))
+  val retire_cnt_int = RegInit(0.U(64.W))
+  val retire_cnt_fp  = RegInit(0.U(64.W))
+  /* for debug only*/
+  val rvv_cnt       = RegInit(0.U(64.W))
+  val rvv_cnt_vset  = RegInit(0.U(64.W))
+  val rvv_cnt_load  = RegInit(0.U(64.W))
+  val rvv_cnt_store = RegInit(0.U(64.W))
+  val rvv_cnt_int   = RegInit(0.U(64.W))
+  val rvv_cnt_float = RegInit(0.U(64.W))
+  val rvv_cnt_div   = RegInit(0.U(64.W))
+  val rvv_cnt_fdiv  = RegInit(0.U(64.W))
+  val rvv_cnt_red   = RegInit(0.U(64.W))
 
   for (w <- 0 until coreWidth) {
-    val insn_is_rvv = if(usingVector) rob.io.commit.uops(w).is_rvv else false.B
-    int_insn(w) := !(rob.io.commit.uops(w).fp_val || insn_is_rvv)
-    retired_load(w)   := rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_ldq && int_insn(w)
-    retired_store(w)  := rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_stq && int_insn(w)
-    retired_amo(w)    := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_amo && int_insn(w)
-    csr_insn(w)       := (rob.io.commit.uops(w).ctrl.csr_cmd =/= freechips.rocketchip.rocket.CSR.N)
-    retired_system(w) := rob.io.commit.valids(w) && csr_insn(w)
-    retired_arith(w)  := rob.io.commit.valids(w) && int_insn(w) && !(rob.io.commit.uops(w).is_jal || rob.io.commit.uops(w).is_jalr || rob.io.commit.uops(w).uses_stq || rob.io.commit.uops(w).uses_ldq || rob.io.commit.uops(w).is_amo || csr_insn(w))
-    retired_branch(w) := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_br
-    retired_jal(w)    := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_jal
-    retired_jalr(w)   := rob.io.commit.valids(w) && rob.io.commit.uops(w).is_jalr
-    retired_mul(w)    := rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_MUL) && int_insn(w)
-    retired_div(w)    := rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_DIV) && int_insn(w)
-
-    retired_fp_store(w) := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_stq
-    retired_fp_load(w)  := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uses_ldq
-    retired_fp_add(w)   := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uopc.isOneOf(uopFADD_S, uopFSUB_S, uopFADD_D, uopFSUB_D)
-    retired_fp_mul(w)   := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uopc.isOneOf(uopFMUL_S, uopFMUL_D)
-    retired_fp_madd(w)  := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && rob.io.commit.uops(w).uopc.isOneOf(uopFMADD_S, uopFMSUB_S, uopFNMADD_S, uopFNMSUB_S, uopFMADD_D, uopFMSUB_D, uopFNMADD_D, uopFNMSUB_D)
-    retired_fp_div(w)   := rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w) && (rob.io.commit.uops(w).fu_code === FU_FDV)
-    retired_fp_other(w) := rob.io.commit.uops(w).fp_val && !(retired_fp_store(w) || retired_fp_load(w) || retired_fp_add(w) || retired_fp_mul(w) || retired_fp_div(w))
+    val isInsRvv = rob.io.commit.valids(w) &&  rob.io.commit.uops(w).is_rvv
+    val isInsFp  = rob.io.commit.valids(w) && !rob.io.commit.uops(w).is_rvv &&  rob.io.commit.uops(w).fp_val
+    val isInsInt = rob.io.commit.valids(w) && !rob.io.commit.uops(w).is_rvv && !rob.io.commit.uops(w).fp_val
+    // retired scalar int instructions
+    retired_int(w)      := isInsInt
+    retired_load(w)     := isInsInt && rob.io.commit.uops(w).uses_ldq
+    retired_amo(w)      := isInsInt && rob.io.commit.uops(w).is_amo
+    retired_system(w)   := isInsInt && (rob.io.commit.uops(w).ctrl.csr_cmd =/= freechips.rocketchip.rocket.CSR.N)
+    retired_fence(w)    := isInsInt && rob.io.commit.uops(w).is_fence
+    retired_fencei(w)   := isInsInt && rob.io.commit.uops(w).is_fencei
+    retired_store(w)    := isInsInt && rob.io.commit.uops(w).uses_stq && !rob.io.commit.uops(w).is_amo && !rob.io.commit.uops(w).is_fence
+    retired_branch(w)   := isInsInt && rob.io.commit.uops(w).is_br
+    retired_jal(w)      := isInsInt && rob.io.commit.uops(w).is_jal
+    retired_jalr(w)     := isInsInt && rob.io.commit.uops(w).is_jalr
+    retired_alu(w)      := isInsInt && rob.io.commit.uops(w).fu_code.isOneOf(FU_ALU) && !rob.io.commit.uops(w).is_br
+    retired_mul(w)      := isInsInt && rob.io.commit.uops(w).fu_code.isOneOf(FU_MUL)
+    retired_div(w)      := isInsInt && rob.io.commit.uops(w).fu_code.isOneOf(FU_DIV)
+    // retired scalar float instructions
+    retired_fp(w)       := isInsFp
+    retired_fp_load(w)  := isInsFp && rob.io.commit.uops(w).uses_ldq
+    retired_fp_store(w) := isInsFp && rob.io.commit.uops(w).uses_stq
+    retired_fp_fpu(w)   := isInsFp && rob.io.commit.uops(w).fu_code.isOneOf(FU_FPU, FU_F2I, FU_I2F)
+    retired_fp_div(w)   := isInsFp && rob.io.commit.uops(w).fu_code.isOneOf(FU_FDV)
+    // retired vector instructions
+    retired_rvv(w)      := isInsRvv && rob.io.commit.uops(w).v_split_last
+    retired_rvv_vset(w) := retired_rvv(w) && rob.io.commit.uops(w).uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
+    retired_rvv_load(w) := retired_rvv(w) && rob.io.commit.uops(w).uses_ldq
+    retired_rvv_store(w):= retired_rvv(w) && rob.io.commit.uops(w).uses_stq
+    retired_rvv_int(w)  := retired_rvv(w) && !rob.io.commit.uops(w).fp_val && !rob.io.commit.uops(w).uses_ldq && !rob.io.commit.uops(w).uses_stq && !rob.io.commit.uops(w).uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
+    retired_rvv_float(w):= retired_rvv(w) && rob.io.commit.uops(w).fp_val
+    retired_rvv_div(w)  := retired_rvv_int(w)   && rob.io.commit.uops(w).fu_code.isOneOf(FU_DIV)
+    retired_rvv_fdiv(w) := retired_rvv_float(w) && rob.io.commit.uops(w).fu_code.isOneOf(FU_FDV)
+    retired_rvv_red(w)  := retired_rvv(w)       && rob.io.commit.uops(w).fu_code.isOneOf(FU_IVRP, FU_FVRP)
 
     when(retired_branch(w).asBool) {
       branch_cnt := branch_cnt + 1.U
@@ -356,147 +392,276 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }
   }
 
-  val insnCommitBaseEvents = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
-     ("int load",    () => retired_load(w)),
-     ("int store",   () => retired_store(w)),
-     ("int amo",     () => retired_amo(w)),
-     ("int system",  () => retired_system(w)),
-     ("int arith",   () => retired_arith(w)),
-     ("int branch",  () => retired_branch(w)),
-     ("int jal",     () => retired_jal(w)),
-     ("int jalr",    () => retired_jalr(w)),
-     ("int mul",     () => retired_mul(w)),
-     ("int div",     () => retired_div(w)))
-     ++ (if (!usingFPU) Seq() else Seq(
-       ("fp insn",     () => rob.io.commit.uops(w).fp_val && rob.io.commit.valids(w)),
-       ("fp load",     () => retired_fp_load(w)),
-       ("fp store",    () => retired_fp_store(w)),
-       ("fp add",      () => retired_fp_add(w)),
-       ("fp mul",      () => retired_fp_mul(w)),
-       ("fp mul-add",  () => retired_fp_madd(w)),
-       ("fp div",      () => retired_fp_div(w)),
-       ("fp other",    () => retired_fp_other(w))))
-    ++ (if (!usingVector) Seq() else Seq(
-      ("vector instruction retired",      () => rob.io.commit.uops(w).is_rvv && rob.io.commit.valids(w))))
-   ))
+  /* for debug counters only*/
+  retire_cnt_int := retire_cnt_int + PopCount(retired_int)
+  retire_cnt_fp  := retire_cnt_fp  + PopCount(retired_fp)
+  rvv_cnt        := rvv_cnt        + PopCount(retired_rvv)
+  rvv_cnt_vset   := rvv_cnt_vset   + PopCount(retired_rvv_vset)
+  rvv_cnt_load   := rvv_cnt_load   + PopCount(retired_rvv_load)
+  rvv_cnt_store  := rvv_cnt_store  + PopCount(retired_rvv_store)
+  rvv_cnt_int    := rvv_cnt_int    + PopCount(retired_rvv_int)
+  rvv_cnt_float  := rvv_cnt_float  + PopCount(retired_rvv_float)
+  rvv_cnt_div    := rvv_cnt_div    + PopCount(retired_rvv_div)
+  rvv_cnt_fdiv   := rvv_cnt_fdiv   + PopCount(retired_rvv_fdiv)
+  rvv_cnt_red    := rvv_cnt_red    + PopCount(retired_rvv_red)
 
-  val micrArchEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
-     ("exception",                         () => rob.io.com_xcpt.valid),
-     ("front-end f1 is resteered",         () => io.ifu.perf.f1_clear),
-     ("front-end f2 is resteered",         () => io.ifu.perf.f2_clear),
-     ("front-end f3 is resteered",         () => io.ifu.perf.f3_clear),
-     ("front-end f4 is resteered",         () => io.ifu.perf.f4_clear)
-   ))
-
-  val resourceEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
-     ("frontend fb full",                  () => io.ifu.perf.fb_full),
-     ("frontend ftq full",                 () => io.ifu.perf.ftq_full),
-     ("fp issue slots full",               () => fp_pipeline.io.perf.iss_slots_full),
-     ("fp issue slots empty",              () => fp_pipeline.io.perf.iss_slots_empty),
-     ("int issue slots full",              () => int_iss_unit.io.perf.full),
-     ("int issue slots empty",             () => int_iss_unit.io.perf.empty),
-     ("mem issue slots full",              () => mem_iss_unit.io.perf.full),
-     ("mem issue slots empty",             () => mem_iss_unit.io.perf.empty),
-     ("load queue almost full",            () => io.lsu.ldq_full.reduce(_||_)),
-     ("store queue almost full",           () => io.lsu.stq_full.reduce(_||_)),
-     ("rob entry empty",                   () => rob.io.perf.empty),
-     ("rob entry full",                    () => rob.io.perf.full)
-   ))
-
-
-  val memorySystemEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
-     ("MSHR reuse",           () => io.lsu.perf.mshrs_reuse),
-     ("MSHR load establish",  () => io.lsu.perf.mshrs_load_establish),
-     ("MSHR load reuse",      () => io.lsu.perf.mshrs_load_reuse),
-     ("MSHR store establish", () => io.lsu.perf.mshrs_store_establish),
-     ("MSHR store reuse",     () => io.lsu.perf.mshrs_store_reuse),
-     ("I$ miss",              () => io.ifu.perf.acquire),
-     ("D$ miss",              () => io.lsu.perf.acquire),
-     ("D$ release",           () => io.lsu.perf.release),
-     ("ITLB miss",            () => io.ifu.perf.tlbMiss),
-     ("DTLB miss",            () => io.lsu.perf.tlbMiss),
-     ("L2 TLB miss",          () => io.ptw.perf.l2miss)
-     ))
-
-  // split at ifu-fetuchBuffer < - > decode
-  val ifu_redirect_flush_stat = RegInit(false.B)
-  when(io.ifu.redirect_flush || io.ifu.sfence.valid){
-    ifu_redirect_flush_stat := true.B
-  } .elsewhen(io.ifu.fetchpacket.valid){
-    ifu_redirect_flush_stat := false.B
+  when(retired_rvv.orR) {
+    printf("rvv_cnt: %d\n", rvv_cnt.asUInt())
   }
 
+  when(retired_rvv_vset.orR) {
+    printf("rvv_cnt_vset: %d\n", rvv_cnt_vset.asUInt())
+  }
 
+  when(retired_rvv_load.orR) {
+    printf("rvv_cnt_load: %d\n", rvv_cnt_load.asUInt())
+  }
+
+  when(retired_rvv_store.orR) {
+    printf("rvv_cnt_store: %d\n", rvv_cnt_store.asUInt())
+  }
+
+  when(retired_rvv_int.orR) {
+    printf("rvv_cnt_int: %d\n", rvv_cnt_int.asUInt())
+  }
+
+  when(retired_rvv_float.orR) {
+    printf("rvv_cnt_float: %d\n", rvv_cnt_float.asUInt())
+  }
+
+  when(retired_rvv_div.orR) {
+    printf("rvv_cnt_div: %d\n", rvv_cnt_div.asUInt())
+  }
+
+  when(retired_rvv_fdiv.orR) {
+    printf("rvv_cnt_fdiv: %d\n", rvv_cnt_fdiv.asUInt())
+  }
+
+  when(retired_rvv_red.orR) {
+    printf("rvv_cnt_red: %d\n", rvv_cnt_red.asUInt())
+  }
+
+  val insnCommitBaseEvents = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
+    ("int total",   () => retired_int(w)),
+    ("int load",    () => retired_load(w)),
+    ("int store",   () => retired_store(w)),
+    ("int amo",     () => retired_amo(w)),
+    ("int system",  () => retired_system(w)),
+    ("int fence",   () => retired_fence(w)),
+    ("int fencei",  () => retired_fencei(w)),
+    ("int branch",  () => retired_branch(w)),
+    ("int jal",     () => retired_jal(w)),
+    ("int jalr",    () => retired_jalr(w)),
+    ("int alu",     () => retired_alu(w)),
+    ("int mul",     () => retired_mul(w)),
+    ("int div",     () => retired_div(w)))
+    ++ (if (!usingFPU) Seq() else Seq(
+      ("fp total",    () => retired_fp(w)),
+      ("fp load",     () => retired_fp_load(w)),
+      ("fp store",    () => retired_fp_store(w)),
+      ("fp fpu",      () => retired_fp_fpu(w)),
+      ("fp div",      () => retired_fp_div(w))))
+    ++ (if (!usingVector) Seq() else Seq(
+      ("vector total",      () => retired_rvv(w)),
+      ("vector vset",       () => retired_rvv_vset(w)),
+      ("vector load",       () => retired_rvv_load(w)),
+      ("vector store",      () => retired_rvv_store(w)),
+      ("vector int",        () => retired_rvv_int(w)),
+      ("vector float",      () => retired_rvv_float(w))))
+  ))
+
+  val micrArchEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+    ("exception",                         () => rob.io.com_xcpt.valid),
+    ("front-end f1 is resteered",         () => io.ifu.perf.f1_clear),
+    ("front-end f2 is resteered",         () => io.ifu.perf.f2_clear),
+    ("front-end f3 is resteered",         () => io.ifu.perf.f3_clear),
+    ("front-end f4 is resteered",         () => io.ifu.perf.f4_clear)
+  ))
+
+  val intIssueSlotsEmpty = int_iss_unit.io.perf.empty
+  val memIssueSlotsEmpty = mem_iss_unit.io.perf.empty
+  val fpIssueSlotsEmpty  = fp_pipeline.io.perf.iss_slots_empty
+  val vecIssueSlotsEmpty = v_pipeline.io.perf.vec_iss_slots_empty
+  val vmxIssueSlotsEmpty = v_pipeline.io.perf.vmx_iss_slots_empty
+  val allIssueSlotsEmpty = intIssueSlotsEmpty && memIssueSlotsEmpty && fpIssueSlotsEmpty && vecIssueSlotsEmpty && vmxIssueSlotsEmpty
+
+  val resourceEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+    ("frontend fb full",                  () => io.ifu.perf.fb_full),
+    ("frontend fb empty",                 () => io.ifu.perf.fb_empty),
+    ("frontend ftq full",                 () => io.ifu.perf.ftq_full),
+    ("branch mask full",                  () => dec_brmask_logic.io.is_full.reduce(_||_)),
+    ("int physical register full",        () => rename_stage.io.ren_stalls.reduce(_||_)),
+    ("pred physical register full",       () => pred_rename_stage.io.ren_stalls.reduce(_||_)),
+    ("fp  physical register full",        () => fp_rename_stage.io.ren_stalls.reduce(_||_)),
+    ("issue slots empty",                 () => allIssueSlotsEmpty),
+    ("int issue slots full",              () => int_iss_unit.io.perf.full),
+    ("int issue slots empty",             () => int_iss_unit.io.perf.empty),
+    ("mem issue slots full",              () => mem_iss_unit.io.perf.full),
+    ("mem issue slots empty",             () => mem_iss_unit.io.perf.empty),
+    ("fp issue slots full",               () => fp_pipeline.io.perf.iss_slots_full),
+    ("fp issue slots empty",              () => fp_pipeline.io.perf.iss_slots_empty),
+    ("load queue almost full",            () => io.lsu.ldq_full.reduce(_||_)),
+    ("store queue almost full",           () => io.lsu.stq_full.reduce(_||_)),
+    ("rob entry empty",                   () => rob.io.perf.empty),
+    ("rob entry full",                    () => rob.io.perf.full) 
+  ))
+
+  val memorySystemEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
+    ("I$ loads",             () => false.B),
+    ("I$ load miss",         () => io.ifu.perf.acquire),
+    ("I$ prefetches",        () => false.B),
+    ("I$ prefetches miss",   () => false.B),
+    ("D$ loads",             () => false.B),
+    ("D$ load miss",         () => io.lsu.perf.acquire),
+    ("D$ stores",            () => false.B),
+    ("D$ store miss",        () => false.B),
+    ("D$ prefetches",        () => false.B),
+    ("D$ prefetch misses",   () => false.B),
+    ("D$ release",           () => io.lsu.perf.release),
+    ("ITLB loads",           () => false.B),
+    ("ITLB load miss",       () => io.ifu.perf.tlbMiss),
+    ("ITLB prefetches",      () => false.B),
+    ("ITLB prefetch misses", () => false.B),
+    ("DTLB loads",           () => false.B),
+    ("DTLB load miss",       () => io.lsu.perf.tlbMiss),
+    ("DTLB stores",          () => false.B),
+    ("DTLB store miss",      () => false.B),
+    ("DTLB prefetches",      () => false.B),
+    ("DTLB prefetch misses", () => false.B),
+    ("L2 hits",              () => false.B),
+    ("L2 misses",            () => false.B),
+    ("L2 loads",             () => false.B),
+    ("L2 load miss",         () => false.B),
+    ("L2 stores",            () => false.B),
+    ("L2 store miss",        () => false.B),
+    ("L2 prefetches",        () => false.B),
+    ("L2 prefetches miss",   () => false.B),
+    ("L2 TLB load",          () => false.B),
+    ("L2 TLB miss",          () => io.ptw.perf.l2miss),
+    ("L2 TLB stores",        () => false.B),
+    ("L2 TLB store miss",    () => false.B),
+    ("MSHR reuse",           () => io.lsu.perf.mshrs_reuse),
+    ("MSHR load establish",  () => io.lsu.perf.mshrs_load_establish),
+    ("MSHR load reuse",      () => io.lsu.perf.mshrs_load_reuse),
+    ("MSHR store establish", () => io.lsu.perf.mshrs_store_establish),
+    ("MSHR store reuse",     () => io.lsu.perf.mshrs_store_reuse)
+  ))
+
+  // split at ifu-fetuchBuffer < - > decode
+  val backend_stall   = dec_hazards.reduce(_||_)
+  val backend_nostall = !backend_stall
+ 
+  val uopsDelivered_sum_leN = Wire(Vec(coreWidth, Bool()))
+  val uopsDelivered_sum = PopCount(dec_fire)
+  (0 until coreWidth).map(n => uopsDelivered_sum_leN(n) := (uopsDelivered_sum <= n.U) && backend_nostall)
+  val uopsDelivered_le_events: Seq[(String, () => Bool)] = uopsDelivered_sum_leN.zipWithIndex.map{case(v,i) => ("less than or equal to $i uops delivered", () => v)}
+  val uopsDelivered_stall = uopsDelivered_sum_leN(0)
+ 
   val uopsDispatched_valids = rob.io.enq_valids
   val uopsDispatched_stall  = !uopsDispatched_valids.reduce(_||_)
 
-  val uopsIssued_valids = iss_valids ++ fp_pipeline.io.perf.iss_valids
-  val uopsIssued_stall  = !uopsIssued_valids.reduce(_||_)
+  val mem_iss_valids = mem_iss_unit.io.iss_valids
+  val int_iss_valids = int_iss_unit.io.iss_valids
+  val fp_iss_valids  = fp_pipeline.io.perf.iss_valids
+  val vec_iss_valids = v_pipeline.io.perf.vec_iss_valids
+  val vmx_iss_valids = v_pipeline.io.perf.vmx_iss_valids
 
-  val uopsExeActive_valids = if (usingFPU)
+  val uopsIssued_valids  = mem_iss_valids ++ int_iss_valids ++ fp_iss_valids ++ vec_iss_valids ++ vmx_iss_valids
+  val issueWidthSum      = issueParams.map(_.issueWidth).sum
+  val uopsIssued_sum_leN = Wire(Vec(issueWidthSum, Bool()))
+  val uopsIssued_sum     = PopCount(uopsIssued_valids)
+  (0 until issueWidthSum).map(n => uopsIssued_sum_leN(n) := (uopsIssued_sum <= n.U) && ~allIssueSlotsEmpty)
+  val uopsIssued_le_events: Seq[(String, () => Bool)] = uopsIssued_sum_leN.zipWithIndex.map{case(v,i) => ("less than or equal to $i uops issued", () => v)}
+
+  val uopsIssued_stall = uopsIssued_sum_leN(1)
+  val uopsIssued_stall_on_loads  = uopsIssued_stall &&  io.lsu.perf.in_flight_load
+  val uopsIssued_stall_on_stores = uopsIssued_stall && !io.lsu.perf.in_flight_load && io.lsu.perf.stq_full
+  //val uopsIssued_stall_on_loads   = uopsIssued_stall && io.lsu.perf.ldq_nonempty && rob.io.perf.com_load_is_at_rob_head
+  //val uopsIssued_stall_on_stores  = uopsIssued_stall && io.lsu.perf.stq_full && (!io.lsu.perf.ldq_nonempty || !rob.io.perf.com_load_is_at_rob_head)
+
+  val uopsExeActive_valids = if(usingVector)    
+      exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids ++ v_pipeline.io.perf.vec_req_valids ++ v_pipeline.io.perf.vmx_req_valids
+    else if (usingFPU) 
       exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids
     else
       exe_units.map(u => u.io.req.valid)
   val uopsExeActive_events: Seq[(String, () => Bool)] = uopsExeActive_valids.zipWithIndex.map{case(v,i) => ("Excution unit $i active cycle", () => v)}
-
-  val uops_executed_valids = rob.io.wb_resps.map(r => r.valid)
-  val uopsExecuted_sum_gtN = Wire(Vec(rob.numWakeupPorts, Bool()))
-  val uopsExecuted_sum_ltN = Wire(Vec(rob.numWakeupPorts, Bool()))
-  val uopsExecuted_sum = PopCount(uops_executed_valids)
-  (0 until rob.numWakeupPorts).map(n => uopsExecuted_sum_gtN(n) := (uopsExecuted_sum > n.U))
-  val uopsExecuted_gt_events: Seq[(String, () => Bool)] = uopsExecuted_sum_gtN.zipWithIndex.map{case(v,i) => ("more than $i uops executed", () => v)}
-  (0 until rob.numWakeupPorts).map(n => uopsExecuted_sum_ltN(n) := (uopsExecuted_sum <= n.U))
-  val uopsExecuted_lt_events: Seq[(String, () => Bool)] = uopsExecuted_sum_ltN.zipWithIndex.map{case(v,i) => ("less than or equal to $i uops executed", () => v)}
-  val uopsExecuted_stall = uopsExecuted_sum_ltN(0)
-
+ 
+  val uopsExecuted_valids = rob.io.wb_resps.map(r => r.valid)
+  val uopsExecuted_sum_geN = Wire(Vec(rob.numWakeupPorts, Bool()))
+  val uopsExecuted_sum_leN = Wire(Vec(rob.numWakeupPorts, Bool()))
+  val uopsExecuted_sum = PopCount(uopsExecuted_valids)
+  (0 until rob.numWakeupPorts).map(n => uopsExecuted_sum_geN(n) := (uopsExecuted_sum >= (n.U+1.U)) && ~allIssueSlotsEmpty)
+  val uopsExecuted_ge_events: Seq[(String, () => Bool)] = uopsExecuted_sum_geN.zipWithIndex.map{case(v,i) => ("more than ${i+1} uops executed", () => v)}
+  (0 until rob.numWakeupPorts).map(n => uopsExecuted_sum_leN(n) := (uopsExecuted_sum <= n.U) && ~allIssueSlotsEmpty)
+  val uopsExecuted_le_events: Seq[(String, () => Bool)] = uopsExecuted_sum_leN.zipWithIndex.map{case(v,i) => ("less than or equal to $i uops executed", () => v)}
+  val uopsExecuted_stall = uopsExecuted_sum_leN(0)
+  val uopsExecuted_stall_on_loads   = uopsExecuted_stall && io.lsu.perf.ldq_nonempty && rob.io.perf.com_load_is_at_rob_head
+  val uopsExecuted_stall_on_stores  = uopsExecuted_stall && io.lsu.perf.stq_full && (~uopsExecuted_stall_on_loads)
+ 
   val uopsRetired_valids = rob.io.commit.valids
-  val uopsRetired_stall  = !uopsRetired_valids.reduce(_||_)
+  val uopsRetired_sum_leN = Wire(Vec(rob.retireWidth, Bool()))
+  val uopsRetired_sum = PopCount(uopsRetired_valids)
+  (0 until rob.retireWidth).map(n => uopsRetired_sum_leN(n) := (uopsRetired_sum <= n.U) && ~rob.io.perf.empty)
+  val uopsRetired_le_events: Seq[(String, () => Bool)] = uopsRetired_sum_leN.zipWithIndex.map{case(v,i) => ("less than or equal to $i uops Retired", () => v)}
+  val uopsRetired_stall  = uopsRetired_sum_leN(0)
+ 
+  val bad_resteers_stat = RegInit(false.B)
+  when(io.ifu.redirect_flush || io.ifu.sfence.valid){
+    bad_resteers_stat := true.B
+  } .elsewhen(dec_fire.reduce(_||_)){
+    bad_resteers_stat:= false.B
+  }
 
+  val resource_allocator_recovery_stat = RegInit(false.B)
+  when(brupdate.b2.mispredict){
+    resource_allocator_recovery_stat := true.B
+  } .elsewhen(uopsIssued_valids.reduce(_||_)){
+    resource_allocator_recovery_stat := false.B
+  }
 
+ 
   val br_insn_retired_cond_ntaken = Wire(Vec(coreWidth, Bool()))
   val br_insn_retired_cond_taken = Wire(Vec(coreWidth, Bool()))
   br_insn_retired_cond_taken  := (0 until coreWidth).map(w => retired_branch(w) && rob.io.commit.uops(w).taken)
   br_insn_retired_cond_ntaken := (0 until coreWidth).map(w => retired_branch(w) && ~rob.io.commit.uops(w).taken)
-
-  val numArithDivider     = exe_units.count(_.hasDiv)
-  val arith_divder_active = Wire(Vec(numArithDivider, Bool()))
-  var exu_div_idx = 0
-  for (i <- 0 until exe_units.length) {
-    if (exe_units(i).hasDiv) {
-      arith_divder_active(exu_div_idx) := exe_units(i).io.perf.div_busy
-      exu_div_idx += 1
-    }
-  }
-  val arith_divder_active_events: Seq[(String, () => Bool)] = arith_divder_active.zipWithIndex.map{case(v,i) => ("cycles when $i divider unit is busy", () => v)}
-
-
-  val backend_stall   = dec_hazards.reduce(_||_)
-  val backend_nostall = !backend_stall
-  val fetch_no_deliver= (~dec_fire.reduce(_||_)) && backend_nostall && (~ifu_redirect_flush_stat)
-
-  val cycles_l1d_miss = false.B
-  val cycles_l2_miss  = false.B
-  val cycles_l3_miss  = false.B
-  val mem_stall_anyload = uopsIssued_stall && io.lsu.perf.ldq_nonempty
-  val mem_stall_stores  = uopsIssued_stall && io.lsu.perf.stq_full && (~mem_stall_anyload)
-  val mem_stall_l1d_miss = false.B
-  val mem_stall_l2_miss  = false.B
-  val mem_stall_l3_miss  = false.B
-
+ 
+  val divider_actives = if(usingVector)
+      exe_units.map(e => if(e.hasDiv) e.io.perf.div_busy else false.B) ++ fp_pipeline.io.perf.fdiv_busy ++ v_pipeline.io.perf.div_busy ++ v_pipeline.io.perf.fdiv_busy
+    else if(usingFPU)
+      exe_units.map(e => if(e.hasDiv) e.io.perf.div_busy else false.B) ++ fp_pipeline.io.perf.fdiv_busy
+    else
+      exe_units.map(e => if(e.hasDiv) e.io.perf.div_busy else false.B)
+  val divider_active_events: Seq[(String, () => Bool)] = Seq(("cycles when divider unit is busy", () => divider_actives.orR))
+ 
+ 
   val topDownslotsVec = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("slots issued",                      () => dec_fire(w)),
-    ("fetch bubbles",                     () => (~dec_fire(w)) && backend_nostall && (~ifu_redirect_flush_stat)),
+    ("fetch bubbles",                     () => !dec_fire(w) && !dec_stalls(w)),
     ("branch instruction retired",        () => retired_branch(w)),
     ("taken conditional branch instructions retired",     () => br_insn_retired_cond_taken(w)),
     ("not taken conditional branch instructions retired", () => br_insn_retired_cond_ntaken(w)),
     ("Counts the number of dispatched",   () => uopsDispatched_valids(w)),
-    ("Counts the number of retirement",   () => uopsRetired_valids(w)))
-  ))
-
+    ("Counts the number of retirement",   () => uopsRetired_valids(w)),
+    ("retirement bubbles",                () => ~uopsRetired_valids(w))
+  )))
+       
   val topDownIssVec = (0 until issueParams.map(_.issueWidth).sum).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("issued uops sum",            () => uopsIssued_valids(w)),
     ("exe active sum",             () => uopsExeActive_valids(w))
     )))
+
+  val topDownWBVec = (0 until rob.numWakeupPorts).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
+    ("executed sum",               () => uopsExecuted_valids(w))
+    )))
+
+  val mem_stall_l1d_miss = uopsIssued_stall && io.lsu.perf.in_flight_load && io.lsu.perf.mshrs_has_busy
+  val mem_stall_l2_miss  = false.B
+  val mem_stall_dram     = false.B
+ 
+  val resource_any_stalls = backend_stall
+  val resource_rob_stalls = !rob.io.perf.ready
+  val resource_issueslots_stalls = !dispatcher.io.ren_uops.map(u => u.ready).reduce(_||_)
 
   val br_misp_retired = brupdate.b2.mispredict
   val br_misp_target = br_misp_retired && oldest_mispredict.cfi_type === CFI_JALR
@@ -505,43 +670,50 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val br_misp_retired_cond_ntaken = br_misp_dir && (~brupdate.b2.taken)
 
   val topDownCyclesEvents0 = new EventSet((mask, hits) => (mask & hits).orR, Seq(
-    ("recovery cycle",                     () => ifu_redirect_flush_stat),
-    ("fetch no Deliver cycle",             () => fetch_no_deliver),
+    ("bad speculation resteers cycle",     () => io.ifu.perf.badResteers),
+    ("recovery cycle",                     () => resource_allocator_recovery_stat),
+    ("frontend unkowns branched resteers", () => io.ifu.perf.unknownsBranchCycles),
     ("branch mispred retired",             () => brupdate.b2.mispredict),
     ("machine clears",                     () => rob.io.flush.valid),
-    ("none uops executed",                 () => uopsExecuted_stall),
-    ("few uops executed cycle",            () => uopsExecuted_sum_ltN(1)),
-    ("any load mem stall",                 () => mem_stall_anyload),
-    ("stores mem stall",                   () => mem_stall_stores),
+    ("icache stalls cycles",               () => io.ifu.perf.iCache_stalls),
+    ("iTLB stalls cycles",                 () => io.ifu.perf.iTLB_stalls),
+    ("any load mem stall",                 () => uopsIssued_stall_on_loads),
+    ("stores mem stall",                   () => uopsIssued_stall_on_stores),
     ("l1d miss mem stall",                 () => mem_stall_l1d_miss),
     ("l2 miss mem stall",                  () => mem_stall_l2_miss),
-    ("l3 miss mem stall",                  () => mem_stall_l3_miss),
+    ("dram mem stall",                     () => mem_stall_dram),
     ("mem latency",                        () => false.B),
+    ("resource stall",                     () => resource_any_stalls),
+    ("issueslots stall",                   () => resource_issueslots_stalls),
+    ("rob unit cause excution stall",      () => resource_rob_stalls),
     ("control-flow target misprediction",  () => br_misp_target),
     ("mispredicted conditional branch instructions retired", () => br_misp_dir),
     ("taken conditional mispredicted branch instructions retired", () => br_misp_retired_cond_taken),
     ("not taken conditional mispredicted branch instructions retired", () => br_misp_retired_cond_ntaken),
-    ("rob unit cause excution stall",      () => !rob.io.perf.ready),
     ("not actually retired uops",          () => uopsRetired_stall)
   ))
-
+ 
   val topDownCyclesEvents1 = new EventSet((mask, hits) => (mask & hits).orR,
-    uopsExeActive_events
-    ++ uopsExecuted_gt_events
-    ++ arith_divder_active_events
+       uopsDelivered_le_events            // coreWidth
+    ++ uopsIssued_le_events               // exu num
+    ++ uopsExeActive_events               // exu num
+    ++ divider_active_events              // divider busy
+    ++ uopsExecuted_le_events             // rob.numWakeupPorts
+    ++ uopsExecuted_ge_events             // rob.numWakeupPorts
+    ++ uopsRetired_le_events              // rob.retireWidth
   )
-
+ 
   val perfEvents = new SuperscalarEventSets(Seq(
     (topDownslotsVec,           (m, n) => m +& n),
     (Seq(topDownCyclesEvents0), (m, n) => m +& n),
     (Seq(topDownCyclesEvents1), (m, n) => m +& n),
     (topDownIssVec,             (m, n) => m +& n),
+    (topDownWBVec,              (m, n) => m +& n),
     (insnCommitBaseEvents,      (m, n) => m +& n),
     (Seq(micrArchEvents),       (m, n) => m +& n),
     (Seq(resourceEvents),       (m, n) => m +& n),
     (Seq(memorySystemEvents),   (m, n) => m +& n)
   ))
-
 
   val csr = Module(new freechips.rocketchip.rocket.CSRFile(perfEvents.toScalarEventSets, boomParams.customCSRs.decls))
   csr.io.inst foreach { c => c := DontCare }
@@ -875,7 +1047,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
                       || brupdate.b2.mispredict
                       || io.ifu.redirect_flush))
 
-  val dec_stalls = dec_hazards.scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
+  dec_stalls  := dec_hazards.scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
   dec_fe_fire := (0 until coreWidth).map(w => dec_valids(w) && !dec_stalls(w) && !dec_enq_stalls(w))
   dec_fire := (0 until coreWidth).map(w => dec_valids(w) && !dec_stalls(w))
 
@@ -1429,7 +1601,18 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   // Extra I/O
   // Delay retire/exception 1 cycle
-  csr.io.retire    := RegNext(PopCount(rob.io.commit.arch_valids.asUInt))
+  if(usingVector) {
+    val cmt_valids = (0 until coreParams.retireWidth).map(i =>
+      rob.io.commit.valids(i) && (!rob.io.commit.uops(i).is_rvv || rob.io.commit.uops(i).v_split_last))
+      //rob.io.commit.arch_valids(i) && (!rob.io.commit.uops(i).is_rvv || rob.io.commit.uops(i).v_split_last))
+    csr.io.retire  := RegNext(PopCount(cmt_valids))
+    when(cmt_valids.orR) {
+      retire_cnt := retire_cnt + PopCount(cmt_valids)
+      printf("retire_cnt: %d\n", retire_cnt.asUInt())
+    }
+  } else {
+    csr.io.retire  := RegNext(PopCount(rob.io.commit.arch_valids.asUInt))
+  }
   csr.io.exception := RegNext(rob.io.com_xcpt.valid)
   // csr.io.pc used for setting EPC during exception or CSR.io.trace.
 
