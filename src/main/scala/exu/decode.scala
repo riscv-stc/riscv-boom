@@ -366,19 +366,18 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vlmul_value = Mux(is_v_mask_insn, 0.U, Cat(vlmul_sign, vlmul_mag))
     val vmvr_emul  = Mux(instRS1(2), 3.U, Mux(instRS1(1), 2.U, Mux(instRS1(0), 1.U, 0.U)))
     val vd_emul    = Mux(isVMVR, vmvr_emul,
-                     Mux(isScalarMove || is_v_mask_ld || vmlogic_insn || uop.is_reduce || uop.rt(RD, isMaskVD), 0.U,
+                     Mux(isScalarMove || is_v_mask_ld || vmlogic_insn || uop.is_reduce || uop.rt(RD, isMaskVD) || !uop.rt(RD, isVector), 0.U,
                      Mux(uop.rt(RD, isWidenV), vlmul_value + vd_wfactor,
                      Mux(uop.rt(RD, isNarrowV), vlmul_value - vd_nfactor,
                      Mux(is_v_reg_ls, Log2(vreg_nf + 1.U),
-                     Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew - vsew + vlmul_value,
-                     Mux(cs.allow_vd_is_v0, 0.U, vlmul_value)))))))
+                     Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew - vsew + vlmul_value, vlmul_value))))))
     val vs1_emul   = Mux(cs.uopc === uopVRGATHEREI16, vlmul_value + 1.U - vsew,
-                     Mux(vmlogic_insn || uop.is_reduce, 0.U,
-                     Mux(uop.rt(RS1, isWidenV ), vlmul_value + 1.U, vlmul_value)))
+                     Mux(vmlogic_insn || uop.is_reduce || !uop.rt(RS1, isVector), 0.U,
+                     Mux(uop.rt(RS1, isWidenV), vlmul_value + 1.U, vlmul_value)))
     val vs2_emul   = Mux(isVMVR, vmvr_emul,
                      Mux(uop.rt(RS2, isWidenV), vlmul_value + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor, 
-                     Mux(vmlogic_insn || is_viota_m || uop.is_vmv_s2v, 0.U, vlmul_value))))
+                     Mux(vmlogic_insn || is_viota_m || !uop.rt(RS2, isVector), 0.U, vlmul_value))))
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
       //assert(vsew >= vd_nfactor  && vsew + vd_wfactor  <= 3.U, "Unsupported vd_sew")
