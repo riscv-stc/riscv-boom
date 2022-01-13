@@ -78,12 +78,12 @@ class VStQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     if (w == 0) enqPtrVec(w) := tailPtr
     else enqPtrVec(w) := WrapInc(enqPtrVec(w - 1), nEntries)
   }
-  val storeVlds: UInt = VecInit(io.vuopDis.map(in => in.valid && in.bits.uCtrlSig.accessType.isStore)).asUInt()
+  val storeVlds: Seq[Bool] = io.vuopDis.map(in => in.valid && in.bits.uCtrlSig.accessType.isStore)
   val storeVldCount: UInt = PopCount(storeVlds)
   io.disVStQIdx.foreach(idx => idx := 0.U.asTypeOf(Valid(new DispatchAck(ap))))
   for ( w <- 0 until ap.coreWidth){
-    val preVlds: UInt = storeVlds(w, 0)
-    val preVldCount: UInt = PopCount(preVlds) - 1.U
+    val preVlds: UInt = if (w == 0) 0.U else VecInit(storeVlds.slice(0, w)).asUInt()
+    val preVldCount: UInt = PopCount(preVlds)
     val enqPtr: UInt = enqPtrVec(preVldCount)
     val vStQFull = WrapInc(enqPtr, ap.nVStQEntries) === headPtr
     io.vStQFull(w) := vStQFull
@@ -101,7 +101,7 @@ class VStQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
       io.disVStQIdx(w).bits.robIdx := io.vuopDis(w).bits.robIdx
     }
   }
-  when(storeVlds.orR()){
+  when(VecInit(storeVlds).asUInt().orR()){
     tailPtr := WrapInc(enqPtrVec(storeVldCount - 1.U), ap.nVStQEntries)
   }
   //__________________________________________________________________________________//
