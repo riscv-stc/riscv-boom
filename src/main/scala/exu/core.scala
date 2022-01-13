@@ -318,18 +318,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val store_cnt      = RegInit(0.U(64.W))
   val load_cnt       = RegInit(0.U(64.W))
   val retire_cnt     = RegInit(0.U(64.W))
-  val retire_cnt_int = RegInit(0.U(64.W))
-  val retire_cnt_fp  = RegInit(0.U(64.W))
-  /* for debug only*/
-  val rvv_cnt       = RegInit(0.U(64.W))
-  val rvv_cnt_vset  = RegInit(0.U(64.W))
-  val rvv_cnt_load  = RegInit(0.U(64.W))
-  val rvv_cnt_store = RegInit(0.U(64.W))
-  val rvv_cnt_int   = RegInit(0.U(64.W))
-  val rvv_cnt_float = RegInit(0.U(64.W))
-  val rvv_cnt_div   = RegInit(0.U(64.W))
-  val rvv_cnt_fdiv  = RegInit(0.U(64.W))
-  val rvv_cnt_red   = RegInit(0.U(64.W))
 
   for (w <- 0 until coreWidth) {
     val isInsRvv = rob.io.commit.valids(w) &&  rob.io.commit.uops(w).is_rvv
@@ -390,55 +378,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       store_cnt := store_cnt + 1.U
       printf("store_cnt: %d\n", store_cnt.asUInt())
     }
-  }
-
-  /* for debug counters only*/
-  retire_cnt_int := retire_cnt_int + PopCount(retired_int)
-  retire_cnt_fp  := retire_cnt_fp  + PopCount(retired_fp)
-  rvv_cnt        := rvv_cnt        + PopCount(retired_rvv)
-  rvv_cnt_vset   := rvv_cnt_vset   + PopCount(retired_rvv_vset)
-  rvv_cnt_load   := rvv_cnt_load   + PopCount(retired_rvv_load)
-  rvv_cnt_store  := rvv_cnt_store  + PopCount(retired_rvv_store)
-  rvv_cnt_int    := rvv_cnt_int    + PopCount(retired_rvv_int)
-  rvv_cnt_float  := rvv_cnt_float  + PopCount(retired_rvv_float)
-  rvv_cnt_div    := rvv_cnt_div    + PopCount(retired_rvv_div)
-  rvv_cnt_fdiv   := rvv_cnt_fdiv   + PopCount(retired_rvv_fdiv)
-  rvv_cnt_red    := rvv_cnt_red    + PopCount(retired_rvv_red)
-
-  when(retired_rvv.orR) {
-    printf("rvv_cnt: %d\n", rvv_cnt.asUInt())
-  }
-
-  when(retired_rvv_vset.orR) {
-    printf("rvv_cnt_vset: %d\n", rvv_cnt_vset.asUInt())
-  }
-
-  when(retired_rvv_load.orR) {
-    printf("rvv_cnt_load: %d\n", rvv_cnt_load.asUInt())
-  }
-
-  when(retired_rvv_store.orR) {
-    printf("rvv_cnt_store: %d\n", rvv_cnt_store.asUInt())
-  }
-
-  when(retired_rvv_int.orR) {
-    printf("rvv_cnt_int: %d\n", rvv_cnt_int.asUInt())
-  }
-
-  when(retired_rvv_float.orR) {
-    printf("rvv_cnt_float: %d\n", rvv_cnt_float.asUInt())
-  }
-
-  when(retired_rvv_div.orR) {
-    printf("rvv_cnt_div: %d\n", rvv_cnt_div.asUInt())
-  }
-
-  when(retired_rvv_fdiv.orR) {
-    printf("rvv_cnt_fdiv: %d\n", rvv_cnt_fdiv.asUInt())
-  }
-
-  when(retired_rvv_red.orR) {
-    printf("rvv_cnt_red: %d\n", rvv_cnt_red.asUInt())
   }
 
   val insnCommitBaseEvents = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
