@@ -15,21 +15,18 @@
 
 package boom.exu
 
-import scala.collection.mutable.{ArrayBuffer}
-
+import scala.collection.mutable.ArrayBuffer
 import chisel3._
 import chisel3.util._
-
-import freechips.rocketchip.config.{Parameters}
+import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.{BP, VConfig}
-import freechips.rocketchip.tile.{XLen, RoCCCoreIO}
+import freechips.rocketchip.tile.{RoCCCoreIO, XLen}
 import freechips.rocketchip.tile
-import freechips.rocketchip.util.{UIntIsOneOf, LCG}
-
+import freechips.rocketchip.util.{LCG, UIntIsOneOf}
 import FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
-import boom.ifu.{GetPCFromFtqIO}
+import boom.ifu.GetPCFromFtqIO
 import boom.util._
 
 /**
@@ -124,7 +121,6 @@ abstract class ExecutionUnit(
     val vresp    = if (writesVrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_iresp = if (writesLlIrf) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_fresp = if (writesLlFrf) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
-    val ll_vresp = if (writesLlVrf) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
 
 
     val bypass   = Output(Vec(numBypassStages, Valid(new ExeUnitResp(dataWidth))))
@@ -149,6 +145,10 @@ abstract class ExecutionUnit(
     val bp = if (hasMem) Input(Vec(nBreakpoints, new BP)) else null
     val mcontext = if (hasMem) Input(UInt(coreParams.mcontextWidth.W)) else null
     val scontext = if (hasMem) Input(UInt(coreParams.scontextWidth.W)) else null
+
+    // only used by vector lsu
+    /** for unmasked and unindexed load/store, data width should be xlen. */
+    val vlsuReq = if (usingVector && hasMem) ValidIO(new FuncUnitReq(dataWidth)) else null
 
     // TODO move this out of ExecutionUnit
     val com_exception = if (hasMem || hasRocc) Input(Bool()) else null
@@ -182,10 +182,10 @@ abstract class ExecutionUnit(
     io.vresp.bits.predicated := false.B
 //  assert(io.vresp.ready)
   }
-  if (writesLlVrf) {
-    io.ll_vresp.bits.fflags.valid := false.B
-    io.ll_vresp.bits.predicated := false.B
-  }
+  //if (writesLlVrf) {
+  //  io.ll_vresp.bits.fflags.valid := false.B
+  //  io.ll_vresp.bits.predicated := false.B
+  //}
 
   // TODO add "number of fflag ports", so we can properly account for FPU+Mem combinations
   def hasFFlags     : Boolean = hasFpu || hasFdiv
@@ -239,7 +239,7 @@ class ALUExeUnit(
     writesIrf        = hasAlu || hasMul || hasDiv,
     writesLlIrf      = hasMem || hasRocc,
     writesLlFrf      = (hasIfpu || hasMem) && p(tile.TileKey).core.fpu != None,
-    writesLlVrf      = (p(tile.TileKey).core.useVector && hasMem),
+    writesLlVrf      = false,
     numBypassStages  =
       if (hasAlu && hasMul) 3 //TODO XXX p(tile.TileKey).core.imulLatency
       else if (hasAlu) 1 else 0,
@@ -433,7 +433,11 @@ class ALUExeUnit(
       io.ll_fresp <> io.lsu_io.fresp
     }
     if (usingVector) {
-      io.ll_vresp <> io.lsu_io.vresp
+      // req to scalar lsu is a funcResp, for unmasked and unindexed LS.
+      // Vector data write back via vmx unit.
+      io.vlsuReq.valid := io.req.valid
+      io.vlsuReq.bits := io.req.bits
+      io.req.ready := true.B
     }
   }
 
@@ -631,6 +635,7 @@ class VecExeUnit(
     writesVrf        = true,
     writesIrf        = hasAlu,
     writesFrf        = hasAlu,
+    writesLlVrf      = false,
     numBypassStages  = if (hasMacc) 3 else 1,
     dataWidth        = p(tile.TileKey).core.vLen,
     bypassable       = false,

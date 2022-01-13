@@ -50,7 +50,7 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false)
   val in_uop        = Flipped(Valid(new MicroOp())) // if valid, this WILL overwrite an entry!
   val out_uop       = Output(new MicroOp()) // the updated slot uop; will be shifted upwards in a collasping queue.
   val uop           = Output(new MicroOp()) // the current Slot's uop. Sent down the pipeline when issued.
-  val vmupdate      = if (usingVector && !vector) Input(Vec(1, Valid(new MicroOp))) else null
+  //val vmupdate      = if (usingVector && !vector) Input(Vec(1, Valid(new MicroOp))) else null
   val intupdate     = if (vector) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
   val fpupdate      = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   //val vecUpdate     = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
@@ -102,6 +102,7 @@ class IssueSlot(
   //val pm    = if(vector) RegInit(0.U(vLenb.W)) else if (usingVector && iqType == IQT_MEM.litValue) RegInit(false.B) else null
   val ps    = if(vector) RegInit(false.B) else null
   val sdata = if(vector) RegInit(0.U(eLen.W)) else null
+  val strideLength = if(iqType == IQT_VMX.litValue) RegInit(0.U(eLen.W)) else null
   val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
 
@@ -277,13 +278,16 @@ class IssueSlot(
         //in_pm := ~io.in_uop.bits.prvm_busy
         ps    := ~io.in_uop.bits.v_scalar_busy
         sdata := io.in_uop.bits.v_scalar_data
+        if(iqType == IQT_VMX.litValue) {
+          strideLength := io.in_uop.bits.vStrideLength
+        }
       } else {
         next_p1 := !io.in_uop.bits.prs1_busy(0)
         next_p2 := !io.in_uop.bits.prs2_busy(0)
         next_p3 := !io.in_uop.bits.prs3_busy(0)
         if (iqType == IQT_MEM.litValue) {
           //in_pm := !io.in_uop.bits.prvm_busy(0)
-          vxofs := io.in_uop.bits.v_xls_offset
+          //vxofs := io.in_uop.bits.v_xls_offset
         }
       }
     } else {
@@ -373,18 +377,18 @@ class IssueSlot(
     next_state := s_invalid
   }
 
-  if (usingVector && !vector && iqType == IQT_MEM.litValue) {
+  //if (usingVector && !vector && iqType == IQT_MEM.litValue) {
     //next_pm := io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx).reduce(_||_)
-    when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx).reduce(_||_)) {
-      slot_uop.v_unmasked := true.B
-    }
-    when (next_uop.v_idx_ls && io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid)).reduce(_||_)) {
-      vxofs := Mux1H(io.vmupdate.map(x => (x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid), x.bits.v_xls_offset)))
-    }
-    when (IsKilledByVM(io.vmupdate, slot_uop)) {
-      next_state := s_invalid
-    }
-  }
+    //when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx).reduce(_||_)) {
+    //  slot_uop.v_unmasked := true.B
+    //}
+    //when (next_uop.v_idx_ls && io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid)).reduce(_||_)) {
+    //  vxofs := Mux1H(io.vmupdate.map(x => (x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid), x.bits.v_xls_offset)))
+    //}
+    //when (IsKilledByVM(io.vmupdate, slot_uop)) {
+    //  next_state := s_invalid
+    //}
+  //}
 
   when (!io.in_uop.valid) {
     slot_uop.br_mask := next_br_mask
@@ -407,6 +411,10 @@ class IssueSlot(
       val fp_data  = io.fpupdate.map(_.bits.data)
       ps := int_sel.reduce(_||_) || fp_sel.reduce(_||_)
       sdata := Mux1H(int_sel++fp_sel, int_data++fp_data)
+      if(iqType == IQT_VMX.litValue){
+        val strideLengthVec = io.intupdate.map(_.bits.uop.vStrideLength)
+        strideLength := Mux1H(int_sel, strideLengthVec)
+      }
       assert(PopCount(int_sel++fp_sel) <= 1.U, "Multiple drivers")
     }
 
@@ -455,6 +463,9 @@ class IssueSlot(
       //io.out_uop.prvm_busy  := ~pm
       io.out_uop.v_scalar_busy := ~ps
       io.out_uop.v_scalar_data := sdata
+      if(iqType == IQT_VMX.litValue){
+        io.out_uop.vStrideLength := strideLength
+      }
       io.out_uop.v_perm_busy := false.B //!perm_ready || perm_ready_vrg_bsy
       io.out_uop.v_perm_wait := false.B //perm_wait || perm_wait_vrg_set
       io.out_uop.v_perm_idx  := 0.U //perm_idx
@@ -492,8 +503,8 @@ class IssueSlot(
       io.out_uop.prs3_busy  := ~p3
       if (iqType == IQT_MEM.litValue) {
         //io.out_uop.prvm_busy := Cat(0.U, !pm)
-        io.out_uop.v_xls_offset := vxofs
-        io.uop.v_xls_offset := vxofs
+        //io.out_uop.v_xls_offset := vxofs
+        //io.uop.v_xls_offset := vxofs
       } else {
         //io.out_uop.prvm_busy := 0.U
       }
@@ -509,11 +520,11 @@ class IssueSlot(
 
   when (io.in_uop.valid) {
     slot_uop := io.in_uop.bits
-    if(usingVector && !vector && iqType == IQT_MEM.litValue) {
-      when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === io.in_uop.bits.rob_idx).reduce(_||_)) {
-        slot_uop.v_unmasked := true.B
-      }
-    }
+    //if(usingVector && !vector && iqType == IQT_MEM.litValue) {
+    //  when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === io.in_uop.bits.rob_idx).reduce(_||_)) {
+    //    slot_uop.v_unmasked := true.B
+    //  }
+    //}
     assert (is_invalid || io.clear || io.kill, "trying to overwrite a valid issue slot.")
   }
 
