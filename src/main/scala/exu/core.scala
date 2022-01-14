@@ -1688,7 +1688,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     io.lsu.dis_uops(w).valid := dis_fire(w) && !dis_uops(w).is_rvv
     io.lsu.dis_uops(w).bits  := dis_uops(w)
     if(usingVector){
-      vlsuIO.fromDis.vuopDis(w).valid := dis_fire(w) && dis_uops(w).is_rvv
+      vlsuIO.fromDis.vuopDis(w).valid := dis_fire(w) && dis_uops(w).is_rvv && (dis_uops(w).uses_ldq || dis_uops(w).uses_stq)
       vlsuIO.fromDis.vuopDis(w).bits := uopConvertToVuop(dis_uops(w))
     }
   }
