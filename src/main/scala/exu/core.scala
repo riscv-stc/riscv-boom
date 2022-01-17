@@ -96,8 +96,6 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     //vmupdate := v_pipeline.io.vmupdate
     v_pipeline.io.intupdate := DontCare
     v_pipeline.io.fpupdate := DontCare
-    v_pipeline.io.vlsuWritePort.valid := false.B
-    v_pipeline.io.vlsuWritePort.bits := DontCare
   }
 
   val numIrfWritePorts        = exe_units.numIrfWritePorts + memWidth
@@ -1804,12 +1802,6 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   }
 
   if (usingVector) {
-    // FIXME
-    v_pipeline.io.from_int.valid := false.B
-    v_pipeline.io.from_int.bits := DontCare
-    //v_pipeline.io.to_int.ready := true.B
-    v_pipeline.io.from_fp.valid := false.B
-    v_pipeline.io.from_fp.bits := DontCare
     fp_pipeline.io.fromVec <> v_pipeline.io.to_fp
     Seq.tabulate(vecWidth)(i => i).foreach { i =>
       val attachBase: Int = 2 + (if(usingRoCC) 1 else 0)
@@ -1819,7 +1811,8 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     //v_pipeline.io.ll_wports  <> exe_units.memory_units.map(_.io.ll_vresp)
     v_pipeline.io.vlsuWritePort.valid := vlsuIO.toVrf.write.valid
     v_pipeline.io.vlsuWritePort.bits.data := vlsuIO.toVrf.write.bits.data
-    v_pipeline.io.vlsuWritePort.bits.uop.pdst := vlsuIO.toVrf.write.bits.addr
+    v_pipeline.io.vlsuWritePort.bits.addr := vlsuIO.toVrf.write.bits.addr
+    v_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
   }
 
   if (usingRoCC) {

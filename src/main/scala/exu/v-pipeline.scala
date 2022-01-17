@@ -24,6 +24,13 @@ import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
 
+
+class VLSUWriteBack(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
+{
+  val addr = UInt(vpregSz.W)
+  val data = UInt(dataWidth.W)
+  val byteMask = UInt((dataWidth/8).W)
+}
 /**
  * Top level datapath that wraps the floating point issue window, regfile, and arithmetic units.
  */
@@ -33,7 +40,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   val vmxIssueParams = issueParams.find(_.iqType == IQT_VMX.litValue).get
   require(vecIssueParams.dispatchWidth == vmxIssueParams.dispatchWidth)
   val dispatchWidth = vecIssueParams.dispatchWidth
-  val numWakeupPorts = vecWidth + memWidth + vecMemWidth // internal wakeups
+  val numWakeupPorts = vecWidth + vecMemWidth // internal wakeups
 
   val io = IO(new Bundle {
     val brupdate         = Input(new BrUpdateInfo())
@@ -46,10 +53,8 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val vmx_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
     val vbusy_status     = Input(UInt(numVecPhysRegs.W))
 
-    val vlsuWritePort    = Flipped(Decoupled(new ExeUnitResp(vLen)))
-    val from_int         = Flipped(Decoupled(new ExeUnitResp(eLen)))
-    val from_fp          = Flipped(Decoupled(new ExeUnitResp(eLen)))
-//  val to_int_iss       = Decoupled(new ExeUnitResp(eLen))
+    val vlsuWritePort    = Flipped(ValidIO(new VLSUWriteBack(vLen)))
+    //val to_int_iss       = Decoupled(new ExeUnitResp(eLen))
     //val to_sdq           = Decoupled(new ExeUnitResp(eLen))
     val to_int           = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
     val to_fp            = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
@@ -95,10 +100,10 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   val viu = Seq(vec_issue_unit, vmx_issue_unit)
   val vregfile       = Module(new RegisterFileSynthesizable(numVecPhysRegs,
                          exe_units.numVrfReadPorts + 1, // plus 1 for vlsu read request for stores.
-                         exe_units.numVrfWritePorts + memWidth + 1,
+                         exe_units.numVrfWritePorts + 1,
                          vLen,
                          // No bypassing for any VEC units, + memWidth for ll_wb
-                         Seq.fill(exe_units.numVrfWritePorts + memWidth + 1){ false },
+                         Seq.fill(exe_units.numVrfWritePorts + 1){ false },
                          vector = true))
   val vregister_read = Module(new RegisterRead(
                          vecWidth+1,
@@ -110,7 +115,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
                          vLen, float = false, vector = true))
 
   require (exe_units.count(_.readsVrf) == vecWidth + 1)
-  require (exe_units.numVrfWritePorts + memWidth + vecMemWidth == numWakeupPorts,
+  require (exe_units.numVrfWritePorts + vecMemWidth == numWakeupPorts,
     s"${exe_units.numVrfWritePorts} + ${memWidth} + ${vecMemWidth} + ${numWakeupPorts}")
   require (vecWidth >= memWidth)
 
@@ -207,7 +212,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   // Only one port for vector load write back.
   vregfile.io.read_ports.last.addr := Mux(io.vlsuReadReq.valid, io.vlsuReadReq.bits, 0.U)
-  io.vlsuReadResp.valid :=  RegNext(io.vlsuReadReq.valid)
+  io.vlsuReadResp.valid := RegNext(io.vlsuReadReq.valid)
   io.vlsuReadResp.bits := vregfile.io.read_ports.last.data
   //-------------------------------------------------------------
   // **** Execute Stage ****
@@ -233,34 +238,19 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     case (to_int, vec) => to_int <> vec
   }
 
-  // int and float write to vrf arb
-  val ll_wbarb = Module(new Arbiter(new ExeUnitResp(eLen), 2))
-
-
-  //ll_wbarb.io.in(0) <> io.ll_wports(0)
-  //ll_wbarb.io.in(0).bits.data := io.ll_wports(0).bits.data
-
-  ll_wbarb.io.in(0) <> io.from_int
-  ll_wbarb.io.in(0).bits.data := io.from_int.bits.data
-
-  ll_wbarb.io.in(1) <> io.from_fp
-  ll_wbarb.io.in(1).bits.data := io.from_fp.bits.data
-
-
   // Cut up critical path by delaying the write by a cycle.
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
-  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vpregSz, vLen, isVector, true, true))
-
-  assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
-  when (io.from_int.valid) { assert (io.from_int.bits.uop.rf_wen && io.from_int.bits.uop.rt(RD, isVector)) }
-  when (io.from_fp.valid)  { assert (io.from_fp.bits.uop.rf_wen  && io.from_fp.bits.uop.rt(RD, isVector)) }
+  vregfile.io.write_ports(0).valid := io.vlsuWritePort.valid
+  vregfile.io.write_ports(0).bits.addr := io.vlsuWritePort.bits.addr
+  vregfile.io.write_ports(0).bits.data := io.vlsuWritePort.bits.data
+  vregfile.io.write_ports(0).bits.mask := io.vlsuWritePort.bits.byteMask
 
   var w_cnt = 1
-  for (i <- 1 until vecMemWidth + 1) {//dedicated for vlsu
-    vregfile.io.write_ports(w_cnt) := WritePort(io.vlsuWritePort, vpregSz, vLen, isVector, true)
-    w_cnt += 1
-  }
+  //for (i <- 1 until vecMemWidth + 1) {//dedicated for vlsu
+    //vregfile.io.write_ports(w_cnt) := WritePort(io.vlsuWritePort, vpregSz, vLen, isVector, true)
+    //w_cnt += 1
+  //}
   for (eu <- exe_units.withFilter(_.writesVrf)) {
     // vmx does not write vrf
     val eu_vresp = WireInit(eu.io.vresp)
@@ -304,15 +294,15 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
   //-------------------------------------------------------------
 
-  io.wakeups(0).valid := ll_wbarb.io.out.valid
-  io.wakeups(0).bits := ll_wbarb.io.out.bits
-  ll_wbarb.io.out.ready := true.B
+  //io.wakeups(0).valid := ll_wbarb.io.out.valid
+  //io.wakeups(0).bits := ll_wbarb.io.out.bits
+  //ll_wbarb.io.out.ready := true.B
 
-  w_cnt = 1
-  for (i <- 1 until vecMemWidth) {// vector load write back port
+  w_cnt = 0
+  for (i <- 0 until vecMemWidth) {// vector load write back port
     io.wakeups(w_cnt).valid := io.vlsuWritePort.valid
     io.wakeups(w_cnt).bits.data := io.vlsuWritePort.bits.data
-    io.wakeups(w_cnt).bits.uop := io.vlsuWritePort.bits.uop
+    io.wakeups(w_cnt).bits.uop := NullMicroOp()
     io.wakeups(w_cnt).bits.uop.is_rvv := true.B
     io.wakeups(w_cnt).bits.uop.uses_ldq := true.B
     w_cnt += 1
