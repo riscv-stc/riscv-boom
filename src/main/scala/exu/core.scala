@@ -158,7 +158,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   val ll_wbarb         = Module(new Arbiter(new ExeUnitResp(xLen), 1 +
                                                                    (if (usingFPU) 1 else 0) +
                                                                    (if (usingRoCC) 1 else 0) +
-                                                                   (if (usingVector) vecWidth else 0)))
+                                                                   (if (usingVector) vecWidth else 0))) // for vec pipe write to int reg
   val iregister_read   = Module(new RegisterRead(
                            issue_units.map(_.issueWidth).sum,
                            exe_units.withFilter(_.readsIrf).map(_.supportedFuncUnits),
@@ -288,20 +288,20 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     mem_units(i).io.lsu_io <> io.lsu.exe(i)
   }
   if(usingVector){
-    val vlsuReqVld = mem_units(0).io.vlsuReq.valid && mem_units(0).io.vlsuReq.bits.uop.is_rvv &&
-      (mem_units(0).io.vlsuReq.bits.uop.uses_ldq || mem_units(0).io.vlsuReq.bits.uop.uses_stq)
+    val vlsuReqVld = mem_units(0).io.vlsuReqRr.valid && mem_units(0).io.vlsuReqRr.bits.uop.is_rvv &&
+      (mem_units(0).io.vlsuReqRr.bits.uop.uses_ldq || mem_units(0).io.vlsuReqRr.bits.uop.uses_stq)
     /* For unmasked/unindexed vector load store that doesn't need to read vrf. */
     vlsuIO.fromRr.vuop(0).valid := vlsuReqVld
-    vlsuIO.fromRr.vuop(0).bits := uopConvertToVuop(mem_units(0).io.vlsuReq.bits.uop)
-    vlsuIO.fromRr.vuop(0).bits.rs1 := mem_units(0).io.vlsuReq.bits.rs1_data
-    vlsuIO.fromRr.vuop(0).bits.rs2 := mem_units(0).io.vlsuReq.bits.rs2_data // for unmasked constant stride
+    vlsuIO.fromRr.vuop(0).bits := uopConvertToVuop(mem_units(0).io.vlsuReqRr.bits.uop)
+    vlsuIO.fromRr.vuop(0).bits.rs1 := mem_units(0).io.vlsuReqRr.bits.rs1_data
+    vlsuIO.fromRr.vuop(0).bits.rs2 := mem_units(0).io.vlsuReqRr.bits.rs2_data // for unmasked constant stride
 
     /* For masked/indexed vector load store. */
     vlsuIO.fromRr.vuop(1).valid := v_pipeline.io.toVlsuRr.valid
     vlsuIO.fromRr.vuop(1).bits := uopConvertToVuop(v_pipeline.io.toVlsuRr.bits.uop)
     vlsuIO.fromRr.vuop(1).bits.rs1 := v_pipeline.io.toVlsuRr.bits.uop.v_scalar_data
     vlsuIO.fromRr.vuop(1).bits.rs2 := v_pipeline.io.toVlsuRr.bits.uop.vStrideLength
-    vlsuIO.fromRr.vuop(1).bits.vs2 := v_pipeline.io.toVlsuRr.bits.data
+    vlsuIO.fromRr.vuop(1).bits.vs2 := v_pipeline.io.toVlsuRr.bits.rs2_data  //for indexed load/stores
     //Fixme: masked vector load store is not supported yet, because mask in VLSU is not fully tested.
   }
 
@@ -1942,9 +1942,15 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   rob.io.lsu_clr_unsafe := io.lsu.clr_unsafe
   rob.io.lxcpt          <> io.lsu.lxcpt
 
-  // VLSU <> ROB
-  (rob.io.lsu_clr_bsy.slice(memWidth + 1, memWidth + coreWidth - 1) zip vlsuIO.stToRob.robIdx).foreach { case (rob, vlsu) =>
-    rob := vlsu
+  // VLSU store <> ROB
+  (rob.io.lsu_clr_bsy.slice(memWidth, memWidth + coreWidth) zip vlsuIO.stToRob.robIdx).foreach { case (rob, vlsu) =>
+    rob.valid := vlsu.valid
+    rob.bits := vlsu.bits
+  }
+  // VLSU load <> ROB
+  (rob.io.lsu_clr_bsy.slice(memWidth + coreWidth, memWidth + 2 * coreWidth) zip vlsuIO.ldToRob.robIdx).foreach{ case (rob, vlsu) =>
+    rob.valid := vlsu.valid
+    rob.bits := vlsu.bits
   }
   assert (!(csr.io.singleStep), "[core] single-step is unsupported.")
 

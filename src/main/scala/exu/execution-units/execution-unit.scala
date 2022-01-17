@@ -148,7 +148,7 @@ abstract class ExecutionUnit(
 
     // only used by vector lsu
     /** for unmasked and unindexed load/store, data width should be xlen. */
-    val vlsuReq = if (usingVector && hasMem) ValidIO(new FuncUnitReq(dataWidth)) else null
+    val vlsuReqRr = if (usingVector && (hasMem || hasVMX)) ValidIO(new FuncUnitReq(dataWidth)) else null
 
     // TODO move this out of ExecutionUnit
     val com_exception = if (hasMem || hasRocc) Input(Bool()) else null
@@ -417,7 +417,7 @@ class ALUExeUnit(
     require(!hasAlu)
     val maddrcalc = Module(new MemAddrCalcUnit)
     maddrcalc.io.req        <> io.req
-    maddrcalc.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_MEM)
+    maddrcalc.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_MEM) && !io.req.bits.uop.is_rvv
     maddrcalc.io.brupdate     <> io.brupdate
     maddrcalc.io.status     := io.status
     maddrcalc.io.bp         := io.bp
@@ -435,8 +435,8 @@ class ALUExeUnit(
     if (usingVector) {
       // req to scalar lsu is a funcResp, for unmasked and unindexed LS.
       // Vector data write back via vmx unit.
-      io.vlsuReq.valid := io.req.valid
-      io.vlsuReq.bits := io.req.bits
+      io.vlsuReqRr.valid := io.req.valid && io.req.bits.uop.is_rvv
+      io.vlsuReqRr.bits := io.req.bits
       io.req.ready := true.B
     }
   }
@@ -632,7 +632,7 @@ class VecExeUnit(
 ) (implicit p: Parameters)
   extends ExecutionUnit(
     readsVrf         = true,
-    writesVrf        = true,
+    writesVrf        = !hasVMX,
     writesIrf        = hasAlu,
     writesFrf        = hasAlu,
     writesLlVrf      = false,
@@ -783,8 +783,11 @@ class VecExeUnit(
     vmx.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMX)
 
     // separate write port
-    vmx.io.resp.ready := io.vresp.ready
+    //vmx.io.resp.ready := io.vresp.ready
+    vmx.io.resp.ready := true.B
     vmx_busy := !vmx.io.req.ready
+    io.vlsuReqRr.valid := io.req.valid && io.req.bits.uop.is_rvv
+    io.vlsuReqRr.bits := io.req.bits
 
     vec_fu_units += vmx
   }
