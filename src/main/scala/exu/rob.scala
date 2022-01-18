@@ -570,18 +570,19 @@ class Rob(
 
     for (i <- 0 until numWakeupPorts) {
       val rob_idx = io.wb_resps(i).bits.uop.rob_idx
+      val realRespsVld = io.wb_resps(i).valid && !(io.wb_resps(i).bits.uop.is_rvv && io.wb_resps(i).bits.uop.uses_ldq)
       when (io.debug_wb_valids(i) && MatchBank(GetBankIdx(rob_idx))) {
         rob_debug_wdata(GetRowIdx(rob_idx)) := io.debug_wb_wdata(i)
       }
       val temp_uop = rob_uop(GetRowIdx(rob_idx))
 
-      assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
+      assert (!(realRespsVld && MatchBank(GetBankIdx(rob_idx)) &&
                !rob_val(GetRowIdx(rob_idx))),
                "[rob] writeback (" + i + ") occurred to an invalid ROB entry.")
-      assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
+      assert (!(realRespsVld && MatchBank(GetBankIdx(rob_idx)) &&
                !rob_bsy(GetRowIdx(rob_idx))),
                "[rob] writeback (" + i + ") occurred to a not-busy ROB entry.")
-      assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
+      assert (!(realRespsVld && MatchBank(GetBankIdx(rob_idx)) &&
                temp_uop.ldst_val && Mux(temp_uop.rt(RD, isVector),
                  !(temp_uop.pvd.map(p => p.valid && p.bits === io.wb_resps(i).bits.uop.pdst).reduce(_ || _)), // matching pvd(x).bits
                  temp_uop.pdst =/= io.wb_resps(i).bits.uop.pdst)),
