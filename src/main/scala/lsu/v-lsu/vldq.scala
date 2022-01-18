@@ -84,7 +84,7 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     val vLdQFull = WrapInc(enqPtr, ap.nVLdQEntries) === headPtr
     io.vLdQFull(w) := vLdQFull
     val isVectorLoad: Bool = io.vuopDis(w).valid && io.vuopDis(w).bits.uCtrlSig.accessType.isLoad
-    assert(Mux(io.vuopDis(w).bits.uCtrlSig.accessType.isLoad, !io.vuopDis(w).bits.uCtrlSig.accessType.isStore, true.B)  ,
+    assert(Mux(io.vuopDis(w).valid, io.vuopDis(w).bits.uCtrlSig.accessType.isStore ^ io.vuopDis(w).bits.uCtrlSig.accessType.isLoad, true.B),
       "vuop shold not be ld and st at same time.")
     val nonUnitStride: Bool = isVectorLoad &&
       (io.vuopDis(w).bits.uCtrlSig.accessStyle.isConstantStride || io.vuopDis(w).bits.uCtrlSig.accessStyle.isIndexed)

@@ -305,6 +305,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     io.wakeups(w_cnt).bits.uop := NullMicroOp()
     io.wakeups(w_cnt).bits.uop.is_rvv := true.B
     io.wakeups(w_cnt).bits.uop.uses_ldq := true.B
+    io.wakeups(w_cnt).bits.uop.dst_rtype := RT_VEC
     w_cnt += 1
   }
   for (eu <- exe_units) {
