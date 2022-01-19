@@ -1813,6 +1813,8 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     v_pipeline.io.vlsuWritePort.bits.data := vlsuIO.toVrf.write.bits.data
     v_pipeline.io.vlsuWritePort.bits.addr := vlsuIO.toVrf.write.bits.addr
     v_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
+    v_pipeline.io.vlsuLoadWakeUp.valid := vlsuIO.wakeUpVReg.valid
+    v_pipeline.io.vlsuLoadWakeUp.bits := vlsuIO.wakeUpVReg.bits
   }
 
   if (usingRoCC) {

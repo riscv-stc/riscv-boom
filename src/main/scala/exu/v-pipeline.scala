@@ -53,7 +53,9 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val vmx_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
     val vbusy_status     = Input(UInt(numVecPhysRegs.W))
 
+    /** vld ops may write one vreg multiple times but be freed when all done. */
     val vlsuWritePort    = Flipped(ValidIO(new VLSUWriteBack(vLen)))
+    val vlsuLoadWakeUp   = Flipped(ValidIO(UInt(vpregSz.W)))
     //val to_int_iss       = Decoupled(new ExeUnitResp(eLen))
     //val to_sdq           = Decoupled(new ExeUnitResp(eLen))
     val to_int           = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
@@ -301,13 +303,13 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   w_cnt = 0
   //vld write back clears busy table in rename but not busy bit in rob entry.
   for (i <- 0 until vecMemWidth) {// vector load write back port
-    io.wakeups(w_cnt).valid := io.vlsuWritePort.valid
+    io.wakeups(w_cnt).valid := io.vlsuLoadWakeUp.valid
     io.wakeups(w_cnt).bits.data := 0.U
     io.wakeups(w_cnt).bits.uop := NullMicroOp()
     io.wakeups(w_cnt).bits.uop.is_rvv := true.B
     io.wakeups(w_cnt).bits.uop.uses_ldq := true.B
     io.wakeups(w_cnt).bits.uop.dst_rtype := RT_VEC
-    io.wakeups(w_cnt).bits.uop.pdst := io.vlsuWritePort.bits.addr
+    io.wakeups(w_cnt).bits.uop.pdst := io.vlsuLoadWakeUp.bits
     w_cnt += 1
   }
   for (eu <- exe_units) {

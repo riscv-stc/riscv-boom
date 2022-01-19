@@ -22,6 +22,8 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     val toRob = new VLSUROBIO(ap)
     /** Retire finished load queue entry. */
     val fromRob = new ROBVLSUIO(ap)
+
+    val wakeUp = ValidIO(UInt(ap.vpregSz.W))
   })
 
   val nEntries: Int = ap.nVLdQEntries
@@ -51,6 +53,7 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   }
   val toRobVec = WireInit(0.U.asTypeOf(Vec(nEntries, Decoupled(UInt(ap.robAddrSz.W)))))
   val finishVec = WireInit(0.U.asTypeOf(Vec(nEntries, Bool())))
+  val wakeUpVec = WireInit(0.U.asTypeOf(Vec(nEntries, Decoupled(UInt(ap.vpregSz.W)))))
   val entries: Seq[VLdQEntry] = Seq.tabulate(nEntries){ i =>
     val e = Module(new VLdQEntry(ap, i))
     e.io.vuopDis := vuopDisInputs(i)
@@ -59,6 +62,7 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     e.io.finishAck := io.finishAck
     toRobVec(i) <> e.io.robAck
     finishVec(i) := e.io.allDone
+    wakeUpVec(i) <> e.io.wakeUp
     e.io.fromRob := io.fromRob
     e.io.headPtr := headPtr
     e.io.tailPtr := tailPtr
@@ -116,6 +120,15 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     outReq <> arbWinner
   }
   //__________________________________________________________________________________//
+  //----------------------------Wake up on partial finish-----------------------------//
+  val wakeUpArbiter = Module(new Arbiter(UInt(ap.vpregSz.W), nEntries))
+  io.wakeUp.valid := wakeUpArbiter.io.out.valid
+  io.wakeUp.bits := wakeUpArbiter.io.out.bits
+  wakeUpArbiter.io.out.ready := true.B
+  (wakeUpVec zip wakeUpArbiter.io.in).foreach { case (entryOut, arbIn) =>
+    arbIn <> entryOut
+  }
+  //__________________________________________________________________________________//
   //----------------------------Ack to rob when finished------------------------------//
   val ackArbiter = Module(new RequestArbitrator(ap, UInt(ap.robAddrSz.W), true))
   ackArbiter.io.inputReq <> toRobVec
@@ -155,12 +168,16 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     val headPtr = Input(UInt(ap.nVLdQIndexBits.W))
     val tailPtr = Input(UInt(ap.nVLdQIndexBits.W))
     val nonUnitStrideOHs = Input(UInt(ap.nVLdQEntries.W))
+    /** Wake up core pipe line when single register is all done. */
+    val wakeUp = DecoupledIO(UInt(ap.vpregSz.W))
   })
 
   io.uReq.valid := false.B
   io.uReq.bits := 0.U.asTypeOf(new VLdRequest(ap))
   io.robAck.valid := false.B
   io.robAck.bits := 0.U
+  io.wakeUp.valid := false.B
+  io.wakeUp.bits := 0.U
   io.allDone := false.B
   /** This register record which req buffer entry hold our request. */
   val reg: ValidIO[VLdQEntryBundle] = RegInit(0.U.asTypeOf(Valid(new VLdQEntryBundle(ap))))
@@ -201,6 +218,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.totalReq := snippetInitializer.io.totalRequest
       reg.bits.robIndex := io.vuopDis.bits.robIdx
       reg.bits.finishMasks := snippetInitializer.io.initSnippet
+      reg.bits.wakeUpVec := snippetInitializer.io.initSnippet.map(s => (~s).asUInt().orR())
       reg.bits.orderFail := false.B
       reg.bits.allSucceeded := false.B
       reg.bits.pRegVec := io.vuopDis.bits.vpdst
@@ -249,7 +267,23 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     when(io.finishAck.valid && io.finishAck.bits.qEntryIdx === id.U){
       reg.bits.finishMasks(io.finishAck.bits.segmentIdx) := reg.bits.finishMasks(io.finishAck.bits.segmentIdx) | io.finishAck.bits.regAccessCS.finishMaskSnippet
     }
-    val allFinished = WireInit(VecInit(reg.bits.finishMasks.map(_.andR())).asUInt().andR())
+    /** indicates we have some vreg to wake up, 1 is valid. */
+    val needWakeUpVec = VecInit((reg.bits.finishMasks zip reg.bits.wakeUpVec).map { case (finish, wake) =>
+      wake && finish.andR()
+    }).asUInt()
+    val needWakeUp: Bool = needWakeUpVec.orR()
+    /** indicates which reg in this group needs wakeup, not the reg addr. */
+    val wakeUpGroupIdx: UInt = OHToUInt(FindFirstOne(needWakeUpVec, 8))
+    /** find out real reg addr to wake up. */
+    val wakeUpRegIdx: UInt = reg.bits.pRegVec(wakeUpGroupIdx)
+    when(needWakeUp){
+      io.wakeUp.valid := true.B
+      io.wakeUp.bits := wakeUpRegIdx
+      when(io.wakeUp.fire()){
+        reg.bits.wakeUpVec(wakeUpGroupIdx) := false.B
+      }
+    }
+    val allFinished = !reg.bits.wakeUpVec.asUInt().orR()
     when(allFinished){
       io.robAck.valid := true.B
       io.robAck.bits := reg.bits.robIndex

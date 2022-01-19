@@ -50,6 +50,8 @@ class RRVLSUIO(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
 
 /** Entry of an entire vector load uop. */
 class VLdQEntryBundle(ap: VLSUArchitecturalParams) extends LoadStoreQueueEntryBundleBase(ap){
+  /** 1 means need to wake up core pipeline. 0 means do nothing or done. */
+  val wakeUpVec = Vec(8, Bool())
 }
 
 class VStQEntryBundle(ap: VLSUArchitecturalParams) extends LoadStoreQueueEntryBundleBase(ap){
@@ -367,6 +369,7 @@ class VLSUTopBundle(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   /** VLSU to ROB IO. */
   val ldToRob: VLSUROBIO = new VLSUROBIO(ap)
   val stToRob: VLSUROBIO = new VLSUROBIO(ap)
+  val wakeUpVReg = ValidIO(UInt(ap.vpregSz.W))
   val fromRob = new ROBVLSUIO(ap)
 }
 

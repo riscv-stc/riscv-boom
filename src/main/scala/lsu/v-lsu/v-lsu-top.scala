@@ -43,6 +43,7 @@ class VLSUImp(outer: VLSU,
   io.toDis.disVLdQIdx := vldqHandler.io.disVLdQIdx
   io.ldToRob <> vldqHandler.io.toRob
   vldqHandler.io.fromRob := io.fromRob
+  io.wakeUpVReg <> vldqHandler.io.wakeUp
 
   val vstqHandler = Module(new VStQueueHandler(ap))
   vstqHandler.io.vuopDis <> io.fromDis.vuopDis

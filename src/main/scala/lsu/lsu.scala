@@ -1553,8 +1553,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   var temp_ldq_head        = ldq_head
   for (w <- 0 until coreWidth)
   {
-    val commit_store = io.core.commit.valids(w) && io.core.commit.uops(w).uses_stq
-    val commit_load  = io.core.commit.valids(w) && io.core.commit.uops(w).uses_ldq
+    val commit_store = io.core.commit.valids(w) && io.core.commit.uops(w).uses_stq && !io.core.commit.uops(w).is_rvv
+    val commit_load  = io.core.commit.valids(w) && io.core.commit.uops(w).uses_ldq && !io.core.commit.uops(w).is_rvv
     val idx = Mux(commit_store, temp_stq_commit_head, temp_ldq_head)
     when (commit_store)
     {
