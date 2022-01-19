@@ -2221,7 +2221,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     vuop.rs1 := 0.U
     vuop.rs2 := 0.U
     vuop.vm := 0.U
-    vuop.vpdst := VecInit(uop.pvd.map(_.bits))
+    vuop.vpdst := Mux(uop.uses_ldq, VecInit(uop.pvd.map(_.bits)), VecInit(uop.stale_pvd.map(_.bits)))
     vuop
   }
 }

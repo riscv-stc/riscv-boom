@@ -246,7 +246,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   vregfile.io.write_ports(0).valid := io.vlsuWritePort.valid
   vregfile.io.write_ports(0).bits.addr := io.vlsuWritePort.bits.addr
   vregfile.io.write_ports(0).bits.data := io.vlsuWritePort.bits.data
-  vregfile.io.write_ports(0).bits.mask := io.vlsuWritePort.bits.byteMask
+  vregfile.io.write_ports(0).bits.mask := MaskExploder(io.vlsuWritePort.bits.byteMask, vLen)
 
   var w_cnt = 1
   //for (i <- 1 until vecMemWidth + 1) {//dedicated for vlsu
@@ -355,4 +355,22 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     + BoomCoreStringPrefix(
       "Num Wakeup Ports      : " + numWakeupPorts,
       "Num Bypass Ports      : " + exe_units.numTotalBypassPorts))
+}
+/** Convert byte mask into bit mask. */
+class MaskExploder(bitWidth: Int) extends Module {
+  val io = IO(new Bundle{
+    val byteMaskIn = Input(UInt((bitWidth/8).W))
+    val bitMaskOut = Output(UInt(bitWidth.W))
+  })
+  io.bitMaskOut := VecInit(io.byteMaskIn.asBools().map(byte => Fill(8, byte))).asUInt()
+}
+
+object MaskExploder{
+  def apply(byteMask: UInt, bitWidth: Int): UInt = {
+    val bitMask: UInt = Wire(UInt(bitWidth.W))
+    val maskExploder = Module(new MaskExploder(bitWidth))
+    maskExploder.io.byteMaskIn := byteMask
+    bitMask := maskExploder.io.bitMaskOut
+    bitMask
+  }
 }
