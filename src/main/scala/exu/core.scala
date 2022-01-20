@@ -1698,7 +1698,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       entry.valid := rob.io.commit.valids(i) || rob.io.commit.arch_valids(i)
       entry.bits.isStore := rob.io.commit.uops(i).uses_stq
       entry.bits.isLoad := rob.io.commit.uops(i).uses_ldq
-      entry.bits.qEntryIdx := rob.io.commit.uops(i).rob_idx
+      entry.bits.qEntryIdx := Mux(rob.io.commit.uops(i).uses_stq, rob.io.commit.uops(i).stq_idx, rob.io.commit.uops(i).ldq_idx)
     }
   }
 
