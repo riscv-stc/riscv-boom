@@ -17,7 +17,7 @@ class VLSU(generalParams: VLSUGeneralParams,
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = s"l1vlsu",
-      sourceId = IdRange(0, vmshrs - 1),
+      sourceId = IdRange(0, vmshrs),
       supportsProbe = TransferSizes.none
     ))
   )))(ValName(s"fromL1vlsu"))
