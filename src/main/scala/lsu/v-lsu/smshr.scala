@@ -69,7 +69,7 @@ class SMSHR(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModules(ap){
       state := sWaitAck
     }
   }.elsewhen(state === sWaitAck){
-    when(io.tlInD.valid){
+    when(io.tlInD.valid && (io.tlInD.bits.source === (nLmshrs + idx).U)){
       when(io.tlInD.bits.corrupt || io.tlInD.bits.denied){
         state := sWaitArb
       }.otherwise{
