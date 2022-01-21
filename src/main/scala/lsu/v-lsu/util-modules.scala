@@ -262,7 +262,7 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val io = IO(new Bundle{
     val ctrl = Input(new VectorAccessStyle(ap))
     val initSnippet = Output(Vec(8, UInt(ap.vLenb.W)))
-    val totalSegment = Output(UInt(3.W))
+    val totalSegment = Output(UInt(4.W))
     val totalRequest = Output(UInt((log2Ceil(ap.vLenb) + 1).W))
   })
   val isSegment = io.ctrl.isSegment
@@ -283,7 +283,7 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val lmulLargerEqualOne = !io.ctrl.vlmul(2)
   /** lmul <= 1 */
   val lmulSmallerEqualOne = lmul1 || lmulSmallerThanOne
-  val nFields = io.ctrl.nf + 1.U
+  val nFields = io.ctrl.nf
 
   /** if register is valid in pure nf. */
   val nfVld: Int => Bool = (i: Int) => i.U < nFields
@@ -333,7 +333,8 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
           Mux(isSegment && lmul4 && segmentVld(i), snippetX(idxMod4),
             allOnes)))))
   }
-  io.totalSegment := Mux(io.ctrl.isWholeAccess, io.ctrl.nf, Mux(isSegment, lmulValue * nFields - 1.U, lmulValue - 1.U))
+  //4 bits, up to 'h8.
+  io.totalSegment := Mux(io.ctrl.isWholeAccess, nFields, Mux(isSegment, lmulValue * nFields, lmulValue))
   val denseAccess = (io.ctrl.isUnitStride && !isSegment) || io.ctrl.isWholeAccess
   io.totalRequest := Mux(denseAccess, ap.maxReqsInUnitStride.U, (ap.vLenb.U >> io.ctrl.eew).asUInt())
 }

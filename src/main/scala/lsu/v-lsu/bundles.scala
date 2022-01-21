@@ -70,8 +70,8 @@ class LoadStoreQueueEntryBundleBase(ap: VLSUArchitecturalParams) extends VLSUBun
   val finishMasks: Vec[UInt] = Vec(8, UInt(ap.vLenb.W))
   val allSucceeded: Bool = Bool()
   /** Max segments is 8 */
-  val segmentCount: UInt = UInt(3.W)
-  val totalSegments: UInt = UInt(3.W)
+  val segmentCount: UInt = UInt(4.W)
+  val totalSegments: UInt = UInt(4.W)
   /** total request number within one dest vreg. */
   val totalReq: UInt = UInt(ap.vLenb.W)
   /** variable request count within one dest vreg. */
@@ -207,7 +207,7 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     val (headSnippet, bodySnippet, tailSnippet) = UnitStrideSnippetsCalculator(offset)
     assert((tailSnippet | headSnippet | bodySnippet).andR(), "Wrong snippet result!")
     out.address := addr + (reqCount << ap.offsetBits).asUInt()
-    out.segmentIdx := segmentCount
+    out.segmentIdx := segmentCount(2,0)
     out.style.isUnitStride := true.B
     out.style.isIndexed := false.B
     out.style.isConstantStride := false.B
@@ -270,7 +270,7 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     out.style.isWholeAccess := false.B
     val elementBytes: UInt = (1.U << eew).asUInt()
     out.style.eew := eew
-    out.segmentIdx := segmentCount
+    out.segmentIdx := segmentCount(2,0)
     out.regAccessCS.regIdx := dstPReg
     out.lineStartIndex := offset
     out.addressIsPhysical := false.B
@@ -315,7 +315,7 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     out.address := elementAddr
     out.executing := false.B
     out.done := false.B
-    out.segmentIdx := segmentCount
+    out.segmentIdx := segmentCount(2,0)
     out.style.isUnitStride := false.B
     out.style.isConstantStride := false.B
     out.style.isIndexed := true.B

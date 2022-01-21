@@ -249,19 +249,16 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   }.elsewhen(state === sSplitting){
     io.uReq.valid := requestSplitter.io.uReq.valid && !freeze
     io.uReq.bits := requestSplitter.io.uReq.bits
-    when((io.uReq.valid && io.uReq.ready) || !io.uReq.valid){
-      reg.bits.reqCount := reg.bits.reqCount + 1.U
-      reg.bits.preAddr := requestSplitter.io.newAddr
-      reg.bits.preSnippet := requestSplitter.io.newSnippet
-    }
-    when(reg.bits.reqCount === reg.bits.totalReq - 1.U){
-      reg.bits.preAddr := reg.bits.addr
-      reg.bits.preSnippet := 0.U
-      reg.bits.segmentCount := reg.bits.segmentCount + 1.U
-      reg.bits.reqCount := 0.U
-      when(reg.bits.segmentCount === reg.bits.totalSegments){
-        state := sWaitData
-      }
+    /** Ready is true only when valid is true, but unnecessary request does not trigger valid. Both shift to next. */
+    val nextSplit: Bool = io.uReq.ready || !io.uReq.valid
+    val nextSeg: Bool = reg.bits.reqCount === reg.bits.totalReq - 1.U
+    reg.bits.reqCount := Mux(nextSplit, Mux(nextSeg, 0.U, reg.bits.reqCount + 1.U), reg.bits.reqCount)
+    reg.bits.preAddr := Mux(nextSplit, Mux(nextSeg, reg.bits.addr, requestSplitter.io.newAddr), reg.bits.preAddr)
+    reg.bits.preSnippet := Mux(nextSplit, Mux(nextSeg, 0.U, requestSplitter.io.newSnippet), reg.bits.preSnippet)
+    reg.bits.segmentCount := Mux(nextSplit && nextSeg, reg.bits.segmentCount + 1.U, reg.bits.segmentCount)
+    val splitDone: Bool = (reg.bits.segmentCount === (reg.bits.totalSegments - 1.U)) && nextSeg && nextSplit
+    when(splitDone){
+      state := sWaitData
     }
     when(io.finishAck.valid && io.finishAck.bits.qEntryIdx === id.U){
       reg.bits.finishMasks(io.finishAck.bits.segmentIdx) := reg.bits.finishMasks(io.finishAck.bits.segmentIdx) | io.finishAck.bits.regAccessCS.finishMaskSnippet
