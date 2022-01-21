@@ -263,6 +263,9 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
         state := sWaitData
       }
     }
+    when(io.finishAck.valid && io.finishAck.bits.qEntryIdx === id.U){
+      reg.bits.finishMasks(io.finishAck.bits.segmentIdx) := reg.bits.finishMasks(io.finishAck.bits.segmentIdx) | io.finishAck.bits.regAccessCS.finishMaskSnippet
+    }
   }.elsewhen(state === sWaitData){
     when(io.finishAck.valid && io.finishAck.bits.qEntryIdx === id.U){
       reg.bits.finishMasks(io.finishAck.bits.segmentIdx) := reg.bits.finishMasks(io.finishAck.bits.segmentIdx) | io.finishAck.bits.regAccessCS.finishMaskSnippet
