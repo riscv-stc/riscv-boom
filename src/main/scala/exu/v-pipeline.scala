@@ -303,9 +303,9 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   w_cnt = 0
   //vld write back clears busy table in rename but not busy bit in rob entry.
   for (i <- 0 until vecMemWidth) {// vector load write back port
+    io.wakeups(w_cnt) <> DontCare
     io.wakeups(w_cnt).valid := io.vlsuLoadWakeUp.valid
     io.wakeups(w_cnt).bits.data := 0.U
-    io.wakeups(w_cnt).bits.uop := DontCare
     io.wakeups(w_cnt).bits.uop.is_rvv := true.B
     io.wakeups(w_cnt).bits.uop.uses_ldq := true.B
     io.wakeups(w_cnt).bits.uop.dst_rtype := RT_VEC

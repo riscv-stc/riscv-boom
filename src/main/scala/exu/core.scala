@@ -198,6 +198,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   val dis_ready  = Wire(Bool())
   //val dis_split       = Wire(Vec(coreWidth, Bool()))
   //val dis_fired       = RegInit(VecInit(0.U(coreWidth.W).asBools))
+  val disSplitFirst  = Wire(Vec(coreWidth, Bool()))
   val dis_split_last  = Wire(Vec(coreWidth, Bool()))
   val dis_split_cand  = Wire(Vec(coreWidth, Bool()))
   val dis_split_actv  = Wire(Vec(coreWidth, Bool()))
@@ -1213,8 +1214,9 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       when (vlsReadsMask) {
         dis_uops(w).iq_type := IQT_MVMX
       }
-
-      v_rename_stage.io.dis_fire_first(w) := dis_fire(w) && dis_uops(w).v_split_first
+      disSplitFirst(w) := Mux(needSplit, dis_split_segf === 0.U, true.B)
+      dis_uops(w).v_split_first := disSplitFirst(w)
+      v_rename_stage.io.dis_fire_first(w) := dis_fire(w) && disSplitFirst(w)
     }
   } else {
     dis_fire := dis_valids zip dis_stalls map {case (v,s) => v && !s}

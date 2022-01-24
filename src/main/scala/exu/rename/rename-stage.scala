@@ -675,21 +675,22 @@ extends AbstractRenameStage(
   // Busy Table
 
   busytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
-  busytable.io.wb_valids := io.wakeups.map(wk => wk.valid)
-  busytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
+  busytable.io.wb_valids := VecInit(io.wakeups.map(wk => wk.valid))
+  busytable.io.wb_pdsts := VecInit(io.wakeups.map(_.bits.uop.pdst))
   io.vbusy_status := busytable.io.vbusy_status
   for (w <- 0 until plWidth) {
     busytable.io.rebusy_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && io.dis_fire_first(w)
   }
   for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) {
     val wkUop   = wk.bits.uop
+    val isVLoad  = wkUop.is_rvv && wkUop.uses_ldq
     val v_eidx  = wkUop.v_eidx
     val vsew    = wkUop.vd_eew(1,0)
     val ecnt    = wkUop.v_split_ecnt
     val rmask   = VRegMask(v_eidx, vsew, ecnt, vLenb)
     val tailMask = Mux(wkUop.rt(RD, isMaskVD), Fill(vLenb, wkUop.v_split_last) << (v_eidx >> 3)(log2Ceil(vLenb)-1, 0),
                                                Fill(vLenb, wkUop.v_split_last) << (v_eidx << vsew)(log2Ceil(vLenb)-1, 0))
-    bs := rmask | tailMask
+    bs := Mux(isVLoad, Fill(vLenb, true.B), rmask | tailMask)
   }
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
