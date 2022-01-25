@@ -218,7 +218,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.totalReq := snippetInitializer.io.totalRequest
       reg.bits.robIndex := io.vuopDis.bits.robIdx
       reg.bits.finishMasks := snippetInitializer.io.initSnippet
-      reg.bits.wakeUpVec := snippetInitializer.io.initSnippet.map(s => (~s).asUInt().orR())
+      reg.bits.wakeUpVec := VecInit(snippetInitializer.io.wakeVecInit.asBools())
       reg.bits.orderFail := false.B
       reg.bits.allSucceeded := false.B
       reg.bits.pRegVec := io.vuopDis.bits.vpdst
