@@ -65,7 +65,8 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val vlsuReadReq: DecoupledIO[UInt] = Flipped(Decoupled(UInt(vpregSz.W)))
     val vlsuReadResp     = ValidIO(UInt(vLen.W))
     //val vmupdate         = Output(Vec(1, Valid(new MicroOp)))
-    val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
+    /** wider int update, @todo: specify update port into independent issue-unit */
+    val intupdate        = Input(Vec(intWidth + memWidth, Valid(new ExeUnitResp(eLen))))
     val fpupdate         = Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen))))
 
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(eLen))) // wakeup issue_units for mem, int and fp

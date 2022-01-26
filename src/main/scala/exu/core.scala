@@ -1212,7 +1212,9 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       val vlsReadsMask = dis_uops(w).is_rvv && (dis_uops(w).uses_stq || dis_uops(w).uses_ldq) &&
         !dis_uops(w).v_unmasked
       when (vlsReadsMask) {
+        // if uop need both scalar addr and vector mask(index), addr arrive at vmx-issue as scalar-data.
         dis_uops(w).iq_type := IQT_MVMX
+        dis_uops(w).v_scalar_busy := true.B
       }
       disSplitFirst(w) := Mux(needSplit, dis_split_segf === 0.U, true.B)
       dis_uops(w).v_split_first := disSplitFirst(w)

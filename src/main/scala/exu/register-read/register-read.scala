@@ -66,8 +66,7 @@ class RegisterRead(
     // send micro-ops to the execution pipelines
     val exe_reqs = Vec(issueWidth, (new DecoupledIO(new FuncUnitReq(registerWidth))))
     //val vmupdate = if (vector) Output(Vec(1, Valid(new MicroOp))) else null
-    //val vecUpdate = if (vector) Output(Vec(1, Valid(new ExeUnitResp(eLen)))) else null
-    val intupdate= if (usingVector && !vector && !float) Output(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
+    val intupdate = if (usingVector && !vector && !float) Output(Vec(issueWidth, Valid(new ExeUnitResp(eLen)))) else null
     val fpupdate = if (usingVector && float) Output(Vec(issueWidth, Valid(new ExeUnitResp(eLen)))) else null
     require(!(float && vector))
 
@@ -334,14 +333,18 @@ class RegisterRead(
 
     if (usingVector) {
       if (!vector && !float) {
+        val is_setvl = exe_reg_uops(w).uopc.isOneOf(uopVSETVLI, uopVSETIVLI, uopVSETVL)
+        io.intupdate(w).valid := exe_reg_valids(w) && exe_reg_uops(w).is_rvv && !is_setvl
+        io.intupdate(w).bits.uop := exe_reg_uops(w)
+        io.intupdate(w).bits.data := exe_reg_rs1_data(w)
+        io.intupdate(w).bits.uop.vStrideLength := exe_reg_rs2_data(w)
         // avoid mem pipes (lower indexed)
         if (w >= memWidth && w < memWidth+intWidth) {
-          val is_setvl = exe_reg_uops(w).uopc.isOneOf(uopVSETVLI, uopVSETIVLI, uopVSETVL)
           io.exe_reqs(w).valid := exe_reg_valids(w) && (is_setvl || !exe_reg_uops(w).is_rvv)
-          io.intupdate(w - memWidth).valid := exe_reg_valids(w) && exe_reg_uops(w).is_rvv && !is_setvl
-          io.intupdate(w - memWidth).bits.uop := exe_reg_uops(w)
-          io.intupdate(w - memWidth).bits.data := exe_reg_rs1_data(w)
-          io.intupdate(w - memWidth).bits.uop.vStrideLength := exe_reg_rs2_data(w)
+          //io.intupdate(w - memWidth).valid := exe_reg_valids(w) && exe_reg_uops(w).is_rvv && !is_setvl
+          //io.intupdate(w - memWidth).bits.uop := exe_reg_uops(w)
+          //io.intupdate(w - memWidth).bits.data := exe_reg_rs1_data(w)
+          //io.intupdate(w - memWidth).bits.uop.vStrideLength := exe_reg_rs2_data(w)
         }
       } else if (float) {
         io.exe_reqs(w).valid := exe_reg_valids(w) && !exe_reg_uops(w).is_rvv

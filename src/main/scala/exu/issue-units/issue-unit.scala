@@ -88,7 +88,7 @@ class IssueUnitIO(
 
   val brupdate         = Input(new BrUpdateInfo())
   //val vmupdate         = if (usingVector && !vector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
-  val intupdate        = if (vector) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val intupdate        = if (vector) Input(Vec(intWidth + memWidth, Valid(new ExeUnitResp(eLen)))) else null
   val fpupdate         = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   //val vecUpdate        = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
   val vbusy_status     = if (vector) Input(UInt(numVecPhysRegs.W)) else null

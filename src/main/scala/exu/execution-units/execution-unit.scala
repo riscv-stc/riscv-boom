@@ -435,7 +435,7 @@ class ALUExeUnit(
     if (usingVector) {
       // req to scalar lsu is a funcResp, for unmasked and unindexed LS.
       // Vector data write back via vmx unit.
-      io.vlsuReqRr.valid := io.req.valid && io.req.bits.uop.is_rvv
+      io.vlsuReqRr.valid := io.req.valid && io.req.bits.uop.is_rvv && !io.req.bits.uop.v_scalar_busy
       io.vlsuReqRr.bits := io.req.bits
       io.req.ready := true.B
     }
