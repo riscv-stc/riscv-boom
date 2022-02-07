@@ -358,6 +358,7 @@ class VecFDivSqrtUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeF
     // inputs
     fdiv.io.req.valid          := io.req.valid && !this.do_kill
     fdiv.io.fcsr_rm            := io.fcsr_rm
+    fdiv.io.req.bits.rvmFull   := DontCare
     fdiv.io.req.bits.uop       := io.req.bits.uop
     fdiv.io.req.bits.pred_data := io.req.bits.pred_data
     fdiv.io.req.bits.kill      := io.req.bits.kill

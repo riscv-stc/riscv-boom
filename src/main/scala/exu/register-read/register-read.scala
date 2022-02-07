@@ -319,8 +319,10 @@ class RegisterRead(
 
     io.exe_reqs(w).valid    := exe_reg_valids(w)
     io.exe_reqs(w).bits.uop := exe_reg_uops(w)
+    io.exe_reqs(w).bits.rvmFull := DontCare
     if (vector) {
       if (numReadPorts > 0) io.exe_reqs(w).bits.rvm_data := exe_reg_rvm_align(w)
+      if (numReadPorts > 0) io.exe_reqs(w).bits.rvmFull := exe_reg_rvm_data(w)
       if (numReadPorts > 1) io.exe_reqs(w).bits.rs3_data := exe_reg_rs3_data(w)
       if (numReadPorts > 2) io.exe_reqs(w).bits.rs2_data := exe_reg_rs2_data(w)
       if (numReadPorts > 3) io.exe_reqs(w).bits.rs1_data := exe_reg_rs1_data(w)

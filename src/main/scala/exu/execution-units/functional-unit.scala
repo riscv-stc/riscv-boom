@@ -127,6 +127,8 @@ class FuncUnitReq(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
   val rs2_data = UInt(dataWidth.W)
   val rs3_data = UInt(dataWidth.W) // used for FMA, vector units
   val rvm_data = UInt((dataWidth/8).W)
+  /** VLSU only, @Fixme: don't make this depends on firrtl dce.  */
+  val rvmFull = UInt(dataWidth.W)
   val pred_data = Bool()
 
   val kill = Bool() // kill everything
@@ -1094,6 +1096,7 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
               else                         Module(new FixMulAcc(numStages, eLen >> 3))
                 
     xma.io.vxrm                := io.vxrm
+    xma.io.req.bits            := DontCare
     xma.io.req.bits.uop        := uop
     xma.io.req.valid           := io.req.valid
     xma.io.req.bits.uop.v_eidx := uop.v_eidx + e.U

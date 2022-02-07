@@ -301,6 +301,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     vlsuIO.fromRr.vuop(1).bits.rs1 := v_pipeline.io.toVlsuRr.bits.uop.v_scalar_data
     vlsuIO.fromRr.vuop(1).bits.rs2 := v_pipeline.io.toVlsuRr.bits.uop.vStrideLength
     vlsuIO.fromRr.vuop(1).bits.vs2 := v_pipeline.io.toVlsuRr.bits.rs2_data  //for indexed load/stores
+    vlsuIO.fromRr.vuop(1).bits.vm := v_pipeline.io.toVlsuRr.bits.rvmFull
     //Fixme: masked vector load store is not supported yet, because mask in VLSU is not fully tested.
   }
 
