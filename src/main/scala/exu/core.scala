@@ -1699,7 +1699,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   io.lsu.commit                  := rob.io.commit
   if(usingVector){
     vlsuIO.fromRob.retireEntries.zipWithIndex.foreach {case (entry, i) =>
-      entry.valid := rob.io.commit.valids(i) || rob.io.commit.arch_valids(i)
+      entry.valid := (rob.io.commit.valids(i) || rob.io.commit.arch_valids(i)) && rob.io.commit.uops(i).is_rvv
       entry.bits.isStore := rob.io.commit.uops(i).uses_stq
       entry.bits.isLoad := rob.io.commit.uops(i).uses_ldq
       entry.bits.qEntryIdx := Mux(rob.io.commit.uops(i).uses_stq, rob.io.commit.uops(i).stq_idx, rob.io.commit.uops(i).ldq_idx)
