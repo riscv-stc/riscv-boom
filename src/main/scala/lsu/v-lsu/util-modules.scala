@@ -341,24 +341,23 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   io.wakeVecInit := Mux(lmul1 || lmulSmallerThanOne, 1.U, Mux(lmul2, 3.U, Mux(lmul4, 0xf.U, 0xff.U)))
 }
 
-/** Construct active snippet for element access according to vm and lmul, nf. */
+/** Construct active snippet for element access according to vm and lmul, nf and new vl. */
 class SnippetVectorMaskAdjuster(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val io = IO(new Bundle{
-    val eew = Input(UInt(3.W))
+    val ctrl = Input(new VectorAccessStyle(ap))
     val vm = Input(UInt(ap.vLen.W))
-    val vlmul = Input(UInt(3.W))
-    val isSegment = Input(Bool())
-    val nf = Input(UInt(3.W))
+    /** adjusted snippet, bit x is 0 means this byte of data needs to be accessed. */
     val adjustedSnippet = Output(Vec(8, UInt(ap.vLenb.W)))
   })
   io.adjustedSnippet := 0.U.asTypeOf(Vec(8, UInt(ap.vLenb.W)))
-  val elenB = (1.U << io.eew(1,0)).asUInt()
-  val isSegment = io.isSegment
-  val elen1 = io.eew === 0.U
-  val elen2 = io.eew === 1.U
-  val elen4 = io.eew === 2.U
-  val elen8 = io.eew === 3.U
-  val lmul = io.vlmul(1, 0)
+  val elementBytes = (1.U << io.ctrl.eew(1, 0)).asUInt()
+  val elenB = (1.U << io.ctrl.eew(1,0)).asUInt()
+  val isSegment = io.ctrl.isSegment
+  val elen1 = io.ctrl.eew === 0.U
+  val elen2 = io.ctrl.eew === 1.U
+  val elen4 = io.ctrl.eew === 2.U
+  val elen8 = io.ctrl.eew === 3.U
+  val lmul = io.ctrl.vlmul(1, 0)
   val lmulOHs = WireInit(0.U(8.W))
   lmulOHs := (1.U << lmul).asUInt() - 1.U
   val elementsPerRegElen1 = ap.vLenb
@@ -369,27 +368,50 @@ class SnippetVectorMaskAdjuster(ap: VLSUArchitecturalParams) extends VLSUModules
   val lmul4: Bool = WireInit(lmul === 2.U)
   val lmul8: Bool = WireInit(lmul === 3.U)
   val lmul1: Bool = WireInit(lmul === 0.U)
-  val nFields = io.nf + 1.U
+  /** lmul > 1 */
+  val lmulLagerThanOne = !io.ctrl.vlmul(2) && lmul.orR()
+  val nFields = io.ctrl.nf + 1.U
   val lmulValue = (1.U << lmul).asUInt()
-  val byteActiveX: (Int,Int) => Bool = (i: Int, j: Int) => ???
-  val vm = io.vm
+  val shrinkRate: UInt = 4.U - lmul
+  // input mask, 0 means invalid entire element. 1 means valid element.
+  val elementVldVec = io.vm
   /** Indicates if this vlen is valid under current vlmul. */
-  val lmulVld: Int => Bool = (i: Int) => i.U < (1.U << lmul).asUInt()
+  val lmulVld: Int => Bool = (pregIdx: Int) => pregIdx.U < (1.U << lmul).asUInt()
   /** if register is valid in lmul and nf combinations. */
   val segmentVld: Int => Bool = (i: Int) => i.U < (nFields * lmulValue)
-  /** This is normal look up to vm when index < lmul and non-segment. */
-  val snippetX: Int => UInt = (X: Int) => WireInit(VecInit(Seq.tabulate(ap.vLenb)(i => i + X * ap.vLenb).map(x =>
-    Mux(elen1, vm(x) , Mux(elen2, vm(x >> 1), Mux(elen4,  vm(x >> 2), vm(x >> 3)))))).asUInt())
-  val allOnes = Fill(ap.vLenb,1.U)
-  io.adjustedSnippet.zipWithIndex.foreach { case (out, i) =>
-    val snippet = snippetX(0)
-    val idxMod4: Int = i % 4
-    val idxMod2: Int = i % 2
-    out := Mux(!isSegment && lmulVld(i), snippetX(i),
-      Mux(isSegment && lmul1 && segmentVld(i), snippet,
-        Mux(isSegment && lmul2 && segmentVld(i), snippetX(idxMod2),
-          Mux(isSegment && lmul4 && segmentVld(i), snippetX(idxMod4), 0.U
-        ))))
+  /** end byte index of vl */
+  val endBytevl = (io.ctrl.vl * elementBytes).asUInt()
+  /** byte index of vstart */
+  val startByte = io.ctrl.vStart * elementBytes
+
+  /** Compare two end byte index and pick smaller one. parameter is segment index. */
+  val endByteIdx: Int => UInt = (pregIdx: Int) => WireInit(
+    Mux(endByteLmulX(pregIdx) > endBytevl, endBytevl, endByteLmulX(pregIdx)))
+  /** Calculate end byte index of this vlen when is in one register group. parameter is segment index. */
+  val endByteLmulX: Int => UInt = (pregIdx: Int) => WireInit(
+    Mux(lmulLagerThanOne && lmulVld(pregIdx), (ap.vLenb.U * (pregIdx + 1).U).asUInt(),
+      Mux(lmul1, ap.vLenb.U, (ap.vLenb.U >> shrinkRate).asUInt())))
+
+  /** 0 means this byte needs to be accessed. parameter is byte index.*/
+  val byteVldX: (Int, UInt) => Bool = (byteIdx: Int, endByteIdx: UInt) => WireInit(
+    byteIdx.U < startByte || byteIdx.U >= endByteIdx)
+
+  /** This is normal look up to vm and check if if valid according to vl. */
+  val snippetX: Int => UInt = (pregIdx: Int) => WireInit(
+    VecInit(Seq.tabulate(ap.vLenb)(byteIdx => byteIdx + pregIdx * ap.vLenb).map(globalByteIdx => {
+      val byteVldByVM: Bool =
+        Mux(elen1, elementVldVec(globalByteIdx),
+        Mux(elen2, elementVldVec(globalByteIdx >> 1),
+        Mux(elen4, elementVldVec(globalByteIdx >> 2),
+            elementVldVec(globalByteIdx >> 3))))
+      val byteVldByVL = !byteVldX(globalByteIdx, endByteIdx(pregIdx))
+      // 0 means need access.
+      val byteVld: Bool = Mux(byteVldByVL, !byteVldByVM, true.B)
+      byteVld
+    })).asUInt())
+
+  io.adjustedSnippet.zipWithIndex.foreach { case (out, pregIdx) =>
+    out := snippetX(pregIdx)
   }
 }
 

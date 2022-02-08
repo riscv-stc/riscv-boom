@@ -294,6 +294,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     vlsuIO.fromRr.vuop(0).bits := uopConvertToVuop(mem_units(0).io.vlsuReqRr.bits.uop)
     vlsuIO.fromRr.vuop(0).bits.rs1 := mem_units(0).io.vlsuReqRr.bits.rs1_data
     vlsuIO.fromRr.vuop(0).bits.rs2 := mem_units(0).io.vlsuReqRr.bits.rs2_data // for unmasked constant stride
+    vlsuIO.fromRr.vuop(0).bits.vm := Fill(vLen, 1.U(1.W))
 
     /* For masked/indexed vector load store. */
     vlsuIO.fromRr.vuop(1).valid := v_pipeline.io.toVlsuRr.valid

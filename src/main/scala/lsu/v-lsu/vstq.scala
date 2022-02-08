@@ -179,10 +179,7 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   snippetInitializer.io.ctrl := io.vuopDis.bits.uCtrlSig.accessStyle
 
   val snippetVMAdjuster = Module(new SnippetVectorMaskAdjuster(ap))
-  snippetVMAdjuster.io.eew := io.vuopRR.bits.uCtrlSig.accessStyle.eew
-  snippetVMAdjuster.io.vlmul := io.vuopRR.bits.uCtrlSig.accessStyle.vlmul
-  snippetVMAdjuster.io.isSegment := io.vuopRR.bits.uCtrlSig.accessStyle.isSegment
-  snippetVMAdjuster.io.nf := io.vuopRR.bits.uCtrlSig.accessStyle.nf
+  snippetVMAdjuster.io.ctrl := io.vuopRR.bits.uCtrlSig.accessStyle
   snippetVMAdjuster.io.vm := io.vuopRR.bits.vm
 
   /** If the oldest un-commit non-unit-stride is older than us, hang. */
