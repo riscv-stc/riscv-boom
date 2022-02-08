@@ -183,7 +183,7 @@ class UnitStrideStoreLineFactory(ap: VLSUArchitecturalParams) extends VLSUModule
   val tailData: UInt = if (hasBody) Mux(alignedAddr, bodyData, ((vData >> (offsetLeft << 3).asUInt()) >> ap.cacheLineBits.U).asUInt()(ap.cacheLineBits - 1, 0))
                        else (vData >> (offsetLeft << 3).asUInt()).asUInt()(ap.cacheLineBits - 1, 0)
   val headMask: UInt = ((vMask ## 0.U(ap.cacheLineByteSize.W)) >> offsetLeft)(ap.cacheLineByteSize - 1, 0)
-  val bodyMask: UInt = if (hasBody) Fill(ap.cacheLineByteSize, 1.U(1.W)) else 0.U
+  val bodyMask: UInt = if (hasBody) (vMask >> offsetLeft).asUInt()(ap.cacheLineByteSize - 1, 0) else 0.U
   val tailMask: UInt = if (hasBody) Mux(alignedAddr, bodyMask, ((vMask >> offsetLeft).asUInt() >> ap.cacheLineByteSize).asUInt()(ap.cacheLineByteSize - 1, 0))
                        else (vMask >> offsetLeft).asUInt()(ap.cacheLineByteSize - 1, 0)
 
