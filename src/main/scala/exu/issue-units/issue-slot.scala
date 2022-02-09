@@ -406,6 +406,7 @@ class IssueSlot(
   }
 
   if (vector) {
+    // when intupdate or fpupdate, we need to tell if data is really we need.
     when (io.intupdate.map(_.valid).reduce(_||_) || io.fpupdate.map(_.valid).reduce(_||_)) {
       val int_sel  = io.intupdate.map(u => u.valid && u.bits.uop.prs1 === next_uop.prs1 && next_uop.rt(RS1, isInt))
       val int_data = io.intupdate.map(u => Mux(u.bits.uop.uses_stq || u.bits.uop.uses_ldq, u.bits.data,
@@ -421,8 +422,12 @@ class IssueSlot(
                                                                                      u.bits.data)))))
       val fp_sel   = io.fpupdate.map(u => u.valid && u.bits.uop.prs1 === next_uop.prs1 && next_uop.rt(RS1, isFloat))
       val fp_data  = io.fpupdate.map(_.bits.data)
-      ps := int_sel.reduce(_||_) || fp_sel.reduce(_||_)
-      sdata := Mux1H(int_sel++fp_sel, int_data++fp_data)
+      val needUpdatePS = VecInit(int_sel ++ fp_sel).asUInt().orR()
+      val updatedSData = Mux1H(int_sel ++ fp_sel, int_data ++ fp_data)
+      when(needUpdatePS){
+        ps := true.B
+        sdata := updatedSData
+      }
       if(iqType == IQT_VMX.litValue){
         val strideLengthVec = io.intupdate.map(_.bits.uop.vStrideLength)
         strideLength := Mux1H(int_sel, strideLengthVec)
