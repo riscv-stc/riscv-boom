@@ -433,9 +433,11 @@ class IssueSlot(
                                                                                      u.bits.data)))))
       val fp_sel   = io.fpupdate.map(u => u.valid && u.bits.uop.prs1 === next_uop.prs1 && next_uop.rt(RS1, isFloat))
       val fp_data  = io.fpupdate.map(_.bits.data)
-      ps := ps || int_sel.reduce(_||_) || fp_sel.reduce(_||_)
-      when(int_sel.reduce(_||_) || fp_sel.reduce(_||_)) {
-        sdata := Mux1H(int_sel++fp_sel, int_data++fp_data)
+      val needUpdatePS = VecInit(int_sel ++ fp_sel).asUInt().orR()
+      val updatedSData = Mux1H(int_sel ++ fp_sel, int_data ++ fp_data)
+      when(needUpdatePS){
+        ps := true.B
+        sdata := updatedSData
       }
       if(iqType == IQT_VMX.litValue){
         val strideLengthVec = io.intupdate.map(_.bits.uop.vStrideLength)
