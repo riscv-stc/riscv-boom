@@ -150,7 +150,12 @@ class VecRenameFreeList(
   }
   val sel_fire = Wire(Vec(plWidth, Vec(8, Bool())))
 
-  val allocs = io.alloc_pregs.map(a => a.map(ar => Fill(n, ar.valid) & UIntToOH(ar.bits, n)).reduce(_ | _))
+  //val allocs = io.alloc_pregs.map(a => a.map(ar => Fill(n, ar.valid) & UIntToOH(ar.bits, n)).reduce(_ | _))
+  val allocs = (io.alloc_pregs zip ioreq_grp).map {
+                  case (a,ioreq) => (a.zipWithIndex).map {
+                      case (ar,i) => Fill(n, ar.valid & ioreq(i).valid) & UIntToOH(ar.bits, n)
+                  }.reduce(_ | _)
+               }
   val alloc_masks = (allocs zip io.reqs).scanRight(0.U(n.W)) { case ((a,r),m) => m | a & Fill(n,r.valid) }
 
   // Masks that modify the freelist array.

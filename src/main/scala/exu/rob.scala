@@ -316,6 +316,7 @@ class Rob(
     // one bank
     val rob_val       = RegInit(VecInit(Seq.fill(numRobRows){false.B}))
     val rob_bsy       = Reg(Vec(numRobRows, Bool()))
+    val rob_ud_bsy    = if (usingVector) Reg(Vec(numRobRows, Bool())) else null
     val rob_unsafe    = Reg(Vec(numRobRows, Bool()))
     val rob_uop       = Reg(Vec(numRobRows, new MicroOp()))
     val rob_exception = Reg(Vec(numRobRows, Bool()))
@@ -341,6 +342,9 @@ class Rob(
       rob_predicated(rob_tail)   := false.B
       rob_vleff_exception(rob_tail) := false.B
       rob_fflags(rob_tail)    := 0.U
+      if (usingVector) {
+        rob_ud_bsy(rob_tail)  := io.enq_uops(w).iq_type === IQT_MVMX && io.enq_uops(w).uses_ldq
+      }
 
       assert (rob_val(rob_tail) === false.B, "[rob] overwriting a valid entry.")
       assert ((io.enq_uops(w).rob_idx >> log2Ceil(coreWidth)) === rob_tail)
@@ -361,6 +365,9 @@ class Rob(
           val wb_rvv_sta  = wb_uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
           rob_bsy(row_idx)      := Mux(wb_rvv_load, Mux(wb_uop.uses_ldq, false.B, rob_bsy(row_idx)),
                                    Mux(wb_rvv_sta,  false.B, wb_uop.v_is_split && !wb_uop.v_split_last))
+          when (wb_rvv_load && !wb_uop.uses_ldq) {
+            rob_ud_bsy(row_idx) := false.B
+          }
           rob_unsafe(row_idx)   := false.B
           rob_predicated(row_idx)  := wb_resp.bits.predicated
           rob_uop(row_idx).vxsat := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
@@ -446,7 +453,8 @@ class Rob(
     // Commit or Rollback
 
     // Can this instruction commit? (the check for exceptions/rob_state happens later).
-    can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall
+    val ud_bsy = if (usingVector) rob_ud_bsy(rob_head) else false.B
+    can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall && !ud_bsy
 
 
     // use the same "com_uop" for both rollback AND commit
@@ -575,8 +583,9 @@ class Rob(
       assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
                !rob_val(GetRowIdx(rob_idx))),
                "[rob] writeback (" + i + ") occurred to an invalid ROB entry.")
+      val temp_ud_bsy = if (usingVector) rob_ud_bsy(GetRowIdx(rob_idx)) else false.B
       assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
-               !rob_bsy(GetRowIdx(rob_idx))),
+               !rob_bsy(GetRowIdx(rob_idx)) && !temp_ud_bsy),
                "[rob] writeback (" + i + ") occurred to a not-busy ROB entry.")
       assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
                temp_uop.ldst_val && Mux(temp_uop.rt(RD, isVector),
