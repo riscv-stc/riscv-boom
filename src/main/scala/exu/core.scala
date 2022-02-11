@@ -33,7 +33,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
-import freechips.rocketchip.rocket.{CSR, Causes, PRV, VConfig}
+import freechips.rocketchip.rocket.{CSR, Causes, EventSet, EventSets, PRV, SuperscalarEventSets, VConfig, VType}
 import freechips.rocketchip.rocket.{EventSet, EventSets, SuperscalarEventSets}
 import freechips.rocketchip.util.{CoreMonitorBundle, SeqBoolBitwiseOps, Str, UIntIsOneOf}
 import freechips.rocketchip.util._
@@ -116,7 +116,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val pred_rename_stage= Module(new PredRenameStage(coreWidth, ftqSz, 1))
   val v_rename_stage   = if (usingVector) Module(new VecRenameStage(coreWidth, numVecPhysRegs, numVecWakeupPorts)) else null
   //vconfig decode and mask
-  val vconfigdecode_units = for (w <- 0 until decodeWidth) yield { val v = Module(new VconfigDecode); v }
+  //val vconfigdecode_units = for (w <- 0 until decodeWidth) yield { val v = Module(new VconfigDecode); v }
   val dec_vconfigmask_logic = Module(new VconfigMaskGenerationLogic(coreWidth))
 
   // usingVector implies usingFPU
@@ -934,32 +934,33 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       decode_units(w).io.csr_vstart       := csr.io.vector.get.vstart
       decode_units(w).io.csr_vconfig      := Mux(vcq_empty && !dec_vconfig_valid.reduce(_||_), csr.io.vector.get.vconfig, vcq_data.vconfig)
       decode_units(w).io.enq.uop.vl_ready := Mux(vcq_empty && !dec_vconfig_valid.reduce(_||_), true.B, vcq_data.vl_ready)
-      //decode_units(w).io.csr_vconfig     := vcq.io.deq.bits
-    //  decode_units(w).io.csr_vconfig     := csr.io.vector.get.vconfig
+
       decode_units(w).io.csr_vconfig.vtype.reserved := DontCare
 
       dec_vconfig_valid(w)              := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6,0) === 87.U) && (dec_fbundle.uops(w).bits.inst(14,12) === 7.U) && ((dec_fbundle.uops(w).bits.inst(31,30) === 3.U) || !dec_fbundle.uops(w).bits.inst(31))
-      dec_vconfig(w).vconfig            := vconfigdecode_units(w).io.vconfig
-      dec_vconfig(w).vl_ready           := vconfigdecode_units(w).io.vl_ready
+      dec_vconfig(w).vconfig.vl         := dec_fbundle.uops(w).bits.inst(19,15)
+      dec_vconfig(w).vconfig.vtype      := VType.fromUInt(dec_fbundle.uops(w).bits.inst(27,20))
+      dec_vconfig(w).vl_ready           := dec_fbundle.uops(w).bits.inst(31)
 
-      vconfigdecode_units(w).io.inst    := dec_fbundle.uops(w).bits.inst
-
-      dec_vconfigmask_logic.io.is_vconfig(w)  := dec_vconfig_valid(w)
-      dec_vconfigmask_logic.io.will_fire(w)   := dec_fire(w)  // ren, dis can back pressure us
-      dec_uops(w).vconfig_tag                 := dec_vconfigmask_logic.io.vconfig_tag(w)
-      dec_uops(w).vconfig_mask                := dec_vconfigmask_logic.io.vconfig_mask(w)
       dec_uops(w).vcq_idx                     := vcq_idx
     }
 
     dec_uops(w) := decode_units(w).io.deq.uop
   }
 
-  //val vcq_arbit = Module(new Arbiter(new VconfigDecodeSignals(), 2))
-  //  vcq_arbit.io.in(0) <> dec_vconfig.head
-  //  vcq_arbit.io.in(1) <> dec_vconfig.last
-  //  vcq_arbit.io.out.ready := true.B
+  // Vconfig Mask Logic
+  dec_vconfigmask_logic.io.vconfig_mask_update := RegNext(Mux(rob.io.commit.valids.head & rob.io.commit.uops.head.is_vsetvli, rob.io.commit.uops.head.vconfig_mask,
+    Mux(rob.io.commit.valids.last & rob.io.commit.uops.last.is_vsetvli, rob.io.commit.uops.last.vconfig_mask, 0.U)))
+  dec_vconfigmask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid)
+  vconfig_mask_full := dec_vconfigmask_logic.io.is_full
 
-  //val vcq_arbit = Mux(dec_vconfig.last.valid, dec_vconfig.last.vconfig, dec_vconfig.head.vconfig)
+  for (w <- 0 until coreWidth) {
+    dec_vconfigmask_logic.io.is_vconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_vsetvli || dec_uops(w).is_vsetivli)
+    dec_vconfigmask_logic.io.will_fire(w)  := dec_fire(w) && (dec_uops(w).is_vsetvli || dec_uops(w).is_vsetivli)
+    dec_uops(w).vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag(w)
+    dec_uops(w).vconfig_mask := dec_vconfigmask_logic.io.vconfig_mask(w)
+  }
+
 
   //vconfig instruction decode info enq to VCQ
   val vcq = Module(new VconfigQueue())
@@ -970,10 +971,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     vcq_data         := Mux(vcq.io.enq.valid, vcq.io.enq.bits, vcq.io.get_vconfig)
     vcq_empty        := vcq.io.empty
     vcq_idx          := vcq.io.enq_idx
-  // Vconfig Mask Logic
-  dec_vconfigmask_logic.io.vconfig_mask_update := DontCare  //TODO connect to ROB
-  dec_vconfigmask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid)
-  vconfig_mask_full := dec_vconfigmask_logic.io.is_full
 
   //-------------------------------------------------------------
   // FTQ GetPC Port Arbitration
@@ -1464,7 +1461,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   mem_iss_unit.io.vl_wakeup_port.bits.vl := vl_wakeup.bits.vl
 
   int_iss_unit.io.vl_wakeup_port.valid := false.B
-  int_iss_unit.io.vl_wakeup_port.bits := DontCare
+  int_iss_unit.io.vl_wakeup_port.bits.vcq_idx := vl_wakeup.bits.vcq_idx
+  int_iss_unit.io.vl_wakeup_port.bits.vconfig_mask := vl_wakeup.bits.vconfig_mask
+  int_iss_unit.io.vl_wakeup_port.bits.vconfig_tag := vl_wakeup.bits.vconfig_tag
+  int_iss_unit.io.vl_wakeup_port.bits.vl := vl_wakeup.bits.vl
 
 
 
