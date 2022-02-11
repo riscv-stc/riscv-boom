@@ -2217,10 +2217,10 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     vuop.uCtrlSig.accessStyle.isSegment := false.B //fixme: explicit segment required in uop.
     vuop.uCtrlSig.accessStyle.isWholeAccess := uop.uopc.isOneOf(uopVLR, uopVSR)
     vuop.uCtrlSig.accessStyle.isIndexed := uop.uopc.isOneOf(uopVLUX, uopVLOX, uopVSOXA, uopVSUXA)
-    vuop.uCtrlSig.accessStyle.eew := uop.vconfig.vtype.vsew
+    vuop.uCtrlSig.accessStyle.eew := uop.vd_eew
     vuop.uCtrlSig.accessStyle.vStart := uop.vstart
     vuop.uCtrlSig.accessStyle.vl := uop.vconfig.vl
-    vuop.uCtrlSig.accessStyle.vlmul := uop.vconfig.vtype.vlmul_sign ## uop.vconfig.vtype.vlmul_mag
+    vuop.uCtrlSig.accessStyle.vlmul := uop.vd_emul
     vuop.uCtrlSig.accessStyle.nf := uop.v_seg_nf
     vuop.vs1 := 0.U
     vuop.vs2 := 0.U
