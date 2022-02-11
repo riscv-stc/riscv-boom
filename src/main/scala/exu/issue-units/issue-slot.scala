@@ -106,8 +106,7 @@ class IssueSlot(
   val strideLength = if(iqType == IQT_VMX.litValue) RegInit(0.U(eLen.W)) else null
   val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
-  val vl_ready = if (vector) RegInit(false.B) else RegInit(true.B)
-
+  val vl_ready = RegInit(false.B)
   // Poison if woken up by speculative load.
   // Poison lasts 1 cycle (as ldMiss will come on the next cycle).
   // SO if poisoned is true, set it to false!
@@ -292,7 +291,6 @@ class IssueSlot(
         //in_pm := ~io.in_uop.bits.prvm_busy
         ps    := ~io.in_uop.bits.v_scalar_busy
         sdata := io.in_uop.bits.v_scalar_data
-        next_vl_ready := io.in_uop.bits.vl_ready
         if(iqType == IQT_VMX.litValue) {
           strideLength := io.in_uop.bits.vStrideLength
         }
@@ -311,9 +309,10 @@ class IssueSlot(
       next_p3 := !io.in_uop.bits.prs3_busy
     }
     next_ppred := !(io.in_uop.bits.ppred_busy)
+    next_vl_ready := io.in_uop.bits.vl_ready
   }
 
-  when(io.vl_wakeup_port.valid && io.vl_wakeup_port.bits.vconfig_tag === next_uop.vconfig_tag) {
+  when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === next_uop.vconfig_tag) {
     next_vl_ready := true.B
   }
 
@@ -476,9 +475,9 @@ class IssueSlot(
   io.out_uop.br_mask    := next_br_mask
   if (usingVector) {
     io.uop.v_eidx := slot_uop.v_eidx
- 	when (io.vl_wakeup_port.valid && io.vl_wakeup_port.bits.vconfig_tag === next_uop.vconfig_tag) {
-        io.out_uop.vconfig.vl := io.vl_wakeup_port.bits.vl
-      }
+    when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag +1.U) === next_uop.vconfig_tag) {
+      io.out_uop.vconfig.vl := io.vl_wakeup_port.bits.vl
+    }
     if (vector) {
       // value to next slot should be current latched version
       // ignore element busy masking, we keep busy status for entire v-register (i.e. p1,p2,p3,pm)
