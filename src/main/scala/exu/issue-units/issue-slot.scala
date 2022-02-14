@@ -15,16 +15,16 @@
 
 package boom.exu
 
+import Chisel.UInt
 import chisel3._
 import chisel3.util._
-
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util.{UIntIsOneOf, UIntToAugmentedUInt}
-
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
 import FUConstants._
+import freechips.rocketchip.util._
 
 /**
  * IO bundle to interact with Issue slot
@@ -106,6 +106,7 @@ class IssueSlot(
   val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
   val vl_ready = RegInit(false.B)
+  val vl  = RegInit(0.U((maxVLMax.log2 + 1).W))
   // Poison if woken up by speculative load.
   // Poison lasts 1 cycle (as ldMiss will come on the next cycle).
   // SO if poisoned is true, set it to false!
@@ -269,6 +270,7 @@ class IssueSlot(
   val in_p3 = if (vector) WireInit(p3) else null
   val next_ppred = WireInit(ppred)
   val next_vl_ready = WireInit(vl_ready)
+  val next_vl = WireInit(vl)
 
   when (io.in_uop.valid) {
     if (usingVector) {
@@ -296,10 +298,12 @@ class IssueSlot(
     }
     next_ppred := !(io.in_uop.bits.ppred_busy)
     next_vl_ready := io.in_uop.bits.vl_ready
+    next_vl := io.in_uop.bits.vconfig.vl
   }
 
   when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === next_uop.vconfig_tag) {
     next_vl_ready := true.B
+    next_vl := io.vl_wakeup_port.bits.vl
   }
 
   when (io.ldspec_miss && next_p1_poisoned) {
@@ -521,6 +525,7 @@ class IssueSlot(
   io.out_uop.iw_p1_poisoned := p1_poisoned
   io.out_uop.iw_p2_poisoned := p2_poisoned
   io.out_uop.vl_ready := vl_ready
+  io.out_uop.vconfig.vl := vl
   when (io.in_uop.valid) {
     slot_uop := io.in_uop.bits
     //if(usingVector && !vector && iqType == IQT_MEM.litValue) {
@@ -548,6 +553,7 @@ class IssueSlot(
   p3 := next_p3
   ppred := next_ppred
   vl_ready := next_vl_ready
+  vl := next_vl
 
   if (vector) {
     //pm := next_pm
