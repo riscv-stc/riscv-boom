@@ -197,6 +197,9 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   snippetVMAdjuster.io.ctrl := io.vuopRR.bits.uCtrlSig.accessStyle
   snippetVMAdjuster.io.vm := io.vuopRR.bits.vm
 
+  val vlAdjust = Module(new SnippetInitializer(ap))
+  vlAdjust.io.ctrl := io.vuopRR.bits.uCtrlSig.accessStyle
+
   /** If the oldest un-commit non-unit-stride is older than us, hang. */
   val oldestNonUnitStrideIdx: ValidIO[UInt] = PickOldest(io.nonUnitStrideOHs, io.headPtr, io.tailPtr, ap.nVLdQEntries)
   val freeze = oldestNonUnitStrideIdx.valid && IsOlder(AgePriorityEncoder(io.nonUnitStrideOHs.asBools(), io.headPtr),
@@ -238,7 +241,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.vs2 := io.vuopRR.bits.vs2
       reg.bits.rs2 := io.vuopRR.bits.rs2
       reg.bits.finishMasks :=
-        (snippetVMAdjuster.io.adjustedSnippet zip reg.bits.finishMasks).map {case (vm, snippet) =>
+        (snippetVMAdjuster.io.adjustedSnippet zip vlAdjust.io.initSnippet).map {case (vm, snippet) =>
            vm | snippet
         }
       state := sSplitting
