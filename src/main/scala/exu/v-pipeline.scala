@@ -22,15 +22,7 @@ import boom.exu.FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
-import freechips.rocketchip.util._
 
-class VlWakeupResp(implicit p: Parameters) extends BoomBundle
-{
-  val vcq_idx = UInt(vcqSz.W)
-  val vl = UInt((maxVLMax.log2 + 1).W)
-  val vconfig_tag = UInt(vconfigTagSz.W)
-  val vconfig_mask = UInt(maxVconfigCount.W)
-}
 
 class VLSUWriteBack(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
 {

@@ -479,9 +479,6 @@ class IssueSlot(
   io.out_uop.br_mask    := next_br_mask
   if (usingVector) {
     io.uop.v_eidx := slot_uop.v_eidx
-    when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag +1.U) === next_uop.vconfig_tag) {
-      io.out_uop.vconfig.vl := io.vl_wakeup_port.bits.vl
-    }
     if (vector) {
       // value to next slot should be current latched version
       // ignore element busy masking, we keep busy status for entire v-register (i.e. p1,p2,p3,pm)
@@ -548,6 +545,11 @@ class IssueSlot(
   io.out_uop.iw_p2_poisoned := p2_poisoned
   io.out_uop.vl_ready := vl_ready
   io.out_uop.vconfig.vl := vl
+
+  when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag +1.U) === next_uop.vconfig_tag) {
+    io.out_uop.vconfig.vl := io.vl_wakeup_port.bits.vl
+  }
+
   when (io.in_uop.valid) {
     slot_uop := io.in_uop.bits
     //if(usingVector && !vector && iqType == IQT_MEM.litValue) {
