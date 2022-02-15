@@ -795,6 +795,7 @@ class VecExeUnit(
     vmx_busy := !vmx.io.req.ready
     io.vlsuReqRr.valid := io.req.valid && io.req.bits.uop.is_rvv
     io.vlsuReqRr.bits := io.req.bits
+    io.vlsuReqRr.bits.rvmFull := Mux(io.req.bits.uop.v_unmasked, Fill(vLen, 1.U(1.W)), io.req.bits.rvmFull)
 
     vec_fu_units += vmx
   }
