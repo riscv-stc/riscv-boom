@@ -11,14 +11,13 @@
 
 package boom.exu
 
+import Chisel.UInt
 import chisel3._
 import chisel3.util._
-
-import freechips.rocketchip.config.{Parameters}
+import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.MStatus
 import freechips.rocketchip.tile.FPConstants
-import freechips.rocketchip.util.{UIntIsOneOf}
-
+import freechips.rocketchip.util.UIntIsOneOf
 import boom.exu.FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
@@ -69,6 +68,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val intupdate        = Input(Vec(intWidth + memWidth, Valid(new ExeUnitResp(eLen))))
     val fpupdate         = Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen))))
 
+    val vl_wakeup        = Input(Valid(new VlWakeupResp()))
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(eLen))) // wakeup issue_units for mem, int and fp
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
@@ -134,6 +134,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   viu.map(_.io.flush_pipeline := io.flush_pipeline)
   viu.map(_.io.intupdate := io.intupdate)
   viu.map(_.io.fpupdate  := io.fpupdate)
+  viu.map(_.io.vl_wakeup_port := io.vl_wakeup)
   //viu.map(_.io.vecUpdate := vregister_read.io.vecUpdate)
   // Don't support ld-hit speculation to VEC window.
   for (w <- 0 until memWidth) {

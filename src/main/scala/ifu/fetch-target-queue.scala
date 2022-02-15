@@ -18,13 +18,12 @@ package boom.ifu
 
 import chisel3._
 import chisel3.util._
-
-import freechips.rocketchip.config.{Parameters}
-import freechips.rocketchip.util.{Str}
-
+import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.util.Str
 import boom.common._
 import boom.exu._
 import boom.util._
+import freechips.rocketchip.rocket.VConfig
 
 /**
  * FTQ Parameters used in configurations

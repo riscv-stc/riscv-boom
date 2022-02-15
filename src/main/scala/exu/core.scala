@@ -33,9 +33,10 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
-import freechips.rocketchip.rocket.{CSR, Causes, PRV, VConfig}
+import freechips.rocketchip.rocket.{CSR, Causes, EventSet, EventSets, PRV, SuperscalarEventSets, VConfig, VType}
 import freechips.rocketchip.rocket.{EventSet, EventSets, SuperscalarEventSets}
-import freechips.rocketchip.util.{CoreMonitorBundle, Str, UIntIsOneOf, SeqBoolBitwiseOps}
+import freechips.rocketchip.util.{CoreMonitorBundle, SeqBoolBitwiseOps, Str, UIntIsOneOf}
+import freechips.rocketchip.util._
 import freechips.rocketchip.devices.tilelink.{CLINTConsts, PLICConsts}
 import testchipip.ExtendedTracedInstruction
 
@@ -47,6 +48,8 @@ import boom.util._
 import boom.vlsu.{VLSMicroOP, VLSUArchitecturalParams, VLSUTopBundle}
 
 import scala.collection.mutable
+
+import boom.ifu._
 
 /**
  * Top level core object that connects the Frontend to the rest of the pipeline.
@@ -75,6 +78,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   val exe_units = new boom.exu.ExecutionUnits(fpu=false)
   val jmp_unit_idx = exe_units.jmp_unit_idx
   val jmp_unit = exe_units(jmp_unit_idx)
+  val csr_unit_idx = exe_units.csr_unit_idx
 
   // Meanwhile, the FP pipeline holds the FP issue window, FP regfile, and FP arithmetic units.
   var fp_pipeline: FpPipeline = null
@@ -116,6 +120,8 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   val fp_rename_stage  = if (usingFPU) Module(new RenameStage(coreWidth, numFpPhysRegs, numFpWakeupPorts, true)) else null
   val pred_rename_stage= Module(new PredRenameStage(coreWidth, ftqSz, 1))
   val v_rename_stage   = if (usingVector) Module(new VecRenameStage(coreWidth, numVecPhysRegs, numVecWakeupPorts)) else null
+  //vconfig decode and mask
+  val dec_vconfigmask_logic = Module(new VconfigMaskGenerationLogic(coreWidth))
 
   // usingVector implies usingFPU
   val rename_stages    = if (usingVector)
@@ -173,6 +179,22 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   val int_ren_wakeups  = Wire(Vec(numIntRenameWakeupPorts, Valid(new ExeUnitResp(xLen))))
   val pred_wakeup  = Wire(Valid(new ExeUnitResp(1)))
 
+  //val vl_exe_wakeup  =  Wire(Valid(new ExeUnitResp(xLen)))
+  val vl_wakeup = RegInit(0.U.asTypeOf(Valid(new VlWakeupResp())))
+  //vl-ready wake up logic, bypass from execution unit
+  when(exe_units(csr_unit_idx).io.iresp.valid && (exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetvli || exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetivli)) {
+    vl_wakeup.valid := true.B
+    vl_wakeup.bits.vl := exe_units(csr_unit_idx).io.iresp.bits.data(maxVLMax.log2 , 0)
+    vl_wakeup.bits.vcq_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.vcq_idx
+    vl_wakeup.bits.vconfig_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_mask
+    vl_wakeup.bits.vconfig_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_tag
+  }
+
+  when(rob.io.flush.valid) {
+    vl_wakeup.valid := false.B
+    vl_wakeup.bits := DontCare
+  }
+
   require (exe_units.length == issue_units.map(_.issueWidth).sum)
 
   //***********************************
@@ -189,6 +211,12 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   val dec_ready  = Wire(Bool())
   val dec_xcpts  = Wire(Vec(coreWidth, Bool()))
   val ren_stalls = Wire(Vec(coreWidth, Bool()))
+
+  //// are the decoded instruction is vconfig instruction valid? It may be held up though.
+  val dec_vconfig   = Wire(Vec(coreWidth, new VconfigDecodeSignals()))
+  val dec_vconfig_valid = Wire(Vec(coreWidth, Bool()))
+  // stall fetch/dcode because we ran out of vconfig tags
+  val vconfig_mask_full = Wire(Vec(coreWidth, Bool()))
 
   // Rename2/Dispatch stage
   val dis_valids = Wire(Vec(coreWidth, Bool()))
@@ -278,6 +306,12 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   if (usingVector) {
     v_pipeline.io.brupdate := brupdate
     v_pipeline.io.vbusy_status := v_rename_stage.io.vbusy_status
+
+    v_pipeline.io.vl_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && (exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetvli || exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetivli)
+    v_pipeline.io.vl_wakeup.bits.vl := exe_units(csr_unit_idx).io.iresp.bits.data(maxVLMax.log2 , 0)
+    v_pipeline.io.vl_wakeup.bits.vcq_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.vcq_idx
+    v_pipeline.io.vl_wakeup.bits.vconfig_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_mask
+    v_pipeline.io.vl_wakeup.bits.vconfig_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_tag
   }
 
   // Load/Store Unit & ExeUnits
@@ -918,6 +952,9 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
   //-------------------------------------------------------------
   // Decoders
+  val vcq_data = Wire(new VconfigDecodeSignals())
+  val vcq_empty = WireInit(false.B)
+  val vcq_idx = Wire(UInt(log2Ceil(vcqSz).W))
 
   for (w <- 0 until coreWidth) {
     dec_valids(w)                      := io.ifu.fetchpacket.valid && dec_fbundle.uops(w).valid &&
@@ -930,13 +967,53 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     decode_units(w).io.interrupt       := csr.io.interrupt
     decode_units(w).io.interrupt_cause := csr.io.interrupt_cause
     if (usingVector) {
-      decode_units(w).io.csr_vstart      := csr.io.vector.get.vstart
-      decode_units(w).io.csr_vconfig     := csr.io.vector.get.vconfig
+      decode_units(w).io.csr_vstart       := csr.io.vector.get.vstart
+      decode_units(w).io.csr_vconfig      := Mux(vcq_empty && !dec_vconfig_valid.reduce(_||_), csr.io.vector.get.vconfig, vcq_data.vconfig)
+      decode_units(w).io.enq.uop.vl_ready := Mux(vcq_empty && !dec_vconfig_valid.reduce(_||_), true.B, vcq_data.vl_ready)
+
       decode_units(w).io.csr_vconfig.vtype.reserved := DontCare
+
+      dec_vconfig_valid(w)              := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6,0) === 87.U) && (dec_fbundle.uops(w).bits.inst(14,12) === 7.U) && ((dec_fbundle.uops(w).bits.inst(31,30) === 3.U) || !dec_fbundle.uops(w).bits.inst(31))
+      dec_vconfig(w).vconfig.vl         := dec_fbundle.uops(w).bits.inst(19,15)
+      dec_vconfig(w).vconfig.vtype      := VType.fromUInt(dec_fbundle.uops(w).bits.inst(27,20))
+      dec_vconfig(w).vl_ready           := dec_fbundle.uops(w).bits.inst(31)
+
+      dec_uops(w).vcq_idx                     := vcq_idx
     }
 
     dec_uops(w) := decode_units(w).io.deq.uop
   }
+
+  for (w <- 0 until coreWidth) {
+    when(vl_wakeup.valid && (vl_wakeup.bits.vconfig_tag + 1.U) === dec_uops(w).vconfig_tag) {
+      dec_uops(w).vl_ready := true.B
+      dec_uops(w).vconfig.vl := vl_wakeup.bits.vl
+    }
+  }
+
+  // Vconfig Mask Logic
+  dec_vconfigmask_logic.io.vconfig_mask_update := RegNext(Mux(rob.io.commit.valids.head & rob.io.commit.uops.head.is_vsetvli, rob.io.commit.uops.head.vconfig_mask,
+                                                          Mux(rob.io.commit.valids.last & rob.io.commit.uops.last.is_vsetvli, rob.io.commit.uops.last.vconfig_mask, 0.U)))
+  dec_vconfigmask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid)
+  vconfig_mask_full := dec_vconfigmask_logic.io.is_full
+
+  for (w <- 0 until coreWidth) {
+    dec_vconfigmask_logic.io.is_vconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_vsetvli || dec_uops(w).is_vsetivli)
+    dec_vconfigmask_logic.io.will_fire(w)  := dec_fire(w) && (dec_uops(w).is_vsetvli || dec_uops(w).is_vsetivli)
+    dec_uops(w).vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag(w)
+    dec_uops(w).vconfig_mask := dec_vconfigmask_logic.io.vconfig_mask(w)
+  }
+
+
+  //vconfig instruction decode info enq to VCQ
+  val vcq = Module(new VconfigQueue())
+    vcq.io.enq.bits  := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
+    vcq.io.enq.valid := dec_vconfig_valid.reduce(_||_)
+    vcq.io.deq       := RegNext((rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_vsetivli||u.is_vsetvli, false.B)}.reduce(_ | _))
+    vcq.io.flush     := RegNext(rob.io.flush.valid)
+    vcq_data         := Mux(vcq.io.enq.valid, vcq.io.enq.bits, vcq.io.get_vconfig)
+    vcq_empty        := vcq.io.empty
+    vcq_idx          := vcq.io.enq_idx
 
   //-------------------------------------------------------------
   // FTQ GetPC Port Arbitration
@@ -1007,6 +1084,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
                       || rob.io.commit.rollback
                       || dec_xcpt_stall
                       || branch_mask_full(w)
+                      || vconfig_mask_full(w)
                       || brupdate.b1.mispredict_mask =/= 0.U
                       || brupdate.b2.mispredict
                       || io.ifu.redirect_flush))
@@ -1063,6 +1141,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     rename.io.com_uops := rob.io.commit.uops
     rename.io.rbk_valids := rob.io.commit.rbk_valids
     rename.io.rollback := rob.io.commit.rollback
+    rename.io.vl_wakeup_port := vl_wakeup
   }
 
 
@@ -1397,9 +1476,14 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
   // Perform load-hit speculative wakeup through a special port (performs a poison wake-up).
   issue_units map { iu =>
-     iu.io.spec_ld_wakeup := io.lsu.spec_ld_wakeup
-  }
+    iu.io.spec_ld_wakeup := io.lsu.spec_ld_wakeup
 
+    iu.io.vl_wakeup_port.valid := exe_units(csr_unit_idx).io.iresp.valid && (exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetvli || exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetivli)
+    iu.io.vl_wakeup_port.bits.vl := exe_units(csr_unit_idx).io.iresp.bits.data(maxVLMax.log2 , 0)
+    iu.io.vl_wakeup_port.bits.vcq_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.vcq_idx
+    iu.io.vl_wakeup_port.bits.vconfig_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_mask
+    iu.io.vl_wakeup_port.bits.vconfig_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_tag
+  }
 
   // Connect the predicate wakeup port
   issue_units map { iu =>
@@ -1410,7 +1494,6 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     int_iss_unit.io.pred_wakeup_port.valid := pred_wakeup.valid
     int_iss_unit.io.pred_wakeup_port.bits := pred_wakeup.bits.uop.pdst
   }
-
 
   // ----------------------------------------------------------------
   // Connect the wakeup ports to the busy tables in the rename stages

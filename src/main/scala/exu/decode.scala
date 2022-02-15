@@ -5,6 +5,7 @@
 
 package boom.exu
 
+import Chisel.UInt
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
@@ -16,6 +17,7 @@ import FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
+import freechips.rocketchip.util._
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -260,8 +262,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.lrs2       := instRS2
   uop.lrs3       := instRS3
 
-  //uop.ldst_val   := isSomeReg(cs.dst_type) && Mux(cs.is_rvv, !cs.uses_stq, !(uop.ldst === 0.U && uop.rt(RD, isInt)))
-  uop.ldst_val   := isSomeReg(cs.dst_type) && !(uop.ldst === 0.U && uop.rt(RD, isInt)) && Mux(cs.is_rvv, !cs.uses_stq, true.B)
+  uop.ldst_val   := isSomeReg(cs.dst_type) && !(uop.ldst === 0.U && uop.rt(RD, isInt)) && Mux(cs.is_rvv, !cs.uses_stq, true.B) 
   uop.dst_rtype  := cs.dst_type
   uop.lrs1_rtype := cs.rs1_type
   uop.lrs2_rtype := cs.rs2_type
@@ -297,7 +298,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.is_sys_pc2epc   := cs.is_sys_pc2epc
   uop.is_unique  := cs.inst_unique
   uop.flush_on_commit := cs.flush_on_commit || (csr_en && !csr_ren && io.csr_decode.write_flush)
-
+  uop.is_vsetivli := (cs.uopc === uopVSETIVLI)
+  uop.is_vsetvli := (cs.uopc === uopVSETVLI)
+  uop.vl_ready   := Mux(cs.not_use_vtype, true.B, io.enq.uop.vl_ready)
   uop.bypassable   := cs.bypassable
 
   //-------------------------------------------------------------
@@ -704,4 +707,162 @@ class BranchMaskGenerationLogic(val pl_width: Int)(implicit p: Parameters) exten
   }
 
   io.debug_branch_mask := branch_mask
+}
+
+class VlWakeupResp(implicit p: Parameters) extends BoomBundle
+{
+  val vcq_idx = UInt(vcqSz.W)
+  val vl = UInt((maxVLMax.log2 + 1).W)
+  val vconfig_tag = UInt(vconfigTagSz.W)
+  val vconfig_mask = UInt(maxVconfigCount.W)
+}
+
+class VconfigDecodeSignals(implicit p: Parameters) extends BoomBundle
+{
+  val vl_ready = Bool()
+  val vconfig    = new VConfig
+}
+
+/**
+ * Track the current "vconfig mask", and give out the vconfig mask to each micro-op in Decode
+ * (each micro-op in the machine has a vconfig mask which says which vconfig it
+ * is being speculated under).
+ *
+ * @param pl_width pipeline width for the processor
+ */
+class VconfigMaskGenerationLogic(val pl_width: Int) (implicit p: Parameters) extends BoomModule
+{
+  val io = IO(new Bundle {
+    // guess if the uop is a vsetvli/vsetivli (we'll catch this later)
+    val is_vconfig = Input(Vec(pl_width, Bool()))
+    // lock in that it's actually a vconfig and will fire, so we update
+    // the vconfig_masks.
+    val will_fire = Input(Vec(pl_width, Bool()))
+
+    // give out tag immediately (needed in rename)
+    // mask can come later in the cycle
+    val vconfig_tag    = Output(Vec(pl_width, UInt(vconfigTagSz.W)))
+    val vconfig_mask   = Output(Vec(pl_width, UInt(maxVconfigCount.W)))
+
+    // tell decoders the vconfig mask has filled up, but on the granularity
+    // of an individual micro-op (so some micro-ops can go through)
+    val is_full   = Output(Vec(pl_width, Bool()))
+
+    //deadallocate the committed vconfig
+    val vconfig_mask_update  = Input(UInt(maxVconfigCount.W))
+    val flush_pipeline = Input(Bool())
+
+    val debug_vconfig_mask = Output(UInt(maxVconfigCount.W))
+  })
+
+  val vconfig_mask = RegInit(0.U(maxVconfigCount.W))
+
+  //-------------------------------------------------------------
+  // Give out the branch tag to each speculative vconfig micro-op
+
+  var allocate_mask = vconfig_mask
+  val tag_masks = Wire(Vec(pl_width, UInt(maxVconfigCount.W)))
+  for (w <- 0 until pl_width) {
+    io.is_full(w) := (allocate_mask === ~(0.U(maxVconfigCount.W))) && io.is_vconfig(w)
+
+    // find vconfig_tag and compute next vconfig_mask
+    val new_vconfig_tag = Wire(UInt(vconfigTagSz.W))
+    new_vconfig_tag := 0.U
+    tag_masks(w) := 0.U
+
+    for (i <- maxVconfigCount - 1 to 0 by -1) {
+      when(~allocate_mask(i)) {
+        new_vconfig_tag := i.U
+        tag_masks(w) := (1.U << i.U)
+      }
+    }
+
+    io.vconfig_tag(w) := new_vconfig_tag
+    allocate_mask = Mux(io.is_vconfig(w), tag_masks(w) | allocate_mask, allocate_mask)
+  }
+  //-------------------------------------------------------------
+  // Give out the branch mask to each micro-op
+  // (kill off the bits that corresponded to branches that aren't going to fire)
+
+  var curr_mask = vconfig_mask
+  for (w <- 0 until pl_width) {
+    io.vconfig_mask(w) := ~io.vconfig_mask_update & curr_mask
+    curr_mask = Mux(io.will_fire(w), tag_masks(w) | curr_mask, curr_mask)
+  }
+  //-------------------------------------------------------------
+  // Update the current vconfig_mask
+
+  when (io.flush_pipeline) {
+    vconfig_mask := 0.U
+  } .otherwise {
+    vconfig_mask := ~io.vconfig_mask_update & curr_mask
+  }
+
+  io.debug_vconfig_mask := vconfig_mask
+}
+
+case class VcqParameters(
+                          nEntries: Int = 4
+                        )
+
+/**
+ * Queue to store the vconfig info that are inflight in the processor.
+ *
+ * @param num_entries # of entries in the VCQ
+ */
+class VconfigQueue(implicit p: Parameters) extends BoomModule
+  with HasBoomCoreParameters {
+  val num_entries = vcqSz
+  private val idx_sz = log2Ceil(num_entries)
+
+  val io = IO(new BoomBundle {
+    //Enqueue one entry when decode a vconfig instruction.
+    val enq = Flipped(Decoupled(new VconfigDecodeSignals()))
+    val enq_idx = Output(UInt(idx_sz.W))
+    val deq   = Input(Bool())
+    val flush = Input(Bool())
+
+    val get_vconfig = Output(new VconfigDecodeSignals())
+    val empty = Output(Bool())
+  })
+
+  val ram = Reg(Vec(num_entries, new VconfigDecodeSignals()))
+  ram.suggestName("vconfig_table")
+
+  val enq_ptr = RegInit(0.U(num_entries.W))
+  val deq_ptr = RegInit(0.U(num_entries.W))
+  val maybe_full = RegInit(false.B)
+
+  val ptr_match = enq_ptr === deq_ptr
+  val empty = ptr_match && !maybe_full
+  val full = ptr_match && maybe_full
+  val do_enq = WireDefault(io.enq.fire())
+  val do_deq = WireDefault(io.deq)
+
+  def inc(ptr: UInt) = {
+    val n = ptr.getWidth
+    Cat(ptr(n-2,0), ptr(n-1))
+  }
+
+  when(do_enq) {
+    ram(enq_ptr) := io.enq.bits
+    enq_ptr := inc(enq_ptr)
+  }
+  io.enq_idx := enq_ptr
+
+  when(do_deq) {
+    deq_ptr := inc(deq_ptr)
+  }
+  when(do_enq =/= do_deq) {
+    maybe_full := do_enq
+  }
+  when(io.flush) {
+    enq_ptr := 1.U
+    deq_ptr := 1.U
+    maybe_full := false.B
+  }
+
+  io.enq.ready := !full
+  io.get_vconfig := ram(deq_ptr)
+  io.empty := empty
 }

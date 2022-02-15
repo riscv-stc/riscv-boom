@@ -95,6 +95,11 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(impl
     exe_units.indexWhere(_.hasJmpUnit)
   }
 
+  lazy val csr_unit_idx = {
+    exe_units.indexWhere(_.hasCSR)
+  }
+
+
   lazy val rocc_unit = {
     require (usingRoCC)
     require (exe_units.count(_.hasRocc) == 1)

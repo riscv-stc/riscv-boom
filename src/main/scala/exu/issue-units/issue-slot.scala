@@ -15,16 +15,16 @@
 
 package boom.exu
 
+import Chisel.UInt
 import chisel3._
 import chisel3.util._
-
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util.{UIntIsOneOf, UIntToAugmentedUInt}
-
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
 import FUConstants._
+import freechips.rocketchip.util._
 
 /**
  * IO bundle to interact with Issue slot
@@ -46,6 +46,7 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false)
 
   val wakeup_ports  = Flipped(Vec(numWakeupPorts, Valid(new IqWakeup(maxPregSz, vector))))
   val pred_wakeup_port = Flipped(Valid(UInt(log2Ceil(ftqSz).W)))
+  val vl_wakeup_port = Flipped(Valid(new VlWakeupResp()))
   val spec_ld_wakeup= Flipped(Vec(memWidth, Valid(UInt(width=maxPregSz.W))))
   val in_uop        = Flipped(Valid(new MicroOp())) // if valid, this WILL overwrite an entry!
   val out_uop       = Output(new MicroOp()) // the updated slot uop; will be shifted upwards in a collasping queue.
@@ -105,7 +106,8 @@ class IssueSlot(
   val strideLength = if(iqType == IQT_VMX.litValue) RegInit(0.U(eLen.W)) else null
   val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
-
+  val vl_ready = RegInit(false.B)
+  val vl  = RegInit(0.U((maxVLMax.log2 + 1).W))
   // Poison if woken up by speculative load.
   // Poison lasts 1 cycle (as ldMiss will come on the next cycle).
   // SO if poisoned is true, set it to false!
@@ -239,7 +241,7 @@ class IssueSlot(
   when (io.kill) {
     next_state := s_invalid
   } .elsewhen ((io.grant && (state === s_valid_1)) ||
-    (io.grant && (state === s_valid_2) && rs1check && rs2check && ppred)) {
+    (io.grant && (state === s_valid_2) && rs1check && rs2check && ppred && vl_ready)) {
     if (vector) {
       when (state === s_valid_1) {
         when(last_check) {
@@ -279,6 +281,8 @@ class IssueSlot(
   val in_p2 = if (vector) WireInit(p2) else null
   val in_p3 = if (vector) WireInit(p3) else null
   val next_ppred = WireInit(ppred)
+  val next_vl_ready = WireInit(vl_ready)
+  val next_vl = WireInit(vl)
 
   when (io.in_uop.valid) {
     if (usingVector) {
@@ -307,6 +311,13 @@ class IssueSlot(
       next_p3 := !io.in_uop.bits.prs3_busy
     }
     next_ppred := !(io.in_uop.bits.ppred_busy)
+    next_vl_ready := io.in_uop.bits.vl_ready
+    next_vl := io.in_uop.bits.vconfig.vl
+  }
+
+  when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === next_uop.vconfig_tag) {
+    next_vl_ready := true.B
+    next_vl := io.vl_wakeup_port.bits.vl
   }
 
   when (io.ldspec_miss && next_p1_poisoned) {
@@ -439,9 +450,9 @@ class IssueSlot(
   // Request Logic
   //io.request := is_valid && rs1check() && rs2check() && rs3check() && vmcheck() && ppred && !io.kill
   when (state === s_valid_1) {
-    io.request := ppred && rs1check && rs2check && rs3check && vmcheck && scalarCheck && !io.kill
+    io.request := ppred && rs1check && rs2check && rs3check && vmcheck && scalarCheck && vl_ready && !io.kill
   } .elsewhen (state === s_valid_2) {
-    io.request := (rs1check || rs2check) && ppred && !io.kill
+    io.request := (rs1check || rs2check) && ppred && vl_ready && !io.kill
   } .otherwise {
     io.request := false.B
   }
@@ -457,7 +468,7 @@ class IssueSlot(
 
   // micro-op will vacate due to grant.
   val may_vacate = io.grant && ((state === s_valid_1) || (state === s_valid_2)) &&
-                   ppred && rs1check && rs2check && rs3check && vmcheck && last_check
+                   ppred && rs1check && rs2check && rs3check && vmcheck && vl_ready && last_check
   val squash_grant = io.ldspec_miss && (p1_poisoned || p2_poisoned)
   io.will_be_valid := is_valid && !(may_vacate && !squash_grant)
 
@@ -485,7 +496,8 @@ class IssueSlot(
       io.out_uop.v_perm_wait := false.B //perm_wait || perm_wait_vrg_set
       io.out_uop.v_perm_idx  := 0.U //perm_idx
       //io.cur_vs2_busy       := UIntToOH(slot_uop.prs2)(vpregSz-1,0) & Fill(vpregSz, !(p2.andR) && is_valid)
-      // handle VOP_VI, prs1 records the value of lrs1, and is used as simm5
+      // handle VOP_VI, prs1 records the value of lrpwdls
+      // s1, and is used as simm5
       io.uop.v_scalar_data  := Mux(io.uop.rt(RS1, isRvvSImm5), Cat(Fill(eLen-5, io.uop.prs1(4).asUInt), io.uop.prs1(4,0)),
                                Mux(io.uop.rt(RS1, isRvvUImm5), Cat(Fill(eLen-5, 0.U(1.W)), slot_uop.prs1(4,0)), sdata))
       io.uop.v_perm_busy    := false.B //~perm_ready
@@ -493,7 +505,7 @@ class IssueSlot(
       when (vcompress) {
         io.uop.pvm := slot_uop.prs1
       }
-      when (io.request && io.grant && !io.uop.uopc.isOneOf(/*uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, */uopVSA, uopVSSA, uopVSUXA, uopVSOXA)) {
+           when (io.request && io.grant && !io.uop.uopc.isOneOf(/*uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, */uopVSA, uopVSSA, uopVSUXA, uopVSOXA)) {
         val vd_idx = Mux(slot_uop.rt(RD, isMaskVD), 0.U, VRegSel(slot_uop.v_eidx, slot_uop.vd_eew, eLenSelSz))
         io.uop.pdst := Mux(slot_uop.rt(RD, isVector), slot_uop.pvd(vd_idx).bits, slot_uop.pdst)
         assert(is_invalid || !slot_uop.rt(RD, isVector) || slot_uop.pvd(vd_idx).valid)
@@ -532,6 +544,12 @@ class IssueSlot(
   io.out_uop.ppred_busy := !ppred
   io.out_uop.iw_p1_poisoned := p1_poisoned
   io.out_uop.iw_p2_poisoned := p2_poisoned
+  io.out_uop.vl_ready := vl_ready
+  io.out_uop.vconfig.vl := vl
+
+  when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag +1.U) === next_uop.vconfig_tag) {
+    io.out_uop.vconfig.vl := io.vl_wakeup_port.bits.vl
+  }
 
   when (io.in_uop.valid) {
     slot_uop := io.in_uop.bits
@@ -544,12 +562,12 @@ class IssueSlot(
   }
 
   when (state === s_valid_2) {
-    when (rs1check && rs2check && ppred) {
+    when (rs1check && rs2check && ppred && vl_ready)  {
       ; // send out the entire instruction as one uop
-    } .elsewhen (rs1check && ppred) {
+    } .elsewhen (rs1check && ppred && vl_ready) {
       io.uop.uopc := slot_uop.uopc
       io.uop.lrs2_rtype := RT_X
-    } .elsewhen (rs2check && ppred) {
+    } .elsewhen (rs2check && ppred && vl_ready) {
       io.uop.uopc := uopSTD
       io.uop.lrs1_rtype := RT_X
     }
@@ -559,6 +577,9 @@ class IssueSlot(
   p2 := next_p2
   p3 := next_p3
   ppred := next_ppred
+  vl_ready := next_vl_ready
+  vl := next_vl
+
   if (vector) {
     //pm := next_pm
   } else if (usingVector && iqType == IQT_MEM.litValue) {

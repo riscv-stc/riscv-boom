@@ -61,6 +61,15 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val br_mask          = UInt(maxBrCount.W)  // which branches are we being speculated under?
   val br_tag           = UInt(brTagSz.W)
 
+  //vconfig speculation info
+  val is_vsetvli       = Bool()                      // is this a vsetvli?
+  val is_vsetivli      = Bool()                      // is this a vsetivli?
+  val vl_ready         = Bool()
+
+  val vconfig_mask          = UInt(maxVconfigCount.W)  // which vconfig are we being speculated under?
+  val vconfig_tag           = UInt(vconfigTagSz.W)
+  val vcq_idx               = UInt(log2Ceil(vcqSz).W)
+
   // Index into FTQ to figure out our fetch PC.
   val ftq_idx          = UInt(log2Ceil(ftqSz).W)
   // This inst straddles two fetch packets
@@ -257,6 +266,7 @@ class DebugStageEvents extends Bundle()
 object MicroOpcodes extends Enumeration {
   type MicroOpcodes = Value
   val UOPC_SZ       = 9
+
 
   val uopNOP_enum   = Value
   val uopNOP        = uopNOP_enum.id.U(UOPC_SZ.W)

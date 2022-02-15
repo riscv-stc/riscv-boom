@@ -113,6 +113,9 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   }
   issue_unit.io.ld_miss := false.B
 
+  issue_unit.io.vl_wakeup_port.valid := false.B
+  issue_unit.io.vl_wakeup_port.bits := DontCare
+
   require (exe_units.numTotalBypassPorts == 0)
 
   //-------------------------------------------------------------

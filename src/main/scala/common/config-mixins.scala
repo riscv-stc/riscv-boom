@@ -557,6 +557,7 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               numLdqEntries = 16,
               numStqEntries = 16,
               maxBrCount = 12,
+              maxVconfigCount = 4,
               numFetchBufferEntries = 16,
               ftq = FtqParameters(nEntries=32),
               nPerfCounters = 29,
