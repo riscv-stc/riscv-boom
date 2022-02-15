@@ -65,9 +65,8 @@ class RegisterRead(
 
     // send micro-ops to the execution pipelines
     val exe_reqs = Vec(issueWidth, (new DecoupledIO(new FuncUnitReq(registerWidth))))
-    val vmupdate = if (vector) Output(Vec(1, Valid(new MicroOp))) else null
-    //val vecUpdate = if (vector) Output(Vec(1, Valid(new ExeUnitResp(eLen)))) else null
-    val intupdate= if (usingVector && !vector && !float) Output(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
+    //val vmupdate = if (vector) Output(Vec(1, Valid(new MicroOp))) else null
+    val intupdate = if (usingVector && !vector && !float) Output(Vec(issueWidth, Valid(new ExeUnitResp(eLen)))) else null
     val fpupdate = if (usingVector && float) Output(Vec(issueWidth, Valid(new ExeUnitResp(eLen)))) else null
     require(!(float && vector))
 
@@ -320,8 +319,10 @@ class RegisterRead(
 
     io.exe_reqs(w).valid    := exe_reg_valids(w)
     io.exe_reqs(w).bits.uop := exe_reg_uops(w)
+    io.exe_reqs(w).bits.rvmFull := DontCare
     if (vector) {
       if (numReadPorts > 0) io.exe_reqs(w).bits.rvm_data := exe_reg_rvm_align(w)
+      if (numReadPorts > 0) io.exe_reqs(w).bits.rvmFull := exe_reg_rvm_data(w)
       if (numReadPorts > 1) io.exe_reqs(w).bits.rs3_data := exe_reg_rs3_data(w)
       if (numReadPorts > 2) io.exe_reqs(w).bits.rs2_data := exe_reg_rs2_data(w)
       if (numReadPorts > 3) io.exe_reqs(w).bits.rs1_data := exe_reg_rs1_data(w)
@@ -334,13 +335,18 @@ class RegisterRead(
 
     if (usingVector) {
       if (!vector && !float) {
+        val is_setvl = exe_reg_uops(w).uopc.isOneOf(uopVSETVLI, uopVSETIVLI, uopVSETVL)
+        io.intupdate(w).valid := exe_reg_valids(w) && exe_reg_uops(w).is_rvv && !is_setvl
+        io.intupdate(w).bits.uop := exe_reg_uops(w)
+        io.intupdate(w).bits.data := exe_reg_rs1_data(w)
+        io.intupdate(w).bits.uop.vStrideLength := exe_reg_rs2_data(w)
         // avoid mem pipes (lower indexed)
         if (w >= memWidth && w < memWidth+intWidth) {
-          val is_setvl = exe_reg_uops(w).uopc.isOneOf(uopVSETVLI, uopVSETIVLI, uopVSETVL)
           io.exe_reqs(w).valid := exe_reg_valids(w) && (is_setvl || !exe_reg_uops(w).is_rvv)
-          io.intupdate(w - memWidth).valid := exe_reg_valids(w) && exe_reg_uops(w).is_rvv && !is_setvl
-          io.intupdate(w - memWidth).bits.uop := exe_reg_uops(w)
-          io.intupdate(w - memWidth).bits.data := exe_reg_rs1_data(w)
+          //io.intupdate(w - memWidth).valid := exe_reg_valids(w) && exe_reg_uops(w).is_rvv && !is_setvl
+          //io.intupdate(w - memWidth).bits.uop := exe_reg_uops(w)
+          //io.intupdate(w - memWidth).bits.data := exe_reg_rs1_data(w)
+          //io.intupdate(w - memWidth).bits.uop.vStrideLength := exe_reg_rs2_data(w)
         }
       } else if (float) {
         io.exe_reqs(w).valid := exe_reg_valids(w) && !exe_reg_uops(w).is_rvv
@@ -350,12 +356,12 @@ class RegisterRead(
       } else if (vector) {
         //val uses_ldq   = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_ldq
         //val uses_stq   = exe_reg_uops(w).is_rvv && exe_reg_uops(w).uses_stq
-        val is_load    = exe_reg_uops(w).ctrl.is_load
-        val is_sta     = exe_reg_uops(w).ctrl.is_sta
-        val is_masked  = !exe_reg_uops(w).v_unmasked
-        val is_idx_ls  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).v_idx_ls
-        val v_eidx     = exe_reg_uops(w).v_eidx
-        val vl         = exe_reg_uops(w).vconfig.vl
+        //val is_load    = exe_reg_uops(w).ctrl.is_load
+        //val is_sta     = exe_reg_uops(w).ctrl.is_sta
+        //val is_masked  = !exe_reg_uops(w).v_unmasked
+        //val is_idx_ls  = exe_reg_uops(w).is_rvv && exe_reg_uops(w).v_idx_ls
+        //val v_eidx     = exe_reg_uops(w).v_eidx
+        //val vl         = exe_reg_uops(w).vconfig.vl
         //val vmlogic    = exe_reg_uops(w).ctrl.is_vmlogic
         //val is_vmask_cnt_m     = exe_reg_uops(w).uopc.isOneOf(uopVPOPC, uopVFIRST)
         //val is_vmask_set_m     = exe_reg_uops(w).uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
@@ -368,7 +374,7 @@ class RegisterRead(
         //val vslideup           = exe_reg_uops(w).uopc === uopVSLIDEUP
         //val vcompress          = exe_reg_uops(w).uopc === uopVCOMPRESS
         //val perm_idx           = exe_reg_uops(w).v_perm_idx
-        val is_active          = Mux(is_masked, exe_reg_rvm_data(w)(v_eidx), true.B) && v_eidx < vl && v_eidx >= exe_reg_uops(w).vstart
+        //val is_active          = Mux(is_masked, exe_reg_rvm_data(w)(v_eidx), true.B) && v_eidx < vl && v_eidx >= exe_reg_uops(w).vstart
                                  //Mux(is_vmaskInsn, vmaskInsn_active,
                                  //Mux(vslideup,  exe_reg_uops(w).v_eidx >= exe_reg_uops(w).v_scalar_data && (exe_reg_rvm_data(w) || !is_masked),
                                  //Mux(is_masked || vcompress, exe_reg_rvm_data(w), true.B))) && Mux(vcompress, perm_idx, v_eidx) < vl && v_eidx >= io.csr_vstart
@@ -386,25 +392,26 @@ class RegisterRead(
 
         //val is_perm_fdbk       = exe_reg_uops(w).uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS) && exe_reg_uops(w).v_perm_busy
         //io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && is_active) && (!is_perm_fdbk || vcompress && (!exe_reg_uops(w).v_perm_busy || exe_reg_rvm_data(w)))
-        io.exe_reqs(w).valid    := exe_reg_valids(w) && (!is_sta || is_active)
+        //io.exe_reqs(w).valid    := exe_reg_valids(w) && (!is_sta || is_active)
+        io.exe_reqs(w).valid := exe_reg_valids(w)
         //val vmove: Bool = VecInit(Seq(exe_reg_uops(w).uopc === uopVFMV_S_F,
           //exe_reg_uops(w).uopc === uopVFMV_F_S,
           //exe_reg_uops(w).uopc === uopVMV_X_S,
           //exe_reg_uops(w).uopc === uopVMV_S_X
         //)).asUInt().orR()
 
-        if (w >= vecWidth) {
-          io.vmupdate(w-vecWidth).valid  := exe_reg_valids(w) && ((is_sta || is_load) && (is_masked || is_idx_ls))
-          io.vmupdate(w-vecWidth).bits   := exe_reg_uops(w)
-          io.vmupdate(w-vecWidth).bits.v_active        := is_active
-          io.vmupdate(w-vecWidth).bits.v_xls_offset    := exe_reg_rs2_data(w)
-        }
+        //if (w >= vecWidth) {
+        //  io.vmupdate(w-vecWidth).valid  := exe_reg_valids(w) && ((is_sta || is_load) && (is_masked || is_idx_ls))
+        //  io.vmupdate(w-vecWidth).bits   := exe_reg_uops(w)
+        //  io.vmupdate(w-vecWidth).bits.v_active        := is_active
+        //  io.vmupdate(w-vecWidth).bits.v_xls_offset    := exe_reg_rs2_data(w)
+        //}
         //io.vecUpdate(w).valid               := false.B // FIXME: exe_reg_valids(w) && is_perm_fdbk
         //io.vecUpdate(w).bits.uop            := exe_reg_uops(w)
         //io.vecUpdate(w).bits.uop.v_active   := false.B //exe_reg_rvm_data(w) && (v_eidx < vl)
         //io.vecUpdate(w).bits.uop.v_perm_idx := 0.U //perm_idx + (v_eidx < vl)
         //io.vecUpdate(w).bits.data           := 0.U //exe_reg_rs1_data(w)
-        io.exe_reqs(w).bits.uop.v_active := is_active //Mux(vmove, !v_eidx.orR(), is_active)
+        //io.exe_reqs(w).bits.uop.v_active := is_active //Mux(vmove, !v_eidx.orR(), is_active)
         when(io.exe_reqs(w).bits.uop.is_rvv && io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVFMV_V_F, uopVFMV_S_F)) {
           io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
         }

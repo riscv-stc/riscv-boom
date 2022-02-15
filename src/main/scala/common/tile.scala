@@ -6,28 +6,26 @@
 package boom.common
 
 import chisel3._
-import chisel3.util.{RRArbiter, Queue}
+import chisel3.util.{Queue, RRArbiter}
 
-import scala.collection.mutable.{ListBuffer}
-
+import scala.collection.mutable.ListBuffer
 import freechips.rocketchip.config._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.{LogicalTreeNode }
+import freechips.rocketchip.diplomaticobjectmodel.logicaltree.LogicalTreeNode
 import freechips.rocketchip.rocket._
-import freechips.rocketchip.subsystem.{RocketCrossingParams}
+import freechips.rocketchip.subsystem.RocketCrossingParams
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.util._
 import freechips.rocketchip.tile._
-
 import testchipip.{ExtendedTracedInstruction, WithExtendedTraceport}
-
 import boom.exu._
 import boom.ifu._
 import boom.lsu._
-import boom.util.{BoomCoreStringPrefix}
+import boom.util.BoomCoreStringPrefix
+import boom.vlsu._
 import freechips.rocketchip.prci.ClockSinkParameters
 
 
@@ -135,6 +133,15 @@ class BoomTile private(
   val dCacheTap = TLIdentityNode()
   tlMasterXbar.node := dCacheTap := dcache.node
 
+  // v-lsu
+  val bp = p(TileKey).core.asInstanceOf[BoomCoreParams]
+  val usingVector = bp.useVector
+
+  val gp = Some(VLSUGeneralParams(nCacheLineSizeBytes = p(CacheBlockBytes), bp.vLen, coreWidth = bp.decodeWidth))
+  val vlsu = Some(LazyModule(new VLSU(gp.get,bp)))
+  val vlsuWidget = Some(LazyModule(new TLWidthWidget(64)).suggestName("vlsuWidthWidget"))
+
+  if(usingVector) {tlMasterXbar.node := vlsuWidget.get.node := vlsu.get.node}
 
   // Frontend/ICache
   val frontend = LazyModule(new BoomFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
@@ -155,8 +162,8 @@ class BoomTile private(
 class BoomTileModuleImp(outer: BoomTile) extends BaseTileModuleImp(outer){
 
   Annotated.params(this, outer.boomParams)
-
-  val core = Module(new BoomCore(outer.boomParams.trace)(outer.p))
+  val vlsuparam = outer.vlsu.get.module.ap
+  val core = Module(new BoomCore(outer.boomParams.trace, Some(vlsuparam))(outer.p))
   val lsu  = Module(new LSU()(outer.p, outer.dcache.module.edge))
 
   val ptwPorts         = ListBuffer(lsu.io.ptw, outer.frontend.module.io.ptw, core.io.ptw_tlb)
@@ -176,6 +183,7 @@ class BoomTileModuleImp(outer: BoomTile) extends BaseTileModuleImp(outer){
   // Connect the core pipeline to other intra-tile modules
   outer.frontend.module.io.cpu <> core.io.ifu
   core.io.lsu <> lsu.io.core
+  core.io.vlsu.get <> outer.vlsu.get.module.io
 
   //fpuOpt foreach { fpu => core.io.fpu <> fpu.io } RocketFpu - not needed in boom
   core.io.rocc := DontCare

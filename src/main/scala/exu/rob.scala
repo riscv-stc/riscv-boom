@@ -61,7 +61,7 @@ class RobIo(
 
   // Handle Branch Misspeculations
   val brupdate = Input(new BrUpdateInfo())
-  val vmupdate = if (usingVector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
+  //val vmupdate = if (usingVector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
 
   // Write-back Stage
   // (Update of ROB)
@@ -70,7 +70,8 @@ class RobIo(
 
   // Unbusying ports for stores.
   // +1 for fpstdata
-  val lsu_clr_bsy      = Input(Vec(memWidth + 1, Valid(UInt(robAddrSz.W))))
+  // +coreWidth*2 for vector stores and loads
+  val lsu_clr_bsy      = Input(Vec(memWidth + 1 + coreWidth * 2, Valid(UInt(robAddrSz.W))))
 
   // Port for unmarking loads/stores as speculation hazards..
   val lsu_clr_unsafe   = Input(Vec(memWidth, Valid(UInt(robAddrSz.W))))
@@ -316,7 +317,7 @@ class Rob(
     // one bank
     val rob_val       = RegInit(VecInit(Seq.fill(numRobRows){false.B}))
     val rob_bsy       = Reg(Vec(numRobRows, Bool()))
-    val rob_ud_bsy    = if (usingVector) Reg(Vec(numRobRows, Bool())) else null
+    //val rob_ud_bsy    = if (usingVector) Reg(Vec(numRobRows, Bool())) else null
     val rob_unsafe    = Reg(Vec(numRobRows, Bool()))
     val rob_uop       = Reg(Vec(numRobRows, new MicroOp()))
     val rob_exception = Reg(Vec(numRobRows, Bool()))
@@ -342,9 +343,9 @@ class Rob(
       rob_predicated(rob_tail)   := false.B
       rob_vleff_exception(rob_tail) := false.B
       rob_fflags(rob_tail)    := 0.U
-      if (usingVector) {
-        rob_ud_bsy(rob_tail)  := io.enq_uops(w).iq_type === IQT_MVMX && io.enq_uops(w).uses_ldq
-      }
+      //if (usingVector) {
+        //rob_ud_bsy(rob_tail)  := io.enq_uops(w).iq_type === IQT_MVMX && io.enq_uops(w).uses_ldq
+      //}
 
       assert (rob_val(rob_tail) === false.B, "[rob] overwriting a valid entry.")
       assert ((io.enq_uops(w).rob_idx >> log2Ceil(coreWidth)) === rob_tail)
@@ -361,13 +362,20 @@ class Rob(
       val row_idx = GetRowIdx(wb_uop.rob_idx)
       if (usingVector) {
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
-          val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
-          val wb_rvv_sta  = wb_uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
-          rob_bsy(row_idx)      := Mux(wb_rvv_load, Mux(wb_uop.uses_ldq, false.B, rob_bsy(row_idx)),
-                                   Mux(wb_rvv_sta,  false.B, wb_uop.v_is_split && !wb_uop.v_split_last))
-          when (wb_rvv_load && !wb_uop.uses_ldq) {
-            rob_ud_bsy(row_idx) := false.B
-          }
+          //val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
+          //val wb_rvv_sta  = wb_uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
+          //rob_bsy(row_idx)      := Mux(wb_rvv_load, Mux(wb_uop.uses_ldq, false.B, rob_bsy(row_idx)),
+          //                         Mux(wb_rvv_sta,  false.B, wb_uop.v_is_split && !wb_uop.v_split_last))
+          //when (wb_rvv_load && !wb_uop.uses_ldq) {
+          //  rob_ud_bsy(row_idx) := false.B
+          //}
+          val wb_rvv_load = wb_uop.is_rvv && wb_uop.uses_ldq
+          val wbSplitting = wb_uop.v_is_split && !wb_uop.v_split_last
+          //val wb_rvv_sta  = wb_uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
+          //rob_bsy(row_idx)      := Mux(wb_rvv_load, Mux(wb_uop.uses_ldq, false.B, rob_bsy(row_idx)),
+          //                         Mux(wb_rvv_sta,  false.B, wb_uop.v_is_split && !wb_uop.v_split_last))
+          // rob entry for vector load is freed via lsu_clr_busy port.
+          rob_bsy(row_idx) := Mux(wb_rvv_load, rob_bsy(row_idx), wbSplitting)
           rob_unsafe(row_idx)   := false.B
           rob_predicated(row_idx)  := wb_resp.bits.predicated
           rob_uop(row_idx).vxsat := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
@@ -453,8 +461,9 @@ class Rob(
     // Commit or Rollback
 
     // Can this instruction commit? (the check for exceptions/rob_state happens later).
-    val ud_bsy = if (usingVector) rob_ud_bsy(rob_head) else false.B
-    can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall && !ud_bsy
+    //val ud_bsy = if (usingVector) rob_ud_bsy(rob_head) else false.B
+    //can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall && !ud_bsy
+    can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall
 
 
     // use the same "com_uop" for both rollback AND commit
@@ -513,21 +522,21 @@ class Rob(
         rob_uop(i).br_mask := GetNewBrMask(io.brupdate, br_mask)
       }
 
-      if (usingVector) {
-        when (io.vmupdate.map(u =>
-            u.valid && !u.bits.v_active &&
-            GetRowIdx(u.bits.rob_idx) === i.U &&
-            MatchBank(GetBankIdx(u.bits.rob_idx))).reduce(_||_)) {
-          assert(rob_val(i), "Vmask Kill invalid entry")
-          assert(rob_uop(i).is_rvv, "Vmask Kill invalid entry")
-          assert(rob_uop(i).uses_ldq || rob_uop(i).uses_stq, "Vmask Kill non-lsu entry")
-          rob_unsafe(i) := false.B
-          rob_exception(i) := false.B
-          when (rob_uop(i).uses_stq) {
-            rob_bsy(i) := false.B
-          }
-        }
-      }
+      //if (usingVector) {
+        //when (io.vmupdate.map(u =>
+        //    u.valid && !u.bits.v_active &&
+        //    GetRowIdx(u.bits.rob_idx) === i.U &&
+        //    MatchBank(GetBankIdx(u.bits.rob_idx))).reduce(_||_)) {
+        //  assert(rob_val(i), "Vmask Kill invalid entry")
+        //  assert(rob_uop(i).is_rvv, "Vmask Kill invalid entry")
+        //  assert(rob_uop(i).uses_ldq || rob_uop(i).uses_stq, "Vmask Kill non-lsu entry")
+        //  rob_unsafe(i) := false.B
+        //  rob_exception(i) := false.B
+        //  when (rob_uop(i).uses_stq) {
+        //    rob_bsy(i) := false.B
+        //  }
+        //}
+      //}
     }
 
 
@@ -575,19 +584,22 @@ class Rob(
 
     for (i <- 0 until numWakeupPorts) {
       val rob_idx = io.wb_resps(i).bits.uop.rob_idx
+      val realRespsVld = io.wb_resps(i).valid && !(io.wb_resps(i).bits.uop.is_rvv && io.wb_resps(i).bits.uop.uses_ldq)
       when (io.debug_wb_valids(i) && MatchBank(GetBankIdx(rob_idx))) {
         rob_debug_wdata(GetRowIdx(rob_idx)) := io.debug_wb_wdata(i)
       }
       val temp_uop = rob_uop(GetRowIdx(rob_idx))
 
-      assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
+      assert (!(realRespsVld && MatchBank(GetBankIdx(rob_idx)) &&
                !rob_val(GetRowIdx(rob_idx))),
                "[rob] writeback (" + i + ") occurred to an invalid ROB entry.")
-      val temp_ud_bsy = if (usingVector) rob_ud_bsy(GetRowIdx(rob_idx)) else false.B
-      assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
-               !rob_bsy(GetRowIdx(rob_idx)) && !temp_ud_bsy),
+      //val temp_ud_bsy = if (usingVector) rob_ud_bsy(GetRowIdx(rob_idx)) else false.B
+      //assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
+      //         !rob_bsy(GetRowIdx(rob_idx)) && !temp_ud_bsy),
+      assert (!(realRespsVld && MatchBank(GetBankIdx(rob_idx)) &&
+               !rob_bsy(GetRowIdx(rob_idx))),
                "[rob] writeback (" + i + ") occurred to a not-busy ROB entry.")
-      assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
+      assert (!(realRespsVld && MatchBank(GetBankIdx(rob_idx)) &&
                temp_uop.ldst_val && Mux(temp_uop.rt(RD, isVector),
                  !(temp_uop.pvd.map(p => p.valid && p.bits === io.wb_resps(i).bits.uop.pdst).reduce(_ || _)), // matching pvd(x).bits
                  temp_uop.pdst =/= io.wb_resps(i).bits.uop.pdst)),
@@ -739,7 +751,8 @@ class Rob(
   r_xcpt_uop         := next_xcpt_uop
   r_xcpt_uop.br_mask := GetNewBrMask(io.brupdate, next_xcpt_uop)
   if (usingVector) {
-    when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop) || IsKilledByVM(io.vmupdate, next_xcpt_uop)) {
+    //when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop) || IsKilledByVM(io.vmupdate, next_xcpt_uop)) {
+    when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop)) {
       r_xcpt_val := false.B
     }
   } else {

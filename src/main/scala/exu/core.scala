@@ -44,11 +44,14 @@ import boom.common.MicroOpcodes._
 import boom.ifu.{GlobalHistory, HasBoomFrontendParameters}
 import boom.exu.FUConstants._
 import boom.util._
+import boom.vlsu.{VLSMicroOP, VLSUArchitecturalParams, VLSUTopBundle}
+
+import scala.collection.mutable
 
 /**
  * Top level core object that connects the Frontend to the rest of the pipeline.
  */
-class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
+class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(implicit p: Parameters) extends BoomModule
   with HasBoomFrontendParameters // TODO: Don't add this trait
 {
   val io = new freechips.rocketchip.tile.CoreBundle
@@ -62,7 +65,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     val ptw_tlb = new freechips.rocketchip.rocket.TLBPTWIO()
     val trace = Output(Vec(coreParams.retireWidth, new ExtendedTracedInstruction))
     val fcsr_rm = UInt(freechips.rocketchip.tile.FPConstants.RM_SZ.W)
+    val vlsu: Option[VLSUTopBundle] = if(usingVector) Some(Flipped(new VLSUTopBundle(vlsuparam.get))) else None
   }
+  val vlsuIO: VLSUTopBundle = io.vlsu.get
   //**********************************
   // construct all of the modules
 
@@ -82,13 +87,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   var v_pipeline: VecPipeline = null
-  val vmupdate = Wire(Vec(vecWidth, Valid(new MicroOp)))
-  vmupdate.map(_.valid := false.B)
-  vmupdate.map(_.bits := DontCare)
+  //val vmupdate = Wire(Vec(vecWidth, Valid(new MicroOp)))
+  //vmupdate.map(_.valid := false.B)
+  //vmupdate.map(_.bits := DontCare)
   if (usingVector) {
     v_pipeline = Module(new VecPipeline)
-    v_pipeline.io.ll_wports := DontCare
-    vmupdate := v_pipeline.io.vmupdate
+    //v_pipeline.io.ll_wports := DontCare
+    //vmupdate := v_pipeline.io.vmupdate
     v_pipeline.io.intupdate := DontCare
     v_pipeline.io.fpupdate := DontCare
   }
@@ -151,7 +156,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val ll_wbarb         = Module(new Arbiter(new ExeUnitResp(xLen), 1 +
                                                                    (if (usingFPU) 1 else 0) +
                                                                    (if (usingRoCC) 1 else 0) +
-                                                                   (if (usingVector) vecWidth else 0)))
+                                                                   (if (usingVector) vecWidth else 0))) // for vec pipe write to int reg
   val iregister_read   = Module(new RegisterRead(
                            issue_units.map(_.issueWidth).sum,
                            exe_units.withFilter(_.readsIrf).map(_.supportedFuncUnits),
@@ -193,6 +198,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dis_ready  = Wire(Bool())
   //val dis_split       = Wire(Vec(coreWidth, Bool()))
   //val dis_fired       = RegInit(VecInit(0.U(coreWidth.W).asBools))
+  val disSplitFirst  = Wire(Vec(coreWidth, Bool()))
   val dis_split_last  = Wire(Vec(coreWidth, Bool()))
   val dis_split_cand  = Wire(Vec(coreWidth, Bool()))
   val dis_split_actv  = Wire(Vec(coreWidth, Bool()))
@@ -279,6 +285,25 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val mem_resps = mem_units.map(_.io.ll_iresp)
   for (i <- 0 until memWidth) {
     mem_units(i).io.lsu_io <> io.lsu.exe(i)
+  }
+  if(usingVector){
+    val vlsuReqVld = mem_units(0).io.vlsuReqRr.valid && mem_units(0).io.vlsuReqRr.bits.uop.is_rvv &&
+      (mem_units(0).io.vlsuReqRr.bits.uop.uses_ldq || mem_units(0).io.vlsuReqRr.bits.uop.uses_stq)
+    /* For unmasked/unindexed vector load store that doesn't need to read vrf. */
+    vlsuIO.fromRr.vuop(0).valid := vlsuReqVld
+    vlsuIO.fromRr.vuop(0).bits := uopConvertToVuop(mem_units(0).io.vlsuReqRr.bits.uop)
+    vlsuIO.fromRr.vuop(0).bits.rs1 := mem_units(0).io.vlsuReqRr.bits.rs1_data
+    vlsuIO.fromRr.vuop(0).bits.rs2 := mem_units(0).io.vlsuReqRr.bits.rs2_data // for unmasked constant stride
+    vlsuIO.fromRr.vuop(0).bits.vm := Fill(vLen, 1.U(1.W))
+
+    /* For masked/indexed vector load store. */
+    vlsuIO.fromRr.vuop(1).valid := v_pipeline.io.toVlsuRr.valid
+    vlsuIO.fromRr.vuop(1).bits := uopConvertToVuop(v_pipeline.io.toVlsuRr.bits.uop)
+    vlsuIO.fromRr.vuop(1).bits.rs1 := v_pipeline.io.toVlsuRr.bits.uop.v_scalar_data
+    vlsuIO.fromRr.vuop(1).bits.rs2 := v_pipeline.io.toVlsuRr.bits.uop.vStrideLength
+    vlsuIO.fromRr.vuop(1).bits.vs2 := v_pipeline.io.toVlsuRr.bits.rs3_data  //for indexed load/stores
+    vlsuIO.fromRr.vuop(1).bits.vm := v_pipeline.io.toVlsuRr.bits.rvmFull
+    //Fixme: masked vector load store is not supported yet, because mask in VLSU is not fully tested.
   }
 
   //-------------------------------------------------------------
@@ -1134,7 +1159,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
                       || dis_rocc_alloc_stall(w)
                       || brupdate.b1.mispredict_mask =/= 0.U
                       || brupdate.b2.mispredict
-                      || io.ifu.redirect_flush))
+                      || io.ifu.redirect_flush
+                      || vlsuIO.toDis.vLdQFull(w) && dis_uops(w).uses_ldq && dis_uops(w).is_rvv
+                      || vlsuIO.toDis.vStQFull(w) && dis_uops(w).uses_stq && dis_uops(w).is_rvv))
 
 
   io.lsu.fence_dmem := (dis_valids zip wait_for_empty_pipeline).map {case (v,w) => v && w} .reduce(_||_)
@@ -1151,70 +1178,49 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   //-------------------------------------------------------------
-  // RVV L/S split
+  // RVV L/S split rules:
+  // 1. No split for unitstride even lmul is larger than 1;
+  // 2. Split constantstride and indexed when lmul is larger than 1 according to this lmul.
+  // 3. Split and convert segment unitstride/constantstride into constantstride according to nf.
+  // 4. Split and convert segment indexed into indexed according to nf.
   if (usingVector) {
-
     for (w <- 0 until coreWidth) {
-      val dis_split_eidx  = RegInit(0.U((vLenSz+1).W))
       val dis_split_segf  = RegInit(0.U(3.W))
-      val dis_split_segg  = RegInit(0.U(3.W))
       val vseg_ls         = dis_uops(w).is_rvv && dis_uops(w).v_seg_nf > 1.U
       val vseg_flast      = dis_split_segf + 1.U(4.W) === dis_uops(w).v_seg_nf
-      //val dis_total_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, dis_uops(w).vconfig.vl, rename_stage.io.ren2_uops(w).v_split_ecnt)
-      val dis_total_ecnt  = rename_stage.io.ren2_uops(w).v_split_ecnt
-      val dis_split_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, 1.U, dis_total_ecnt)
-      val elem_last       = dis_split_eidx + dis_split_ecnt >= dis_total_ecnt
-      val vLen_ecnt       = (vLen.U >> 3.U) >> dis_uops(w).vd_eew
-      val dis_undisturb   = (dis_uops(w).vconfig.vl < dis_uops(w).vconfig.vtype.vlMax ||
-                            dis_uops(w).vconfig.vtype.vlMax < vLen_ecnt) && !rename_stage.io.ren2_uops(w).uopc.isOneOf(uopVLM, uopVLR)
-
+      val lmulLargerThanOne = !dis_uops(w).vd_emul(2) && dis_uops(w).vd_emul(1,0) =/= 0.U
+      val splitLmul = lmulLargerThanOne && dis_uops(w).uopc.isOneOf(uopVLS,uopVSSA,uopVSUXA,uopVSOXA,uopVLOX,uopVLUX)
+      val needSplit = splitLmul || vseg_ls
       when (io.ifu.redirect_flush) {
-        dis_split_eidx := 0.U
         dis_split_segf := 0.U
-        dis_split_segg := 0.U
-        //dis_fired(w) := false.B
       } .elsewhen (dis_ready) {
-        dis_split_eidx := 0.U
         dis_split_segf := 0.U
-        dis_split_segg := 0.U
-        //dis_fired(w) := false.B
       } .elsewhen (dis_fire(w)) {
         when (vseg_ls) {
-          dis_split_eidx := dis_split_eidx + Mux(vseg_flast, dis_split_ecnt, 0.U)
           dis_split_segf := dis_split_segf + Mux(vseg_flast, 0.U, 1.U)
-          dis_split_segg := dis_split_segg + Mux(vseg_flast, 1.U, 0.U)
-        } .otherwise {
-          dis_split_eidx := dis_split_eidx + dis_split_ecnt
         }
-        //when (dis_split_last(w)) { dis_fired(w) := true.B }
       }
-
-      dis_split_last(w) := elem_last && (!vseg_ls || vseg_flast)
-      dis_split_cand(w) := dis_uops(w).is_rvv && dis_uops(w).v_is_split && (dis_uops(w).uses_ldq || dis_uops(w).uses_stq)
-      //if (w == 0) {
-      //  dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_fired(w)
-      //} else {
-      //  dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_fired(w) && !(dis_split_actv.slice(0,w).reduce(_||_))
-      //}
-      dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_split_last(w) // && !dis_fired(w)
-      //dis_fire(w)    := (!dis_split_cand(w) || !dis_fired(w)) && dis_valids(w) && !dis_stalls(w)
+      dis_split_last(w) := !vseg_ls || vseg_flast
+      dis_split_cand(w) := vseg_ls && (dis_uops(w).uses_ldq || dis_uops(w).uses_stq)
+      dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_split_last(w)
       dis_fire(w)    := dis_valids(w) && !dis_stalls(w)
       dis_fire_fb(w) := dis_fire(w) && (!dis_split_cand(w) || dis_split_last(w))
       when (dis_split_cand(w) && dis_valids(w)) {
         when (vseg_ls) { dis_uops(w).v_seg_f := dis_split_segf }
-        dis_uops(w).v_eidx := dis_split_eidx
       }
-      dis_uops(w).v_split_first := dis_split_eidx === 0.U
       dis_uops(w).v_split_last  := dis_split_last(w)
-      dis_uops(w).v_split_ecnt  := dis_split_ecnt
-      // for partial load (including prestart/body masked/tail not empty), 
-      // shoot first split to vector pipe to get undisturb part
-      when (dis_uops(w).is_rvv && dis_uops(w).uses_ldq && dis_split_eidx === 0.U && dis_undisturb) {
-        dis_uops(w).iq_type := IQT_MVMX
-      }
-      // TODO: for masked load/store, dispatch every split to vector pipe to get mask update
 
-      v_rename_stage.io.dis_fire_first(w) := dis_fire(w) && dis_uops(w).v_split_first
+      //For masked VLS, dispatch to vector pipe to get mask/index.
+      val vlsReadsMVMX = dis_uops(w).is_rvv && (dis_uops(w).uses_stq || dis_uops(w).uses_ldq) &&
+        (!dis_uops(w).v_unmasked || dis_uops(w).v_idx_ls)
+      when (vlsReadsMVMX) {
+        // if uop need both scalar addr and vector mask(index), addr arrive at vmx-issue as scalar-data.
+        dis_uops(w).iq_type := IQT_MVMX
+        dis_uops(w).v_scalar_busy := true.B
+      }
+      disSplitFirst(w) := Mux(needSplit, dis_split_segf === 0.U, true.B)
+      dis_uops(w).v_split_first := disSplitFirst(w)
+      v_rename_stage.io.dis_fire_first(w) := dis_fire(w) && disSplitFirst(w)
     }
   } else {
     dis_fire := dis_valids zip dis_stalls map {case (v,s) => v && !s}
@@ -1231,8 +1237,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   for (w <- 0 until coreWidth) {
     // Dispatching instructions request load/store queue entries when they can proceed.
-    dis_uops(w).ldq_idx := io.lsu.dis_ldq_idx(w)
-    dis_uops(w).stq_idx := io.lsu.dis_stq_idx(w)
+    dis_uops(w).ldq_idx := Mux(dis_uops(w).is_rvv, vlsuIO.toDis.disVLdQIdx(w).bits.qIdx, io.lsu.dis_ldq_idx(w))
+    dis_uops(w).stq_idx := Mux(dis_uops(w).is_rvv, vlsuIO.toDis.disVStQIdx(w).bits.qIdx, io.lsu.dis_stq_idx(w))
   }
 
   //-------------------------------------------------------------
@@ -1471,11 +1477,15 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   issue_units.map(_.io.brupdate := brupdate)
   issue_units.map(_.io.flush_pipeline := RegNext(rob.io.flush.valid))
   if (usingVector) {
-    mem_iss_unit.io.vmupdate := vmupdate
-    int_iss_unit.io.vmupdate.map(_.valid := false.B)
-    int_iss_unit.io.vmupdate.map(_.bits := DontCare)
+    //mem_iss_unit.io.vmupdate := vmupdate
+    //int_iss_unit.io.vmupdate.map(_.valid := false.B)
+    //int_iss_unit.io.vmupdate.map(_.bits := DontCare)
     v_pipeline.io.intupdate := iregister_read.io.intupdate
     v_pipeline.io.fpupdate := fp_pipeline.io.fpupdate
+    v_pipeline.io.vlsuReadReq.valid := vlsuIO.toVrf.readReq.valid
+    v_pipeline.io.vlsuReadReq.bits := vlsuIO.toVrf.readReq.bits.addr
+    vlsuIO.fromVrf.readResp.valid := v_pipeline.io.vlsuReadResp.valid
+    vlsuIO.fromVrf.readResp.bits.data := v_pipeline.io.vlsuReadResp.bits
   }
 
   // Load-hit Misspeculations
@@ -1679,12 +1689,24 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   // enqueue basic load/store info in Decode
   for (w <- 0 until coreWidth) {
-    io.lsu.dis_uops(w).valid := dis_fire(w)
+    io.lsu.dis_uops(w).valid := dis_fire(w) && !dis_uops(w).is_rvv
     io.lsu.dis_uops(w).bits  := dis_uops(w)
+    if(usingVector){
+      vlsuIO.fromDis.vuopDis(w).valid := dis_fire(w) && dis_uops(w).is_rvv && (dis_uops(w).uses_ldq || dis_uops(w).uses_stq)
+      vlsuIO.fromDis.vuopDis(w).bits := uopConvertToVuop(dis_uops(w))
+    }
   }
 
   // tell LSU about committing loads and stores to clear entries
   io.lsu.commit                  := rob.io.commit
+  if(usingVector){
+    vlsuIO.fromRob.retireEntries.zipWithIndex.foreach {case (entry, i) =>
+      entry.valid := (rob.io.commit.valids(i) || rob.io.commit.arch_valids(i)) && rob.io.commit.uops(i).is_rvv
+      entry.bits.isStore := rob.io.commit.uops(i).uses_stq
+      entry.bits.isLoad := rob.io.commit.uops(i).uses_ldq
+      entry.bits.qEntryIdx := Mux(rob.io.commit.uops(i).uses_stq, rob.io.commit.uops(i).stq_idx, rob.io.commit.uops(i).ldq_idx)
+    }
+  }
 
   // tell LSU that it should fire a load that waits for the rob to clear
   io.lsu.commit_load_at_rob_head := rob.io.com_load_is_at_rob_head
@@ -1694,9 +1716,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   // Handle Branch Mispeculations
   io.lsu.brupdate := brupdate
-  if (usingVector) {
-    io.lsu.vmupdate := vmupdate
-  }
+  //if (usingVector) {
+  //  io.lsu.vmupdate := vmupdate
+  //}
   io.lsu.rob_head_idx := rob.io.rob_head_idx
   io.lsu.rob_pnr_idx  := rob.io.rob_pnr_idx
 
@@ -1711,13 +1733,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 //  fp_pipeline.io.to_sdq.ready := false.B
   }
 
-  if (usingVector) {
-    io.lsu.v_stdata <> v_pipeline.io.to_sdq
+  //if (usingVector) {
+  //  io.lsu.v_stdata <> v_pipeline.io.to_sdq
 //} else {
 //  io.lsu.v_stdata.valid := false.B
 //  io.lsu.v_stdata.bits := DontCare
 //  v_pipeline.io.to_sdq.ready := false.B
-  }
+  //}
 
   //-------------------------------------------------------------
   //-------------------------------------------------------------
@@ -1786,19 +1808,19 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   if (usingVector) {
-    // FIXME
-    v_pipeline.io.from_int.valid := false.B
-    v_pipeline.io.from_int.bits := DontCare
-    //v_pipeline.io.to_int.ready := true.B
-    v_pipeline.io.from_fp.valid := false.B
-    v_pipeline.io.from_fp.bits := DontCare
     fp_pipeline.io.fromVec <> v_pipeline.io.to_fp
     Seq.tabulate(vecWidth)(i => i).foreach { i =>
       val attachBase: Int = 2 + (if(usingRoCC) 1 else 0)
       ll_wbarb.io.in(attachBase + i) <> v_pipeline.io.to_int(i)
     }
     //v_pipeline.io.to_fp.ready := true.B
-    v_pipeline.io.ll_wports  <> exe_units.memory_units.map(_.io.ll_vresp)
+    //v_pipeline.io.ll_wports  <> exe_units.memory_units.map(_.io.ll_vresp)
+    v_pipeline.io.vlsuWritePort.valid := vlsuIO.toVrf.write.valid
+    v_pipeline.io.vlsuWritePort.bits.data := vlsuIO.toVrf.write.bits.data
+    v_pipeline.io.vlsuWritePort.bits.addr := vlsuIO.toVrf.write.bits.addr
+    v_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
+    v_pipeline.io.vlsuLoadWakeUp.valid := vlsuIO.wakeUpVReg.valid
+    v_pipeline.io.vlsuLoadWakeUp.bits := vlsuIO.wakeUpVReg.bits
   }
 
   if (usingRoCC) {
@@ -1889,14 +1911,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }
   }
 
-  require (cnt == rob.numWakeupPorts)
+  require (cnt == rob.numWakeupPorts, s"rob wb port mismatch: ${cnt}, ${rob.numWakeupPorts}")
 
   // branch resolution
   rob.io.brupdate <> brupdate
   // vector mask update
-  if (usingVector) {
-    rob.io.vmupdate <> vmupdate
-  }
+  //if (usingVector) {
+  //  rob.io.vmupdate <> vmupdate
+  //}
 
   exe_units.map(u => u.io.status := csr.io.status)
   if (usingFPU)
@@ -1915,10 +1937,22 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   // LSU <> ROB
-  rob.io.lsu_clr_bsy    := io.lsu.clr_bsy
+  //rob.io.lsu_clr_bsy    := io.lsu.clr_bsy
+  rob.io.lsu_clr_bsy.foreach( _ := DontCare)
+  (rob.io.lsu_clr_bsy.slice(0, memWidth) zip io.lsu.clr_bsy).foreach { case (rob, lsu) => rob := lsu }
   rob.io.lsu_clr_unsafe := io.lsu.clr_unsafe
   rob.io.lxcpt          <> io.lsu.lxcpt
 
+  // VLSU store <> ROB
+  (rob.io.lsu_clr_bsy.slice(memWidth, memWidth + coreWidth) zip vlsuIO.stToRob.robIdx).foreach { case (rob, vlsu) =>
+    rob.valid := vlsu.valid
+    rob.bits := vlsu.bits
+  }
+  // VLSU load <> ROB
+  (rob.io.lsu_clr_bsy.slice(memWidth + coreWidth, memWidth + 2 * coreWidth) zip vlsuIO.ldToRob.robIdx).foreach{ case (rob, vlsu) =>
+    rob.valid := vlsu.valid
+    rob.bits := vlsu.bits
+  }
   assert (!(csr.io.singleStep), "[core] single-step is unsupported.")
 
 
@@ -2169,5 +2203,31 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     io.trace := DontCare
     io.trace map (t => t.valid := false.B)
     io.ifu.debug_ftq_idx := DontCare
+  }
+
+  def uopConvertToVuop(uop: MicroOp): VLSMicroOP = {
+    val vuop = WireInit(0.U.asTypeOf(new VLSMicroOP(vlsuparam.get)))
+    vuop.vLdQIdx := uop.ldq_idx
+    vuop.vStQIdx := uop.stq_idx
+    vuop.robIdx := uop.rob_idx
+    vuop.uCtrlSig.accessType.isLoad := uop.uses_ldq
+    vuop.uCtrlSig.accessType.isStore := uop.uses_stq
+    vuop.uCtrlSig.accessStyle.isUnitStride := uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA)
+    vuop.uCtrlSig.accessStyle.isConstantStride := uop.uopc.isOneOf(uopVLS, uopVSSA)
+    vuop.uCtrlSig.accessStyle.isSegment := false.B //fixme: explicit segment required in uop.
+    vuop.uCtrlSig.accessStyle.isWholeAccess := uop.uopc.isOneOf(uopVLR, uopVSR)
+    vuop.uCtrlSig.accessStyle.isIndexed := uop.uopc.isOneOf(uopVLUX, uopVLOX, uopVSOXA, uopVSUXA)
+    vuop.uCtrlSig.accessStyle.eew := uop.vd_eew
+    vuop.uCtrlSig.accessStyle.vStart := uop.vstart
+    vuop.uCtrlSig.accessStyle.vl := uop.vconfig.vl
+    vuop.uCtrlSig.accessStyle.vlmul := uop.vd_emul
+    vuop.uCtrlSig.accessStyle.nf := uop.v_seg_nf
+    vuop.vs1 := 0.U
+    vuop.vs2 := 0.U
+    vuop.rs1 := 0.U
+    vuop.rs2 := 0.U
+    vuop.vm := 0.U
+    vuop.vpdst := Mux(uop.uses_ldq, VecInit(uop.pvd.map(_.bits)), VecInit(uop.stale_pvd.map(_.bits)))
+    vuop
   }
 }
