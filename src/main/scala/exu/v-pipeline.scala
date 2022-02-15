@@ -22,7 +22,6 @@ import boom.exu.FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
-import freechips.rocketchip.util._
 
 /**
  * Top level datapath that wraps the floating point issue window, regfile, and arithmetic units.

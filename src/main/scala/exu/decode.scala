@@ -5,6 +5,7 @@
 
 package boom.exu
 
+import Chisel.UInt
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
@@ -16,6 +17,7 @@ import FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
+import freechips.rocketchip.util._
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -707,27 +709,18 @@ class BranchMaskGenerationLogic(val pl_width: Int)(implicit p: Parameters) exten
   io.debug_branch_mask := branch_mask
 }
 
+class VlWakeupResp(implicit p: Parameters) extends BoomBundle
+{
+  val vcq_idx = UInt(vcqSz.W)
+  val vl = UInt((maxVLMax.log2 + 1).W)
+  val vconfig_tag = UInt(vconfigTagSz.W)
+  val vconfig_mask = UInt(maxVconfigCount.W)
+}
 
 class VconfigDecodeSignals(implicit p: Parameters) extends BoomBundle
 {
   val vl_ready = Bool()
   val vconfig    = new VConfig
-}
-
-class VconfigDecode(implicit p: Parameters) extends BoomModule
-{
-  val io = IO(new Bundle {
-    val inst    = Input(UInt(32.W))
-
-    val vconfig  = Output(new VConfig())
-    val vl_ready = Output(Bool())
-  })
-
-  val vtypei = io.inst(27,20)
-
-  io.vl_ready   := io.inst(31)
-  io.vconfig.vl := io.inst(19,15)
-  io.vconfig.vtype := VType.fromUInt(vtypei)
 }
 
 /**
@@ -806,4 +799,70 @@ class VconfigMaskGenerationLogic(val pl_width: Int) (implicit p: Parameters) ext
   }
 
   io.debug_vconfig_mask := vconfig_mask
+}
+
+case class VcqParameters(
+                          nEntries: Int = 4
+                        )
+
+/**
+ * Queue to store the vconfig info that are inflight in the processor.
+ *
+ * @param num_entries # of entries in the VCQ
+ */
+class VconfigQueue(implicit p: Parameters) extends BoomModule
+  with HasBoomCoreParameters {
+  val num_entries = vcqSz
+  private val idx_sz = log2Ceil(num_entries)
+
+  val io = IO(new BoomBundle {
+    //Enqueue one entry when decode a vconfig instruction.
+    val enq = Flipped(Decoupled(new VconfigDecodeSignals()))
+    val enq_idx = Output(UInt(idx_sz.W))
+    val deq   = Input(Bool())
+    val flush = Input(Bool())
+
+    val get_vconfig = Output(new VconfigDecodeSignals())
+    val empty = Output(Bool())
+  })
+
+  val ram = Reg(Vec(num_entries, new VconfigDecodeSignals()))
+  ram.suggestName("vconfig_table")
+
+  val enq_ptr = RegInit(0.U(num_entries.W))
+  val deq_ptr = RegInit(0.U(num_entries.W))
+  val maybe_full = RegInit(false.B)
+
+  val ptr_match = enq_ptr === deq_ptr
+  val empty = ptr_match && !maybe_full
+  val full = ptr_match && maybe_full
+  val do_enq = WireDefault(io.enq.fire())
+  val do_deq = WireDefault(io.deq)
+
+  def inc(ptr: UInt) = {
+    val n = ptr.getWidth
+    Cat(ptr(n-2,0), ptr(n-1))
+  }
+
+  when(do_enq) {
+    ram(enq_ptr) := io.enq.bits
+    enq_ptr := inc(enq_ptr)
+  }
+  io.enq_idx := enq_ptr
+
+  when(do_deq) {
+    deq_ptr := inc(deq_ptr)
+  }
+  when(do_enq =/= do_deq) {
+    maybe_full := do_enq
+  }
+  when(io.flush) {
+    enq_ptr := 1.U
+    deq_ptr := 1.U
+    maybe_full := false.B
+  }
+
+  io.enq.ready := !full
+  io.get_vconfig := ram(deq_ptr)
+  io.empty := empty
 }

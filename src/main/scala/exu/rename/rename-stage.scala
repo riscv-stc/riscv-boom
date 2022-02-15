@@ -83,6 +83,7 @@ abstract class AbstractRenameStage(
 
     // wakeup ports
     val wakeups = Flipped(Vec(numWbPorts, Valid(new ExeUnitResp(xLen))))
+    val vl_wakeup_port = Flipped(Valid(new VlWakeupResp()))
 
     // commit stage
     val com_valids = Input(Vec(plWidth, Bool()))
@@ -372,6 +373,12 @@ extends AbstractRenameStage(
     io.ren2_uops(w) := GetNewUopAndBrMask(bypassed_uop, io.brupdate)
   }
 
+  for (w <- 0 until plWidth) {
+    when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === io.ren2_uops(w).vconfig_tag) {
+      io.ren2_uops(w).vl_ready := true.B
+      io.ren2_uops(w).vconfig.vl := io.vl_wakeup_port.bits.vl
+    }
+  }
   //-------------------------------------------------------------
   // Debug signals
 
