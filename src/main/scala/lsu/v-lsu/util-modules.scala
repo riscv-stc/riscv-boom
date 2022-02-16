@@ -266,6 +266,8 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     val totalRequest = Output(UInt((log2Ceil(ap.vLenb) + 1).W))
     val wakeVecInit = Output(UInt(8.W))
   })
+  val isIndexed = io.ctrl.isIndexed
+  val fieldIdx = io.ctrl.fieldIdx
   val isSegment = io.ctrl.isSegment
   val elementBytes = (1.U << io.ctrl.eew(1, 0)).asUInt()
   /** 00 => 1, 01 => 2, 10 => 4, 11 => 8 */
@@ -296,6 +298,8 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val startByte = io.ctrl.vStart * elementBytes
   /** Indicates if this vlen is valid under current vlmul. parameter is segment index. */
   val lmulVld: Int => Bool = (pregIdx: Int) => pregIdx.U < (1.U << lmul).asUInt()
+  /** For indexed ls, true when input equals to fieldIdx */
+  val indexedFieldVld: Int => Bool = (pregIdx: Int) => Mux(isIndexed, pregIdx.U === fieldIdx, true.B)
   /** end byte index of vl */
   val endBytevl = (io.ctrl.vl * elementBytes).asUInt()
   /** Calculate end byte index of this vlen when is in one register group. parameter is segment index. */
@@ -328,7 +332,7 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     val snippet = snippetX(0)
     val idxMod4: Int = i % 4
     val idxMod2: Int = i % 2
-    out := Mux(io.ctrl.isWholeAccess && nfVld(i), 0.U, Mux(!isSegment && lmulVld(i), snippetX(i),
+    out := Mux(io.ctrl.isWholeAccess && nfVld(i), 0.U, Mux(!isSegment && lmulVld(i) && indexedFieldVld(i), snippetX(i),
       Mux(isSegment && lmul1 && segmentVld(i), snippet,
         Mux(isSegment && lmul2 && segmentVld(i), snippetX(idxMod2),
           Mux(isSegment && lmul4 && segmentVld(i), snippetX(idxMod4),

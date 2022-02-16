@@ -182,7 +182,7 @@ class RegisterRead(
 //                                                VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
       rs1_addr := iss_uop.pvs1(rs1_sel).bits
       rs2_addr := Mux(iss_uop.is_vmv_s2v, 0.U, iss_uop.pvs2(rs2_sel).bits)
-      rs3_addr := Mux(isIndexedLS, iss_uop.pvs2(0).bits, iss_uop.stale_pvd(rs3_sel).bits)
+      rs3_addr := Mux(isIndexedLS, iss_uop.pvs2(iss_uop.v_seg_f).bits, iss_uop.stale_pvd(rs3_sel).bits)
       rvm_addr := iss_uop.pvm
     }
 

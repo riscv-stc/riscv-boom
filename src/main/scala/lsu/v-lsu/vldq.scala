@@ -224,7 +224,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.pRegVec := io.vuopDis.bits.vpdst
       reg.bits.style := io.vuopDis.bits.uCtrlSig.accessStyle
       reg.bits.reqCount := 0.U
-      reg.bits.segmentCount := 0.U
+      reg.bits.segmentCount := Mux(io.vuopDis.bits.uCtrlSig.accessStyle.isIndexed, io.vuopDis.bits.uCtrlSig.accessStyle.fieldIdx, 0.U)
       reg.bits.totalSegments := snippetInitializer.io.totalSegment
       state := sWaitRs
     }

@@ -421,6 +421,8 @@ class VectorAccessStyle(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val vl: UInt = UInt(ap.vlMax.W)
   val vlmul: UInt = UInt(3.W)
   val nf: UInt = UInt(3.W)
+  /** indicates which of this vuop from split uop at dispatch stage. For indexed only.*/
+  val fieldIdx: UInt = UInt(3.W)
 }
 class VectorAccessType extends Bundle{
   val isLoad: Bool = Bool()

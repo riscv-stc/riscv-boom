@@ -201,7 +201,7 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.finishMasks := snippetInitializer.io.initSnippet
       reg.bits.tlbMasks := snippetInitializer.io.initSnippet
       reg.bits.pRegVec := io.vuopDis.bits.vpdst
-      reg.bits.segmentCount := 0.U
+      reg.bits.segmentCount := Mux(io.vuopDis.bits.uCtrlSig.accessStyle.isIndexed, io.vuopDis.bits.uCtrlSig.accessStyle.fieldIdx, 0.U)
       reg.bits.totalSegments := snippetInitializer.io.totalSegment
       state := sWaitRs
     }
