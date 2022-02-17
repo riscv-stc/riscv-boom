@@ -141,9 +141,9 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     (head, body, tail)
   }
   /** Extract index from vs2 according to voffset and eew. */
-  def IndexExtractor(indexArray: UInt, eew: UInt, vOffset: UInt): UInt = {
-    val elementBytes: UInt = (1.U << eew).asUInt()
-    val vOffsetBits: UInt = (vOffset << eew) ## 0.U(3.W)
+  def IndexExtractor(indexArray: UInt, IndexEew: UInt, vOffset: UInt): UInt = {
+    val elementBytes: UInt = (1.U << IndexEew).asUInt()
+    val vOffsetBits: UInt = (vOffset << IndexEew) ## 0.U(3.W)
     val indexRaw = indexArray >> vOffsetBits
     val indexByteSeq = Seq.tabulate(ap.vLenb)(i => i).map{i =>
       indexRaw(i*8+7, i*8)
@@ -216,7 +216,8 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     out.regAccessCS.snippetIsHead := isHead
     out.regAccessCS.snippetIsTail := isTail
     // eew is ineffective in unit stride
-    out.style.eew := 1.U
+    out.style.dataEew := 0.U
+    out.style.indexEew := 0.U
     out.regAccessCS.regIdx := dstPReg
     out.lineStartIndex := offset
     out.addressIsPhysical := false.B
@@ -238,7 +239,7 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   def ConstantStride(addr: UInt,
                      preAddr: UInt,
                      strideBytes: UInt,
-                     eew: UInt,
+                     dataEew: UInt,
                      dstPReg: UInt,
                      segmentCount: UInt,
                      reqCount: UInt,
@@ -268,8 +269,9 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     out.style.isIndexed := false.B
     out.style.isSegment := false.B
     out.style.isWholeAccess := false.B
-    val elementBytes: UInt = (1.U << eew).asUInt()
-    out.style.eew := eew
+    val elementBytes: UInt = (1.U << dataEew).asUInt()
+    out.style.dataEew := dataEew
+    out.style.indexEew := 0.U
     out.segmentIdx := segmentCount(2,0)
     out.regAccessCS.regIdx := dstPReg
     out.lineStartIndex := offset
@@ -284,7 +286,8 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     (reqNecessary._1, out, elementAddr, elementSnippet)
   }
   def Indexed(addr: UInt,
-              eew: UInt,
+              indexEew: UInt,
+              dataEew: UInt,
               dstPReg: UInt,
               reqCount: UInt,
               segmentCount: UInt,
@@ -306,10 +309,10 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
         out.committed := false.B
         out
       }
-    val index = IndexExtractor(indexArray, eew, reqCount)
+    val index = IndexExtractor(indexArray, indexEew, reqCount)
     val elementAddr = (addr.asSInt() + index.asSInt()).asUInt()
     val elementOffset = elementAddr(ap.offsetBits - 1, 0)
-    val elementBytes: UInt = (1.U << eew).asUInt()
+    val elementBytes: UInt = (1.U << dataEew).asUInt()
     val initSnippet: UInt = (1.U << elementBytes).asUInt() - 1.U
     val elementSnippet = Mux(reqCount.orR(), (preSnippet << elementBytes).asUInt(), initSnippet)
     out.address := elementAddr
@@ -321,7 +324,8 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     out.style.isIndexed := true.B
     out.style.isSegment := false.B
     out.style.isWholeAccess := false.B
-    out.style.eew := eew
+    out.style.indexEew := indexEew
+    out.style.dataEew := dataEew
     out.regAccessCS.regIdx := dstPReg
     out.addressIsPhysical := false.B
     out.lineStartIndex := elementOffset
@@ -416,7 +420,8 @@ class VectorAccessStyle(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val isConstantStride: Bool = Bool()
   val isSegment: Bool = Bool()
   val isWholeAccess: Bool = Bool()
-  val eew: UInt = UInt(3.W)
+  val dataEew: UInt = UInt(3.W)
+  val indexEew: UInt = UInt(3.W)
   val vStart: UInt = UInt(ap.vLenSz.W)
   val vl: UInt = UInt(ap.vlMax.W)
   val vlmul: UInt = UInt(3.W)

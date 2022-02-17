@@ -36,7 +36,7 @@ class SMSHR(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModules(ap){
   elementFactory.io.storeSnippet := io.vStReq.bits.regAccessCS.finishMaskSnippet
   elementFactory.io.address := io.vStReq.bits.address
   elementFactory.io.storeData := Mux(io.fromVRF.valid, io.fromVRF.bits.data, 0.U)
-  elementFactory.io.eew := io.vStReq.bits.style.eew
+  elementFactory.io.eew := io.vStReq.bits.style.dataEew
   val lineDataIncoming = Mux(io.vStReq.bits.style.isUnitStride, unitStrideFactory.io.lineData, elementFactory.io.lineData)
   val lineMaskIncoming = Mux(io.vStReq.bits.style.isUnitStride, unitStrideFactory.io.lineMask, elementFactory.io.lineMask)
   val dataMerger = Module(new LineDataMerger(ap))

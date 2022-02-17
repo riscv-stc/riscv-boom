@@ -243,7 +243,7 @@ class ElementDataStretcher(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     val lineDataIn = Input(UInt(ap.cacheLineBits.W))
     val vrfWriteReq = Output(new VLSUWriteVRFReq(ap))
   })
-  val len = (1.U << io.reqWB.style.eew(1,0)).asUInt()
+  val len = (1.U << io.reqWB.style.dataEew(1,0)).asUInt()
   val snippet = io.reqWB.regAccessCS.finishMaskSnippet
   io.vrfWriteReq.byteMask := snippet
   val offset = io.reqWB.address(ap.offsetBits - 1, 0)
@@ -269,7 +269,7 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val isIndexed = io.ctrl.isIndexed
   val fieldIdx = io.ctrl.fieldIdx
   val isSegment = io.ctrl.isSegment
-  val elementBytes = (1.U << io.ctrl.eew(1, 0)).asUInt()
+  val elementBytes = (1.U << io.ctrl.dataEew(1, 0)).asUInt()
   /** 00 => 1, 01 => 2, 10 => 4, 11 => 8 */
   val lmul = io.ctrl.vlmul(1, 0)
   val lmulValue = (1.U << lmul).asUInt()
@@ -341,7 +341,7 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   //4 bits, up to 'h8.
   io.totalSegment := Mux(io.ctrl.isWholeAccess, nFields, Mux(isSegment, lmulValue * nFields, lmulValue))
   val denseAccess = (io.ctrl.isUnitStride && !isSegment) || io.ctrl.isWholeAccess
-  io.totalRequest := Mux(denseAccess, ap.maxReqsInUnitStride.U, (ap.vLenb.U >> io.ctrl.eew).asUInt())
+  io.totalRequest := Mux(denseAccess, ap.maxReqsInUnitStride.U, (ap.vLenb.U >> io.ctrl.dataEew).asUInt())
   io.wakeVecInit := Mux(lmul1 || lmulSmallerThanOne, 1.U, Mux(lmul2, 3.U, Mux(lmul4, 0xf.U, 0xff.U)))
 }
 
@@ -354,13 +354,13 @@ class SnippetVectorMaskAdjuster(ap: VLSUArchitecturalParams) extends VLSUModules
     val adjustedSnippet = Output(Vec(8, UInt(ap.vLenb.W)))
   })
   io.adjustedSnippet := 0.U.asTypeOf(Vec(8, UInt(ap.vLenb.W)))
-  val elementBytes = (1.U << io.ctrl.eew(1, 0)).asUInt()
-  val elenB = (1.U << io.ctrl.eew(1,0)).asUInt()
+  val elementBytes = (1.U << io.ctrl.dataEew(1, 0)).asUInt()
+  val elenB = (1.U << io.ctrl.dataEew(1,0)).asUInt()
   val isSegment = io.ctrl.isSegment
-  val elen1 = io.ctrl.eew === 0.U
-  val elen2 = io.ctrl.eew === 1.U
-  val elen4 = io.ctrl.eew === 2.U
-  val elen8 = io.ctrl.eew === 3.U
+  val elen1 = io.ctrl.dataEew === 0.U
+  val elen2 = io.ctrl.dataEew === 1.U
+  val elen4 = io.ctrl.dataEew === 2.U
+  val elen8 = io.ctrl.dataEew === 3.U
   val lmul = io.ctrl.vlmul(1, 0)
   val lmulOHs = WireInit(0.U(8.W))
   lmulOHs := (1.U << lmul).asUInt() - 1.U
@@ -447,14 +447,15 @@ class RequestSplitter(ap: VLSUArchitecturalParams, isLoad: Boolean, id: Int) ext
   }.elsewhen(reg.style.isConstantStride){
     /** when segmentCount === lmul, reset to base addr. */
     val newAddr: UInt = Mux(lmulLargerThanOne && segmentModLmul === 0.U, reg.addr, reg.preAddr)
-    val (reqNecessary, req, addr, snippet) = io.uReq.bits.ConstantStride(reg.addr, newAddr, reg.rs2, reg.style.eew,
+    val (reqNecessary, req, addr, snippet) = io.uReq.bits.ConstantStride(reg.addr, newAddr, reg.rs2, reg.style.dataEew,
       reg.pRegVec(reg.segmentCount), reg.segmentCount, reg.reqCount, reg.preSnippet, true, reg.finishMasks, id)
     io.uReq.valid := reqNecessary
     io.uReq.bits := req
     io.newAddr := addr
     io.newSnippet := snippet
   }.elsewhen(reg.style.isIndexed){
-    val (reqNecessary, req, snippet) = io.uReq.bits.Indexed(reg.addr, reg.style.eew, reg.pRegVec(reg.segmentCount),
+    val (reqNecessary, req, snippet) = io.uReq.bits.Indexed(reg.addr,
+      indexEew = reg.style.indexEew, dataEew = reg.style.dataEew, reg.pRegVec(reg.segmentCount),
       reg.reqCount, reg.segmentCount, reg.preSnippet, reg.vs2,true, reg.finishMasks, id)
     io.uReq.valid := reqNecessary
     io.uReq.bits := req
