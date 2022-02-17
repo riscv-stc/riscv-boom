@@ -1269,7 +1269,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       val vseg_ls = disUops(w).is_rvv && disUops(w).v_seg_nf > 1.U
       /** Indeicates if this uop needs to split according to lmul */
       val splitLmul = lmulLargerThanOne && disUops(w).v_idx_ls // @todo not considering seg and constant stride that need to split
-      val splitLmulLast = dis_split_segf === disUops(w).vd_emul
+      val splitLmulLast: Bool = (dis_split_segf + 1.U(4.W)) === (1.U << disUops(w).vd_emul(1,0))
       val isSplitLast = Mux(splitLmul, splitLmulLast, Mux(vseg_ls, dis_split_segf + 1.U(4.W) === disUops(w).v_seg_nf, true.B))
       val needSplitDis = splitLmul || vseg_ls
       when (io.ifu.redirect_flush) {
