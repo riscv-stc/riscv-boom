@@ -157,7 +157,20 @@ class IssueSlot(
     if (vector) {
       val v_eidx = Mux(uop.uopc === uopVIOTA, 0.U, uop.v_eidx)
       val eew    = Mux(uop.uses_v_ls_ew, uop.v_ls_ew, uop.vs2_eew)
-      val rsel   = VRegSel(v_eidx, eew, eLenSelSz)
+      val isIndexed = uop.v_idx_ls
+      /** Calculate vs2 sel for indexed ls. */
+      val indexEew = uop.vs2_eew
+      val dataEew = uop.vd_eew
+      val largerData = dataEew > indexEew
+      val shinkRate = dataEew - indexEew
+      val largerIndex = indexEew > dataEew
+      val expandRate = indexEew - dataEew
+      val equal = indexEew === dataEew
+      val fieldIdx = uop.v_seg_f
+      val indexPick: UInt = Mux(equal, fieldIdx,
+        Mux(largerData, (fieldIdx >> shinkRate).asUInt(),
+          (fieldIdx << expandRate).asUInt()))
+      val rsel   = Mux(isIndexed, indexPick, VRegSel(v_eidx, eew, eLenSelSz))
       val pvs2   = uop.pvs2(rsel).bits
       val reduce_busy = uop.pvs2.map(pvs2 => pvs2.valid && io.vbusy_status(pvs2.bits)).reduce(_ || _)
       ret       := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))

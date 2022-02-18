@@ -344,7 +344,8 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
                         Mux(isIndexed, fieldIdx + 1.U, lmulValue)))
   val denseAccess = (io.ctrl.isUnitStride && !isSegment) || io.ctrl.isWholeAccess
   io.totalRequest := Mux(denseAccess, ap.maxReqsInUnitStride.U, (ap.vLenb.U >> io.ctrl.dataEew).asUInt())
-  io.wakeVecInit := Mux(lmul1 || lmulSmallerThanOne, 1.U, Mux(lmul2, 3.U, Mux(lmul4, 0xf.U, 0xff.U)))
+  val wakeRegIdxIndexed = UIntToOH(fieldIdx, 8)
+  io.wakeVecInit := Mux(isIndexed, wakeRegIdxIndexed, Mux(lmul1 || lmulSmallerThanOne, 1.U, Mux(lmul2, 3.U, Mux(lmul4, 0xf.U, 0xff.U))))
 }
 
 /** Construct active snippet for element access according to vm and lmul, nf and new vl. */

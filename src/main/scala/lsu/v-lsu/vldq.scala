@@ -252,7 +252,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     io.uReq.valid := requestSplitter.io.uReq.valid && !freeze
     io.uReq.bits := requestSplitter.io.uReq.bits
     /** Ready is true only when valid is true, but unnecessary request does not trigger valid. Both shift to next. */
-    val nextSplit: Bool = io.uReq.ready || !io.uReq.valid
+    val nextSplit: Bool = (io.uReq.ready || !io.uReq.valid) && !freeze
     val nextSeg: Bool = reg.bits.reqCount === reg.bits.totalReq - 1.U
     reg.bits.reqCount := Mux(nextSplit, Mux(nextSeg, 0.U, reg.bits.reqCount + 1.U), reg.bits.reqCount)
     reg.bits.preAddr := Mux(nextSplit, Mux(nextSeg, reg.bits.addr, requestSplitter.io.newAddr), reg.bits.preAddr)
