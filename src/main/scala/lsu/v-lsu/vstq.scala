@@ -175,8 +175,8 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
 
   val isUnitStride = reg.bits.style.isUnitStride
 
-  val snippetInitializer = Module(new SnippetInitializer(ap))
-  snippetInitializer.io.ctrl := io.vuopDis.bits.uCtrlSig.accessStyle
+  //val snippetInitializer = Module(new SnippetInitializer(ap))
+  //snippetInitializer.io.ctrl := io.vuopDis.bits.uCtrlSig.accessStyle
 
   val snippetVMAdjuster = Module(new SnippetVectorMaskAdjuster(ap))
   snippetVMAdjuster.io.ctrl := io.vuopRR.bits.uCtrlSig.accessStyle
@@ -197,12 +197,12 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.addr := 0.U
       reg.bits.style := io.vuopDis.bits.uCtrlSig.accessStyle
       reg.bits.robIndex := io.vuopDis.bits.robIdx
-      reg.bits.totalReq := snippetInitializer.io.totalRequest
-      reg.bits.finishMasks := snippetInitializer.io.initSnippet
-      reg.bits.tlbMasks := snippetInitializer.io.initSnippet
+      //reg.bits.totalReq := snippetInitializer.io.totalRequest
+      //reg.bits.finishMasks := snippetInitializer.io.initSnippet
+      //reg.bits.tlbMasks := snippetInitializer.io.initSnippet
       reg.bits.pRegVec := io.vuopDis.bits.vpdst
       reg.bits.segmentCount := Mux(io.vuopDis.bits.uCtrlSig.accessStyle.isIndexed, io.vuopDis.bits.uCtrlSig.accessStyle.fieldIdx, 0.U)
-      reg.bits.totalSegments := snippetInitializer.io.totalSegment
+      //reg.bits.totalSegments := snippetInitializer.io.totalSegment
       state := sWaitRs
     }
   }.elsewhen(state === sWaitRs){
@@ -216,7 +216,8 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       val offset: UInt = io.vuopRR.bits.rs1(ap.offsetBits - 1, 0)
       val alignedAddr: Bool = offset === 0.U
       val denseAccess = (reg.bits.style.isUnitStride && !reg.bits.style.isSegment) || reg.bits.style.isWholeAccess
-      reg.bits.totalReq := Mux(alignedAddr && denseAccess, (ap.maxReqsInUnitStride - 1).U, reg.bits.totalReq)
+      reg.bits.totalReq := Mux(alignedAddr && denseAccess, (ap.maxReqsInUnitStride - 1).U, vlAdjust.io.totalRequest)
+      reg.bits.totalSegments := vlAdjust.io.totalSegment
       val adjustedSnippet: Vec[UInt] =
         VecInit((snippetVMAdjuster.io.adjustedSnippet zip vlAdjust.io.initSnippet).map {case (vm, snippet) =>
           vm | snippet

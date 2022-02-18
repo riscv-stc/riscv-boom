@@ -339,7 +339,9 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
             allOnes)))))
   }
   //4 bits, up to 'h8.
-  io.totalSegment := Mux(io.ctrl.isWholeAccess, nFields, Mux(isSegment, lmulValue * nFields, lmulValue))
+  io.totalSegment := Mux(io.ctrl.isWholeAccess, nFields,
+                      Mux(isSegment, lmulValue * nFields,
+                        Mux(isIndexed, fieldIdx + 1.U, lmulValue)))
   val denseAccess = (io.ctrl.isUnitStride && !isSegment) || io.ctrl.isWholeAccess
   io.totalRequest := Mux(denseAccess, ap.maxReqsInUnitStride.U, (ap.vLenb.U >> io.ctrl.dataEew).asUInt())
   io.wakeVecInit := Mux(lmul1 || lmulSmallerThanOne, 1.U, Mux(lmul2, 3.U, Mux(lmul4, 0xf.U, 0xff.U)))

@@ -190,8 +190,8 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   val isUnitStride = reg.bits.style.isUnitStride
   val isSegment = reg.bits.style.isSegment
 
-  val snippetInitializer = Module(new SnippetInitializer(ap))
-  snippetInitializer.io.ctrl := io.vuopDis.bits.uCtrlSig.accessStyle
+  //val snippetInitializer = Module(new SnippetInitializer(ap))
+  //snippetInitializer.io.ctrl := io.vuopDis.bits.uCtrlSig.accessStyle
 
   val snippetVMAdjuster = Module(new SnippetVectorMaskAdjuster(ap))
   snippetVMAdjuster.io.ctrl := io.vuopRR.bits.uCtrlSig.accessStyle
@@ -215,17 +215,17 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.addr := 0.U
       reg.bits.preAddr := 0.U
       reg.bits.rs2 := 0.U
-      reg.bits.totalReq := snippetInitializer.io.totalRequest
+      //reg.bits.totalReq := snippetInitializer.io.totalRequest
       reg.bits.robIndex := io.vuopDis.bits.robIdx
-      reg.bits.finishMasks := snippetInitializer.io.initSnippet
-      reg.bits.wakeUpVec := VecInit(snippetInitializer.io.wakeVecInit.asBools())
+      //reg.bits.finishMasks := snippetInitializer.io.initSnippet
+      //reg.bits.wakeUpVec := VecInit(snippetInitializer.io.wakeVecInit.asBools())
       reg.bits.orderFail := false.B
       reg.bits.allSucceeded := false.B
       reg.bits.pRegVec := io.vuopDis.bits.vpdst
       reg.bits.style := io.vuopDis.bits.uCtrlSig.accessStyle
       reg.bits.reqCount := 0.U
       reg.bits.segmentCount := Mux(io.vuopDis.bits.uCtrlSig.accessStyle.isIndexed, io.vuopDis.bits.uCtrlSig.accessStyle.fieldIdx, 0.U)
-      reg.bits.totalSegments := snippetInitializer.io.totalSegment
+      //reg.bits.totalSegments := snippetInitializer.io.totalSegment
       state := sWaitRs
     }
   }.elsewhen(state === sWaitRs){// Data is ready, start split
@@ -235,7 +235,9 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       val offset: UInt = io.vuopRR.bits.rs1(ap.offsetBits - 1, 0)
       val alignedAddr: Bool = offset === 0.U
       val isUnitStride = reg.bits.style.isUnitStride || reg.bits.style.isWholeAccess
-      reg.bits.totalReq := Mux(alignedAddr && isUnitStride, (ap.maxReqsInUnitStride - 1).U, reg.bits.totalReq)
+      reg.bits.wakeUpVec := VecInit(vlAdjust.io.wakeVecInit.asBools())
+      reg.bits.totalSegments := vlAdjust.io.totalSegment
+      reg.bits.totalReq := Mux(alignedAddr && isUnitStride, (ap.maxReqsInUnitStride - 1).U, vlAdjust.io.totalRequest)
       reg.bits.preAddr := io.vuopRR.bits.rs1
       reg.bits.vs1 := io.vuopRR.bits.vs1
       reg.bits.vs2 := io.vuopRR.bits.vs2
