@@ -2309,12 +2309,15 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     vuop.uCtrlSig.accessStyle.vlmul := uop.vd_emul
     vuop.uCtrlSig.accessStyle.nf := uop.v_seg_nf
     vuop.uCtrlSig.accessStyle.fieldIdx := uop.v_seg_f
+    vuop.uCtrlSig.accessStyle.vma := uop.vconfig.vtype.vma
+    vuop.uCtrlSig.accessStyle.vta := uop.vconfig.vtype.vta
     vuop.vs1 := 0.U
     vuop.vs2 := 0.U
     vuop.rs1 := 0.U
     vuop.rs2 := 0.U
     vuop.vm := 0.U
     vuop.vpdst := Mux(uop.uses_ldq, VecInit(uop.pvd.map(_.bits)), VecInit(uop.stale_pvd.map(_.bits)))
+    vuop.staleRegIdxes := VecInit(uop.stale_pvd.map(_.bits))
     vuop
   }
 }

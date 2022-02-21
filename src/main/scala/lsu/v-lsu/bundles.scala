@@ -52,6 +52,8 @@ class RRVLSUIO(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
 class VLdQEntryBundle(ap: VLSUArchitecturalParams) extends LoadStoreQueueEntryBundleBase(ap){
   /** 1 means need to wake up core pipeline. 0 means do nothing or done. */
   val wakeUpVec = Vec(8, Bool())
+
+  val staleRegIdxVec = Vec(8, UInt(ap.vpregSz.W))
 }
 
 class VStQEntryBundle(ap: VLSUArchitecturalParams) extends LoadStoreQueueEntryBundleBase(ap){
@@ -99,6 +101,7 @@ class VLSMicroOP(ap: VLSUArchitecturalParams) extends VLSUBundle(ap) {
   val rs2: UInt = UInt(ap.xLen.W)
   val vm: UInt = UInt(ap.vLen.W)
   val vpdst: Vec[UInt] = Vec(8, UInt(ap.vpregSz.W))
+  val staleRegIdxes: Vec[UInt] = Vec(8, UInt(ap.vpregSz.W))
 }
 
 class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
@@ -426,6 +429,10 @@ class VectorAccessStyle(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val vl: UInt = UInt(ap.vlMax.W)
   val vlmul: UInt = UInt(3.W)
   val nf: UInt = UInt(3.W)
+  /** 0 means need fetch old data for masked elements. */
+  val vma: Bool = Bool()
+  /** 0 means need fetch old data for tail elements. */
+  val vta: Bool = Bool()
   /** indicates which of this vuop from split uop at dispatch stage. For indexed only.*/
   val fieldIdx: UInt = UInt(3.W)
 }

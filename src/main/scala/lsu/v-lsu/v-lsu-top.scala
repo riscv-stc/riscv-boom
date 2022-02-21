@@ -44,6 +44,7 @@ class VLSUImp(outer: VLSU,
   io.ldToRob <> vldqHandler.io.toRob
   vldqHandler.io.fromRob := io.fromRob
   io.wakeUpVReg <> vldqHandler.io.wakeUp
+  vldqHandler.io.vrfReadResp := io.fromVrf.readResp
 
   val vstqHandler = Module(new VStQueueHandler(ap))
   vstqHandler.io.vuopDis <> io.fromDis.vuopDis
@@ -61,8 +62,10 @@ class VLSUImp(outer: VLSU,
   val storeReqBuffer = Module(new StoreRequestBuffer(ap))
   storeReqBuffer.io.reqIncoming <> vstqHandler.io.vstReq
   storeReqBuffer.io.fromRob := io.fromRob
-  io.toVrf.readReq := storeReqBuffer.io.vrfReadReq
-
+  // store req always win because its req also goes into addr-checker.
+  io.toVrf.readReq.valid := storeReqBuffer.io.vrfReadReq.valid || vldqHandler.io.vrfReadReq.valid
+  io.toVrf.readReq.bits := Mux(storeReqBuffer.io.vrfReadReq.valid, storeReqBuffer.io.vrfReadReq.bits, vldqHandler.io.vrfReadReq.bits)
+  vldqHandler.io.vrfReadReq.ready := !storeReqBuffer.io.vrfReadReq.valid
 
   val vtlb = Module(new VTLB(ap))
   vtlb.io.req(0) <> loadReqBuffer.io.vtlbReq
@@ -99,4 +102,7 @@ class VLSUImp(outer: VLSU,
   loadReqBuffer.io.reqWBDone <> wbCtrl.io.reqWBDone
   vldqHandler.io.finishAck <> wbCtrl.io.finishAck
   io.toVrf.write <> wbCtrl.io.toVRF
+  // write stale data for untouched load.
+  wbCtrl.io.wbReqFromQEntry <> vldqHandler.io.vrfWriteReq
+
 }

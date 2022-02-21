@@ -24,6 +24,11 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     val fromRob = new ROBVLSUIO(ap)
 
     val wakeUp = ValidIO(UInt(ap.vpregSz.W))
+
+    /** For untouched load, we need to copy original data and write back to new reg. */
+    val vrfReadReq = Decoupled(new VLSUReadVRFReq(ap))
+    val vrfReadResp = Flipped(Valid(new VLSUReadVRFResp(ap)))
+    val vrfWriteReq = Decoupled(new VLSUWriteVRFReq(ap))
   })
 
   val nEntries: Int = ap.nVLdQEntries
@@ -54,6 +59,8 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val toRobVec = WireInit(0.U.asTypeOf(Vec(nEntries, Decoupled(UInt(ap.robAddrSz.W)))))
   val finishVec = WireInit(0.U.asTypeOf(Vec(nEntries, Bool())))
   val wakeUpVec = WireInit(0.U.asTypeOf(Vec(nEntries, Decoupled(UInt(ap.vpregSz.W)))))
+  val vrfReadArb = Module(new Arbiter(new VLSUReadVRFReq(ap), ap.nVLdQEntries))
+  val vrfWriteArb = Module(new Arbiter(new VLSUWriteVRFReq(ap), ap.nVLdQEntries))
   val entries: Seq[VLdQEntry] = Seq.tabulate(nEntries){ i =>
     val e = Module(new VLdQEntry(ap, i))
     e.io.vuopDis := vuopDisInputs(i)
@@ -67,8 +74,13 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     e.io.headPtr := headPtr
     e.io.tailPtr := tailPtr
     e.io.nonUnitStrideOHs := nonUnitStrideOHs.asUInt()
+    vrfReadArb.io.in(i) <> e.io.vrfReadReq
+    e.io.vrfReadResp := io.vrfReadResp
+    vrfWriteArb.io.in(i) <> e.io.vrfWriteReq
     e
   }
+  io.vrfReadReq <> vrfReadArb.io.out
+  io.vrfWriteReq <> vrfWriteArb.io.out
   // @todo: only one data path is not enough and round ronbin arbiter is also not good.
   (vldReqArb.io.inputReq zip reqCandidates).foreach {case (a, req) => a <> req}
   //__________________________________________________________________________________//
@@ -170,6 +182,10 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     val nonUnitStrideOHs = Input(UInt(ap.nVLdQEntries.W))
     /** Wake up core pipe line when single register is all done. */
     val wakeUp = DecoupledIO(UInt(ap.vpregSz.W))
+
+    val vrfReadReq = Decoupled(new VLSUReadVRFReq(ap))
+    val vrfReadResp = Flipped(Valid(new VLSUReadVRFResp(ap)))
+    val vrfWriteReq = Decoupled(new VLSUWriteVRFReq(ap))
   })
 
   io.uReq.valid := false.B
@@ -179,12 +195,16 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   io.wakeUp.valid := false.B
   io.wakeUp.bits := 0.U
   io.allDone := false.B
+  io.vrfReadReq.valid := false.B
+  io.vrfReadReq.bits := 0.U.asTypeOf(new VLSUReadVRFReq(ap))
+  io.vrfWriteReq.valid := false.B
+  io.vrfWriteReq.bits := 0.U.asTypeOf(new VLSUWriteVRFReq(ap))
   /** This register record which req buffer entry hold our request. */
   val reg: ValidIO[VLdQEntryBundle] = RegInit(0.U.asTypeOf(Valid(new VLdQEntryBundle(ap))))
 
   io.entryId := id.U
 
-  val sIdle :: sWaitRs :: sSplitting :: sWaitData :: sAllDone :: sWaitRetire :: Nil = Enum(6)
+  val sIdle :: sWaitRs :: sCopyStale :: sSplitting :: sWaitData :: sAllDone :: sWaitRetire :: Nil = Enum(7)
   val state: UInt = RegInit(sIdle)
 
   val isUnitStride = reg.bits.style.isUnitStride
@@ -242,11 +262,44 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.vs1 := io.vuopRR.bits.vs1
       reg.bits.vs2 := io.vuopRR.bits.vs2
       reg.bits.rs2 := io.vuopRR.bits.rs2
+      reg.bits.staleRegIdxVec := io.vuopRR.bits.staleRegIdxes
       reg.bits.finishMasks :=
         (snippetVMAdjuster.io.adjustedSnippet zip vlAdjust.io.initSnippet).map {case (vm, snippet) =>
            vm | snippet
         }
+      val needFetchTail = !io.vuopRR.bits.uCtrlSig.accessStyle.vta
+      val needFetchMask = !io.vuopRR.bits.uCtrlSig.accessStyle.vma
+      /** Fetch all if */
+      val needCopyStale = needFetchTail || needFetchMask
+      when(needCopyStale){
+        state := sCopyStale
+      }.otherwise{
+        state := sSplitting
+      }
+    }
+  }.elsewhen(state === sCopyStale){
+    val fieldCount = RegInit(0.U(4.W))
+    val totalFields = Mux(reg.bits.style.vlmul(2), 1.U, (1.U << reg.bits.style.vlmul(1,0)).asUInt())
+    io.vrfReadReq.valid := true.B
+    io.vrfReadReq.bits.addr := reg.bits.staleRegIdxVec(fieldCount)
+    val staleDataReg = RegInit(0.U.asTypeOf(Valid(UInt(ap.vLen.W))))
+
+    when(io.vrfReadResp.valid){
+      staleDataReg.valid := true.B
+      staleDataReg.bits := io.vrfReadResp.bits.data
+    }
+    io.vrfWriteReq.valid := staleDataReg.valid
+    io.vrfWriteReq.bits.addr := reg.bits.staleRegIdxVec(fieldCount)
+    io.vrfWriteReq.bits.data := staleDataReg.bits
+    io.vrfWriteReq.bits.byteMask := Fill(ap.vLenb, 1.U(1.W))
+    when(io.vrfWriteReq.fire()){
+      fieldCount := fieldCount + 1.U
+      staleDataReg.valid := false.B
+    }
+    val copyDone = fieldCount === totalFields
+    when(copyDone){
       state := sSplitting
+      fieldCount := 0.U
     }
   }.elsewhen(state === sSplitting){
     io.uReq.valid := requestSplitter.io.uReq.valid && !freeze

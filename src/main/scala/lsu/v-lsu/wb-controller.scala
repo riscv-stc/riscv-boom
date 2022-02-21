@@ -16,6 +16,9 @@ class WriteBackController(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     val finishAck: ValidIO[VLdRequest] = Valid(new VLdRequest(ap))
     /** Tell req buffer which entry has finished. */
     val reqWBDone = Valid(UInt(ap.nVLdReqBufferIdxBits.W))
+
+    /** Data path for queue entry writing stale data for undisturbed load. */
+    val wbReqFromQEntry = Flipped(Decoupled(new VLSUWriteVRFReq(ap)))
   })
 
   val sIdle :: sNormalWB :: sBypassWB :: Nil = Enum(3)
@@ -74,5 +77,11 @@ class WriteBackController(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     }
   }
   io.wbReqIncoming.ready := (state === sIdle)
-  io.toVRF.bits := awaitingVRFReq
+  val idling = state === sIdle
+  io.wbReqFromQEntry.ready := idling
+  when(io.wbReqFromQEntry.fire()){
+    io.toVRF.valid := true.B
+  }
+  io.toVRF.bits := Mux(io.wbReqFromQEntry.fire(), io.wbReqFromQEntry.bits, awaitingVRFReq)
+
 }
