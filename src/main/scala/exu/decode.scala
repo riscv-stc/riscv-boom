@@ -296,7 +296,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.is_fence   := cs.is_fence
   uop.is_fencei  := cs.is_fencei
   uop.is_sys_pc2epc   := cs.is_sys_pc2epc
-  uop.is_unique  := cs.inst_unique
+  uop.is_unique  := cs.inst_unique || (cs.uopc === uopVSETVLI) && inst(19,15) === 0.U && inst(11,7)  === 0.U
   uop.flush_on_commit := cs.flush_on_commit || (csr_en && !csr_ren && io.csr_decode.write_flush)
   uop.is_vsetivli := (cs.uopc === uopVSETIVLI)
   uop.is_vsetvli := (cs.uopc === uopVSETVLI)
@@ -761,19 +761,22 @@ class VconfigMaskGenerationLogic(val pl_width: Int) (implicit p: Parameters) ext
   // Give out the branch tag to each speculative vconfig micro-op
 
   var allocate_mask = vconfig_mask
+  val update_vtag = (io.is_vconfig zip io.will_fire).map{case(v,w) => v && w}.reduce(_||_)
   val tag_masks = Wire(Vec(pl_width, UInt(maxVconfigCount.W)))
   for (w <- 0 until pl_width) {
     io.is_full(w) := (allocate_mask === ~(0.U(maxVconfigCount.W))) && io.is_vconfig(w)
 
     // find vconfig_tag and compute next vconfig_mask
-    val new_vconfig_tag = Wire(UInt(vconfigTagSz.W))
-    new_vconfig_tag := 0.U
+    val new_vconfig_tag = RegInit(0.U(vconfigTagSz.W))
+    //new_vconfig_tag := 0.U
     tag_masks(w) := 0.U
 
     for (i <- maxVconfigCount - 1 to 0 by -1) {
       when(~allocate_mask(i)) {
-        new_vconfig_tag := i.U
         tag_masks(w) := (1.U << i.U)
+        when(update_vtag) {
+          new_vconfig_tag := new_vconfig_tag + 1.U
+        }
       }
     }
 
