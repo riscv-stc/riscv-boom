@@ -974,9 +974,9 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       decode_units(w).io.csr_vconfig.vtype.reserved := DontCare
 
       dec_vconfig_valid(w)              := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6,0) === 87.U) && (dec_fbundle.uops(w).bits.inst(14,12) === 7.U) && ((dec_fbundle.uops(w).bits.inst(31,30) === 3.U) || !dec_fbundle.uops(w).bits.inst(31))
-      dec_vconfig(w).vconfig.vl         := dec_fbundle.uops(w).bits.inst(19,15)
+      dec_vconfig(w).vconfig.vl         := Mux(dec_fbundle.uops(w).bits.inst(31), dec_fbundle.uops(w).bits.inst(19,15), VType.fromUInt(dec_fbundle.uops(w).bits.inst(27,20)).vlMax)
       dec_vconfig(w).vconfig.vtype      := VType.fromUInt(dec_fbundle.uops(w).bits.inst(27,20))
-      dec_vconfig(w).vl_ready           := dec_fbundle.uops(w).bits.inst(31)
+      dec_vconfig(w).vl_ready           := (dec_fbundle.uops(w).bits.inst(19,15) === 0.U && dec_fbundle.uops(w).bits.inst(11,7)  =/= 0.U) || dec_fbundle.uops(w).bits.inst(31)
 
       dec_uops(w).vcq_idx                     := vcq_idx
     }
@@ -998,11 +998,15 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   vconfig_mask_full := dec_vconfigmask_logic.io.is_full
 
   for (w <- 0 until coreWidth) {
-    dec_vconfigmask_logic.io.is_vconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_vsetvli || dec_uops(w).is_vsetivli)
-    dec_vconfigmask_logic.io.will_fire(w)  := dec_fire(w) && (dec_uops(w).is_vsetvli || dec_uops(w).is_vsetivli)
-    dec_uops(w).vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag(w)
+    dec_vconfigmask_logic.io.is_vconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_vsetvli && !(dec_uops(w).ldst === 0.U && dec_uops(w).lrs1 === 0.U) || dec_uops(w).is_vsetivli)
+    dec_vconfigmask_logic.io.will_fire(w)  := dec_fire(w) && (dec_uops(w).is_vsetvli && !(dec_uops(w).ldst === 0.U && dec_uops(w).lrs1 === 0.U) || dec_uops(w).is_vsetivli)
+    //dec_uops(w).vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag(w)
     dec_uops(w).vconfig_mask := dec_vconfigmask_logic.io.vconfig_mask(w)
   }
+
+  dec_uops.head.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head
+  dec_uops.last.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head + (dec_vconfigmask_logic.io.is_vconfig.head && dec_vconfigmask_logic.io.will_fire.head).asUInt()
+
 
 
   //vconfig instruction decode info enq to VCQ
