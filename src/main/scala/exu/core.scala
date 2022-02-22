@@ -1190,7 +1190,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       disUops(w).vstartSrc := v_uop.vstartSrc
       disUops(w).vstart    := Mux(v_uop.vstartSrc === VSTART_ZERO, 0.U, csr.io.vector.get.vstart)
       disUops(w).v_scalar_busy := disUops(w).is_rvv && disUops(w).uses_scalar
-      disUops(w).uopc      := Mux(i_uop.uopc.isOneOf(uopVLM, uopVLR), uopVL, i_uop.uopc)
+      disUops(w).uopc      := Mux(i_uop.uopc.isOneOf(uopVLM), uopVL, i_uop.uopc)
     } else {
       disUops(w).prs1_busy := i_uop.prs1_busy & (disUops(w).rt(RS1, isInt)) |
                                f_uop.prs1_busy & (disUops(w).rt(RS1, isFloat))

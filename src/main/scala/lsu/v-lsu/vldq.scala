@@ -274,7 +274,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       val needFetchTail = !io.vuopRR.bits.uCtrlSig.accessStyle.vta
       val needFetchMask = !io.vuopRR.bits.uCtrlSig.accessStyle.vma
       /** Fetch all if */
-      val needCopyStale = needFetchTail || needFetchMask
+      val needCopyStale = Mux(io.vuopRR.bits.uCtrlSig.accessStyle.isWholeAccess, false.B, needFetchTail || needFetchMask)
       when(needCopyStale){
         state := sCopyStale
       }.otherwise{
@@ -286,10 +286,11 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     val totalFields = Mux(reg.bits.style.vlmul(2), 1.U, (1.U << reg.bits.style.vlmul(1,0)).asUInt())
     val staleDataReg = RegInit(0.U.asTypeOf(Valid(UInt(ap.vLen.W))))
     val requestingRegIdx = reg.bits.staleRegIdxVec(fieldCount)
-    io.vrfReadReq.valid := !staleDataReg.valid && !io.vrfBusyStatus(requestingRegIdx)
+    val readSent = RegNext(io.vrfReadReq.fire())
+    io.vrfReadReq.valid := !staleDataReg.valid && !io.vrfBusyStatus(requestingRegIdx) && !readSent
     io.vrfReadReq.bits.addr := requestingRegIdx
 
-    when(io.vrfReadResp.valid && RegNext(io.vrfReadReq.fire())){
+    when(io.vrfReadResp.valid && readSent){
       staleDataReg.valid := true.B
       staleDataReg.bits := io.vrfReadResp.bits.data
     }

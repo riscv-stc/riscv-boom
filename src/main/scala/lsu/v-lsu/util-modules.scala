@@ -289,7 +289,7 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val nFields = io.ctrl.nf
 
   /** if register is valid in pure nf. */
-  val nfVld: Int => Bool = (i: Int) => i.U < nFields
+  //val nfVld: Int => Bool = (i: Int) => i.U < nFields
   val allOnes = Fill(ap.vLenb,1.U)
   /** if register is valid in lmul and nf combinations. */
   val segmentVld: Int => Bool = (i: Int) => i.U < (nFields * lmulValue)
@@ -332,16 +332,16 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     val snippet = snippetX(0)
     val idxMod4: Int = i % 4
     val idxMod2: Int = i % 2
-    out := Mux(io.ctrl.isWholeAccess && nfVld(i), 0.U, Mux(!isSegment && lmulVld(i) && indexedFieldVld(i), snippetX(i),
+    // whole access consider lmul which is decided in decode stage. not vl from the rvv spec.
+    out := Mux(io.ctrl.isWholeAccess && lmulVld(i), 0.U, Mux(!isSegment && lmulVld(i) && indexedFieldVld(i), snippetX(i),
       Mux(isSegment && lmul1 && segmentVld(i), snippet,
         Mux(isSegment && lmul2 && segmentVld(i), snippetX(idxMod2),
           Mux(isSegment && lmul4 && segmentVld(i), snippetX(idxMod4),
             allOnes)))))
   }
   //4 bits, up to 'h8.
-  io.totalSegment := Mux(io.ctrl.isWholeAccess, nFields,
-                      Mux(isSegment, lmulValue * nFields,
-                        Mux(isIndexed, fieldIdx + 1.U, lmulValue)))
+  io.totalSegment := Mux(isSegment, lmulValue * nFields,
+                        Mux(isIndexed, fieldIdx + 1.U, lmulValue))
   val denseAccess = (io.ctrl.isUnitStride && !isSegment) || io.ctrl.isWholeAccess
   io.totalRequest := Mux(denseAccess, ap.maxReqsInUnitStride.U, (ap.vLenb.U >> io.ctrl.dataEew).asUInt())
   val wakeRegIdxIndexed = UIntToOH(fieldIdx, 8)
@@ -418,7 +418,7 @@ class SnippetVectorMaskAdjuster(ap: VLSUArchitecturalParams) extends VLSUModules
     })).asUInt())
 
   io.adjustedSnippet.zipWithIndex.foreach { case (out, pregIdx) =>
-    out := snippetX(pregIdx)
+    out := Mux(io.ctrl.isWholeAccess, Fill(ap.vLenb, !lmulVld(pregIdx)), snippetX(pregIdx))
   }
 }
 
@@ -440,7 +440,7 @@ class RequestSplitter(ap: VLSUArchitecturalParams, isLoad: Boolean, id: Int) ext
   io.newAddr := 0.U
   io.newSnippet := 0.U
   io.uReq := 0.U.asTypeOf(if (isLoad) Valid(new VLdRequest(ap)) else Valid(new VStRequest(ap)))
-  when(reg.style.isUnitStride){
+  when(reg.style.isUnitStride || reg.style.isWholeAccess){
     val baseAddr = Mux(reg.style.isWholeAccess, reg.addr + (reg.segmentCount << log2Ceil(ap.vLenb).U).asUInt(),
       reg.addr + Mux(lmulLargerEqualOne, ap.vLenb.U * segmentModLmul, 0.U))
     val (reqNecessary, req) = io.uReq.bits.UnitStride(baseAddr, reg.reqCount, reg.pRegVec(reg.segmentCount),
