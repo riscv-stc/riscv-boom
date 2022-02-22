@@ -29,6 +29,8 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     val vrfReadReq = Decoupled(new VLSUReadVRFReq(ap))
     val vrfReadResp = Flipped(Valid(new VLSUReadVRFResp(ap)))
     val vrfWriteReq = Decoupled(new VLSUWriteVRFReq(ap))
+
+    val vrfBusyStatus = Input(UInt(ap.nVRegs.W))
   })
 
   val nEntries: Int = ap.nVLdQEntries
@@ -77,6 +79,7 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     vrfReadArb.io.in(i) <> e.io.vrfReadReq
     e.io.vrfReadResp := io.vrfReadResp
     vrfWriteArb.io.in(i) <> e.io.vrfWriteReq
+    e.io.vrfBusyStatus := io.vrfBusyStatus
     e
   }
   io.vrfReadReq <> vrfReadArb.io.out
@@ -186,6 +189,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     val vrfReadReq = Decoupled(new VLSUReadVRFReq(ap))
     val vrfReadResp = Flipped(Valid(new VLSUReadVRFResp(ap)))
     val vrfWriteReq = Decoupled(new VLSUWriteVRFReq(ap))
+    val vrfBusyStatus = Input(UInt(ap.nVRegs.W))
   })
 
   io.uReq.valid := false.B
@@ -280,16 +284,17 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   }.elsewhen(state === sCopyStale){
     val fieldCount = RegInit(0.U(4.W))
     val totalFields = Mux(reg.bits.style.vlmul(2), 1.U, (1.U << reg.bits.style.vlmul(1,0)).asUInt())
-    io.vrfReadReq.valid := true.B
-    io.vrfReadReq.bits.addr := reg.bits.staleRegIdxVec(fieldCount)
     val staleDataReg = RegInit(0.U.asTypeOf(Valid(UInt(ap.vLen.W))))
+    val requestingRegIdx = reg.bits.staleRegIdxVec(fieldCount)
+    io.vrfReadReq.valid := !staleDataReg.valid && !io.vrfBusyStatus(requestingRegIdx)
+    io.vrfReadReq.bits.addr := requestingRegIdx
 
-    when(io.vrfReadResp.valid){
+    when(io.vrfReadResp.valid && RegNext(io.vrfReadReq.fire())){
       staleDataReg.valid := true.B
       staleDataReg.bits := io.vrfReadResp.bits.data
     }
     io.vrfWriteReq.valid := staleDataReg.valid
-    io.vrfWriteReq.bits.addr := reg.bits.staleRegIdxVec(fieldCount)
+    io.vrfWriteReq.bits.addr := reg.bits.pRegVec(fieldCount)
     io.vrfWriteReq.bits.data := staleDataReg.bits
     io.vrfWriteReq.bits.byteMask := Fill(ap.vLenb, 1.U(1.W))
     when(io.vrfWriteReq.fire()){
@@ -299,6 +304,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     val copyDone = fieldCount === totalFields
     when(copyDone){
       state := sSplitting
+      staleDataReg.valid := false.B
       fieldCount := 0.U
     }
   }.elsewhen(state === sSplitting){

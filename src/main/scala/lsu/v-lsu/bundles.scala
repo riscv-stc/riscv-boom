@@ -378,6 +378,7 @@ class VLSUTopBundle(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val stToRob: VLSUROBIO = new VLSUROBIO(ap)
   val wakeUpVReg = ValidIO(UInt(ap.vpregSz.W))
   val fromRob = new ROBVLSUIO(ap)
+  val vrfBusyStatus = Input(UInt(ap.nVRegs.W))
 }
 
 abstract class VLSUBundle(ap: VLSUArchitecturalParams) extends GenericParameterizedBundle(ap)
