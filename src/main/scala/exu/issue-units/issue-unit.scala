@@ -195,7 +195,7 @@ abstract class IssueUnit(
         dis_uops(w).prs2_busy   := 0.U
         // NOTE: for unit-stride load, do undisturb load
         dis_uops(w).v_split_ecnt:= (vLenb.U >> dis_uops(w).vd_eew) * nrVecGroup(dis_uops(w).vd_emul, dis_uops(w).v_seg_nf)
-        dis_uops(w).v_eidx      := dis_uops(w).vconfig.vl
+        //dis_uops(w).v_eidx      := dis_uops(w).vconfig.vl
         dis_uops(w).fu_code     := FU_VMX
         //dis_uops(w).uses_ldq    := false.B
       } .elsewhen (dis_uops(w).uopc.isOneOf(uopVSA, uopVSSA)) {
