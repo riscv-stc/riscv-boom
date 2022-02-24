@@ -68,7 +68,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
 
   val vconfig_mask          = UInt(maxVconfigCount.W)  // which vconfig are we being speculated under?
   val vconfig_tag           = UInt(vconfigTagSz.W)
-  val vcq_idx               = UInt(log2Ceil(vcqSz).W)
+  val vcq_idx               = UInt(vcqSz.W)
 
   // Index into FTQ to figure out our fetch PC.
   val ftq_idx          = UInt(log2Ceil(ftqSz).W)

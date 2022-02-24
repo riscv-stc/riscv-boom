@@ -179,20 +179,25 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   val int_ren_wakeups  = Wire(Vec(numIntRenameWakeupPorts, Valid(new ExeUnitResp(xLen))))
   val pred_wakeup  = Wire(Valid(new ExeUnitResp(1)))
 
-  //val vl_exe_wakeup  =  Wire(Valid(new ExeUnitResp(xLen)))
-  val vl_wakeup = RegInit(0.U.asTypeOf(Valid(new VlWakeupResp())))
+  val vl_wakeup_dec = RegInit(0.U.asTypeOf(Valid(new VlWakeupResp())))
+  val vl_wakeup = WireInit(0.U.asTypeOf(Valid(new VlWakeupResp())))
+  val update_vtype = WireInit(0.U.asTypeOf(new VType()))
   //vl-ready wake up logic, bypass from execution unit
-  when(exe_units(csr_unit_idx).io.iresp.valid && (exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetvli || exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetivli)) {
-    vl_wakeup.valid := true.B
-    vl_wakeup.bits.vl := exe_units(csr_unit_idx).io.iresp.bits.data(maxVLMax.log2 , 0)
-    vl_wakeup.bits.vcq_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.vcq_idx
-    vl_wakeup.bits.vconfig_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_mask
-    vl_wakeup.bits.vconfig_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_tag
+  vl_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && (exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetvli || exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetivli)
+  vl_wakeup.bits.vl := exe_units(csr_unit_idx).io.iresp.bits.data(maxVLMax.log2, 0)
+  vl_wakeup.bits.vcq_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.vcq_idx
+  vl_wakeup.bits.vconfig_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_mask
+  vl_wakeup.bits.vconfig_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_tag
+
+  update_vtype := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig.vtype
+
+  when(vl_wakeup.valid) {
+    vl_wakeup_dec := vl_wakeup
   }
 
   when(rob.io.flush.valid) {
-    vl_wakeup.valid := false.B
-    vl_wakeup.bits := DontCare
+    vl_wakeup_dec.valid := false.B
+    vl_wakeup_dec.bits := DontCare
   }
 
   require (exe_units.length == issue_units.map(_.issueWidth).sum)
@@ -307,11 +312,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     v_pipeline.io.brupdate := brupdate
     v_pipeline.io.vbusy_status := v_rename_stage.io.vbusy_status
 
-    v_pipeline.io.vl_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && (exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetvli || exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetivli)
-    v_pipeline.io.vl_wakeup.bits.vl := exe_units(csr_unit_idx).io.iresp.bits.data(maxVLMax.log2 , 0)
-    v_pipeline.io.vl_wakeup.bits.vcq_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.vcq_idx
-    v_pipeline.io.vl_wakeup.bits.vconfig_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_mask
-    v_pipeline.io.vl_wakeup.bits.vconfig_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_tag
+    v_pipeline.io.vl_wakeup :=  vl_wakeup
   }
 
   // Load/Store Unit & ExeUnits
@@ -954,7 +955,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   // Decoders
   val vcq_data = Wire(new VconfigDecodeSignals())
   val vcq_empty = WireInit(false.B)
-  val vcq_idx = Wire(UInt(log2Ceil(vcqSz).W))
+  //val vcq_idx = Wire(UInt(log2Ceil(vcqSz).W))
 
   for (w <- 0 until coreWidth) {
     dec_valids(w)                      := io.ifu.fetchpacket.valid && dec_fbundle.uops(w).valid &&
@@ -968,8 +969,8 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     decode_units(w).io.interrupt_cause := csr.io.interrupt_cause
     if (usingVector) {
       decode_units(w).io.csr_vstart       := csr.io.vector.get.vstart
-      decode_units(w).io.csr_vconfig      := Mux(vcq_empty && !dec_vconfig_valid.reduce(_||_), csr.io.vector.get.vconfig, vcq_data.vconfig)
-      decode_units(w).io.enq.uop.vl_ready := Mux(vcq_empty && !dec_vconfig_valid.reduce(_||_), true.B, vcq_data.vl_ready)
+      decode_units(w).io.csr_vconfig      := vcq_data.vconfig
+      decode_units(w).io.enq.uop.vl_ready := vcq_data.vl_ready
 
       decode_units(w).io.csr_vconfig.vtype.reserved := DontCare
 
@@ -978,16 +979,15 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       dec_vconfig(w).vconfig.vtype      := VType.fromUInt(dec_fbundle.uops(w).bits.inst(27,20))
       dec_vconfig(w).vl_ready           := (dec_fbundle.uops(w).bits.inst(19,15) === 0.U && dec_fbundle.uops(w).bits.inst(11,7)  =/= 0.U) || dec_fbundle.uops(w).bits.inst(31)
 
-      dec_uops(w).vcq_idx                     := vcq_idx
     }
 
     dec_uops(w) := decode_units(w).io.deq.uop
   }
 
   for (w <- 0 until coreWidth) {
-    when(vl_wakeup.valid && (vl_wakeup.bits.vconfig_tag + 1.U) === dec_uops(w).vconfig_tag) {
+    when(vl_wakeup_dec.valid && (vl_wakeup_dec.bits.vconfig_tag + 1.U) === dec_uops(w).vconfig_tag) {
       dec_uops(w).vl_ready := true.B
-      dec_uops(w).vconfig.vl := vl_wakeup.bits.vl
+      dec_uops(w).vconfig.vl := vl_wakeup_dec.bits.vl
     }
   }
 
@@ -1007,18 +1007,26 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   dec_uops.head.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head
   dec_uops.last.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head + (dec_vconfigmask_logic.io.is_vconfig.head && dec_vconfigmask_logic.io.will_fire.head).asUInt()
 
-
-
   //vconfig instruction decode info enq to VCQ
   val vcq = Module(new VconfigQueue())
     vcq.io.enq.bits  := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
     vcq.io.enq.valid := dec_vconfig_valid.reduce(_||_) && !io.ifu.redirect_flush
     vcq.io.deq       := RegNext((rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_vsetivli||u.is_vsetvli, false.B)}.reduce(_ | _))
     vcq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
-    vcq_data         := Mux(vcq.io.enq.valid, vcq.io.enq.bits, vcq.io.get_vconfig)
     vcq_empty        := vcq.io.empty
-    vcq_idx          := vcq.io.enq_idx
 
+    vcq_data.vconfig := Mux(dec_vconfig_valid.head, dec_vconfig.head.vconfig, Mux(vcq_empty, csr.io.vector.get.vconfig, vcq.io.get_vconfig.vconfig))
+
+  //vcq_data.head.vl_ready := Mux(vcq_empty, true.B, vcq.io.get_vconfig.vl_ready)
+    vcq_data.vl_ready := Mux(dec_vconfig_valid.head, dec_vconfig.head.vl_ready, Mux(vcq_empty, true.B, vcq.io.get_vconfig.vl_ready))
+
+    vcq.io.update_vl.valid := vl_wakeup.valid
+    vcq.io.update_vl.bits.vl_ready := vl_wakeup.valid
+    vcq.io.update_vl.bits.vconfig.vl := vl_wakeup.bits.vl
+    vcq.io.update_vl.bits.vconfig.vtype := update_vtype
+    vcq.io.update_vl_idx := vl_wakeup.bits.vcq_idx
+
+    dec_uops.map(d => d.vcq_idx := vcq.io.enq_idx)
   //-------------------------------------------------------------
   // FTQ GetPC Port Arbitration
 
@@ -1145,7 +1153,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     rename.io.com_uops := rob.io.commit.uops
     rename.io.rbk_valids := rob.io.commit.rbk_valids
     rename.io.rollback := rob.io.commit.rollback
-    rename.io.vl_wakeup_port := vl_wakeup
+    rename.io.vl_wakeup_port := vl_wakeup_dec
   }
 
 
@@ -1484,11 +1492,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   issue_units map { iu =>
     iu.io.spec_ld_wakeup := io.lsu.spec_ld_wakeup
 
-    iu.io.vl_wakeup_port.valid := exe_units(csr_unit_idx).io.iresp.valid && (exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetvli || exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetivli)
-    iu.io.vl_wakeup_port.bits.vl := exe_units(csr_unit_idx).io.iresp.bits.data(maxVLMax.log2 , 0)
-    iu.io.vl_wakeup_port.bits.vcq_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.vcq_idx
-    iu.io.vl_wakeup_port.bits.vconfig_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_mask
-    iu.io.vl_wakeup_port.bits.vconfig_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_tag
+    iu.io.vl_wakeup_port := vl_wakeup
   }
 
   // Connect the predicate wakeup port
@@ -1707,7 +1711,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   if (usingVector) {
     val csr_vld = csr_exe_unit.io.iresp.valid
     val csr_uop = csr_exe_unit.io.iresp.bits.uop
-    val vsetvl = csr_uop.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
+    val vsetvl = csr_uop.uopc === uopVSETVL
     val cmt_rvv = (0 until coreParams.retireWidth).map{i =>
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv
     }.reduce(_ || _)
@@ -1721,13 +1725,15 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat
     }.reduce(_ || _)
     val vleffSetVL = rob.io.setVL
+    val vcq_setVL = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _)
     assert(!(vsetvl && csr_vld && vleffSetVL.valid), "vsetvl and vleff setvl should not happen at same time!")
     csr.io.vector.get.set_vs_dirty := cmt_rvv
-    csr.io.vector.get.set_vconfig.valid := csr_vld && vsetvl || vleffSetVL.valid
-    csr.io.vector.get.set_vconfig.bits := Mux(csr_vld && vsetvl, csr_uop.vconfig, csr.io.vector.get.vconfig)
+    csr.io.vector.get.set_vconfig.valid := csr_vld && vsetvl || vleffSetVL.valid || vcq_setVL
+    csr.io.vector.get.set_vconfig.bits := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
     csr.io.vector.get.set_vconfig.bits.vl := Mux(csr_vld && vsetvl, csr_uop.vconfig.vl,
-                                             Mux(vleffSetVL.valid, vleffSetVL.bits,
-                                             csr.io.vector.get.vconfig.vl))
+                                              Mux(vleffSetVL.valid, vleffSetVL.bits,
+                                              Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig.vl,
+                                                              csr.io.vector.get.vconfig.vl)))
     csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
     csr.io.vector.get.set_vstart.valid := cmt_archlast_rvv || rob.io.com_xcpt.bits.vls_xcpt.valid
     csr.io.vector.get.set_vstart.bits := Mux(cmt_archlast_rvv, 0.U, rob.io.com_xcpt.bits.vls_xcpt.bits)

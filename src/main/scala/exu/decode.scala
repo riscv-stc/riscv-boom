@@ -821,12 +821,17 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
   val io = IO(new BoomBundle {
     //Enqueue one entry when decode a vconfig instruction.
     val enq = Flipped(Decoupled(new VconfigDecodeSignals()))
-    val enq_idx = Output(UInt(idx_sz.W))
+    val enq_idx = Output(UInt(num_entries.W))
     val deq   = Input(Bool())
     val flush = Input(Bool())
 
     val get_vconfig = Output(new VconfigDecodeSignals())
     val empty = Output(Bool())
+
+    val update_vl_idx = Input(UInt(num_entries.W))
+    val update_vl = Flipped(Decoupled(new VconfigDecodeSignals()))
+
+    val vcq_Wcsr = Output(new VconfigDecodeSignals())
   })
 
   val ram = Reg(Vec(num_entries, new VconfigDecodeSignals()))
@@ -859,6 +864,12 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
 
   when(do_deq) {
     deq_ptr := inc(deq_ptr)
+    io.vcq_Wcsr := ram(deq_ptr)
+  }
+  when(io.update_vl.valid) {
+    ram(io.update_vl_idx).vconfig.vl := io.update_vl.bits.vconfig.vl
+    ram(io.update_vl_idx).vl_ready := io.update_vl.bits.vl_ready
+    ram(io.update_vl_idx).vconfig.vtype := io.update_vl.bits.vconfig.vtype
   }
   when(do_enq =/= do_deq) {
     maybe_full := do_enq
@@ -869,6 +880,7 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
     maybe_full := false.B
   }
 
+  io.enq_idx := enq_ptr
   io.enq.ready := !full
   io.get_vconfig := ram(dec(enq_ptr))
   io.empty := empty
