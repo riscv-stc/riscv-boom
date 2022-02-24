@@ -213,6 +213,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
 
   val isUnitStride = reg.bits.style.isUnitStride
   val isSegment = reg.bits.style.isSegment
+  val isIndexed = reg.bits.style.isIndexed
 
   //val snippetInitializer = Module(new SnippetInitializer(ap))
   //snippetInitializer.io.ctrl := io.vuopDis.bits.uCtrlSig.accessStyle
@@ -282,12 +283,16 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       }
     }
   }.elsewhen(state === sCopyStale){
-    val fieldCount = RegInit(0.U(4.W))
-    val totalFields = Mux(reg.bits.style.vlmul(2), 1.U, (1.U << reg.bits.style.vlmul(1,0)).asUInt())
+    // for indexed, start from is split reg idx.
+    val startRegIdx = Mux(isIndexed, reg.bits.segmentCount, 0.U)
+    val fieldCounter = RegInit(0.U(4.W))
+    val endRegIdx = Mux(isIndexed, reg.bits.segmentCount + 1.U, Mux(reg.bits.style.vlmul(2), 1.U, (1.U << reg.bits.style.vlmul(1,0)).asUInt()))
     val staleDataReg = RegInit(0.U.asTypeOf(Valid(UInt(ap.vLen.W))))
-    val requestingRegIdx = reg.bits.staleRegIdxVec(fieldCount)
+    val activeRegIdx = fieldCounter + startRegIdx
+    val requestingRegIdx = reg.bits.staleRegIdxVec(activeRegIdx)
     val readSent = RegNext(io.vrfReadReq.fire())
-    io.vrfReadReq.valid := !staleDataReg.valid && !io.vrfBusyStatus(requestingRegIdx) && !readSent
+    val copyDone = activeRegIdx === endRegIdx
+    io.vrfReadReq.valid := !staleDataReg.valid && !io.vrfBusyStatus(requestingRegIdx) && !readSent && !copyDone
     io.vrfReadReq.bits.addr := requestingRegIdx
 
     when(io.vrfReadResp.valid && readSent){
@@ -295,18 +300,17 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       staleDataReg.bits := io.vrfReadResp.bits.data
     }
     io.vrfWriteReq.valid := staleDataReg.valid
-    io.vrfWriteReq.bits.addr := reg.bits.pRegVec(fieldCount)
+    io.vrfWriteReq.bits.addr := reg.bits.pRegVec(activeRegIdx)
     io.vrfWriteReq.bits.data := staleDataReg.bits
     io.vrfWriteReq.bits.byteMask := Fill(ap.vLenb, 1.U(1.W))
     when(io.vrfWriteReq.fire()){
-      fieldCount := fieldCount + 1.U
+      fieldCounter := fieldCounter + 1.U
       staleDataReg.valid := false.B
     }
-    val copyDone = fieldCount === totalFields
     when(copyDone){
       state := sSplitting
       staleDataReg.valid := false.B
-      fieldCount := 0.U
+      fieldCounter := 0.U
     }
   }.elsewhen(state === sSplitting){
     io.uReq.valid := requestSplitter.io.uReq.valid && !freeze
