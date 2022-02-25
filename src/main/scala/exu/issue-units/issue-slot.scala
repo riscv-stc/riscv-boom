@@ -231,7 +231,7 @@ class IssueSlot(
     (io.grant && (state === s_valid_2) && rs1check() && rs2check() && ppred && vl_ready)) {
     if (vector) {
       when (state === s_valid_1) {
-        when(last_check()) {
+        when(last_check) {
           next_state := s_invalid
         }
       }
@@ -278,7 +278,6 @@ class IssueSlot(
         //in_pm := ~io.in_uop.bits.prvm_busy
         ps    := ~io.in_uop.bits.v_scalar_busy
         sdata := io.in_uop.bits.v_scalar_data
-        next_vl_ready := io.in_uop.bits.vl_ready
       } else {
         next_p1 := !io.in_uop.bits.prs1_busy(0)
         next_p2 := !io.in_uop.bits.prs2_busy(0)
@@ -438,7 +437,7 @@ class IssueSlot(
 
   // micro-op will vacate due to grant.
   val may_vacate = io.grant && ((state === s_valid_1) || (state === s_valid_2)) &&
-                   ppred && rs1check() && rs2check() && rs3check() && vmcheck() && vl_ready && last_check()
+                   ppred && rs1check() && rs2check() && rs3check() && vmcheck() && vl_ready && last_check
   val squash_grant = io.ldspec_miss && (p1_poisoned || p2_poisoned)
   io.will_be_valid := is_valid && !(may_vacate && !squash_grant)
 
