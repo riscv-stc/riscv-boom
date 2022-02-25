@@ -846,6 +846,10 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
     val n = ptr.getWidth
     Cat(ptr(n-2,0), ptr(n-1))
   }
+  def dec(ptr: UInt) = {
+    val n = ptr.getWidth
+    Cat(ptr(0), ptr(n-1,1))
+  }
 
   when(do_enq) {
     ram(enq_ptr) := io.enq.bits
@@ -866,6 +870,6 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
   }
 
   io.enq.ready := !full
-  io.get_vconfig := ram(deq_ptr)
+  io.get_vconfig := ram(dec(enq_ptr))
   io.empty := empty
 }

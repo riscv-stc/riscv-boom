@@ -994,7 +994,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   // Vconfig Mask Logic
   dec_vconfigmask_logic.io.vconfig_mask_update := RegNext(Mux(rob.io.commit.valids.head & rob.io.commit.uops.head.is_vsetvli, rob.io.commit.uops.head.vconfig_mask,
                                                           Mux(rob.io.commit.valids.last & rob.io.commit.uops.last.is_vsetvli, rob.io.commit.uops.last.vconfig_mask, 0.U)))
-  dec_vconfigmask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid)
+  dec_vconfigmask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
   vconfig_mask_full := dec_vconfigmask_logic.io.is_full
 
   for (w <- 0 until coreWidth) {
@@ -1012,9 +1012,9 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   //vconfig instruction decode info enq to VCQ
   val vcq = Module(new VconfigQueue())
     vcq.io.enq.bits  := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
-    vcq.io.enq.valid := dec_vconfig_valid.reduce(_||_)
+    vcq.io.enq.valid := dec_vconfig_valid.reduce(_||_) && !io.ifu.redirect_flush
     vcq.io.deq       := RegNext((rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_vsetivli||u.is_vsetvli, false.B)}.reduce(_ | _))
-    vcq.io.flush     := RegNext(rob.io.flush.valid)
+    vcq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
     vcq_data         := Mux(vcq.io.enq.valid, vcq.io.enq.bits, vcq.io.get_vconfig)
     vcq_empty        := vcq.io.empty
     vcq_idx          := vcq.io.enq_idx
