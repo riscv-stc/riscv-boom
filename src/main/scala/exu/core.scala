@@ -987,9 +987,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //vconfig instruction decode info enq to VCQ
   val vcq = Module(new VconfigQueue())
     vcq.io.enq.bits  := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
-    vcq.io.enq.valid := dec_vconfig_valid.reduce(_||_)
-    vcq.io.deq       := RegNext((rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_vsetivli||u.is_vsetvli, false.B)}.reduce(_ | _))
-    vcq.io.flush     := RegNext(rob.io.flush.valid)
+    vcq.io.enq.valid := dec_vconfig_valid.reduce(_||_) && !io.ifu.redirect_flush
+    vcq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_vsetivli||u.is_vsetvli, false.B)}.reduce(_ | _)
+    vcq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
     vcq_data         := Mux(vcq.io.enq.valid, vcq.io.enq.bits, vcq.io.get_vconfig)
     vcq_empty        := vcq.io.empty
     vcq_idx          := vcq.io.enq_idx
@@ -1709,6 +1709,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat
     }.reduce(_ || _)
     val vleffSetVL = rob.io.setVL
+    //val vcq_setVL = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq.io.empty
     assert(!(vsetvl && csr_vld && vleffSetVL.valid), "vsetvl and vleff setvl should not happen at same time!")
     csr.io.vector.get.set_vs_dirty := cmt_rvv
     csr.io.vector.get.set_vconfig.valid := csr_vld && vsetvl || vleffSetVL.valid

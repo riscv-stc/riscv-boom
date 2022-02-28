@@ -853,7 +853,7 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
   }
   io.enq_idx := enq_ptr
 
-  when(do_deq) {
+  when(do_deq && !empty) {
     deq_ptr := inc(deq_ptr)
   }
   when(do_enq =/= do_deq) {
