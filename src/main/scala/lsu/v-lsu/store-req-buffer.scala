@@ -106,7 +106,7 @@ class StoreBufferEntry(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModule
       }
     }
   }
-  when(io.dataAccomplished.valid && (io.dataAccomplished.bits.reqBufferIdx === idx.U)){
+  when(reg.valid && io.dataAccomplished.valid && (io.dataAccomplished.bits.reqBufferIdx === idx.U)){
     reg.valid := false.B
   }
   when(io.fromVTlb.valid && (io.fromVTlb.bits.reqBufferIdx === idx.U) && io.fromVTlb.bits.hit && !io.fromVTlb.bits.exception){

@@ -122,7 +122,8 @@ class LoadBufferEntry(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModules
     reg.bits.done := true.B
     reg.bits.executing := false.B
   }
-  when(VecInit(io.fromRob.retireEntries.map{i => i.valid && i.bits.isLoad && i.bits.qEntryIdx === reg.bits.qEntryIdx}).asUInt().orR()){
+  val commitHit = VecInit(io.fromRob.retireEntries.map{i => i.valid && i.bits.isLoad && i.bits.qEntryIdx === reg.bits.qEntryIdx}).asUInt().orR()
+  when(reg.valid && commitHit){
     assert(Mux(reg.valid, reg.bits.done, true.B))
     reg.valid := false.B
   }
