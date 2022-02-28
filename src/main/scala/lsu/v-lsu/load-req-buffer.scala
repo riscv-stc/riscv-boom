@@ -11,6 +11,7 @@ import boom.common._
  * */
 class LoadRequestBuffer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val io = IO(new Bundle {
+    val brUpdate = Input(new BranchUpdateInfo(ap))
     /** vld request from vld queue winner. */
     val reqIncoming: Vec[DecoupledIO[VLdRequest]] = Flipped(Vec(ap.coreWidth, Decoupled(new VLdRequest(ap))))
     //val vStReq = Flipped(Valid(new VStRequest(ap)))
@@ -53,6 +54,7 @@ class LoadRequestBuffer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     e.io.reqWBDone := io.reqWBDone
     e.io.fromVTlb := io.vtlbResp
     e.io.fromRob := io.fromRob
+    e.io.brUpdate := io.brUpdate
   }
   (io.reqIncoming.map(_.ready) zip idleEntryIndexes.map(_.valid)) foreach { case (r, v) =>
     r := v
@@ -81,6 +83,7 @@ class LoadRequestBuffer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
 
 class LoadBufferEntry(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModules(ap){
   val io = IO(new Bundle{
+    val brUpdate = Input(new BranchUpdateInfo(ap))
     /** request from vld queue arb winner. */
     val reqIncoming: ValidIO[VLdRequest] = Flipped(Valid(new VLdRequest(ap)))
     /** expose us to buff for new request allocate. */
@@ -100,16 +103,18 @@ class LoadBufferEntry(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModules
   io.wbBypassResp.valid := false.B
   io.wbBypassResp.bits := 0.U.asTypeOf(new VLdRequest(ap))
   val reg = RegInit(0.U.asTypeOf(Valid(new VLdRequest(ap))))
+  val isKilledByBranch = IsKilledByBranch(io.brUpdate, reg.bits.brMask)
   reg.bits.reqBufferIdx := idx.U
   io.status := reg
-  io.reqOutgoing.valid := (reg.valid && !reg.bits.executing && !reg.bits.done)
+  io.reqOutgoing.valid := (reg.valid && !reg.bits.executing && !reg.bits.done && !isKilledByBranch)
   io.reqOutgoing.bits := reg.bits
   io.reqOutgoing.bits.reqBufferIdx := idx.U
+  io.reqOutgoing.bits.brMask := reg.bits.brMask
   when(reg.valid && io.reqOutgoing.fire() && (reg.bits.addressIsPhysical || io.fromVTlb.bits.hit)){
     reg.bits.executing := true.B
   }
   when(io.wbBypassQuery.valid && lineAddress(io.wbBypassQuery.bits) === lineAddress(reg.bits.address) &&
-    !reg.bits.done && reg.valid){
+    !reg.bits.done && reg.valid && !isKilledByBranch){
     io.wbBypassResp.valid := true.B
     io.wbBypassResp.bits := reg.bits
   }
@@ -123,8 +128,11 @@ class LoadBufferEntry(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModules
     reg.bits.executing := false.B
   }
   val commitHit = VecInit(io.fromRob.retireEntries.map{i => i.valid && i.bits.isLoad && i.bits.qEntryIdx === reg.bits.qEntryIdx}).asUInt().orR()
-  when(reg.valid && commitHit){
+  when(reg.valid && commitHit && !isKilledByBranch){
     assert(Mux(reg.valid, reg.bits.done, true.B))
+    reg.valid := false.B
+  }
+  when(reg.valid && isKilledByBranch){
     reg.valid := false.B
   }
 }

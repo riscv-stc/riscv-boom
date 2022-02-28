@@ -5,7 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import boom.common._
 import boom.exu.{CommitSignals, RegisterFileWritePort}
-import boom.util.{IsOlder, WrapInc}
+import boom.util.{IsOlder, UpdateBrMask, WrapInc, maskMatch}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.tile._
@@ -13,6 +13,7 @@ import freechips.rocketchip.tile._
 /** This module handle address check and allocate idle or merge mshrs. */
 class VStQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val io = IO(new Bundle{
+    val brUpdate = Input(new BranchUpdateInfo(ap))
     /** Vector uop from dispatch stage. */
     val vuopDis: Vec[ValidIO[VLSMicroOP]] = Flipped(Vec(ap.coreWidth, Valid(new VLSMicroOP(ap))))
     /** Vector uop from register-read stage. */
@@ -68,6 +69,7 @@ class VStQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     e.io.headPtr := headPtr
     e.io.tailPtr := tailPtr
     e.io.nonUnitStrideOHs := nonUnitStrideOHs.asUInt()
+    e.io.brUpdate := io.brUpdate
     e
   }
   (vstReqArb.io.inputReq zip reqCandidates).foreach { case (a, req) => a <> req }
@@ -139,6 +141,7 @@ class VStQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
 
 class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   val io = IO(new Bundle{
+    val brUpdate = Input(new BranchUpdateInfo(ap))
     val entryId: UInt = Output(UInt(ap.nVStQIndexBits.W))
     val vuopDis = Flipped(Valid(new VLSMicroOP(ap)))
     val vuopRR = Flipped(Valid(new VLSMicroOP(ap)))
@@ -195,6 +198,8 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   requestSplitter.io.reg := reg.bits
   io.uReq.bits := requestSplitter.io.uReq.bits
 
+  val isKilledByBranch = IsKilledByBranch(io.brUpdate, reg.bits.brMask)
+  io.allDone := reg.bits.allSucceeded
   when(state === sIdle){
     when(io.vuopDis.valid){
       reg.bits.addr := 0.U
@@ -206,9 +211,11 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.pRegVec := io.vuopDis.bits.vpdst
       reg.bits.segmentCount := Mux(io.vuopDis.bits.uCtrlSig.accessStyle.isIndexed, io.vuopDis.bits.uCtrlSig.accessStyle.fieldIdx, 0.U)
       //reg.bits.totalSegments := snippetInitializer.io.totalSegment
+      reg.bits.brMask := GetNewBranchMask(io.brUpdate, io.vuopDis.bits.brMask)
       state := sWaitRs
     }
   }.elsewhen(state === sWaitRs){
+    val isKilledByBranch = maskMatch(io.brUpdate.b1.mispredictMask, reg.bits.brMask)
     when(io.vuopRR.valid){
       reg.bits.addr := io.vuopRR.bits.rs1
       reg.bits.preAddr := io.vuopRR.bits.rs1
@@ -227,6 +234,7 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
         })
       reg.bits.finishMasks := adjustedSnippet
       reg.bits.tlbMasks := adjustedSnippet
+      reg.bits.brMask := GetNewBranchMask(io.brUpdate, io.vuopRR.bits.brMask)
 
       state := sSplitting
     }
@@ -270,7 +278,6 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       state := sWaitRetire
     }
   }.elsewhen(state === sWaitRetire){
-    io.allDone := reg.bits.allSucceeded
     assert(io.allDone, "\n Must done all when waiting retire!\n")
     when(io.retire){
       state := sIdle
@@ -280,4 +287,9 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     io.fromVTLB.bits.hit && !io.fromVTLB.bits.exception && io.fromVTLB.bits.queueIdx === id.U){
     reg.bits.tlbMasks(io.fromVTLB.bits.segmentIdx) := reg.bits.tlbMasks(io.fromVTLB.bits.segmentIdx) | io.fromVTLB.bits.snippet
   }
+  when(state =/= sIdle && isKilledByBranch){
+    state := sIdle
+    reg.bits.allSucceeded := true.B
+  }
+  when(io.vuopDis.valid){assert(state === sIdle, "allocating a busy entry!")}
 }

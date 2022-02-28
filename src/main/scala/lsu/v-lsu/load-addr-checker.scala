@@ -9,6 +9,7 @@ import boom.util.WrapInc
  * If hit scalar dcache, pass data to wb-controller. */
 class VectorLoadAddressChecker(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val io = IO(new Bundle {
+    val brUpdate = Input(new BranchUpdateInfo(ap))
     /** Receive processing address from lmshrs */
     val lmshrStatus: Vec[ValidIO[UInt]] = Flipped(Vec(ap.nLmshrs, Valid(UInt(ap.coreMaxAddrBits.W))))
     /** requests from req-buffer winner. */
@@ -51,6 +52,7 @@ class VectorLoadAddressChecker(ap: VLSUArchitecturalParams) extends VLSUModules(
   when(io.reqIncoming.valid && takeIn){
     reg.valid := true.B
     reg.bits := io.reqIncoming.bits
+    reg.bits.brMask := GetNewBranchMask(io.brUpdate, io.reqIncoming.bits.brMask)
     reg.bits.address := newAddr
   }
   /** addr in reg should not hit any busy mshr. */

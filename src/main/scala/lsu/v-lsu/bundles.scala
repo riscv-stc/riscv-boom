@@ -86,6 +86,8 @@ class LoadStoreQueueEntryBundleBase(ap: VLSUArchitecturalParams) extends VLSUBun
   val committed: Bool = Bool()
   /** Indicates which byte has been translated to paddr. All one means can clear busy. */
   val tlbMasks: Vec[UInt] = Vec(8, UInt(ap.vLenb.W))
+
+  val brMask: UInt = UInt(ap.maxBrCount.W)
 }
 
 
@@ -102,6 +104,7 @@ class VLSMicroOP(ap: VLSUArchitecturalParams) extends VLSUBundle(ap) {
   val vm: UInt = UInt(ap.vLen.W)
   val vpdst: Vec[UInt] = Vec(8, UInt(ap.vpregSz.W))
   val staleRegIdxes: Vec[UInt] = Vec(8, UInt(ap.vpregSz.W))
+  val brMask: UInt = UInt(ap.maxBrCount.W)
 }
 
 class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
@@ -133,6 +136,7 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   /** This store request is committed in ROB. Which means it can be issued to memory. */
   val committed: Bool = Bool()
 
+  val brMask: UInt = UInt(ap.maxBrCount.W)
   def UnitStrideSnippetsCalculator(offset: UInt): (UInt, UInt, UInt) = {
     val offsetLeft = ap.cacheLineByteSize.U - offset
     val head = Wire(UInt(ap.vLenb.W))
@@ -400,6 +404,8 @@ class VStRequest(ap: VLSUArchitecturalParams) extends VecRequest(ap){
 
 /** Top io bundle. */
 class VLSUTopBundle(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
+
+  val brUpdate = Input(new BranchUpdateInfo(ap))
   /** VRFIO */
   val toVrf: VLSUVRFIO = new VLSUVRFIO(ap)
   val fromVrf: VRFVLSUIO = new VRFVLSUIO(ap)
@@ -511,4 +517,21 @@ class AddressCheckerResp(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
 class SMSHRStatus(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val awaiting = Bool()
   val addr = UInt(ap.coreMaxAddrBits.W)
+}
+
+/** import from boom core pipeline. [[boom.exu.BrUpdateMasks]] */
+class BranchUpdateMasks(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
+  val resolveMask = UInt(ap.maxBrCount.W)
+  val mispredictMask = UInt(ap.maxBrCount.W)
+}
+/** import [[boom.exu.BrResolutionInfo]] */
+class BranchResolutionInfo(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
+  val vLdqIdx = UInt(ap.nVLdQIndexBits.W)
+  val vStqIdx = UInt(ap.nVStQIndexBits.W)
+  val mispredicted = Bool()
+}
+/** import [[boom.exu.BrUpdateInfo]] */
+class BranchUpdateInfo(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
+  val b1 = new BranchUpdateMasks(ap)
+  val b2 = new BranchResolutionInfo(ap)
 }

@@ -8,6 +8,7 @@ import boom.common._
 
 class StoreRequestBuffer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val io = IO(new Bundle{
+    val brUpdate = Input(new BranchUpdateInfo(ap))
     val reqIncoming = Flipped(Vec(ap.coreWidth, Decoupled(new VStRequest(ap))))
     val reqOutgoing = Decoupled(new VStRequest(ap))
     val vtlbReq = Decoupled(new VTLBReq(ap))
@@ -35,6 +36,7 @@ class StoreRequestBuffer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     e.io.dataAccomplished := io.dataAccomplished
     e.io.fromVTlb := io.vtlbResp
     e.io.fromRob := io.fromRob
+    e.io.brUpdate := io.brUpdate
   }
   (io.reqIncoming.map(_.ready) zip idleEntryIdxes.map(_.valid)) foreach { case (r, v) =>
     r := v
@@ -58,6 +60,7 @@ class StoreRequestBuffer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
 
 class StoreBufferEntry(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModules(ap){
   val io = IO(new Bundle{
+    val brUpdate = Input(new BranchUpdateInfo(ap))
     val reqIncoming = Flipped(Valid(new VStRequest(ap)))
     val reqOutgoing = DecoupledIO(new VStRequest(ap))
     val toVTlb = DecoupledIO(new VTLBReq(ap))
@@ -75,6 +78,7 @@ class StoreBufferEntry(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModule
   io.toVTlb.bits := 0.U.asTypeOf(new VTLBReq(ap))
 
   val reg = RegInit(0.U.asTypeOf(Valid(new VStRequest(ap))))
+  val isKilledByBranch = IsKilledByBranch(io.brUpdate, reg.bits.brMask)
   io.status := reg
   io.reqOutgoing.valid := false.B
   io.reqOutgoing.bits := reg.bits
@@ -82,13 +86,14 @@ class StoreBufferEntry(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModule
     assert(!reg.valid, s"Entry ${idx} should be idle when allocating new request.")
     reg.valid := true.B
     reg.bits := io.reqIncoming.bits
+    reg.bits.brMask := GetNewBranchMask(io.brUpdate, io.reqIncoming.bits.brMask)
     reg.bits.reqBufferIdx := idx.U
   }
   when(VecInit(io.fromRob.retireEntries.map(r =>
     r.valid && r.bits.qEntryIdx === reg.bits.qEntryIdx && r.bits.isStore)).asUInt().orR()){
     reg.bits.committed := true.B
   }
-  when(reg.valid){
+  when(reg.valid && !isKilledByBranch){
     when(!reg.bits.addressIsPhysical){
       io.toVTlb.valid := true.B
       io.toVTlb.bits.vaddr := reg.bits.address
@@ -112,5 +117,8 @@ class StoreBufferEntry(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModule
   when(io.fromVTlb.valid && (io.fromVTlb.bits.reqBufferIdx === idx.U) && io.fromVTlb.bits.hit && !io.fromVTlb.bits.exception){
     reg.bits.address := io.fromVTlb.bits.paddr
     reg.bits.addressIsPhysical := true.B
+  }
+  when(reg.valid && isKilledByBranch){
+    reg.valid := false.B
   }
 }

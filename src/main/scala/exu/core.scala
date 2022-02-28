@@ -339,6 +339,13 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     vlsuIO.fromRr.vuop(1).bits.vs2 := v_pipeline.io.toVlsuRr.bits.rs3_data  //for indexed load/stores
     vlsuIO.fromRr.vuop(1).bits.vm := v_pipeline.io.toVlsuRr.bits.rvmFull
     vlsuIO.vrfBusyStatus := v_rename_stage.io.vbusy_status
+
+    vlsuIO.brUpdate.b1.resolveMask := brupdate.b1.resolve_mask
+    vlsuIO.brUpdate.b1.mispredictMask := brupdate.b1.mispredict_mask
+
+    vlsuIO.brUpdate.b2.mispredicted := brupdate.b2.mispredict && brupdate.b2.uop.is_rvv
+    vlsuIO.brUpdate.b2.vStqIdx := brupdate.b2.uop.stq_idx
+    vlsuIO.brUpdate.b2.vLdqIdx := brupdate.b2.uop.ldq_idx
   }
 
   //-------------------------------------------------------------
@@ -2336,6 +2343,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     vuop.vm := 0.U
     vuop.vpdst := Mux(uop.uses_ldq, VecInit(uop.pvd.map(_.bits)), VecInit(uop.stale_pvd.map(_.bits)))
     vuop.staleRegIdxes := VecInit(uop.stale_pvd.map(_.bits))
+    vuop.brMask := uop.br_mask
     vuop
   }
 }

@@ -7,6 +7,7 @@ import freechips.rocketchip.tilelink._
 /** This file holds all mshrs and arb them to tilelink IO and write back controller. */
 class MSHRFile(ap: VLSUArchitecturalParams) extends VLSUModules(ap) {
   val io = IO(new Bundle{
+    val brUpdate = Input(new BranchUpdateInfo(ap))
     val lmshrStatus: Vec[ValidIO[UInt]] = Vec(ap.nLmshrs, Valid(UInt(ap.coreMaxAddrBits.W)))
     val lmshrAllocateReq: Vec[ValidIO[VLdRequest]] = Flipped(Vec(ap.nLmshrs, Valid(new VLdRequest(ap))))
     val smshrStatus: Vec[ValidIO[SMSHRStatus]] = Vec(ap.nSmshrs, Valid(new SMSHRStatus(ap)))
@@ -24,6 +25,7 @@ class MSHRFile(ap: VLSUArchitecturalParams) extends VLSUModules(ap) {
 
   val lmshrs: Seq[LMSHR] = Seq.tabulate(ap.nLmshrs){ i =>
     val mshr = Module(new LMSHR(ap, i))
+    mshr.io.brUpdate := io.brUpdate
     mshr.io.vLdReq <> io.lmshrAllocateReq(i)
     tlArbiterA.io.in(i) <> mshr.io.tlOutA
     mshr.io.tlInD <> io.tlInD

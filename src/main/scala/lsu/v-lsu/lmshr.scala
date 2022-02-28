@@ -6,6 +6,7 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink._
 class LMSHR(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModules(ap){
   val io = IO(new Bundle{
+    val brUpdate = Input(new BranchUpdateInfo(ap))
     val vLdReq: ValidIO[VLdRequest] = Flipped(Valid(new VLdRequest(ap)))
     val tlOutA: DecoupledIO[TLBundleA] = Decoupled(new TLBundleA(ap.l2BundleParams))
     val tlInD: DecoupledIO[TLBundleD] = Flipped(Decoupled(new TLBundleD(ap.l2BundleParams)))
@@ -24,13 +25,15 @@ class LMSHR(ap: VLSUArchitecturalParams, idx: Int) extends VLSUModules(ap){
   val sIdle :: sWaitArb :: sWaitData :: sWaitWB :: Nil = Enum(4)
   val state: UInt = RegInit(sIdle)
   val reg = RegInit(0.U.asTypeOf(Valid(new VLdRequest(ap))))
+  val isKilledByBranch = IsKilledByBranch(io.brUpdate, reg.bits.brMask)
   when(state === sIdle){
     when(io.vLdReq.valid){
       reg <> io.vLdReq
+      reg.bits.brMask := GetNewBranchMask(io.brUpdate, io.vLdReq.bits.brMask)
       state := sWaitArb
     }
   }.elsewhen(state === sWaitArb){
-    io.tlOutA.valid := true.B
+    io.tlOutA.valid := true.B && !isKilledByBranch
     io.tlOutA.bits := DontCare
     io.tlOutA.bits := ap.tlEdge.Get(idx.U, lineAddress(reg.bits.address), log2Ceil(ap.cacheLineByteSize).U)._2
     when(io.tlOutA.fire()){

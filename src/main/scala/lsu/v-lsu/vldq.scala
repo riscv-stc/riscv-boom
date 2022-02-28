@@ -2,10 +2,11 @@ package boom.vlsu
 
 import chisel3._
 import chisel3.util._
-import boom.util.{AgePriorityEncoder, IsOlder, WrapInc}
+import boom.util.{AgePriorityEncoder, IsOlder, WrapInc, maskMatch}
 /** vuop should be kept in order from dispatch, they might be flushed after a entry. */
 class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val io = IO(new Bundle{
+    val brUpdate = Input(new BranchUpdateInfo(ap))
     /** Vector uop from dispatch stage. */
     val vuopDis: Vec[ValidIO[VLSMicroOP]] = Flipped(Vec(ap.coreWidth, Valid(new VLSMicroOP(ap))))
     /** Vector uop from register-read stage. */
@@ -80,6 +81,7 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     e.io.vrfReadResp := io.vrfReadResp
     vrfWriteArb.io.in(i) <> e.io.vrfWriteReq
     e.io.vrfBusyStatus := io.vrfBusyStatus
+    e.io.brUpdate := io.brUpdate
     e
   }
   io.vrfReadReq <> vrfReadArb.io.out
@@ -166,6 +168,7 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
 /** Hold vuop and split it into individual cache line load requests. */
 class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   val io = IO(new Bundle{
+    val brUpdate = Input(new BranchUpdateInfo(ap))
     val entryId: UInt = Output(UInt(ap.nVLdQIndexBits.W))
     /** Arrived vuop from register-read stage. */
     val vuopRR: ValidIO[VLSMicroOP] = Flipped(Valid(new VLSMicroOP(ap)))
@@ -198,7 +201,6 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   io.robAck.bits := 0.U
   io.wakeUp.valid := false.B
   io.wakeUp.bits := 0.U
-  io.allDone := false.B
   io.vrfReadReq.valid := false.B
   io.vrfReadReq.bits := 0.U.asTypeOf(new VLSUReadVRFReq(ap))
   io.vrfWriteReq.valid := false.B
@@ -210,6 +212,10 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
 
   val sIdle :: sWaitRs :: sCopyStale :: sSplitting :: sWaitData :: sAllDone :: sWaitRetire :: Nil = Enum(7)
   val state: UInt = RegInit(sIdle)
+  val isKilledByBranch = IsKilledByBranch(io.brUpdate, reg.bits.brMask)
+  val isIdle = state === sIdle
+  /** Indicates this entry can be dequeued. */
+  io.allDone := isIdle && (reg.bits.allSucceeded || isKilledByBranch)
 
   val isUnitStride = reg.bits.style.isUnitStride
   val isSegment = reg.bits.style.isSegment
@@ -237,7 +243,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   requestSplitter.io.reg := reg.bits
   io.uReq.bits := requestSplitter.io.uReq.bits
   // Claim a new entry when dispatch.
-  when(state === sIdle){
+  when(isIdle){
     when(io.vuopDis.valid){
       // Dispatch claims us a entry, need init and wait for rs(address).
       reg.bits.addr := 0.U
@@ -254,6 +260,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.reqCount := 0.U
       reg.bits.segmentCount := Mux(io.vuopDis.bits.uCtrlSig.accessStyle.isIndexed, io.vuopDis.bits.uCtrlSig.accessStyle.fieldIdx, 0.U)
       //reg.bits.totalSegments := snippetInitializer.io.totalSegment
+      reg.bits.brMask := GetNewBranchMask(io.brUpdate, io.vuopDis.bits.brMask)
       state := sWaitRs
     }
   }.elsewhen(state === sWaitRs){// Data is ready, start split
@@ -263,6 +270,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       val offset: UInt = io.vuopRR.bits.rs1(ap.offsetBits - 1, 0)
       val alignedAddr: Bool = offset === 0.U
       val isUnitStride = reg.bits.style.isUnitStride || reg.bits.style.isWholeAccess
+      reg.bits.brMask := GetNewBranchMask(io.brUpdate, io.vuopRR.bits.brMask)
       reg.bits.wakeUpVec := VecInit(vlAdjust.io.wakeVecInit.asBools())
       reg.bits.totalSegments := vlAdjust.io.totalSegment
       reg.bits.totalReq := Mux(alignedAddr && isUnitStride, (ap.maxReqsInUnitStride - 1).U, vlAdjust.io.totalRequest)
@@ -336,7 +344,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       fieldCounter := 0.U
     }
   }.elsewhen(state === sSplitting){
-    io.uReq.valid := requestSplitter.io.uReq.valid && !freeze
+    io.uReq.valid := requestSplitter.io.uReq.valid && !freeze && !isKilledByBranch
     io.uReq.bits := requestSplitter.io.uReq.bits
     /** Ready is true only when valid is true, but unnecessary request does not trigger valid. Both shift to next. */
     val nextSplit: Bool = (io.uReq.ready || !io.uReq.valid) && !freeze
@@ -376,7 +384,6 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     when(allFinished){
       io.robAck.valid := true.B
       io.robAck.bits := reg.bits.robIndex
-      reg.bits.allSucceeded := true.B
       when(io.robAck.fire()){
         state := sWaitRetire
       }
@@ -386,8 +393,13 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     // If there is a order fail, pipeline has to be flushed.
     when(VecInit(io.fromRob.retireEntries.map{i => i.valid && i.bits.isLoad && i.bits.qEntryIdx === id.U}).asUInt().orR()){
       state := sIdle
-      io.allDone := reg.bits.allSucceeded
+      reg.bits.allSucceeded := true.B
       reg.valid := false.B
     }
   }
+  when(state =/= sIdle && isKilledByBranch){
+    state := sIdle
+    reg.bits.allSucceeded := true.B
+  }
+  when(io.vuopDis.valid) {assert(isIdle, "allocating a busy entry!")}
 }

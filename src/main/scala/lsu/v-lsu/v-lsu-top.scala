@@ -46,6 +46,7 @@ class VLSUImp(outer: VLSU,
   io.wakeUpVReg <> vldqHandler.io.wakeUp
   vldqHandler.io.vrfReadResp := io.fromVrf.readResp
   vldqHandler.io.vrfBusyStatus := io.vrfBusyStatus
+  vldqHandler.io.brUpdate := io.brUpdate
 
   val vstqHandler = Module(new VStQueueHandler(ap))
   vstqHandler.io.vuopDis <> io.fromDis.vuopDis
@@ -54,11 +55,13 @@ class VLSUImp(outer: VLSU,
   io.toDis.disVStQIdx := vstqHandler.io.disVStQIdx
   io.stToRob <> vstqHandler.io.toRob
   vstqHandler.io.fromRob := io.fromRob
+  vstqHandler.io.brUpdate := io.brUpdate
   //________________________________________________________________________________//
   //-------------------------------Address-Read-------------------------------------//
   val loadReqBuffer = Module(new LoadRequestBuffer(ap))
   loadReqBuffer.io.reqIncoming <> vldqHandler.io.vldReq
   loadReqBuffer.io.fromRob := io.fromRob
+  loadReqBuffer.io.brUpdate := io.brUpdate
 
   val storeReqBuffer = Module(new StoreRequestBuffer(ap))
   storeReqBuffer.io.reqIncoming <> vstqHandler.io.vstReq
@@ -67,6 +70,7 @@ class VLSUImp(outer: VLSU,
   io.toVrf.readReq.valid := storeReqBuffer.io.vrfReadReq.valid || vldqHandler.io.vrfReadReq.valid
   io.toVrf.readReq.bits := Mux(storeReqBuffer.io.vrfReadReq.valid, storeReqBuffer.io.vrfReadReq.bits, vldqHandler.io.vrfReadReq.bits)
   vldqHandler.io.vrfReadReq.ready := !storeReqBuffer.io.vrfReadReq.valid
+  storeReqBuffer.io.brUpdate := io.brUpdate
 
   val vtlb = Module(new VTLB(ap))
   vtlb.io.req(0) <> loadReqBuffer.io.vtlbReq
@@ -79,6 +83,7 @@ class VLSUImp(outer: VLSU,
   val loadAddrChecker = Module(new VectorLoadAddressChecker(ap))
   loadAddrChecker.io.vtlbResp <> vtlb.io.resp(0)
   loadAddrChecker.io.reqIncoming <> loadReqBuffer.io.reqOutgoing
+  loadAddrChecker.io.brUpdate := io.brUpdate
 
   val storeAddrChecker = Module(new VectorStoreAddressChecker(ap))
   storeAddrChecker.io.vtlbResp <> vtlb.io.resp(0)
@@ -88,6 +93,7 @@ class VLSUImp(outer: VLSU,
   val mshrFile = Module(new MSHRFile(ap))
   mshrFile.io.lmshrAllocateReq <> loadAddrChecker.io.mshrAllocate
   mshrFile.io.smshrAllocateReq <> storeAddrChecker.io.mshrAllocate
+  mshrFile.io.brUpdate := io.brUpdate
   tlOut.a <> mshrFile.io.tlOutA
   mshrFile.io.tlInD <> tlOut.d
   loadAddrChecker.io.lmshrStatus <> mshrFile.io.lmshrStatus

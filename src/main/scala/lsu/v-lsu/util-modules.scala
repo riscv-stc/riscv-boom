@@ -5,6 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util._
 import boom.common._
+import boom.util.maskMatch
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMasterPortParameters}
 
@@ -534,5 +535,16 @@ class RequestSplitter(ap: VLSUArchitecturalParams, isLoad: Boolean, id: Int) ext
     io.uReq.valid := reqNecessary
     io.uReq.bits := req
     io.newSnippet := snippet
+  }
+}
+
+object GetNewBranchMask{
+  def apply(brUpdate: BranchUpdateInfo, brMask: UInt): UInt = {
+    brMask & (~brUpdate.b1.resolveMask).asUInt()
+  }
+}
+object IsKilledByBranch{
+  def apply(brUpdate: BranchUpdateInfo, brMask: UInt) = {
+    maskMatch(brUpdate.b1.mispredictMask, brMask)
   }
 }

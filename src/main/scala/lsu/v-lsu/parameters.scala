@@ -90,4 +90,6 @@ class VLSUArchitecturalParams(gp: VLSUGeneralParams,
   val nLmshrs = gp.nLmshrs
   val nSmshrs = gp.nSmshrs
 
+  val maxBrCount = bp.maxBrCount
+
 }
