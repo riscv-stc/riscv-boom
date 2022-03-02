@@ -185,6 +185,9 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   val vlAdjust = Module(new SnippetInitializer(ap))
   vlAdjust.io.ctrl := io.vuopRR.bits.uCtrlSig.accessStyle
 
+  val indexedFilter = Module(new SnippetIndexedSplitsFilter(ap))
+  indexedFilter.io.ctrl := io.vuopRR.bits.uCtrlSig.accessStyle
+
   /** If the oldest un-commit non-unit-stride is older than us, hang. */
   val oldestNonUnitStrideIdx: ValidIO[UInt] = PickOldest(io.nonUnitStrideOHs, io.headPtr, io.tailPtr, ap.nVStQEntries)
   val freeze = oldestNonUnitStrideIdx.valid && IsOlder(oldestNonUnitStrideIdx.bits, id.U, io.headPtr)
@@ -219,8 +222,8 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.totalReq := Mux(alignedAddr && denseAccess, (ap.maxReqsInUnitStride - 1).U, vlAdjust.io.totalRequest)
       reg.bits.totalSegments := vlAdjust.io.totalSegment
       val adjustedSnippet: Vec[UInt] =
-        VecInit((snippetVMAdjuster.io.adjustedSnippet zip vlAdjust.io.initSnippet).map {case (vm, snippet) =>
-          vm | snippet
+        VecInit((snippetVMAdjuster.io.adjustedSnippet zip vlAdjust.io.initSnippet zip indexedFilter.io.filteredSnippet).map {case ((vm, snippet), filtered) =>
+          vm | snippet | filtered
         })
       reg.bits.finishMasks := adjustedSnippet
       reg.bits.tlbMasks := adjustedSnippet

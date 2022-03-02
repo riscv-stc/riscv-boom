@@ -1270,18 +1270,24 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
   //-------------------------------------------------------------
   // RVV L/S split rules:
-  // 1. No split for unitstride even lmul is larger than 1;
-  // 2. Split constantstride and indexed when lmul is larger than 1 according to this lmul.
-  // 3. Split and convert segment unitstride/constantstride into constantstride according to nf.
-  // 4. Split and convert segment indexed into indexed according to nf.
+  // 1. No split for unitstride even lmul is larger than 1; (Done)
+  // 2. Split constantstride and indexed when lmul is larger than 1 according to this lmul. (@Todo)
+  // 3. Split and convert segment unitstride/constantstride into constantstride according to nf. (@Todo)
+  // 4. Split and convert segment indexed into indexed according to nf. (@Todo)
+  // 5. Split indexed when vs2_emul(index) is larger than one. Split according to vs2_emul.
   if (usingVector) {
     for (w <- 0 until coreWidth) {
       val dis_split_segf = RegInit(0.U(3.W))
-      val lmulLargerThanOne = !disUops(w).vd_emul(2) && disUops(w).vd_emul(1,0) =/= 0.U
+      val lmulLargerThanOneIndex = !disUops(w).vs2_emul(2) && disUops(w).vs2_emul(1,0) =/= 0.U
+      val splitIndexed = disUops(w).v_idx_ls && lmulLargerThanOneIndex
       val vseg_ls = disUops(w).is_rvv && disUops(w).v_seg_nf > 1.U
       /** Indeicates if this uop needs to split according to lmul */
-      val splitLmul = lmulLargerThanOne && disUops(w).v_idx_ls // @todo not considering seg and constant stride that need to split
-      val splitLmulLast: Bool = (dis_split_segf + 1.U(4.W)) === (1.U << disUops(w).vd_emul(1,0))
+      val splitLmul = splitIndexed // @todo not considering seg and constant stride that need to split
+      val totalSplits = 1.U << disUops(w).vs2_emul(1,0)
+      when(disUops(w).v_idx_ls){
+        assert(disUops(w).vs2_eew + disUops(w).vd_emul === disUops(w).vs2_emul + disUops(w).vd_eew, "data index mismatch.")
+      }
+      val splitLmulLast: Bool = (dis_split_segf + 1.U(4.W)) === totalSplits
       val isSplitLast = Mux(splitLmul, splitLmulLast, Mux(vseg_ls, dis_split_segf + 1.U(4.W) === disUops(w).v_seg_nf, true.B))
       val needSplitDis = splitLmul || vseg_ls
       when (io.ifu.redirect_flush) {
@@ -1299,6 +1305,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       disFire(w)    := disValids(w) && !dis_stalls(w)
       dis_fire_fb(w) := disFire(w) && (!dis_split_cand(w) || dis_split_last(w))
       when (dis_split_cand(w) && disValids(w)) {
+        // This means fieldIdx of index NOT data due to possible ew mismatch between them.
         when (needSplitDis) { disUops(w).v_seg_f := dis_split_segf }
       }
       disUops(w).v_split_last  := dis_split_last(w)
@@ -2317,6 +2324,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     vuop.uCtrlSig.accessStyle.vStart := uop.vstart
     vuop.uCtrlSig.accessStyle.vl := uop.vconfig.vl
     vuop.uCtrlSig.accessStyle.vlmul := uop.vd_emul
+    vuop.uCtrlSig.accessStyle.indexLmul := uop.vs2_emul
     vuop.uCtrlSig.accessStyle.nf := uop.v_seg_nf
     vuop.uCtrlSig.accessStyle.fieldIdx := uop.v_seg_f
     vuop.uCtrlSig.accessStyle.vma := uop.vconfig.vtype.vma

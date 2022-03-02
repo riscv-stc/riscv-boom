@@ -225,6 +225,9 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   val vlAdjust = Module(new SnippetInitializer(ap))
   vlAdjust.io.ctrl := io.vuopRR.bits.uCtrlSig.accessStyle
 
+  val indexedFilter = Module(new SnippetIndexedSplitsFilter(ap))
+  indexedFilter.io.ctrl := io.vuopRR.bits.uCtrlSig.accessStyle
+
   /** If the oldest un-commit non-unit-stride is older than us, hang. */
   val oldestNonUnitStrideIdx: ValidIO[UInt] = PickOldest(io.nonUnitStrideOHs, io.headPtr, io.tailPtr, ap.nVLdQEntries)
   val freeze = oldestNonUnitStrideIdx.valid && IsOlder(AgePriorityEncoder(io.nonUnitStrideOHs.asBools(), io.headPtr),
@@ -269,8 +272,8 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.rs2 := io.vuopRR.bits.rs2
       reg.bits.staleRegIdxVec := io.vuopRR.bits.staleRegIdxes
       reg.bits.finishMasks :=
-        (snippetVMAdjuster.io.adjustedSnippet zip vlAdjust.io.initSnippet).map {case (vm, snippet) =>
-           vm | snippet
+        (snippetVMAdjuster.io.adjustedSnippet zip vlAdjust.io.initSnippet).zip(indexedFilter.io.filteredSnippet).map {case ((vm, snippet), filtered) =>
+           vm | snippet | filtered
         }
       val needFetchTail = !io.vuopRR.bits.uCtrlSig.accessStyle.vta
       val needFetchMask = !io.vuopRR.bits.uCtrlSig.accessStyle.vma
@@ -283,10 +286,21 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       }
     }
   }.elsewhen(state === sCopyStale){
-    // for indexed, start from is split reg idx.
-    val startRegIdx = Mux(isIndexed, reg.bits.segmentCount, 0.U)
+    val indexEew = reg.bits.style.indexEew
+    val dataEew = reg.bits.style.dataEew
+    val largerData = dataEew > indexEew
+    val dataExpandRate = dataEew - indexEew
+    val largerIndex = indexEew > dataEew
+    val dataShrinkRate = indexEew - dataEew
+    val equal = indexEew === dataEew
+    val indexSegIdx = reg.bits.style.fieldIdx
+    /** Indicates how many data Regs are affected by this split of vs2. */
+    val nActiveDataRegs = Mux(largerIndex || equal, 1.U, dataExpandRate)
+    val startDataRegIdx = Mux(largerIndex, (indexSegIdx >> dataShrinkRate).asUInt(),
+                          Mux(equal, indexSegIdx, (indexSegIdx << dataExpandRate).asUInt()))
+    val startRegIdx = Mux(isIndexed, startDataRegIdx, 0.U)
     val fieldCounter = RegInit(0.U(4.W))
-    val endRegIdx = Mux(isIndexed, reg.bits.segmentCount + 1.U, Mux(reg.bits.style.vlmul(2), 1.U, (1.U << reg.bits.style.vlmul(1,0)).asUInt()))
+    val endRegIdx = Mux(isIndexed, startRegIdx + nActiveDataRegs, Mux(reg.bits.style.vlmul(2), 1.U, (1.U << reg.bits.style.vlmul(1,0)).asUInt()))
     val staleDataReg = RegInit(0.U.asTypeOf(Valid(UInt(ap.vLen.W))))
     val activeRegIdx = fieldCounter + startRegIdx
     val requestingRegIdx = reg.bits.staleRegIdxVec(activeRegIdx)
@@ -299,10 +313,19 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       staleDataReg.valid := true.B
       staleDataReg.bits := io.vrfReadResp.bits.data
     }
+    val affectPartialDataReg = isIndexed && largerIndex
+    val shrinkHalf = dataShrinkRate === 1.U
+    val shrinkQuarter = dataShrinkRate === 2.U
+    val shrinkOctant = dataShrinkRate === 3.U
+    val partialMaskHalf = VecInit(UIntToOH(indexSegIdx(0), 2).asBools().map(b => Fill(ap.vLenb/2, b))).asUInt()
+    val partialMaskQuarter = VecInit(UIntToOH(indexSegIdx(1,0), 4).asBools().map(b => Fill(ap.vLenb/4, b))).asUInt()
+    val partialMaskOctant = VecInit(UIntToOH(indexSegIdx, 8).asBools().map(b => Fill(ap.vLenb/8, b))).asUInt()
+    val partialMask: UInt = Mux(shrinkHalf, partialMaskHalf, Mux(shrinkQuarter, partialMaskQuarter, partialMaskOctant))
+    val staleActiveMask = Mux(affectPartialDataReg, partialMask, Fill(ap.vLenb, 1.U(1.W)))
     io.vrfWriteReq.valid := staleDataReg.valid
     io.vrfWriteReq.bits.addr := reg.bits.pRegVec(activeRegIdx)
     io.vrfWriteReq.bits.data := staleDataReg.bits
-    io.vrfWriteReq.bits.byteMask := Fill(ap.vLenb, 1.U(1.W))
+    io.vrfWriteReq.bits.byteMask := staleActiveMask
     when(io.vrfWriteReq.fire()){
       fieldCounter := fieldCounter + 1.U
       staleDataReg.valid := false.B

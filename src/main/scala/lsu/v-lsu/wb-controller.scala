@@ -10,8 +10,6 @@ class WriteBackController(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     val toVRF: ValidIO[VLSUWriteVRFReq] = Valid(new VLSUWriteVRFReq(ap))
     /** Query req buffer with memory addr that we gonna write back. */
     val wbBypassQuery: ValidIO[UInt] = Valid(UInt(ap.coreMaxAddrBits.W))
-    /** Vec input is to detect order fail. */
-    val wbBypassResp: Vec[ValidIO[VLdRequest]] = Flipped(Vec(ap.nVLdReqBuffEntries, Valid(new VLdRequest(ap))))
     /** Tell vldq handler which entry has partly finished. */
     val finishAck: ValidIO[VLdRequest] = Valid(new VLdRequest(ap))
     /** Tell req buffer which entry has finished. */
@@ -19,6 +17,9 @@ class WriteBackController(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
 
     /** Data path for queue entry writing stale data for undisturbed load. */
     val wbReqFromQEntry = Flipped(Decoupled(new VLSUWriteVRFReq(ap)))
+
+    /** Vec input is to detect order fail. */
+    val wbBypassResp: Vec[ValidIO[VLdRequest]] = Flipped(Vec(ap.nVLdReqBuffEntries, Valid(new VLdRequest(ap))))
   })
 
   val sIdle :: sNormalWB :: sBypassWB :: Nil = Enum(3)
@@ -68,9 +69,9 @@ class WriteBackController(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     io.wbBypassQuery.bits := reg.bits.req.address
     io.toVRF.valid := hasBypassChance
     awaitingVLDReq := io.wbBypassResp(bypassWBIdx).bits
-    io.finishAck.valid := true.B
+    io.finishAck.valid := hasBypassChance
     io.finishAck.bits := io.wbBypassResp(bypassWBIdx).bits
-    io.reqWBDone.valid := true.B
+    io.reqWBDone.valid := hasBypassChance
     io.reqWBDone.bits := bypassWBIdx
     when(!hasBypassChance){
       state := sIdle

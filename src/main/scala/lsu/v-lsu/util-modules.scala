@@ -299,7 +299,7 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   /** Indicates if this vlen is valid under current vlmul. parameter is segment index. */
   val lmulVld: Int => Bool = (pregIdx: Int) => pregIdx.U < (1.U << lmul).asUInt()
   /** For indexed ls, true when input equals to fieldIdx */
-  val indexedFieldVld: Int => Bool = (pregIdx: Int) => Mux(isIndexed, pregIdx.U === fieldIdx, true.B)
+  //val indexedFieldVld: Int => Bool = (pregIdx: Int) => Mux(isIndexed, pregIdx.U === fieldIdx, true.B)
   /** end byte index of vl */
   val endBytevl = (io.ctrl.vl * elementBytes).asUInt()
   /** Calculate end byte index of this vlen when is in one register group. parameter is segment index. */
@@ -333,7 +333,7 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     val idxMod4: Int = i % 4
     val idxMod2: Int = i % 2
     // whole access consider lmul which is decided in decode stage. not vl from the rvv spec.
-    out := Mux(io.ctrl.isWholeAccess && lmulVld(i), 0.U, Mux(!isSegment && lmulVld(i) && indexedFieldVld(i), snippetX(i),
+    out := Mux(io.ctrl.isWholeAccess && lmulVld(i), 0.U, Mux(!isSegment && lmulVld(i), snippetX(i),
       Mux(isSegment && lmul1 && segmentVld(i), snippet,
         Mux(isSegment && lmul2 && segmentVld(i), snippetX(idxMod2),
           Mux(isSegment && lmul4 && segmentVld(i), snippetX(idxMod4),
@@ -343,9 +343,72 @@ class SnippetInitializer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   io.totalSegment := Mux(isSegment, lmulValue * nFields,
                         Mux(isIndexed, fieldIdx + 1.U, lmulValue))
   val denseAccess = (io.ctrl.isUnitStride && !isSegment) || io.ctrl.isWholeAccess
-  io.totalRequest := Mux(denseAccess, ap.maxReqsInUnitStride.U, (ap.vLenb.U >> io.ctrl.dataEew).asUInt())
-  val wakeRegIdxIndexed = UIntToOH(fieldIdx, 8)
+  io.totalRequest := Mux(denseAccess, ap.maxReqsInUnitStride.U, Mux(isIndexed, ap.vLenb.U >> io.ctrl.indexEew, ap.vLenb.U >> io.ctrl.dataEew))
+
+  val indexEew = io.ctrl.indexEew
+  val dataEew = io.ctrl.dataEew
+  val largerData = dataEew > indexEew
+  val dataExpandRate = dataEew - indexEew
+  val largerIndex = indexEew > dataEew
+  val dataShrinkRate = indexEew - dataEew
+  val equal = indexEew === dataEew
+  val affectMultiReg = largerData
+
+  val shrinkHalf = dataShrinkRate === 1.U
+  val shrinkQuarter = dataShrinkRate === 2.U
+  val shrinkOctant = dataShrinkRate === 3.U
+  val wakeVecShrink: UInt = UIntToOH((fieldIdx >> dataShrinkRate).asUInt(), 8)
+  val expandDouble = dataExpandRate === 1.U
+  val expandQuarter = dataExpandRate === 2.U
+  val expandOctuple = dataExpandRate === 3.U
+  val wakeVecExpand: UInt = Mux(expandOctuple, 0xff.U,
+    Mux(expandQuarter, 0xf.U << (4.U * fieldIdx), 0x3.U << (2.U * fieldIdx))).asUInt()
+
+  val wakeRegIdxIndexed = Mux(equal, UIntToOH(fieldIdx, 8), Mux(largerData, wakeVecExpand, wakeVecShrink))
   io.wakeVecInit := Mux(isIndexed, wakeRegIdxIndexed, Mux(lmul1 || lmulSmallerThanOne, 1.U, Mux(lmul2, 3.U, Mux(lmul4, 0xf.U, 0xff.U))))
+}
+/** calculate snippet according index reg idx. */
+class SnippetIndexedSplitsFilter(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
+  val io = IO(new Bundle{
+    val ctrl = Input(new VectorAccessStyle(ap))
+    val filteredSnippet = Output(Vec(8, UInt(ap.vLenb.W)))
+  })
+  val isIndexed = io.ctrl.isIndexed
+  val indexSegIdx = io.ctrl.fieldIdx
+  val indexEew = io.ctrl.indexEew
+  val dataEew = io.ctrl.dataEew
+  val largerData = dataEew > indexEew
+  val dataExpandRate = dataEew - indexEew
+  val largerIndex = indexEew > dataEew
+  val dataShrinkRate = indexEew - dataEew
+  val equal = indexEew === dataEew
+  val affectMultiReg = largerData
+
+  val shrinkHalf = dataShrinkRate === 1.U
+  val shrinkQuarter = dataShrinkRate === 2.U
+  val shrinkOctant = dataShrinkRate === 3.U
+  val expandDouble = dataExpandRate === 1.U
+  val expandQuarter = dataExpandRate === 2.U
+  val expandOctuple = dataExpandRate === 3.U
+  val allOnes = Fill(ap.vLenb, 1.U(1.W))
+
+  val indexOH = UIntToOH(indexSegIdx, 8)
+
+  /** snippet INSIDE picked reg snippet. */
+  val partialMask: UInt = Mux(shrinkHalf, Fill(ap.vLenb/2, 1.U(1.W)) << ((ap.vLenb/2).U * indexSegIdx(0)),
+    Mux(shrinkQuarter, Fill(ap.vLenb/4, 1.U(1.W)) << (ap.vLenb/4).U * indexSegIdx(1,0),
+      Fill(ap.vLenb/8, 1.U(1.W)) << (ap.vLenb/8).U * indexSegIdx(2,0))).asUInt()
+  val wakeVecExpand: UInt = Mux(expandOctuple, 0xff.U,
+    Mux(expandQuarter, 0xf.U << (4.U * indexSegIdx(0)), 0x3.U << (2.U * indexSegIdx(1,0)))).asUInt()
+  val wakeVecShrink: UInt = UIntToOH((indexSegIdx >> dataShrinkRate).asUInt(), 8)
+  io.filteredSnippet.zipWithIndex.foreach{ case (io, regIdx) =>
+    val snippet = Mux(!isIndexed, 0.U,
+      Mux(largerData, Mux(wakeVecExpand(regIdx), 0.U, allOnes),
+      Mux(equal, Mux(wakeVecShrink(regIdx), 0.U, allOnes),
+        Mux(wakeVecShrink(regIdx), ~partialMask, allOnes)
+      )))
+    io := snippet
+  }
 }
 
 /** Construct active snippet for element access according to vm and lmul, nf and new vl. */
@@ -457,9 +520,17 @@ class RequestSplitter(ap: VLSUArchitecturalParams, isLoad: Boolean, id: Int) ext
     io.newAddr := addr
     io.newSnippet := snippet
   }.elsewhen(reg.style.isIndexed){
-    val (reqNecessary, req, snippet) = io.uReq.bits.Indexed(reg.addr,
-      indexEew = reg.style.indexEew, dataEew = reg.style.dataEew, reg.pRegVec(reg.segmentCount),
-      reg.reqCount, reg.segmentCount, reg.preSnippet, reg.vs2,true, reg.finishMasks, id)
+    val (reqNecessary, req, snippet) = io.uReq.bits.Indexed(addr = reg.addr,
+                                                            indexEew = reg.style.indexEew,
+                                                            dataEew = reg.style.dataEew,
+                                                            dstPReg = reg.pRegVec,
+                                                            reqCount = reg.reqCount,
+                                                            indexRegIdx = reg.segmentCount,
+                                                            preSnippet = reg.preSnippet,
+                                                            indexArray = reg.vs2,
+                                                            isLoad = true,
+                                                            initialSnippet = reg.finishMasks,
+                                                            id = id)
     io.uReq.valid := reqNecessary
     io.uReq.bits := req
     io.newSnippet := snippet

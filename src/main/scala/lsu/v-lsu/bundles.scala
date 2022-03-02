@@ -272,7 +272,7 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     out.style.isIndexed := false.B
     out.style.isSegment := false.B
     out.style.isWholeAccess := false.B
-    val elementBytes: UInt = (1.U << dataEew).asUInt()
+    val elementBytes: UInt = (1.U << dataEew(1,0)).asUInt()
     out.style.dataEew := dataEew
     out.style.indexEew := 0.U
     out.segmentIdx := segmentCount(2,0)
@@ -291,9 +291,9 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   def Indexed(addr: UInt,
               indexEew: UInt,
               dataEew: UInt,
-              dstPReg: UInt,
+              dstPReg: Vec[UInt],
               reqCount: UInt,
-              segmentCount: UInt,
+              indexRegIdx: UInt,
               preSnippet: UInt,
               indexArray: UInt, isLoad: Boolean,
               initialSnippet: Vec[UInt],
@@ -312,16 +312,54 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
         out.committed := false.B
         out
       }
-    val index = IndexExtractor(indexArray, indexEew, reqCount)
-    val elementAddr = (addr.asSInt() + index.asSInt()).asUInt()
-    val elementOffset = elementAddr(ap.offsetBits - 1, 0)
-    val elementBytes: UInt = (1.U << dataEew).asUInt()
-    val initSnippet: UInt = (1.U << elementBytes).asUInt() - 1.U
-    val elementSnippet = Mux(reqCount.orR(), (preSnippet << elementBytes).asUInt(), initSnippet)
+    val index: UInt = IndexExtractor(indexArray, indexEew, reqCount)
+    val elementAddr: UInt = (addr.asSInt() + index.asSInt()).asUInt()
+    val elementAddrOffset: UInt = elementAddr(ap.offsetBits - 1, 0)
+    val dataElementBytes: UInt = (1.U << dataEew(1,0)).asUInt()
+    val indexElementBytes: UInt = (1.U << indexEew(1,0)).asUInt()
+    val nElementsPerDataReg: UInt = ap.vLenb.U / dataElementBytes
+    val nElementsPerIndexReg: UInt = ap.vLenb.U / indexElementBytes
+
+    val largerData = dataEew(1,0) > indexEew(1,0)
+    val dataExpandRate = dataEew(1,0) - indexEew(1,0)
+    val largerIndex = indexEew(1,0) > dataEew(1,0)
+    val dataShrinkRate = indexEew(1,0) - dataEew(1,0)
+    val equal = indexEew === dataEew
+    val affectMultiReg = largerData
+
+    val shrinkHalf = dataShrinkRate === 1.U
+    val shrinkQuarter = dataShrinkRate === 2.U
+    val shrinkEighth = dataShrinkRate === 3.U
+    val expandDouble = dataExpandRate === 1.U
+    val expandQuarter = dataExpandRate === 2.U
+    val expandOctuple = dataExpandRate === 3.U
+
+    val dataRegIdxShrink = Mux(shrinkHalf, indexRegIdx(2,1), Mux(shrinkQuarter, indexRegIdx(2), 0.U))
+
+    val dataRegIdxExpandBase: UInt = Mux(expandOctuple, 0.U, Mux(expandDouble, indexRegIdx(1,0) << 1, indexRegIdx(0) << 2)).asUInt()
+    val dataRegIdxExpandOffset: UInt = reqCount / nElementsPerDataReg
+    val dataRegIdxExpand: UInt = dataRegIdxExpandBase + dataRegIdxExpandOffset
+    /** Target reg idx in the group, not idx in vrf. */
+    val dataRegIdx = Mux(equal, indexRegIdx, Mux(largerIndex, dataRegIdxShrink, dataRegIdxExpand))
+
+    val initSnippetEqualExpand: UInt = (1.U << dataElementBytes).asUInt() - 1.U
+    val initSnippetShrinkHalf: UInt = VecInit(UIntToOH(indexRegIdx(0), 2).asBools().map(b =>
+      Mux(b, initSnippetEqualExpand | 0.U((ap.vLenb/2).W), 0.U((ap.vLenb/2).W)))).asUInt()
+    val initSnippetShrinkQuarter: UInt = VecInit(UIntToOH(indexRegIdx(1,0)).asBools().map(b =>
+      Mux(b, initSnippetEqualExpand | 0.U((ap.vLenb/4).W), 0.U((ap.vLenb/4).W)))).asUInt()
+    val initSnippetShrinkEighth: UInt = VecInit(UIntToOH(indexRegIdx, 8).asBools().map(b =>
+      Mux(b, initSnippetEqualExpand | 0.U((ap.vLenb/8).W), 0.U((ap.vLenb/8).W)))).asUInt()
+    val initSnippetShrink: UInt = Mux(shrinkHalf, initSnippetShrinkHalf,
+      Mux(shrinkQuarter, initSnippetShrinkQuarter, initSnippetShrinkEighth))
+
+    val reqCountOffset: UInt = reqCount % nElementsPerDataReg
+    val initSnippet: UInt = Mux(largerIndex, initSnippetShrink, initSnippetEqualExpand)
+    val elementSnippet: UInt = Mux(reqCountOffset.orR(), (preSnippet << dataElementBytes).asUInt(), initSnippet)
     out.address := elementAddr
     out.executing := false.B
     out.done := false.B
-    out.segmentIdx := segmentCount(2,0)
+    /** In indexed processing, this indicates regIdx of data. */
+    out.segmentIdx := dataRegIdx
     out.style.isUnitStride := false.B
     out.style.isConstantStride := false.B
     out.style.isIndexed := true.B
@@ -329,12 +367,12 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     out.style.isWholeAccess := false.B
     out.style.indexEew := indexEew
     out.style.dataEew := dataEew
-    out.regAccessCS.regIdx := dstPReg
+    out.regAccessCS.regIdx := dstPReg(dataRegIdx)
     out.addressIsPhysical := false.B
-    out.lineStartIndex := elementOffset
+    out.lineStartIndex := elementAddrOffset
     out.addressIsPhysical := false.B
     out.reqBufferIdx := 0.U
-    val reqNecessary = RequestNecessaryCheck(elementSnippet, segmentCount, initialSnippet)
+    val reqNecessary = RequestNecessaryCheck(elementSnippet, dataRegIdx, initialSnippet)
     out.regAccessCS.finishMaskSnippet := reqNecessary._2
     (reqNecessary._1, out, elementSnippet)
   }
@@ -424,11 +462,12 @@ class VectorAccessStyle(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val isConstantStride: Bool = Bool()
   val isSegment: Bool = Bool()
   val isWholeAccess: Bool = Bool()
-  val dataEew: UInt = UInt(3.W)
-  val indexEew: UInt = UInt(3.W)
+  val dataEew: UInt = UInt(2.W)
+  val indexEew: UInt = UInt(2.W)
   val vStart: UInt = UInt(ap.vLenSz.W)
   val vl: UInt = UInt(ap.vlMax.W)
   val vlmul: UInt = UInt(3.W)
+  val indexLmul = UInt(3.W)
   val nf: UInt = UInt(3.W)
   /** 0 means need fetch old data for masked elements. */
   val vma: Bool = Bool()

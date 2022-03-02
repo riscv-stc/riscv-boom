@@ -181,18 +181,8 @@ class RegisterRead(
 //    val rs3_sel = Mux(iss_uop.rt(RD, isMaskVD), VRegSel(iss_uop.v_eidx >> 3, 0.U, eLenSelSz),
 //                                                VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
 
-      /** Calculate vs2 sel for indexed ls. */
-      val indexEew = iss_uop.vs2_eew
-      val dataEew = iss_uop.vd_eew
-      val largerData = dataEew > indexEew
-      val shinkRate = dataEew - indexEew
-      val largerIndex = indexEew > dataEew
-      val expandRate = indexEew - dataEew
-      val equal = indexEew === dataEew
       val fieldIdx = iss_uop.v_seg_f
-      val indexPick: UInt = Mux(equal, fieldIdx,
-        Mux(largerData, (fieldIdx >> shinkRate).asUInt(),
-          (fieldIdx << expandRate).asUInt()))
+      val indexPick: UInt = fieldIdx
       rs1_addr := iss_uop.pvs1(rs1_sel).bits
       rs2_addr := Mux(iss_uop.is_vmv_s2v, 0.U, iss_uop.pvs2(rs2_sel).bits)
       rs3_addr := Mux(isIndexedLS, iss_uop.pvs2(indexPick).bits, iss_uop.stale_pvd(rs3_sel).bits)
