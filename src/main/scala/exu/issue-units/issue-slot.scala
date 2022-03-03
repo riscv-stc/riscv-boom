@@ -105,8 +105,8 @@ class IssueSlot(
   val sdata = if(vector) RegInit(0.U(eLen.W)) else null
   val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
-  val vl_ready = RegInit(false.B)
-  val vl  = RegInit(0.U((maxVLMax.log2 + 1).W))
+  val slot_uop = RegInit(NullMicroOp(usingVector))
+  val vl_ready = WireInit(slot_uop.vl_ready)
   // Poison if woken up by speculative load.
   // Poison lasts 1 cycle (as ldMiss will come on the next cycle).
   // SO if poisoned is true, set it to false!
@@ -117,7 +117,6 @@ class IssueSlot(
   val next_p1_poisoned = Mux(io.in_uop.valid, io.in_uop.bits.iw_p1_poisoned, p1_poisoned)
   val next_p2_poisoned = Mux(io.in_uop.valid, io.in_uop.bits.iw_p2_poisoned, p2_poisoned)
 
-  val slot_uop = RegInit(NullMicroOp(usingVector))
   val next_uop = WireInit(Mux(io.in_uop.valid, io.in_uop.bits, slot_uop))
   val vcompress = slot_uop.uopc === uopVCOMPRESS
   val vrg_has_vupd = slot_uop.rt(RS1, isVector) && slot_uop.uopc === uopVRGATHER || slot_uop.uopc === uopVRGATHEREI16
@@ -269,8 +268,6 @@ class IssueSlot(
   val in_p2 = if (vector) WireInit(p2) else null
   val in_p3 = if (vector) WireInit(p3) else null
   val next_ppred = WireInit(ppred)
-  val next_vl_ready = WireInit(vl_ready)
-  val next_vl = WireInit(vl)
 
   when (io.in_uop.valid) {
     if (usingVector) {
@@ -297,13 +294,6 @@ class IssueSlot(
       next_p3 := !io.in_uop.bits.prs3_busy
     }
     next_ppred := !(io.in_uop.bits.ppred_busy)
-    next_vl_ready := io.in_uop.bits.vl_ready
-    next_vl := io.in_uop.bits.vconfig.vl
-  }
-
-  when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === next_uop.vconfig_tag) {
-    next_vl_ready := true.B
-    next_vl := io.vl_wakeup_port.bits.vl
   }
 
   when (io.ldspec_miss && next_p1_poisoned) {
@@ -521,12 +511,6 @@ class IssueSlot(
   io.out_uop.ppred_busy := !ppred
   io.out_uop.iw_p1_poisoned := p1_poisoned
   io.out_uop.iw_p2_poisoned := p2_poisoned
-  io.out_uop.vl_ready := vl_ready
-  io.out_uop.vconfig.vl := vl
-
-  when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag +1.U) === next_uop.vconfig_tag) {
-    io.out_uop.vconfig.vl := io.vl_wakeup_port.bits.vl
-  }
 
   when (io.in_uop.valid) {
     slot_uop := io.in_uop.bits
@@ -537,6 +521,14 @@ class IssueSlot(
     //}
     assert (is_invalid || io.clear || io.kill, "trying to overwrite a valid issue slot.")
   }
+
+  when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag +1.U) === next_uop.vconfig_tag) {
+    slot_uop.vconfig.vl := io.vl_wakeup_port.bits.vl
+    slot_uop.vl_ready := true.B
+  }
+
+  io.out_uop.vl_ready := slot_uop.vl_ready
+  io.out_uop.vconfig.vl := slot_uop.vconfig.vl
 
   when (state === s_valid_2) {
     when (rs1check() && rs2check() && ppred && vl_ready)  {
@@ -554,9 +546,6 @@ class IssueSlot(
   p2 := next_p2
   p3 := next_p3
   ppred := next_ppred
-  vl_ready := next_vl_ready
-  vl := next_vl
-
   if (vector) {
     //pm := next_pm
   } else if (usingVector && iqType == IQT_MEM.litValue) {

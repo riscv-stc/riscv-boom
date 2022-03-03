@@ -226,6 +226,8 @@ trait ScalarOpConstants
     uop.prs1       := 0.U
     uop.prs2       := 0.U
     uop.prs3       := 0.U
+    uop.vconfig_tag := 0.U
+    uop.vl_ready := false.B
     if (usingVector) {
       uop.pvm        := 0.U
     }
