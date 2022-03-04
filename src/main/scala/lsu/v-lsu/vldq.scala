@@ -295,7 +295,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     val equal = indexEew === dataEew
     val indexSegIdx = reg.bits.style.fieldIdx
     /** Indicates how many data Regs are affected by this split of vs2. */
-    val nActiveDataRegs = Mux(largerIndex || equal, 1.U, dataExpandRate)
+    val nActiveDataRegs = Mux(largerIndex || equal, 1.U, 1.U << dataExpandRate)
     val startDataRegIdx = Mux(largerIndex, (indexSegIdx >> dataShrinkRate).asUInt(),
                           Mux(equal, indexSegIdx, (indexSegIdx << dataExpandRate).asUInt()))
     val startRegIdx = Mux(isIndexed, startDataRegIdx, 0.U)
