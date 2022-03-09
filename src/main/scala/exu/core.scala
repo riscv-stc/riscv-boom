@@ -986,7 +986,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //vconfig instruction decode info enq to VCQ
   val vcq = Module(new VconfigQueue())
     vcq.io.enq.bits  := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
-    vcq.io.enq.valid := dec_vconfig_valid.reduce(_||_) && !io.ifu.redirect_flush
+    vcq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_vsetivli||u.is_vsetvli)}.reduce(_ | _)
     vcq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_vsetivli||u.is_vsetvli, false.B)}.reduce(_ | _)
     vcq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
     vcq_data         := Mux(vcq.io.enq.valid, vcq.io.enq.bits, vcq.io.get_vconfig)
