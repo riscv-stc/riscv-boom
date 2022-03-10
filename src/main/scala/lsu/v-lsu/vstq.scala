@@ -215,7 +215,6 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       state := sWaitRs
     }
   }.elsewhen(state === sWaitRs){
-    val isKilledByBranch = maskMatch(io.brUpdate.b1.mispredictMask, reg.bits.brMask)
     when(io.vuopRR.valid){
       reg.bits.addr := io.vuopRR.bits.rs1
       reg.bits.preAddr := io.vuopRR.bits.rs1
