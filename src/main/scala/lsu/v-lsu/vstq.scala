@@ -197,8 +197,9 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   val requestSplitter = Module(new RequestSplitter(ap, false, id))
   requestSplitter.io.reg := reg.bits
   io.uReq.bits := requestSplitter.io.uReq.bits
-
-  val isKilledByBranch = IsKilledByBranch(io.brUpdate, reg.bits.brMask)
+  // after updating brmask, then check if killed.
+  val updatedBrMask = Mux(io.vuopRR.valid, io.vuopRR.bits.brMask, reg.bits.brMask)
+  val isKilledByBranch = IsKilledByBranch(io.brUpdate, updatedBrMask)
   io.allDone := reg.bits.allSucceeded
   when(state === sIdle){
     when(io.vuopDis.valid){

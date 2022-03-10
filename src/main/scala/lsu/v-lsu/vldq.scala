@@ -212,7 +212,8 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
 
   val sIdle :: sWaitRs :: sCopyStale :: sSplitting :: sWaitData :: sAllDone :: sWaitRetire :: Nil = Enum(7)
   val state: UInt = RegInit(sIdle)
-  val isKilledByBranch = IsKilledByBranch(io.brUpdate, reg.bits.brMask)
+  val updatedBrMask = Mux(io.vuopRR.valid, io.vuopRR.bits.brMask, reg.bits.brMask)
+  val isKilledByBranch = IsKilledByBranch(io.brUpdate, updatedBrMask)
   val isIdle = state === sIdle
   /** Indicates this entry can be dequeued. */
   io.allDone := isIdle && (reg.bits.allSucceeded || isKilledByBranch)
