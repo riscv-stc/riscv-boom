@@ -176,7 +176,7 @@ class RegisterRead(
       }
       val rs1_sel = Mux(vs1_nr === 0.U, 0.U, VRegSel(iss_uop.v_eidx, iss_uop.vs1_eew, eLenSelSz))
       val rs2_sel = Mux(vs2_nr === 0.U, 0.U, VRegSel(iss_uop.v_eidx, iss_uop.vs2_eew, eLenSelSz))
-      val rs3_sel = Mux(vd_nr  === 0.U, 0.U, VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
+      val rs3_sel = Mux(vd_nr  === 0.U || iss_uop.rt(RD, isMaskVD), 0.U, VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
       val isIndexedLS = iss_uop.v_idx_ls
 //    val rs3_sel = Mux(iss_uop.rt(RD, isMaskVD), VRegSel(iss_uop.v_eidx >> 3, 0.U, eLenSelSz),
 //                                                VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
