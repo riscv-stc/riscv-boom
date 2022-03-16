@@ -2007,8 +2007,10 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
   if (usingVector) {
     for ((wdata, wakeup) <- v_pipeline.io.debug_wb_wdata zip v_pipeline.io.wakeups) {
-      rob.io.wb_resps(cnt) <> wakeup
-      rob.io.debug_wb_valids(cnt) := wakeup.valid
+      rob.io.wb_resps(cnt).valid := wakeup.valid && !(wakeup.bits.uop.is_rvv && wakeup.bits.uop.uses_ldq)
+      rob.io.wb_resps(cnt).bits := wakeup.bits
+
+      rob.io.debug_wb_valids(cnt) := wakeup.valid && !(wakeup.bits.uop.is_rvv && wakeup.bits.uop.uses_ldq)
       rob.io.debug_wb_wdata(cnt) := wdata
       cnt += 1
 
