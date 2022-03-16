@@ -1726,7 +1726,7 @@ class VecALUUnit(
                                    Mux(op1_eew(0), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e))))
       //alu.io.in1 := Mux(op1_eew(0), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e))
       alu.io.in2 := Mux(isMerge,   Mux(op2_eew(0), op1_data(16*e+15, 16*e) & Fill(16, !rvm_data(e)) | op2_data(16*e+15, 16*e) & Fill(16, rvm_data(e)),
-                                                     op1_data( 8*e+7,   8*e) & Fill( 8, !rvm_data(e)) | op2_data( 8*e+7,   8*e) & Fill( 8, rvm_data(e))),
+                                                   op1_data( 8*e+7,   8*e) & Fill( 8, !rvm_data(e)) | op2_data( 8*e+7,   8*e) & Fill( 8, rvm_data(e))),
                     Mux(op2Signed, Mux(op2_eew(0), op2_data(16*e+15, 16*e), op2_data(8*e+7, 8*e).sextTo(eLen >> 2)),
                                    Mux(op2_eew(0), op2_data(16*e+15, 16*e) & shiftMask, op2_data(8*e+7, 8*e) & shiftMask)))
       alu.io.ci  := Mux(withCarry && !uop.v_unmasked, rvm_data(e), false.B) // FIXME

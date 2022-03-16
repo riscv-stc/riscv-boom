@@ -498,14 +498,14 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
       rs2_edata := rs2_data(esel*16+15, esel*16)
       rs3_edata := rs3_data(esel*16+15, esel*16)
     } else {
-      if (esel < 16) {
+      if (esel < numELENinVLEN) {
         rs1_edata := Mux(vs1_sew === 3.U, rs1_data(esel*64+63, esel*64),
                      Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32), rs1_data(esel*16+15, esel*16)))
         rs2_edata := Mux(vs2_sew === 3.U, rs2_data(esel*64+63, esel*64),
                      Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32), rs2_data(esel*16+15, esel*16)))
         rs3_edata := Mux(vd_sew === 3.U,  rs3_data(esel*64+63, esel*64),
                      Mux(vd_sew === 2.U,  rs3_data(esel*32+31, esel*32), rs3_data(esel*16+15, esel*16)))
-      } else if (esel < 32) {
+      } else if (esel < numELENinVLEN*2) {
         rs1_edata := Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32), rs1_data(esel*16+15, esel*16))
         rs2_edata := Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32), rs2_data(esel*16+15, esel*16))
         rs3_edata := Mux(vd_sew === 2.U,  rs3_data(esel*32+31, esel*32), rs3_data(esel*16+15, esel*16))
@@ -580,8 +580,8 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
 
   //val fma_vl = Mux((io_req.uop.uopc === uopVFMV_S_F) && (io.req.bits.uop.vconfig.vl > 1.U), 1.U,  io.req.bits.uop.vconfig.vl)
   val fma_vl = io.req.bits.uop.vconfig.vl
-  val dfma = (0 until vLen/64).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.D)))
-  for (i <- 0 until vLen/64) {
+  val dfma = (0 until numELENinVLEN).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.D)))
+  for (i <- 0 until numELENinVLEN) {
     val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < fma_vl &&
                   ((io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart) //||
                    //(io_req.uop.uopc === uopVFMV_S_F) && (io.req.bits.uop.vconfig.vl > io.req.bits.uop.vstart))
@@ -589,8 +589,8 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
     dfma(i).io.in.valid := active && io.req.valid && reqfue.dfma
   }
 
-  val sfma = (0 until vLen/32).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.S)))
-  for (i <- 0 until vLen/32) {
+  val sfma = (0 until numELENinVLEN*2).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.S)))
+  for (i <- 0 until numELENinVLEN*2) {
     val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < fma_vl &&
                   ((io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart) // ||
                    //(io_req.uop.uopc === uopVFMV_S_F) && (io.req.bits.uop.vconfig.vl > io.req.bits.uop.vstart))
@@ -598,19 +598,19 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
     sfma(i).io.in.valid := active && io.req.valid && reqfue.sfma
   }
 
-  val hfma = (0 until vLen/16).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.H)))
+  val hfma = (0 until numELENinVLEN*4).map(i => Module(new tile.FPUFMAPipe(latency = fpu_latency, t = tile.FType.H)))
 
-  val fpiu = (0 until vLen/16).map(i => Module(new tile.FPToInt(vector = true)))
-  val fpiu_result = Wire(Vec(vLen/16, new tile.FPResult))
-  val fpiu_out_valid = Wire(Vec(vLen/16, Bool()))
+  val fpiu = (0 until numELENinVLEN*4).map(i => Module(new tile.FPToInt(vector = true)))
+  val fpiu_result = Wire(Vec(numELENinVLEN*4, new tile.FPResult))
+  val fpiu_out_valid = Wire(Vec(numELENinVLEN*4, Bool()))
   val fpiu_out = fpiu.map(m => Pipe(RegNext(m.io.in.valid && !fp_ctrl.fastpipe), m.io.out.bits, fpu_latency-1))
   val fpiu_invert = reqpipe.bits.uop.uopc === uopVMFNE
   val fpiu_dtype  = Pipe(io.req.valid && !fp_ctrl.fastpipe, fp_ctrl.typeTagOut, fpu_latency).bits
   val fpiu_vd_sew = Pipe(io.req.valid && !fp_ctrl.fastpipe, vd_sew(0), fpu_latency).bits
 
-  val fpmu = (0 until vLen/16).map(i => Module(new tile.FPToFP(fpu_latency)))
+  val fpmu = (0 until numELENinVLEN*4).map(i => Module(new tile.FPToFP(fpu_latency)))
   val fpmu_dtype = Pipe(io.req.valid && fp_ctrl.fastpipe, fp_ctrl.typeTagOut, fpu_latency).bits
-  for (i <- 0 until vLen/16) {
+  for (i <- 0 until numELENinVLEN*4) {
     val active = (io.req.bits.uop.v_unmasked || io.req.bits.rvm_data(i)) && (io.req.bits.uop.v_eidx + i.U) < fma_vl &&
                   ((io.req.bits.uop.v_eidx + i.U) >= io.req.bits.uop.vstart) // ||
                    //(io_req.uop.uopc === uopVFMV_S_F) && (io.req.bits.uop.vconfig.vl > io.req.bits.uop.vstart))
@@ -621,8 +621,8 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
     fpiu(i).io.in.bits  := fuInput(None, i)
     fpiu(i).io.in.bits.wen := io.req.valid && reqfue.fpiu && fp_ctrl.typeTagOut === H && vd_sew === 0.U          // for vfncvt to int8/uint8 only
     fpiu(i).io.in.valid := active && io.req.valid && reqfue.fpiu &&
-                           Mux(fp_ctrl.typeTagOut === D, (i < vLen/64).B,
-                           Mux(fp_ctrl.typeTagOut === S, (i < vLen/32).B, true.B))
+                           Mux(fp_ctrl.typeTagOut === D, (i < numELENinVLEN).B,
+                           Mux(fp_ctrl.typeTagOut === S, (i < numELENinVLEN*2).B, true.B))
     fpiu_out_valid(i)   := Pipe(fpiu(i).io.out.valid, true.B, fpu_latency-1).valid
     fpiu_result(i).data := Mux(fpiu_invert, Cat(0.U, ~fpiu_out(i).bits.toint(0)), fpiu_out(i).bits.toint)
     fpiu_result(i).exc  := fpiu_out(i).bits.exc
@@ -630,8 +630,8 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
     fpmu(i).io.lt       := fpiu(i).io.out.bits.lt
     fpmu(i).io.in.bits  := fuInput(None, i)
     fpmu(i).io.in.valid := active && io.req.valid && reqfue.fpmu &&
-                           Mux(fp_ctrl.typeTagOut === D, (i < vLen/64).B,
-                           Mux(fp_ctrl.typeTagOut === S, (i < vLen/32).B, true.B))
+                           Mux(fp_ctrl.typeTagOut === D, (i < numELENinVLEN).B,
+                           Mux(fp_ctrl.typeTagOut === S, (i < numELENinVLEN*2).B, true.B))
   }
 
   // Response (all FP units have been padded out to the same latency)
