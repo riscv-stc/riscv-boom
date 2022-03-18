@@ -2050,17 +2050,17 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   // LSU <> ROB
   //rob.io.lsu_clr_bsy    := io.lsu.clr_bsy
   rob.io.lsu_clr_bsy.foreach( _ := DontCare)
-  (rob.io.lsu_clr_bsy.slice(0, memWidth) zip io.lsu.clr_bsy).foreach { case (rob, lsu) => rob := lsu }
+  (rob.io.lsu_clr_bsy.slice(0, memWidth + 1) zip io.lsu.clr_bsy).foreach { case (rob, lsu) => rob := lsu }
   rob.io.lsu_clr_unsafe := io.lsu.clr_unsafe
   rob.io.lxcpt          <> io.lsu.lxcpt
 
   // VLSU store <> ROB
-  (rob.io.lsu_clr_bsy.slice(memWidth, memWidth + coreWidth) zip vlsuIO.stToRob.robIdx).foreach { case (rob, vlsu) =>
+  (rob.io.lsu_clr_bsy.slice(memWidth + 1, memWidth + 1 + coreWidth) zip vlsuIO.stToRob.robIdx).foreach { case (rob, vlsu) =>
     rob.valid := vlsu.valid
     rob.bits := vlsu.bits
   }
   // VLSU load <> ROB
-  (rob.io.lsu_clr_bsy.slice(memWidth + coreWidth, memWidth + 2 * coreWidth) zip vlsuIO.ldToRob.robIdx).foreach{ case (rob, vlsu) =>
+  (rob.io.lsu_clr_bsy.slice(memWidth + 1 + coreWidth, memWidth + 1 + 2 * coreWidth) zip vlsuIO.ldToRob.robIdx).foreach{ case (rob, vlsu) =>
     rob.valid := vlsu.valid
     rob.bits := vlsu.bits
   }
