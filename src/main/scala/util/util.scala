@@ -738,7 +738,7 @@ object VRegSel {
    * Get Register index (of the group) from v_eidx
    */
   def apply(v_eidx: UInt, vsew: UInt, eLenSelSz: Int): UInt = {
-    val ret = ((v_eidx << vsew) >> (eLenSelSz.U + 3.U))(2, 0)
+    val ret = ((v_eidx << vsew) >> (eLenSelSz + 3).U)(2, 0)
     ret
   }
 }
