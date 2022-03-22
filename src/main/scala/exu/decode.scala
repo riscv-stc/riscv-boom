@@ -297,7 +297,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.is_fencei  := cs.is_fencei
   uop.is_sys_pc2epc   := cs.is_sys_pc2epc
   uop.is_unique  := cs.inst_unique || (cs.uopc === uopVSETVLI) && inst(19,15) === 0.U && inst(11,7)  === 0.U
-  uop.flush_on_commit := cs.flush_on_commit || (csr_en && !csr_ren && io.csr_decode.write_flush)
+  uop.flush_on_commit := cs.flush_on_commit || (csr_en && !csr_ren && io.csr_decode.write_flush) || (cs.uopc === uopVSETVLI) && inst(19,15) === 0.U && inst(11,7)  === 0.U
   uop.is_vsetivli := (cs.uopc === uopVSETIVLI)
   uop.is_vsetvli := (cs.uopc === uopVSETVLI)
   uop.vl_ready   := Mux(cs.not_use_vtype, true.B, io.enq.uop.vl_ready)
