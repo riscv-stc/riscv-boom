@@ -341,7 +341,7 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     val dataRegIdxShrink = Mux(shrinkHalf, indexRegIdx(2,1), Mux(shrinkQuarter, indexRegIdx(2), 0.U))
 
     val dataRegIdxExpandBase: UInt = Mux(expandOctuple, 0.U, Mux(expandDouble, indexRegIdx(1,0) << 1, indexRegIdx(0) << 2)).asUInt()
-    val dataRegIdxExpandOffset: UInt = reqCount >> (log2Ceil(vLenbSz) - dataEew(1,0))
+    val dataRegIdxExpandOffset: UInt = reqCount >> (log2Ceil(ap.vLenb).U - dataEew(1,0))
     val dataRegIdxExpand: UInt = dataRegIdxExpandBase + dataRegIdxExpandOffset
     /** Target reg idx in the group, not idx in vrf. */
     val dataRegIdx = Mux(equal, indexRegIdx, Mux(largerIndex, dataRegIdxShrink, dataRegIdxExpand))
