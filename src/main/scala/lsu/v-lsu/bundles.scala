@@ -321,8 +321,8 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     val elementAddrOffset: UInt = elementAddr(ap.offsetBits - 1, 0)
     val dataElementBytes: UInt = (1.U << dataEew(1,0)).asUInt()
     val indexElementBytes: UInt = (1.U << indexEew(1,0)).asUInt()
-    val nElementsPerDataReg: UInt = ap.vLenb.U / dataElementBytes
-    val nElementsPerIndexReg: UInt = ap.vLenb.U / indexElementBytes
+    val nElementsPerDataReg: UInt = (ap.vLenb.U >> dataEew(1,0)).asUInt()
+    val nElementsPerIndexReg: UInt = (ap.vLenb.U >> indexEew(1,0)).asUInt()
 
     val largerData = dataEew(1,0) > indexEew(1,0)
     val dataExpandRate = dataEew(1,0) - indexEew(1,0)
@@ -341,7 +341,7 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     val dataRegIdxShrink = Mux(shrinkHalf, indexRegIdx(2,1), Mux(shrinkQuarter, indexRegIdx(2), 0.U))
 
     val dataRegIdxExpandBase: UInt = Mux(expandOctuple, 0.U, Mux(expandDouble, indexRegIdx(1,0) << 1, indexRegIdx(0) << 2)).asUInt()
-    val dataRegIdxExpandOffset: UInt = reqCount / nElementsPerDataReg
+    val dataRegIdxExpandOffset: UInt = reqCount >> (log2Ceil(vLenbSz) - dataEew(1,0))
     val dataRegIdxExpand: UInt = dataRegIdxExpandBase + dataRegIdxExpandOffset
     /** Target reg idx in the group, not idx in vrf. */
     val dataRegIdx = Mux(equal, indexRegIdx, Mux(largerIndex, dataRegIdxShrink, dataRegIdxExpand))
