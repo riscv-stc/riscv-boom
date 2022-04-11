@@ -4,6 +4,8 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.{DontTouch, GenericParameterizedBundle}
 import scala.math._
+import boom.util.{MaskLower}
+
 /** IO between Rob and v-lsu
  *  v-lsu tell rob when an uop is all done
  *  rob tell v-lsu the uop is committed.
@@ -356,7 +358,7 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     val initSnippetShrink: UInt = Mux(shrinkHalf, initSnippetShrinkHalf,
       Mux(shrinkQuarter, initSnippetShrinkQuarter, initSnippetShrinkEighth))
 
-    val reqCountOffset: UInt = reqCount % nElementsPerDataReg
+    val reqCountOffset: UInt = reqCount & MaskLower((ap.vLenb.U >> dataEew(1,0)).asUInt)
     val initSnippet: UInt = Mux(largerIndex, initSnippetShrink, initSnippetEqualExpand)
     val elementSnippet: UInt = Mux(reqCountOffset.orR(), (preSnippet << dataElementBytes).asUInt(), initSnippet)
     out.address := elementAddr
