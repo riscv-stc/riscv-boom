@@ -135,6 +135,10 @@ class BoomTile private(
   val dCacheTap = TLIdentityNode()
   tlMasterXbar.node := dCacheTap := dcache.node
 
+  // VecMem
+  lazy val vecMem: VecMem = LazyModule(new VecMem)
+  val vecMemWidget = LazyModule(new TLWidthWidget(64)).suggestName("vecMemWidthConverter")
+  tlMasterXbar.node := vecMemWidget := vecMem.node
 
   // Frontend/ICache
   val frontend = LazyModule(new BoomFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
