@@ -49,10 +49,13 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.Str
+import freechips.rocketchip.util.{Str, UIntIsOneOf}
+
+import freechips.rocketchip.diplomacy._
 
 import boom.common._
-import boom.exu.{BrUpdateInfo, Exception, FuncUnitResp, CommitSignals, ExeUnitResp}
+import boom.common.MicroOpcodes._
+import boom.exu.{BrUpdateInfo, Exception, FuncUnitReq, FuncUnitResp, CommitSignals, ExeUnitResp, RegisterFileReadPortIO}
 import boom.util._
 
 class LSUExeIO(implicit p: Parameters) extends BoomBundle()(p)
@@ -132,18 +135,18 @@ class BoomVMemResp(implicit p: Parameters) extends BoomBundle()(p)
   val vdata = UInt(vLen.W)
 }
 
-class BKQUInt(width: Int = 0)(implicit p: Parameters) extends BoomBundle()(p)
+class BKQUInt(val wid: Int = 0)(implicit p: Parameters) extends BoomBundle()(p)
   with HasBoomUOP
 {
-  val data = UInt(width.W)
+  val data = UInt(wid.W)
 }
 
 class VecMemIO(implicit p: Parameters, edge: TLEdgeOut) extends BoomBundle()(p)
 {
   val req           = new DecoupledIO(new BoomVMemReq)
   val s1_vdata      = UInt(vLen.W)
-  val s1_kill       = Output(Vec(memWidth, Bool()))
-  val resp          = Flipped(Vec(memWidth, new ValidIO(new BoomDMemResp)))
+  val s1_kill       = Output(Bool())
+  val resp          = Flipped(new ValidIO(new BoomVMemResp))
   val vsdq_ready    = Input(Bool())
 
   val brupdate      = Output(new BrUpdateInfo)
@@ -168,8 +171,8 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
   val stq_full    = Output(Vec(coreWidth, Bool()))
 
   val fp_stdata   = if (usingFPU) Flipped(Decoupled(new ExeUnitResp(fLen))) else null
-  val vrf_rport   = if (usingVector) Flipped(new RegisterFileReadPortIO(vecPregSz, vLen)) else null
-  val vrf_wbk     = if (usingVector) Valid(new FuncUnitResp(vector)) else null
+  val vrf_rport   = if (usingVector) Flipped(new RegisterFileReadPortIO(vpregSz, vLen)) else null
+  val vrf_wbk     = if (usingVector) Valid(new FuncUnitResp(vLen)) else null
 
   val commit      = Input(new CommitSignals)
   val commit_load_at_rob_head = Input(Bool())
@@ -269,16 +272,14 @@ class STQEntry(implicit p: Parameters) extends BoomBundle()(p)
 
 class VLDQEntry(implicit p: Parameters) extends LDQEntry()(p)
 {
-  val is_aumus            = Bool()
+  //val is_aumus            = Bool()
   val vmask               = UInt(vLenb.W) // for fast unit-stride vl
-  val debug_wb_data       = UInt(vLen.W)
 }
 
 class VSTQEntry(implicit p: Parameters) extends STQEntry()(p)
 {
-  val is_aumus            = Bool()
+  //val is_aumus            = Bool()
   val vmask               = UInt(vLenb.W) // for fast unit-stride vl
-  val debug_wb_data       = UInt(vLen.W)
 }
 
 class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
@@ -352,7 +353,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vlud_dat_q = Module(new BranchKillableQueue(new BKQUInt(vLen), 4))
     //vstd_vrf_q = Module(new Queue(new UInt(0.W), 4))
     //vstd_dat_q = Module(new Queue(new UInt(vLen.W), 4))
-    vrf_rarb = Module(new Arbiter(new UInt(vecPregSz.W), 3))
+    vrf_rarb = Module(new Arbiter(UInt(vpregSz.W), 3))
   }
 
   io.ptw <> dtlb.io.ptw
@@ -667,8 +668,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   // Can we start vload addrgen
   val ldq_vag_idx = RegNext(AgePriorityEncoder((0 until numLdqEntries).map(i=> {
-    val e = ldq(i).bits
-    e.valid && e.addr.valid && !e.executed && !e.succeeded && !e.order_fail && e.uop.is_rvv
+    val e = ldq(i)
+    e.valid && e.bits.addr.valid && !e.bits.executed && !e.bits.succeeded && !e.bits.order_fail && e.bits.uop.is_rvv
   }), ldq_head))
   val ldq_vag_e = ldq(ldq_vag_idx)
   val can_fire_vload_addrgen   = widthMap(w =>
@@ -681,11 +682,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   // Can we start vstore addrgen
   val stq_vag_idx = RegNext(AgePriorityEncoder((0 until numStqEntries).map(i => {
-    val e = stq(i).bits
-    e.valid && e.addr.valid && !e.committed && !e.succeeded && e.uop.is_rvv
+    val e = stq(i)
+    e.valid && e.bits.addr.valid && !e.bits.committed && !e.bits.succeeded && e.bits.uop.is_rvv
   }), stq_head))
   val stq_vag_e = stq(stq_vag_idx)
-  val can_fire_vload_addrgen   = widthMap(w =>
+  val can_fire_vstore_addrgen  = widthMap(w =>
                                  ((w == w-1).B                                          &&
                                   !vsagu.io.busy                                        &&
                                   stq_vag_e.valid                                       &&
@@ -695,8 +696,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   // Can we fire a vldq lookup
   val vldq_lkup_idx = RegNext(AgePriorityEncoder((0 until numVLdqEntries).map(i => {
-    val e = vldq(i).bits
-    e.valid && e.addr.valid && e.addr_is_virtual && !e.executed && !e.order_fail
+    val e = vldq(i)
+    e.valid && e.bits.addr.valid && e.bits.addr_is_virtual && !e.bits.executed && !e.bits.order_fail
   }), vldq_head))
   val vldq_lkup_e = vldq(vldq_lkup_idx)
   val can_fire_vldq_lookup     = widthMap(w =>
@@ -705,12 +706,13 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   vldq_lkup_e.bits.addr.valid                           &&
                                   vldq_lkup_e.bits.addr_is_virtual                      &&
                                   !vldq_lkup_e.bits.executed                            &&
-                                  !vldq_lkup_e.bits.order_fail))
+                                  !vldq_lkup_e.bits.order_fail                          &&
+                                  io.vmem.req.ready))
 
   // Can we fire a vstq lookup
   val vstq_lkup_idx = RegNext(AgePriorityEncoder((0 until numVStqEntries).map(i => {
-    val e = vstq(i).bits
-    e.valid && e.addr.valid && e.addr_is_virtual && !e.executed && !e.committed
+    val e = vstq(i)
+    e.valid && e.bits.addr.valid && e.bits.addr_is_virtual && !e.bits.committed
   }), vstq_head))
   val vstq_lkup_e = vstq(vstq_lkup_idx)
   val can_fire_vstq_lookup     = widthMap(w =>
@@ -720,20 +722,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   vstq_lkup_e.bits.addr_is_virtual                      &&
                                   !vstq_lkup_e.bits.committed))
 
-  // Can we fire a vldq undisturb copy
-  //val vldq_udcopy_idx = RegNext(AgePriorityEncoder((0 until numVLdqEntries).map(i => {
-    //val e = vldq(i).bits
-    //e.valid && e.addr.valid && e.addr_is_virtual && !e.executed && !e.order_fail && !e.udready
-  //}), vldq_head))
-  //val vldq_udcopy_e = vldq(vldq_udcopy_idx)
-  //val can_fire_vldq_udcopy     = widthMap(w =>
-                                 //((w == 0).B                                            &&
-                                  //vldq_udcopy_e.valid                                   &&
-                                  //vldq_udcopy_e.bits.addr.valid                         &&
-                                  //vldq_udcopy_e.bits.addr_is_virtual                    &&
-                                  //!vldq_udcopy_e.bits.executed                          &&
-                                  //!vldq_udcopy_e.bits.order_fail))
-
   // Can we fire a vstq (partial) commit
   val vstq_commit_e = vstq(vstq_execute_head)
   val can_fire_vstq_commit     = widthMap(w =>
@@ -741,8 +729,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   vstq_commit_e.valid                                   &&
                                   vstq_commit_e.bits.data.valid                         &&
                                   vstq_commit_e.bits.committed                          &&
-                                  !mem_excpt_valid                                      &&
+                                  !mem_xcpt_valid                                       &&
                                   !vstq_commit_e.bits.uop.exception                     &&
+                                  io.vmem.req.ready                                     &&
+                                  io.vmem.vsdq_ready
                                  ))
 
   //---------------------------------------------------------
@@ -878,25 +868,25 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     "SFENCE through hella interface not supported")
 
   val exe_tlb_uop = widthMap(w => MuxCase(NullMicroOp(), Seq(
-                      will_fire_load_incoming (w) ||
+                     (will_fire_load_incoming (w) ||
                       will_fire_stad_incoming (w) ||
                       will_fire_sta_incoming  (w) ||
-                      will_fire_sfence        (w)  -> exe_req(w).bits.uop,
+                      will_fire_sfence        (w)) -> exe_req(w).bits.uop,
                       will_fire_load_retry    (w)  -> ldq_retry_e.bits.uop,
                       will_fire_sta_retry     (w)  -> stq_retry_e.bits.uop,
-                      will_fire_hella_incoming(w)  -> NullMicroOp(),
+                      //will_fire_hella_incoming(w)  -> NullMicroOp(),
                       will_fire_vldq_lookup   (w)  -> vldq_lkup_e.bits.uop,
                       will_fire_vstq_lookup   (w)  -> vstq_lkup_e.bits.uop
                     )))
 
   val exe_tlb_vaddr = widthMap(w => MuxCase(0.U, Seq(
-                        will_fire_load_incoming (w) ||
+                       (will_fire_load_incoming (w) ||
                         will_fire_stad_incoming (w) ||
-                        will_fire_sta_incoming  (w)  -> exe_req(w).bits.addr,
+                        will_fire_sta_incoming  (w)) -> exe_req(w).bits.addr,
                         will_fire_sfence        (w)  -> exe_req(w).bits.sfence.bits.addr,
                         will_fire_load_retry    (w)  -> ldq_retry_e.bits.addr.bits,
                         will_fire_sta_retry     (w)  -> stq_retry_e.bits.addr.bits,
-                        will_fire_hella_incoming(w)  -> hella_req.addr
+                        will_fire_hella_incoming(w)  -> hella_req.addr,
                         will_fire_vldq_lookup   (w)  -> vldq_lkup_e.bits.addr.bits,
                         will_fire_vstq_lookup   (w)  -> vstq_lkup_e.bits.addr.bits
                       )))
@@ -1177,10 +1167,28 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq_e.bits.addr.bits            := exe_req(w).bits.addr
       stq_e.bits.const_stride         := exe_req(w).bits.data
       stq_e.bits.addr_is_virtual      := true.B
-      stq_e.bits.addr_is_uncacheable  := false.B
     }
   }
 
+  val vmem_req = Wire(new BoomVMemReq)
+
+  vmem_req.uop   := NullMicroOp()
+  vmem_req.addr  := 0.U
+  vmem_req.mask  := 0.U
+
+  when (will_fire_vldq_lookup(0)) {
+    vmem_req.uop   := vldq_lkup_e.bits.uop
+    vmem_req.addr  := vldq_lkup_e.bits.addr.bits
+    vmem_req.mask  := vldq_lkup_e.bits.vmask
+  } .elsewhen (will_fire_vstq_commit(memWidth-1)) {
+    vmem_req.uop   := vstq_commit_e.bits.uop
+    vmem_req.addr  := vstq_commit_e.bits.addr.bits
+    vmem_req.mask  := vstq_commit_e.bits.vmask
+  }
+  io.vmem.req.valid := will_fire_vldq_lookup(0) || will_fire_vstq_commit(memWidth-1)
+  io.vmem.req.bits  := vmem_req
+  io.vmem.s1_vdata  := io.core.vrf_rport.data
+  io.vmem.s1_kill   := false.B // fixme
 
   val will_fire_stdf_incoming = io.core.fp_stdata.fire()
   require (xLen >= fLen) // for correct SDQ size
@@ -1210,7 +1218,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val fired_hella_wakeup   = RegNext(will_fire_hella_wakeup)
   val fired_vldq_lookup    = RegNext(will_fire_vldq_lookup)
   val fired_vstq_lookup    = RegNext(will_fire_vstq_lookup)
-  val fired_vldq_udcopy    = RegNext(will_fire_vldq_udcopy)
   val fired_vstq_commit    = RegNext(will_fire_vstq_commit)
 
   val mem_incoming_uop     = RegNext(widthMap(w => UpdateBrMask(io.core.brupdate, exe_req(w).bits.uop)))
@@ -1228,7 +1235,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                  fired_sta_incoming (w), mem_stq_incoming_e(w),
                              Mux(fired_sta_retry    (w), mem_stq_retry_e, (0.U).asTypeOf(Valid(new STQEntry)))))
   val mem_stdf_uop         = RegNext(UpdateBrMask(io.core.brupdate, io.core.fp_stdata.bits.uop))
-  val mem_vldq_lookup_e    = RegNext(widthMap(w => UpdateBrMask(
+  val mem_vldq_lkup_e      = RegNext(UpdateBrMask(io.core.brupdate, vldq_lkup_e))
+  val mem_vstq_lkup_e      = RegNext(UpdateBrMask(io.core.brupdate, vstq_lkup_e))
 
 
   val mem_tlb_miss             = RegNext(exe_tlb_miss)
@@ -1242,7 +1250,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   for (w <- 0 until memWidth) {
     clr_bsy_valid   (w) := false.B
-    clr_bsy_rob_idx (w) := NullMicroOp()
+    clr_bsy_uop     (w) := NullMicroOp()
     clr_bsy_brmask  (w) := 0.U
 
 
@@ -1251,7 +1259,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                             !mem_tlb_miss(w)                       &&
                             !mem_stq_incoming_e(w).bits.uop.is_amo &&
                             !IsKilledByBranch(io.core.brupdate, mem_stq_incoming_e(w).bits.uop)
-      clr_bsy_rob_idx (w) := mem_stq_incoming_e(w).bits.uop
+      clr_bsy_uop     (w) := mem_stq_incoming_e(w).bits.uop
       clr_bsy_brmask  (w) := GetNewBrMask(io.core.brupdate, mem_stq_incoming_e(w).bits.uop)
     } .elsewhen (fired_sta_incoming(w)) {
       clr_bsy_valid   (w) := mem_stq_incoming_e(w).valid            &&
@@ -1259,7 +1267,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                             !mem_tlb_miss(w)                        &&
                             !mem_stq_incoming_e(w).bits.uop.is_amo  &&
                             !IsKilledByBranch(io.core.brupdate, mem_stq_incoming_e(w).bits.uop)
-      clr_bsy_rob_idx (w) := mem_stq_incoming_e(w).bits.uop
+      clr_bsy_uop     (w) := mem_stq_incoming_e(w).bits.uop
       clr_bsy_brmask  (w) := GetNewBrMask(io.core.brupdate, mem_stq_incoming_e(w).bits.uop)
     } .elsewhen (fired_std_incoming(w)) {
       clr_bsy_valid   (w) := mem_stq_incoming_e(w).valid                 &&
@@ -1267,11 +1275,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                             !mem_stq_incoming_e(w).bits.addr_is_virtual  &&
                             !mem_stq_incoming_e(w).bits.uop.is_amo       &&
                             !IsKilledByBranch(io.core.brupdate, mem_stq_incoming_e(w).bits.uop)
-      clr_bsy_rob_idx (w) := mem_stq_incoming_e(w).bits.uop
+      clr_bsy_uop     (w) := mem_stq_incoming_e(w).bits.uop
       clr_bsy_brmask  (w) := GetNewBrMask(io.core.brupdate, mem_stq_incoming_e(w).bits.uop)
     } .elsewhen (fired_sfence(w)) {
       clr_bsy_valid   (w) := (w == 0).B // SFence proceeds down all paths, only allow one to clr the rob
-      clr_bsy_rob_idx (w) := mem_incoming_uop(w)
+      clr_bsy_uop     (w) := mem_incoming_uop(w)
       clr_bsy_brmask  (w) := GetNewBrMask(io.core.brupdate, mem_incoming_uop(w))
     } .elsewhen (fired_sta_retry(w)) {
       clr_bsy_valid   (w) := mem_stq_retry_e.valid            &&
@@ -1279,7 +1287,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                             !mem_tlb_miss(w)                  &&
                             !mem_stq_retry_e.bits.uop.is_amo  &&
                             !IsKilledByBranch(io.core.brupdate, mem_stq_retry_e.bits.uop)
-      clr_bsy_rob_idx (w) := mem_stq_retry_e.bits.uop
+      clr_bsy_uop     (w) := mem_stq_retry_e.bits.uop
       clr_bsy_brmask  (w) := GetNewBrMask(io.core.brupdate, mem_stq_retry_e.bits.uop)
     }
 
@@ -1290,10 +1298,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   }
 
   val stdf_clr_bsy_valid   = RegInit(false.B)
-  val stdf_clr_bsy_rob_idx = Reg(UInt(robAddrSz.W))
+  val stdf_clr_bsy_uop     = RegInit(NullMicroOp())
   val stdf_clr_bsy_brmask  = Reg(UInt(maxBrCount.W))
   stdf_clr_bsy_valid   := false.B
-  stdf_clr_bsy_rob_idx := 0.U
+  stdf_clr_bsy_uop     := NullMicroOp()
   stdf_clr_bsy_brmask  := 0.U
   when (fired_stdf_incoming) {
     val s_idx = mem_stdf_uop.stq_idx
@@ -1302,68 +1310,68 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                             !stq(s_idx).bits.addr_is_virtual &&
                             !stq(s_idx).bits.uop.is_amo      &&
                             !IsKilledByBranch(io.core.brupdate, mem_stdf_uop)
-    stdf_clr_bsy_rob_idx := mem_stdf_uop.rob_idx
+    stdf_clr_bsy_uop     := mem_stdf_uop
     stdf_clr_bsy_brmask  := GetNewBrMask(io.core.brupdate, mem_stdf_uop)
   }
 
   io.core.clr_bsy(memWidth).valid := stdf_clr_bsy_valid && !IsKilledByBranch(io.core.brupdate, stdf_clr_bsy_brmask) &&
                                      !io.core.exception && !RegNext(io.core.exception) && !RegNext(RegNext(io.core.exception))
-  io.core.clr_bsy(memWidth).bits  := stdf_clr_bsy_rob_idx
+  io.core.clr_bsy(memWidth).bits  := stdf_clr_bsy_uop
 
   // access VRF
-  vrf_rarb.io.in(0).valid  := will_fire_vstq_commit
-  vrf_rarb.io.in(0).bits   := vstq_commit_e.bits.uop.stale_pd
-  when (will_fire_vstq_commit) {
+  vrf_rarb.io.in(0).valid  := will_fire_vstq_commit(memWidth-1)
+  vrf_rarb.io.in(0).bits   := vstq_commit_e.bits.uop.stale_pdst
+  when (will_fire_vstq_commit(memWidth-1)) {
     assert (vrf_rarb.io.in(0).ready)
   }
 
   vrf_rarb.io.in(1).valid  := vlagu.io.vrf_raddr.valid
-  vrf_rarb.io.in(1).bits   := vlagu.io.vrf_raddr.bits.addr
+  vrf_rarb.io.in(1).bits   := vlagu.io.vrf_raddr.bits
 
   vrf_rarb.io.in(2).valid  := vsagu.io.vrf_raddr.valid
-  vrf_rarb.io.in(2).bits   := vsagu.io.vrf_raddr.bits.addr
+  vrf_rarb.io.in(2).bits   := vsagu.io.vrf_raddr.bits
 
   vrf_rarb.io.out.ready    := true.B
-  io.vrf_rport.addr := Mux(vrf_rarb.io.out.valid, vrf_rarb.io.out.bits, vstq_commit_e.bits.uop.stale_pvd)
+  io.core.vrf_rport.addr := Mux(vrf_rarb.io.out.valid, vrf_rarb.io.out.bits, vstq_commit_e.bits.uop.stale_pdst)
 
-  vlud_vrf_q.enq.valid         := vlage.io.vrf_raddr.valid && vlage.io.vrf_rtag === 1.U
-  vlud_vrf_q.enq.bits.uop      := vlage.io.resp.bits.uop
-  vlud_vrf_q.enq.bits.data     := 0.U
-  vlud_vrf_q.deq.ready         := vlud_vrf_q.deq.valid && vlud_dat_q.enq.ready &&
-                                  !(io.vmem.resp.valid && io.vmem.resp.bits.uop.uses_ldq)
+  vlud_vrf_q.io.enq.valid        := vlagu.io.vrf_raddr.valid && vlagu.io.vrf_rtag === 1.U
+  vlud_vrf_q.io.enq.bits.uop     := vlagu.io.resp.bits.uop
+  vlud_vrf_q.io.enq.bits.data    := 0.U
+  vlud_vrf_q.io.deq.ready        := vlud_vrf_q.io.deq.valid && vlud_dat_q.io.enq.ready &&
+                                    !(io.vmem.resp.valid && io.vmem.resp.bits.uop.uses_ldq)
 
-  vlud_dat_q.enq.valid         := vlud_vrf_q.deq.valid && vlud_dat_q.enq.ready &&
-                                  !(io.vmem.resp.valid && io.vmem.resp.bits.uop.uses_ldq)
-  vlud_dat_q.enq.bits.uop      := vlud_vrf_q.dep.bits.uop
-  vlud_dat_q.enq.bits.data     := io.vrf_rport.data
-  vlud_dat_q.deq.ready         := vlud_dat_q.deq.valid && !(io.vmem.resp.valid && io.vmem.resp.bits.uop.uses_ldq)
+  vlud_dat_q.io.enq.valid        := vlud_vrf_q.io.deq.valid && vlud_dat_q.io.enq.ready &&
+                                    !(io.vmem.resp.valid && io.vmem.resp.bits.uop.uses_ldq)
+  vlud_dat_q.io.enq.bits.uop     := vlud_vrf_q.io.deq.bits.uop
+  vlud_dat_q.io.enq.bits.data    := io.core.vrf_rport.data
+  vlud_dat_q.io.deq.ready        := vlud_dat_q.io.deq.valid && !(io.vmem.resp.valid && io.vmem.resp.bits.uop.uses_ldq)
 
-  //vstd_vrf_q.enq.valid         := will_fire_vstq_commit
-  //vstd_vrf_q.enq.bits          := 0.U
-  //vstd_vrf_q.deq.ready         := vstd_dat_q.deq.valid && vstq_dat_q.enq.ready &&
+  //vstd_vrf_q.io.enq.valid        := will_fire_vstq_commit
+  //vstd_vrf_q.io.enq.bits         := 0.U
+  //vstd_vrf_q.io.deq.ready        := vstd_dat_q.deq.valid && vstq_dat_q.enq.ready &&
 
-  //vstd_dat_q.enq.valid         := fired_vstq_commit
-  //vstd_dat_q.enq.bits          := io.vrf_rport.data
+  //vstd_dat_q.io.enq.valid        := fired_vstq_commit
+  //vstd_dat_q.io.enq.bits         := io.core.vrf_rport.data
 
   // rvv agu
   vlagu.io.req                := DontCare
-  vlagu.io.req.valid          := will_fire_vload_addrgen
+  vlagu.io.req.valid          := will_fire_vload_addrgen(0)
   vlagu.io.req.bits.uop       := ldq_vag_e.bits.uop
-  vlagu.io.req.bits.rs1_data  := ldq_vag_e.bits.addr(xLen-1, 0)
+  vlagu.io.req.bits.rs1_data  := ldq_vag_e.bits.addr.bits(xLen-1, 0)
   vlagu.io.req.bits.rs2_data  := ldq_vag_e.bits.const_stride
   vlagu.io.brupdate           := io.core.brupdate
   vlagu.io.vrf_raddr.ready    := Mux(vlagu.io.vrf_rtag === 1.U, vlud_vrf_q.io.enq.ready, true.B) &&
                                  vrf_rarb.io.in(1).ready
-  vlagu.io.vrf_rdata          := io.vrf_rport.data
+  vlagu.io.vrf_rdata          := io.core.vrf_rport.data
 
   vsagu.io.req                := DontCare
-  vsagu.io.req.valid          := will_fire_vstore_addrgen
+  vsagu.io.req.valid          := will_fire_vstore_addrgen(memWidth-1)
   vsagu.io.req.bits.uop       := stq_vag_e.bits.uop
-  vsagu.io.req.bits.rs1_data  := stq_vag_e.bits.addr(xLen-1, 0)
+  vsagu.io.req.bits.rs1_data  := stq_vag_e.bits.addr.bits(xLen-1, 0)
   vsagu.io.req.bits.rs2_data  := stq_vag_e.bits.const_stride
   vsagu.io.brupdate           := io.core.brupdate
   vsagu.io.vrf_raddr.ready    := vrf_rarb.io.in(2).ready
-  vsagu.io.vrf_rdata          := io.vrf_rport.data
+  vsagu.io.vrf_rdata          := io.core.vrf_rport.data
 
   // Task 2: Do LD-LD. ST-LD searches for ordering failures
   //         Do LD-ST search for forwarding opportunities
@@ -2095,7 +2103,7 @@ class ForwardingAgeLogic(num_entries: Int)(implicit p: Parameters) extends BoomM
    io.forwarding_val := found_match
 }
 
-class VecLSAddrGenUnit() extends BoomModule()(p)
+class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
 {
   val io = IO(new Bundle {
     val req       = Flipped(new DecoupledIO(new FuncUnitReq(xLen)))
@@ -2103,17 +2111,17 @@ class VecLSAddrGenUnit() extends BoomModule()(p)
     val brupdate  = Input(new BrUpdateInfo())
     val busy      = Output(Bool())
     val vrf_rtag  = Output(UInt(2.W)) // 0:idle, 1:ud, 2:vm, 3:idx
-    val vrf_raddr = new DecoupledIO(UInt(vecPregSz.W))
+    val vrf_raddr = new DecoupledIO(UInt(vpregSz.W))
     val vrf_rdata = Input(UInt(vLen.W))
   })
 
-  val s_idle :: s_udcpy :: s_vmask :: s_index :: s_split = Enum(4)
+  val s_idle :: s_udcpy :: s_vmask :: s_index :: s_split :: Nil = Enum(5)
   val state = RegInit(s_idle)
   val vmask = Reg(UInt(vLen.W))
   val eindex = Reg(Vec(8, UInt(vLen.W)))
   val io_uop = io.req.bits.uop
-  val io_aligned = io.req.rs1_data(5, 0) === 0 && io_uop.vstart === 0.U &&
-                   (io_uop.vconfig.vl & (0x3F.U >> io_uop.vd_eew))
+  val io_aligned = io.req.bits.rs1_data(5, 0) === 0.U && io_uop.vstart === 0.U &&
+                   ((io_uop.vconfig.vl & (0x3F.U >> io_uop.vd_eew)) === 0.U)
   val req = RegNext(io.req.bits)
   val uop = req.uop
   val eew = uop.vd_eew
@@ -2129,7 +2137,7 @@ class VecLSAddrGenUnit() extends BoomModule()(p)
                  Mux(uop.uopc.isOneOf(uopVLS, uopVSSA), req.rs2_data,
                  Mux(is_aligned_unmasked_unitstride, vLenb.U, 1.U << eew)))
   val eidx_inc = Mux(is_aligned_unmasked_unitstride, vLenb.U >> eew, 1.U)
-  val op2 = Mux(uop.v_idx_ls, VDataSel(Cat(eindex.reverse), uop.vs2_eew, vLen*8, eLen), 0.U)
+  val op2 = Mux(uop.v_idx_ls, VDataSel(Cat(eindex.reverse), uop.vs2_eew, uop.v_eidx, vLen*8, eLen), 0.U)
 
   when (io.req.valid) {
     assert(io_uop.is_rvv && (io_uop.uses_ldq || io_uop.uses_stq))
@@ -2149,7 +2157,7 @@ class VecLSAddrGenUnit() extends BoomModule()(p)
     is (s_udcpy) {
       when (io.vrf_raddr.fire) {
         emul_ctr := emul_ctr + 1.U
-        when (emul_ctr + 1.U === nrVecGroup(emul, uop.nf)) {
+        when (emul_ctr + 1.U === nrVecGroup(emul, uop.v_seg_nf)) {
           state := Mux(!uop.v_unmasked, s_vmask,
                    Mux(uop.v_idx_ls, s_index, s_split))
         }
@@ -2192,17 +2200,17 @@ class VecLSAddrGenUnit() extends BoomModule()(p)
   }
 
   io.busy := state =/= s_idle
-  io.vrf_rtag := MuxCase(0.U, Seq(state === s_udcpy -> 1.U,
-                                  state === s_vmask -> 2.U,
-                                  state === s_index -> 3.U))
-  io.vrf_raddr.valid := io.vrf_rbusy
-  io.vrf_raddr.bits  := Mux(state === s_vmask, uop.pvm, uop.pvs2(emul_ctr))
+  io.vrf_rtag := MuxCase(0.U, Seq((state === s_udcpy) -> 1.U,
+                                  (state === s_vmask) -> 2.U,
+                                  (state === s_index) -> 3.U))
+  io.vrf_raddr.valid := (io.vrf_rtag =/= 0.U)
+  io.vrf_raddr.bits  := Mux(state === s_vmask, uop.pvm, uop.pvs2(emul_ctr).bits)
 
   io.resp.valid                 := state === s_split &&
                                    (uop.v_unmasked || vmask(uop.v_eidx)) &&
                                    !IsKilledByBranch(io.brupdate, uop)
-  io.resp.bits.uop              := GetNewBrMask(io.brupdate, uop)
-  io.resp.bits.uop.stale_pd     := VRegSel(uop.v_eidx, eew, eLenSelSz)
+  io.resp.bits.uop              := UpdateBrMask(io.brupdate, uop)
+  io.resp.bits.uop.stale_pdst   := VRegSel(uop.v_eidx, eew, eLenSelSz)
   io.resp.bits.uop.v_eidx       := uop.v_eidx
   io.resp.bits.uop.v_split_ecnt := eidx_inc
 
@@ -2216,68 +2224,69 @@ class VecLSAddrGenUnit() extends BoomModule()(p)
 
 class VecMem(implicit p: Parameters) extends LazyModule
 {
-  val node = TLClientNode(Seq(TLMasterPortParameters.v1(
-    Seq(TLMasterParameters.v1(
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
       name = s"l1-vec-memq",
       sourceId = IdRange(0, 1),
       supportsProbe = TransferSizes.none
-    ))
-  )))(ValName(s"fromVecMem"))
+  )))))
   lazy val module = new VecMemImp(this)
 }
 
 class VecMemImp(outer: VecMem) extends LazyModuleImp(outer)
-  with HasL1HellaCacheParameters
+  with rocket.HasL1HellaCacheParameters
   with HasBoomCoreParameters
 {
+  implicit val edge = outer.node.edges.out(0)
+  val (tl_out, _) = outer.node.out(0)
+
   val io = IO(new Bundle{
     val lsu = Flipped(new VecMemIO)
   })
 
-  implicit val edge = outer.node.edges.out(0)
-  val (tl_out, _) = outer.node.out(0)
+  val vmemq = Module(new BranchKillableQueue(new BoomVMemReq, 12))
+  val vsdq  = Module(new Queue(UInt(vLen.W), 8))
+  val histq = Module(new BranchKillableQueue(new BoomVMemReq, 12)) // use L2 nMSHRs
 
-  val vmemq = Module(BranchKillableQueue(new BoomVMemReq, 12))
-  val vsdq  = Module(Queue(new UInt(vLen.W)), 8)
-  val histq = Module(BranchKillableQueue(new BoomVMemReq, 12)) // use L2 nMSHRs
+  vmemq.io.enq.valid := io.lsu.req.valid
+  vmemq.io.enq.bits  := DontCare
+  vmemq.io.enq.bits.uop  := io.lsu.req.bits.uop
+  vmemq.io.enq.bits.addr := io.lsu.req.bits.addr
+  vmemq.io.enq.bits.mask := io.lsu.req.bits.mask
+  vmemq.io.deq.ready := tl_out.a.fire
 
-  vmemq.enq.valid := io.lsu.req.valid
-  vmemq.enq.bits  := DontCare
-  vmemq.enq.bits.uop  := io.lsu.req.bits.uop
-  vmemq.enq.bits.addr := io.lsu.req.bits.addr
-  vmemq.enq.bits.mask := io.lsu.req.bits.vmask
-  vmemq.deq.ready := tl_out.a.fire
+  vsdq.io.enq.valid  := RegNext(io.lsu.req.valid && io.lsu.req.bits.uop.uses_stq)
+  vsdq.io.enq.bits   := io.lsu.s1_vdata
+  vsdq.io.deq.ready  := tl_out.a.fire && vmemq.io.deq.bits.uop.uses_stq
 
-  vsdq.enq.valid  := RegNext(io.lsu.req.valid && io.lsu.req.bits.uop.uses_stq)
-  vsdq.enq.bits   := s1_vdata
-  vsdq.deq.ready  := tl_out.a.fire && vmemq.deq.bits.uop.uses_stq
+  histq.io.enq.valid := tl_out.a.fire
+  histq.io.enq.bits  := vmemq.io.deq.bits
+  histq.io.deq.ready := tl_out.d.fire
 
-  histq.enq.valid := tl_out.a.fire
-  histq.enq.bits  := vmemq.deq.bits
-  histq.deq.ready := tl_out.d.fire
-
-  tl_out.a.valid  := vmemq.deq.valid && (!vmemq.deq.bits.uop.uses_ldq && vsdq.deq.valid)
-  when (vmemq.deq.bits.uop.uses_ldq) {
+  tl_out.a.valid  := vmemq.io.deq.valid && (!vmemq.io.deq.bits.uop.uses_ldq && vsdq.io.deq.valid)
+  when (vmemq.io.deq.bits.uop.uses_ldq) {
     tl_out.a.bits   := edge.Get(
-      fromSource = 0 // cfg.nMSHRs + cfg.nIOMSHRs + 2,
-      toAddress  = vmemq.enq.bits.addr,
+      fromSource = 0.U, // cfg.nMSHRs + cfg.nIOMSHRs + 2,
+      toAddress  = vmemq.io.enq.bits.addr,
       lgSize     = lgCacheBlockBytes.U
-    )
+    )._2
   } .otherwise {
     tl_out.a.bits   := edge.Put(
-      fromSource = 0 // cfg.nMSHRs + cfg.nIOMSHRs + 2,
-      toAddress  = vmemq.deq.bits.addr,
+      fromSource = 0.U, // cfg.nMSHRs + cfg.nIOMSHRs + 2,
+      toAddress  = vmemq.io.deq.bits.addr,
       lgSize     = lgCacheBlockBytes.U,
-      data       = vsdq.deq.bits,
-      mask       = vmemq.deq.bits.mask
-    )
+      data       = vsdq.io.deq.bits,
+      mask       = vmemq.io.deq.bits.mask
+    )._2
   }
 
   io.lsu.resp.valid := tl_out.d.valid
-  io.lsu.resp.bits.uop := histq.deq.bits.uop
-  io.lsu.resp.bits.vdata := tl_out.d.data
+  io.lsu.resp.bits.uop := histq.io.deq.bits.uop
+  io.lsu.resp.bits.vdata := tl_out.d.bits.data
   tl_out.d.ready := true.B
 
-  io.lsu.req.ready  := vmemq.enq.ready
-  io.lsu.vsdq_ready := vsdq.enq.ready
+  io.lsu.req.ready  := vmemq.io.enq.ready
+  io.lsu.vsdq_ready := vsdq.io.enq.ready
+
+  io.lsu.release       := DontCare
+  io.lsu.release.valid := false.B // FIXME
 }

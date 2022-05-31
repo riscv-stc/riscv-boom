@@ -30,10 +30,10 @@ import boom.util._
 class VecPipeline(implicit p: Parameters) extends BoomModule
 {
   val vecIssueParams = issueParams.find(_.iqType == IQT_VEC.litValue).get
-  val vmxIssueParams = issueParams.find(_.iqType == IQT_VMX.litValue).get
-  require(vecIssueParams.dispatchWidth == vmxIssueParams.dispatchWidth)
+  //val vmxIssueParams = issueParams.find(_.iqType == IQT_VMX.litValue).get
+  //require(vecIssueParams.dispatchWidth == vmxIssueParams.dispatchWidth)
   val dispatchWidth = vecIssueParams.dispatchWidth
-  val numWakeupPorts = vecWidth + memWidth + 1 // internal wakeups
+  val numWakeupPorts = vecWidth + memWidth // internal wakeups
 
   val io = IO(new Bundle {
     val brupdate         = Input(new BrUpdateInfo())
@@ -43,7 +43,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val status           = Input(new MStatus())
 
     val vec_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
-    val vmx_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
+    //val vmx_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
     val vbusy_status     = Input(UInt(numVecPhysRegs.W))
 
     val ll_wports        = Flipped(Vec(memWidth, Decoupled(new ExeUnitResp(eLen))))
@@ -67,10 +67,10 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       val vec_req_valids      = Vec(vecIssueParams.issueWidth, Bool())
       val vec_iss_slots_empty = Bool()
       val vec_iss_slots_full  = Bool()
-      val vmx_iss_valids      = Vec(vmxIssueParams.issueWidth, Bool())
-      val vmx_req_valids      = Vec(vmxIssueParams.issueWidth, Bool())
-      val vmx_iss_slots_empty = Bool()
-      val vmx_iss_slots_full  = Bool()
+      //val vmx_iss_valids      = Vec(vmxIssueParams.issueWidth, Bool())
+      //val vmx_req_valids      = Vec(vmxIssueParams.issueWidth, Bool())
+      //val vmx_iss_slots_empty = Bool()
+      //val vmx_iss_slots_full  = Bool()
       val div_busy            = Vec(vecIssueParams.issueWidth, Bool())
       val fdiv_busy           = Vec(vecIssueParams.issueWidth, Bool())
     })
@@ -84,11 +84,11 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
                          vecIssueParams,
                          numWakeupPorts, vector = true))
   vec_issue_unit.suggestName("vec_issue_unit")
-  val vmx_issue_unit = Module(new IssueUnitCollapsing(
-                         vmxIssueParams,
-                         numWakeupPorts, vector = true))
-  vmx_issue_unit.suggestName("vmx_issue_unit")
-  val viu = Seq(vec_issue_unit, vmx_issue_unit)
+  //val vmx_issue_unit = Module(new IssueUnitCollapsing(
+  //                       vmxIssueParams,
+  //                       numWakeupPorts, vector = true))
+  //vmx_issue_unit.suggestName("vmx_issue_unit")
+  val viu = Seq(vec_issue_unit) //vmx_issue_unit
   val vregfile       = Module(new RegisterFileSynthesizable(numVecPhysRegs,
                          exe_units.numVrfReadPorts,
                          exe_units.numVrfWritePorts + memWidth,
@@ -97,7 +97,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
                          Seq.fill(exe_units.numVrfWritePorts + memWidth){ false },
                          vector = true))
   val vregister_read = Module(new RegisterRead(
-                         vecWidth+1,
+                         vecWidth,
                          exe_units.withFilter(_.readsVrf).map(_.supportedFuncUnits),
                          exe_units.numVrfReadPorts,
                          exe_units.withFilter(_.readsVrf).map(x => if (x.hasVMX) 2 else 4),
@@ -105,7 +105,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
                          0,
                          vLen, float = false, vector = true))
 
-  require (exe_units.count(_.readsVrf) == vecWidth + 1)
+  require (exe_units.count(_.readsVrf) == vecWidth)
   require (exe_units.numVrfWritePorts + memWidth == numWakeupPorts)
   require (vecWidth >= memWidth)
 
@@ -138,7 +138,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   // Input (Dispatch)
   for (w <- 0 until dispatchWidth) {
     vec_issue_unit.io.dis_uops(w) <> io.vec_dis_uops(w)
-    vmx_issue_unit.io.dis_uops(w) <> io.vmx_dis_uops(w)
+    //vmx_issue_unit.io.dis_uops(w) <> io.vmx_dis_uops(w)
   }
 
   //-------------------------------------------------------------
@@ -151,10 +151,10 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   io.perf.div_busy  := (0 until vecWidth).map(i => if(exe_units(i).hasDiv)  exe_units(i).io.perf.div_busy  else false.B)
   io.perf.fdiv_busy := (0 until vecWidth).map(i => if(exe_units(i).hasFdiv) exe_units(i).io.perf.fdiv_busy else false.B)
 
-  io.perf.vmx_iss_valids := vmx_issue_unit.io.iss_valids
-  io.perf.vmx_req_valids := (vecWidth until vecWidth+1).map(i => exe_units(i).io.req.valid)
-  io.perf.vmx_iss_slots_empty := vmx_issue_unit.io.perf.empty
-  io.perf.vmx_iss_slots_full  := vmx_issue_unit.io.perf.full
+  //io.perf.vmx_iss_valids := vmx_issue_unit.io.iss_valids
+  //io.perf.vmx_req_valids := (vecWidth until vecWidth+1).map(i => exe_units(i).io.req.valid)
+  //io.perf.vmx_iss_slots_empty := vmx_issue_unit.io.perf.empty
+  //io.perf.vmx_iss_slots_full  := vmx_issue_unit.io.perf.full
 
   // Output (Issue)
   for (i <- 0 until vecWidth) {
@@ -170,9 +170,9 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
     require (exe_units(i).readsVrf)
   }
-  iss_valids(vecWidth) := vmx_issue_unit.io.iss_valids(0)
-  iss_uops(vecWidth)   := vmx_issue_unit.io.iss_uops(0)
-  vmx_issue_unit.io.fu_types(0) := exe_units.vmx_unit.io.fu_types
+  //iss_valids(vecWidth) := vmx_issue_unit.io.iss_valids(0)
+  //iss_uops(vecWidth)   := vmx_issue_unit.io.iss_uops(0)
+  //vmx_issue_unit.io.fu_types(0) := exe_units.vmx_unit.io.fu_types
 
   // Wakeup
   viu.map(iu => {
@@ -259,14 +259,14 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       eu_vresp.bits.uop.v_eidx := 0.U
     }
     if (eu.writesVrf) {
-      if (eu.hasVMX) {
-        eu_vresp.valid    := eu.io.vresp.valid && eu_vresp_uop.rf_wen && !eu_vresp_uop.ctrl.is_sta
-        eu.io.vresp.ready := Mux(eu_vresp_uop.ctrl.is_sta, io.to_sdq.ready, true.B)
-        when (eu.io.vresp.valid) { assert(eu_vresp_uop.is_rvv) }
-      } else {
+      //if (eu.hasVMX) {
+        //eu_vresp.valid    := eu.io.vresp.valid && eu_vresp_uop.rf_wen && !eu_vresp_uop.ctrl.is_sta
+        //eu.io.vresp.ready := Mux(eu_vresp_uop.ctrl.is_sta, io.to_sdq.ready, true.B)
+        //when (eu.io.vresp.valid) { assert(eu_vresp_uop.is_rvv) }
+      //} else {
         eu_vresp.valid    := eu.io.vresp.valid && eu_vresp_uop.rf_wen
         eu.io.vresp.ready := true.B
-      }
+      //}
       vregfile.io.write_ports(w_cnt) := WritePort(eu_vresp, vpregSz, vLen, isVector, true)
       when (eu_vresp.valid && !(eu_vresp_uop.is_rvv && eu_vresp_uop.ctrl.is_sta)) {
         //assert(eu.io.vresp.ready, "No backpressuring the Vec EUs")
@@ -278,13 +278,13 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   }
   require (w_cnt == vregfile.io.write_ports.length)
 
-  val vmx_unit = exe_units.vmx_unit
-  val vmx_resp = vmx_unit.io.vresp
-  val vmx_resp_uop = vmx_unit.io.vresp.bits.uop
+  //val vmx_unit = exe_units.vmx_unit
+  //val vmx_resp = vmx_unit.io.vresp
+  //val vmx_resp_uop = vmx_unit.io.vresp.bits.uop
 
-  io.to_sdq.valid := vmx_resp.valid && vmx_resp_uop.is_rvv && vmx_resp_uop.ctrl.is_sta
-  io.to_sdq.bits  := vmx_resp.bits
-  io.to_sdq.bits.data := VDataSel(vmx_resp.bits.data, vmx_resp_uop.vd_eew, vmx_resp_uop.v_eidx, vLen, eLen)
+  //io.to_sdq.valid := vmx_resp.valid && vmx_resp_uop.is_rvv && vmx_resp_uop.ctrl.is_sta
+  //io.to_sdq.bits  := vmx_resp.bits
+  //io.to_sdq.bits.data := VDataSel(vmx_resp.bits.data, vmx_resp_uop.vd_eew, vmx_resp_uop.v_eidx, vLen, eLen)
   //vmx_resp.ready := Mux(io.to_sdq.valid, io.to_sdq.ready, true.B)
   //io.to_int.valid := false.B
   //io.to_int.bits  := DontCare
@@ -314,11 +314,11 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       val exe_resp = eu.io.vresp
       val wb_uop = eu.io.vresp.bits.uop
       val wport = io.wakeups(w_cnt)
-      if (eu.hasVMX) {
-        wport.valid := exe_resp.valid && wb_uop.rf_wen && !(wb_uop.is_rvv && wb_uop.ctrl.is_sta)
-      } else {
+      //if (eu.hasVMX) {
+        //wport.valid := exe_resp.valid && wb_uop.rf_wen && !(wb_uop.is_rvv && wb_uop.ctrl.is_sta)
+      //} else {
         wport.valid := exe_resp.valid && wb_uop.rf_wen
-      }
+      //}
       wport.bits := exe_resp.bits
 
       w_cnt += 1

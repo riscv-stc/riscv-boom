@@ -421,8 +421,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val memIssueSlotsEmpty = mem_iss_unit.io.perf.empty
   val fpIssueSlotsEmpty  = fp_pipeline.io.perf.iss_slots_empty
   val vecIssueSlotsEmpty = v_pipeline.io.perf.vec_iss_slots_empty
-  val vmxIssueSlotsEmpty = v_pipeline.io.perf.vmx_iss_slots_empty
-  val allIssueSlotsEmpty = intIssueSlotsEmpty && memIssueSlotsEmpty && fpIssueSlotsEmpty && vecIssueSlotsEmpty && vmxIssueSlotsEmpty
+  //val vmxIssueSlotsEmpty = v_pipeline.io.perf.vmx_iss_slots_empty
+  val allIssueSlotsEmpty = intIssueSlotsEmpty && memIssueSlotsEmpty && fpIssueSlotsEmpty && vecIssueSlotsEmpty //&& vmxIssueSlotsEmpty
 
   val resourceEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("frontend fb full",                  () => io.ifu.perf.fb_full),
@@ -503,9 +503,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val int_iss_valids = int_iss_unit.io.iss_valids
   val fp_iss_valids  = fp_pipeline.io.perf.iss_valids
   val vec_iss_valids = v_pipeline.io.perf.vec_iss_valids
-  val vmx_iss_valids = v_pipeline.io.perf.vmx_iss_valids
+  //val vmx_iss_valids = v_pipeline.io.perf.vmx_iss_valids
 
-  val uopsIssued_valids  = mem_iss_valids ++ int_iss_valids ++ fp_iss_valids ++ vec_iss_valids ++ vmx_iss_valids
+  val uopsIssued_valids  = mem_iss_valids ++ int_iss_valids ++ fp_iss_valids ++ vec_iss_valids //++ vmx_iss_valids
   val issueWidthSum      = issueParams.map(_.issueWidth).sum
   val uopsIssued_sum_leN = Wire(Vec(issueWidthSum, Bool()))
   val uopsIssued_sum     = PopCount(uopsIssued_valids)
@@ -519,7 +519,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //val uopsIssued_stall_on_stores  = uopsIssued_stall && io.lsu.perf.stq_full && (!io.lsu.perf.ldq_nonempty || !rob.io.perf.com_load_is_at_rob_head)
 
   val uopsExeActive_valids = if(usingVector)    
-      exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids ++ v_pipeline.io.perf.vec_req_valids ++ v_pipeline.io.perf.vmx_req_valids
+      exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids ++ v_pipeline.io.perf.vec_req_valids //++ v_pipeline.io.perf.vmx_req_valids
     else if (usingFPU) 
       exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids
     else
@@ -1209,9 +1209,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dis_uops(w).v_split_ecnt  := dis_split_ecnt
       // for partial load (including prestart/body masked/tail not empty), 
       // shoot first split to vector pipe to get undisturb part
-      when (dis_uops(w).is_rvv && dis_uops(w).uses_ldq && dis_split_eidx === 0.U && dis_undisturb) {
-        dis_uops(w).iq_type := IQT_MVMX
-      }
+      //when (dis_uops(w).is_rvv && dis_uops(w).uses_ldq && dis_split_eidx === 0.U && dis_undisturb) {
+        //dis_uops(w).iq_type := IQT_MVMX
+      //}
       // TODO: for masked load/store, dispatch every split to vector pipe to get mask update
 
       v_rename_stage.io.dis_fire_first(w) := dis_fire(w) && dis_uops(w).v_split_first
@@ -1292,8 +1292,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   for (i <- 0 until issueParams.size) {
     if (issueParams(i).iqType == IQT_VEC.litValue) {
        v_pipeline.io.vec_dis_uops <> dispatcher.io.dis_uops(i)
-     } else if (issueParams(i).iqType == IQT_VMX.litValue) {
-       v_pipeline.io.vmx_dis_uops <> dispatcher.io.dis_uops(i)
+    //} else if (issueParams(i).iqType == IQT_VMX.litValue) {
+       //v_pipeline.io.vmx_dis_uops <> dispatcher.io.dis_uops(i)
     } else if (issueParams(i).iqType == IQT_FP.litValue) {
        fp_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
     } else {
@@ -1711,13 +1711,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 //  fp_pipeline.io.to_sdq.ready := false.B
   }
 
-  if (usingVector) {
-    io.lsu.v_stdata <> v_pipeline.io.to_sdq
+//if (usingVector) {
+//  io.lsu.v_stdata <> v_pipeline.io.to_sdq
 //} else {
 //  io.lsu.v_stdata.valid := false.B
 //  io.lsu.v_stdata.bits := DontCare
 //  v_pipeline.io.to_sdq.ready := false.B
-  }
+//}
 
   //-------------------------------------------------------------
   //-------------------------------------------------------------

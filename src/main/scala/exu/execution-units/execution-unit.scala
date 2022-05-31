@@ -1309,7 +1309,7 @@ class VecExeUT(timeout: Int = 10000)(implicit p: Parameters)
         dut.io.req.bits.uop.uopc,
         dut.io.req.bits.uop.rob_idx,
         dut.io.req.bits.uop.vconfig.vtype.vsew,
-        dut.io.req.bits.uop.vconfig.vtype.vlmul,
+        dut.io.req.bits.uop.vconfig.vtype.vlmul_signed.asUInt,
         dut.io.req.bits.uop.v_eidx,
         dut.io.req.bits.uop.vconfig.vl)
     printf("     rs1 %x\n", dut.io.req.bits.rs1_data)

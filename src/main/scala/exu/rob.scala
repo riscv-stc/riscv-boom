@@ -70,10 +70,10 @@ class RobIo(
 
   // Unbusying ports for stores.
   // +1 for fpstdata
-  val lsu_clr_bsy      = Input(Vec(memWidth + 1, Valid(UInt(robAddrSz.W))))
+  val lsu_clr_bsy      = Input(Vec(memWidth + 1, Valid(new MicroOp)))
 
   // Port for unmarking loads/stores as speculation hazards..
-  val lsu_clr_unsafe   = Input(Vec(memWidth, Valid(UInt(robAddrSz.W))))
+  val lsu_clr_unsafe   = Input(Vec(memWidth, Valid(new MicroOp)))
 
 
   // Track side-effects for debug purposes.
@@ -343,7 +343,7 @@ class Rob(
       rob_vleff_exception(rob_tail) := false.B
       rob_fflags(rob_tail)    := 0.U
       if (usingVector) {
-        rob_ud_bsy(rob_tail)  := io.enq_uops(w).iq_type === IQT_MVMX && io.enq_uops(w).uses_ldq
+        rob_ud_bsy(rob_tail)  := io.enq_uops(w).uses_ldq
       }
 
       assert (rob_val(rob_tail) === false.B, "[rob] overwriting a valid entry.")
@@ -398,22 +398,23 @@ class Rob(
     }
 
     // Stores have a separate method to clear busy bits
-    for (clr_rob_idx <- io.lsu_clr_bsy) {
-      when (clr_rob_idx.valid && MatchBank(GetBankIdx(clr_rob_idx.bits))) {
-        val cidx = GetRowIdx(clr_rob_idx.bits)
+    for (lsu_clr_bsy <- io.lsu_clr_bsy) {
+      val clr_rob_idx = lsu_clr_bsy.bits.rob_idx
+      when (lsu_clr_bsy.valid && MatchBank(GetBankIdx(clr_rob_idx))) {
+        val cidx = GetRowIdx(clr_rob_idx)
         rob_bsy(cidx)    := false.B
         rob_unsafe(cidx) := false.B
         assert (rob_val(cidx) === true.B, "[rob] store writing back to invalid entry.")
         assert (rob_bsy(cidx) === true.B, "[rob] store writing back to a not-busy entry.")
         if (O3PIPEVIEW_PRINTF) {
           printf("%d; O3PipeView:complete:%d\n",
-            rob_uop(GetRowIdx(clr_rob_idx.bits)).debug_events.fetch_seq, io.debug_tsc)
+            rob_uop(GetRowIdx(clr_rob_idx)).debug_events.fetch_seq, io.debug_tsc)
         }
       }
     }
     for (clr <- io.lsu_clr_unsafe) {
-      when (clr.valid && MatchBank(GetBankIdx(clr.bits))) {
-        val cidx = GetRowIdx(clr.bits)
+      when (clr.valid && MatchBank(GetBankIdx(clr.bits.rob_idx))) {
+        val cidx = GetRowIdx(clr.bits.rob_idx)
         rob_unsafe(cidx) := false.B
       }
     }

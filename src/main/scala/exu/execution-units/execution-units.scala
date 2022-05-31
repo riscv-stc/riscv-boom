@@ -101,11 +101,11 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(impl
     exe_units.find(_.hasRocc).get
   }
 
-  lazy val vmx_unit = {
-    require (usingVector)
-    require (exe_units.count(_.hasVMX) == 1)
-    exe_units.find(_.hasVMX).get
-  }
+  //lazy val vmx_unit = {
+    //require (usingVector)
+    //require (exe_units.count(_.hasVMX) == 1)
+    //exe_units.find(_.hasVMX).get
+  //}
 
   if (!fpu && !vector) {
     // scalar integer
@@ -152,13 +152,13 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(impl
       exe_units += vec_exe_unit
     }
 
-    val vmx_exe_unit = Module(new VecExeUnit(hasVMX = true,
-                                             hasAlu = false,
-                                             hasMacc = false,
-                                             hasVMaskUnit = false,
-                                             hasDiv = false))
-    vmx_exe_unit.suggestName("vmx_exe_unit")
-    exe_units += vmx_exe_unit
+    //val vmx_exe_unit = Module(new VecExeUnit(hasVMX = true,
+    //                                         hasAlu = false,
+    //                                         hasMacc = false,
+    //                                         hasVMaskUnit = false,
+    //                                         hasDiv = false))
+    //vmx_exe_unit.suggestName("vmx_exe_unit")
+    //exe_units += vmx_exe_unit
   }
 
   val exeUnitsStr = new StringBuilder
