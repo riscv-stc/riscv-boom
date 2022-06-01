@@ -61,7 +61,7 @@ class RobIo(
 
   // Handle Branch Misspeculations
   val brupdate = Input(new BrUpdateInfo())
-  val vmupdate = if (usingVector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
+  //val vmupdate = if (usingVector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
 
   // Write-back Stage
   // (Update of ROB)
@@ -514,21 +514,21 @@ class Rob(
         rob_uop(i).br_mask := GetNewBrMask(io.brupdate, br_mask)
       }
 
-      if (usingVector) {
-        when (io.vmupdate.map(u =>
-            u.valid && !u.bits.v_active &&
-            GetRowIdx(u.bits.rob_idx) === i.U &&
-            MatchBank(GetBankIdx(u.bits.rob_idx))).reduce(_||_)) {
-          assert(rob_val(i), "Vmask Kill invalid entry")
-          assert(rob_uop(i).is_rvv, "Vmask Kill invalid entry")
-          assert(rob_uop(i).uses_ldq || rob_uop(i).uses_stq, "Vmask Kill non-lsu entry")
-          rob_unsafe(i) := false.B
-          rob_exception(i) := false.B
-          when (rob_uop(i).uses_stq) {
-            rob_bsy(i) := false.B
-          }
-        }
-      }
+      //if (usingVector) {
+      //  when (io.vmupdate.map(u =>
+      //      u.valid && !u.bits.v_active &&
+      //      GetRowIdx(u.bits.rob_idx) === i.U &&
+      //      MatchBank(GetBankIdx(u.bits.rob_idx))).reduce(_||_)) {
+      //    assert(rob_val(i), "Vmask Kill invalid entry")
+      //    assert(rob_uop(i).is_rvv, "Vmask Kill invalid entry")
+      //    assert(rob_uop(i).uses_ldq || rob_uop(i).uses_stq, "Vmask Kill non-lsu entry")
+      //    rob_unsafe(i) := false.B
+      //    rob_exception(i) := false.B
+      //    when (rob_uop(i).uses_stq) {
+      //      rob_bsy(i) := false.B
+      //    }
+      //  }
+      //}
     }
 
 
@@ -739,15 +739,15 @@ class Rob(
 
   r_xcpt_uop         := next_xcpt_uop
   r_xcpt_uop.br_mask := GetNewBrMask(io.brupdate, next_xcpt_uop)
-  if (usingVector) {
-    when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop) || IsKilledByVM(io.vmupdate, next_xcpt_uop)) {
-      r_xcpt_val := false.B
-    }
-  } else {
+  //if (usingVector) {
+    //when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop) || IsKilledByVM(io.vmupdate, next_xcpt_uop)) {
+      //r_xcpt_val := false.B
+    //}
+  //} else {
     when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop)) {
       r_xcpt_val := false.B
     }
-  }
+  //}
 
   assert (!(exception_thrown && !r_xcpt_val),
     "ROB trying to throw an exception, but it doesn't have a valid xcpt_cause")

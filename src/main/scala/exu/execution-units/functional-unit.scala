@@ -554,17 +554,17 @@ class MemAddrCalcUnit(implicit p: Parameters)
   val op2 = WireInit(uop.imm_packed(19,8).asSInt)
   // unit stride
   if (usingVector) {
-    val v_ls_ew = Mux(usingVector.B & uop.is_rvv, uop.v_ls_ew, 0.U)
-    val uop_sew = Mux(usingVector.B & uop.is_rvv, uop.vconfig.vtype.vsew, 0.U)
+    //val v_ls_ew = Mux(usingVector.B & uop.is_rvv, uop.v_ls_ew, 0.U)
+    //val uop_sew = Mux(usingVector.B & uop.is_rvv, uop.vconfig.vtype.vsew, 0.U)
     // unit stride load/store
-    val vec_us_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA) // or uopVLFF
-    val vec_cs_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLS, uopVSSA)
-    val vec_idx_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+    //val vec_us_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA) // or uopVLFF
+    //val vec_cs_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLS, uopVSSA)
+    //val vec_idx_ls = usingVector.B & uop.is_rvv & uop.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
     // TODO: optimize multiplications here
-    op2 := Mux(vec_us_ls, ((uop.v_eidx * uop.v_seg_nf + uop.v_seg_f) << v_ls_ew).asSInt,
-           Mux(vec_cs_ls, io.req.bits.rs2_data.asSInt * uop.v_eidx.asUInt + Cat(0.U(1.W), uop.v_seg_f << v_ls_ew).asSInt,
-           Mux(vec_idx_ls, uop.v_xls_offset.asSInt + Cat(0.U(1.W), uop.v_seg_f << uop_sew).asSInt,
-           uop.imm_packed(19,8).asSInt)))
+    //op2 := Mux(vec_us_ls, ((uop.v_eidx * uop.v_seg_nf + uop.v_seg_f) << v_ls_ew).asSInt,
+           //Mux(vec_cs_ls, io.req.bits.rs2_data.asSInt * uop.v_eidx.asUInt + Cat(0.U(1.W), uop.v_seg_f << v_ls_ew).asSInt,
+           //Mux(vec_idx_ls, uop.v_xls_offset.asSInt + Cat(0.U(1.W), uop.v_seg_f << uop_sew).asSInt,
+           //uop.imm_packed(19,8).asSInt)))
   }
 
   // perform address calculation
@@ -575,7 +575,7 @@ class MemAddrCalcUnit(implicit p: Parameters)
 
   val store_data = io.req.bits.rs2_data
 
-  io.resp.bits.addr := effective_address
+  io.resp.bits.addr := Mux(uop.is_rvv, op1.asUInt, effective_address)
   io.resp.bits.data := store_data
 
   if (dataWidth > 63) {

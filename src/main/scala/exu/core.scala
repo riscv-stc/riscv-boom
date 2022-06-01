@@ -82,13 +82,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   var v_pipeline: VecPipeline = null
-  val vmupdate = Wire(Vec(vecWidth, Valid(new MicroOp)))
-  vmupdate.map(_.valid := false.B)
-  vmupdate.map(_.bits := DontCare)
+  //val vmupdate = Wire(Vec(vecWidth, Valid(new MicroOp)))
+  //vmupdate.map(_.valid := false.B)
+  //vmupdate.map(_.bits := DontCare)
   if (usingVector) {
     v_pipeline = Module(new VecPipeline)
     v_pipeline.io.ll_wports := DontCare
-    vmupdate := v_pipeline.io.vmupdate
+    //vmupdate := v_pipeline.io.vmupdate
     v_pipeline.io.intupdate := DontCare
     v_pipeline.io.fpupdate := DontCare
   }
@@ -193,10 +193,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dis_ready  = Wire(Bool())
   //val dis_split       = Wire(Vec(coreWidth, Bool()))
   //val dis_fired       = RegInit(VecInit(0.U(coreWidth.W).asBools))
-  val dis_split_last  = Wire(Vec(coreWidth, Bool()))
-  val dis_split_cand  = Wire(Vec(coreWidth, Bool()))
-  val dis_split_actv  = Wire(Vec(coreWidth, Bool()))
-  val dis_prev_split_actv  = Wire(Vec(coreWidth, Bool()))
+  //val dis_split_last  = Wire(Vec(coreWidth, Bool()))
+  //val dis_split_cand  = Wire(Vec(coreWidth, Bool()))
+  //val dis_split_actv  = Wire(Vec(coreWidth, Bool()))
+  //val dis_prev_split_actv  = Wire(Vec(coreWidth, Bool()))
   val wait_for_empty_pipeline = Wire(Vec(coreWidth, Bool()))
 
   // Issue Stage/Register Read
@@ -1109,7 +1109,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dis_prior_slot_valid = dis_valids.scanLeft(false.B) ((s,v) => s || v)
   val dis_prior_slot_unique = (dis_uops zip dis_valids).scanLeft(false.B) {case (s,(u,v)) => s || v && u.is_unique}
   wait_for_empty_pipeline := (0 until coreWidth).map(w => (dis_uops(w).is_unique || custom_csrs.disableOOO) &&
-                                  (!rob.io.empty || !io.lsu.fencei_rdy || dis_prior_slot_valid(w)))
+                                                           (!rob.io.empty || !io.lsu.fencei_rdy || dis_prior_slot_valid(w)))
   val rocc_shim_busy = if (usingRoCC) !exe_units.rocc_unit.io.rocc.rxq_empty else false.B
   val wait_for_rocc = (0 until coreWidth).map(w =>
                         (dis_uops(w).is_fence || dis_uops(w).is_fencei) && (io.rocc.busy || rocc_shim_busy))
@@ -1118,13 +1118,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dis_rocc_alloc_stall = (dis_uops.map(_.uopc === uopROCC) zip block_rocc) map {case (p,r) =>
                                if (usingRoCC) p && r else false.B}
 
-  dis_prev_split_actv(0) := false.B
-  (1 until coreWidth).map(w => dis_prev_split_actv(w) := dis_split_actv.slice(0, w).reduce(_ || _))
+  //dis_prev_split_actv(0) := false.B
+  //(1 until coreWidth).map(w => dis_prev_split_actv(w) := dis_split_actv.slice(0, w).reduce(_ || _))
   val dis_hazards = (0 until coreWidth).map(w =>
                       dis_valids(w) &&
                       (  !rob.io.ready
                       || ren_stalls(w)
-                      || dis_prev_split_actv(w)
+                      //|| dis_prev_split_actv(w)
                       || io.lsu.ldq_full(w) && dis_uops(w).uses_ldq
                       || io.lsu.stq_full(w) && dis_uops(w).uses_stq
                       || !dispatcher.io.ren_uops(w).ready
@@ -1140,73 +1140,73 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   io.lsu.fence_dmem := (dis_valids zip wait_for_empty_pipeline).map {case (v,w) => v && w} .reduce(_||_)
 
   val dis_stalls = dis_hazards.scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
-  val disLast = (0 until coreWidth).map(i => !dis_valids(i) || !dis_split_cand(i) || dis_split_last(i)).andR
-  if (usingVector) {
+  //val disLast = (0 until coreWidth).map(i => !dis_valids(i) || !dis_split_cand(i) || dis_split_last(i)).andR
+  //if (usingVector) {
     //dis_ready := !dis_stalls.last &&
                  //(!dis_valids.last || !dis_split_cand.last || dis_split_last.last)
-    dis_ready := !dis_stalls.last && disLast
+    //dis_ready := !dis_stalls.last && disLast
     //dis_ready := dis_fire_fb.last
-  } else {
+  //} else {
     dis_ready := !dis_stalls.last
-  }
+  //}
 
   //-------------------------------------------------------------
   // RVV L/S split
-  if (usingVector) {
+  //if (usingVector) {
 
-    for (w <- 0 until coreWidth) {
-      val dis_split_eidx  = RegInit(0.U((vLenSz+1).W))
-      val dis_split_segf  = RegInit(0.U(3.W))
-      val dis_split_segg  = RegInit(0.U(3.W))
-      val vseg_ls         = dis_uops(w).is_rvv && dis_uops(w).v_seg_nf > 1.U
-      val vseg_flast      = dis_split_segf + 1.U(4.W) === dis_uops(w).v_seg_nf
+    //for (w <- 0 until coreWidth) {
+      //val dis_split_eidx  = RegInit(0.U((vLenSz+1).W))
+      //val dis_split_segf  = RegInit(0.U(3.W))
+      //val dis_split_segg  = RegInit(0.U(3.W))
+      //val vseg_ls         = dis_uops(w).is_rvv && dis_uops(w).v_seg_nf > 1.U
+      //val vseg_flast      = dis_split_segf + 1.U(4.W) === dis_uops(w).v_seg_nf
       //val dis_total_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, dis_uops(w).vconfig.vl, rename_stage.io.ren2_uops(w).v_split_ecnt)
-      val dis_total_ecnt  = rename_stage.io.ren2_uops(w).v_split_ecnt
-      val dis_split_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, 1.U, dis_total_ecnt)
-      val elem_last       = dis_split_eidx + dis_split_ecnt >= dis_total_ecnt
-      val vLen_ecnt       = (vLen.U >> 3.U) >> dis_uops(w).vd_eew
-      val dis_undisturb   = (dis_uops(w).vconfig.vl < dis_uops(w).vconfig.vtype.vlMax ||
-                            dis_uops(w).vconfig.vtype.vlMax < vLen_ecnt) && !rename_stage.io.ren2_uops(w).uopc.isOneOf(uopVLM, uopVLR)
+      //val dis_total_ecnt  = rename_stage.io.ren2_uops(w).v_split_ecnt
+      //val dis_split_ecnt  = Mux(dis_uops(w).uses_stq || dis_uops(w).uses_ldq, 1.U, dis_total_ecnt)
+      //val elem_last       = dis_split_eidx + dis_split_ecnt >= dis_total_ecnt
+      //val vLen_ecnt       = (vLen.U >> 3.U) >> dis_uops(w).vd_eew
+      //val dis_undisturb   = (dis_uops(w).vconfig.vl < dis_uops(w).vconfig.vtype.vlMax ||
+                            //dis_uops(w).vconfig.vtype.vlMax < vLen_ecnt) && !rename_stage.io.ren2_uops(w).uopc.isOneOf(uopVLM, uopVLR)
 
-      when (io.ifu.redirect_flush) {
-        dis_split_eidx := 0.U
-        dis_split_segf := 0.U
-        dis_split_segg := 0.U
+      //when (io.ifu.redirect_flush) {
+        //dis_split_eidx := 0.U
+        //dis_split_segf := 0.U
+        //dis_split_segg := 0.U
         //dis_fired(w) := false.B
-      } .elsewhen (dis_ready) {
-        dis_split_eidx := 0.U
-        dis_split_segf := 0.U
-        dis_split_segg := 0.U
+      //} .elsewhen (dis_ready) {
+        //dis_split_eidx := 0.U
+        //dis_split_segf := 0.U
+        //dis_split_segg := 0.U
         //dis_fired(w) := false.B
-      } .elsewhen (dis_fire(w)) {
-        when (vseg_ls) {
-          dis_split_eidx := dis_split_eidx + Mux(vseg_flast, dis_split_ecnt, 0.U)
-          dis_split_segf := dis_split_segf + Mux(vseg_flast, 0.U, 1.U)
-          dis_split_segg := dis_split_segg + Mux(vseg_flast, 1.U, 0.U)
-        } .otherwise {
-          dis_split_eidx := dis_split_eidx + dis_split_ecnt
-        }
+      //} .elsewhen (dis_fire(w)) {
+        //when (vseg_ls) {
+          //dis_split_eidx := dis_split_eidx + Mux(vseg_flast, dis_split_ecnt, 0.U)
+          //dis_split_segf := dis_split_segf + Mux(vseg_flast, 0.U, 1.U)
+          //dis_split_segg := dis_split_segg + Mux(vseg_flast, 1.U, 0.U)
+        //} .otherwise {
+          //dis_split_eidx := dis_split_eidx + dis_split_ecnt
+        //}
         //when (dis_split_last(w)) { dis_fired(w) := true.B }
-      }
+      //}
 
-      dis_split_last(w) := elem_last && (!vseg_ls || vseg_flast)
-      dis_split_cand(w) := dis_uops(w).is_rvv && dis_uops(w).v_is_split && (dis_uops(w).uses_ldq || dis_uops(w).uses_stq)
+      //dis_split_last(w) := elem_last && (!vseg_ls || vseg_flast)
+      //dis_split_cand(w) := dis_uops(w).is_rvv && dis_uops(w).v_is_split && (dis_uops(w).uses_ldq || dis_uops(w).uses_stq)
       //if (w == 0) {
       //  dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_fired(w)
       //} else {
       //  dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_fired(w) && !(dis_split_actv.slice(0,w).reduce(_||_))
       //}
-      dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_split_last(w) // && !dis_fired(w)
+      //dis_split_actv(w) := dis_split_cand(w) && dis_valids(w) && !dis_split_last(w) // && !dis_fired(w)
       //dis_fire(w)    := (!dis_split_cand(w) || !dis_fired(w)) && dis_valids(w) && !dis_stalls(w)
-      dis_fire(w)    := dis_valids(w) && !dis_stalls(w)
-      dis_fire_fb(w) := dis_fire(w) && (!dis_split_cand(w) || dis_split_last(w))
-      when (dis_split_cand(w) && dis_valids(w)) {
-        when (vseg_ls) { dis_uops(w).v_seg_f := dis_split_segf }
-        dis_uops(w).v_eidx := dis_split_eidx
-      }
-      dis_uops(w).v_split_first := dis_split_eidx === 0.U
-      dis_uops(w).v_split_last  := dis_split_last(w)
-      dis_uops(w).v_split_ecnt  := dis_split_ecnt
+      //dis_fire(w)    := dis_valids(w) && !dis_stalls(w)
+      //dis_fire_fb(w) := dis_fire(w) && (!dis_split_cand(w) || dis_split_last(w))
+      //when (dis_split_cand(w) && dis_valids(w)) {
+        //when (vseg_ls) { dis_uops(w).v_seg_f := dis_split_segf }
+        //dis_uops(w).v_eidx := dis_split_eidx
+      //}
+      //dis_uops(w).v_split_first := dis_split_eidx === 0.U
+      //dis_uops(w).v_split_last  := dis_split_last(w)
+      //dis_uops(w).v_split_ecnt  := dis_split_ecnt
       // for partial load (including prestart/body masked/tail not empty), 
       // shoot first split to vector pipe to get undisturb part
       //when (dis_uops(w).is_rvv && dis_uops(w).uses_ldq && dis_split_eidx === 0.U && dis_undisturb) {
@@ -1214,17 +1214,17 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       //}
       // TODO: for masked load/store, dispatch every split to vector pipe to get mask update
 
-      v_rename_stage.io.dis_fire_first(w) := dis_fire(w) && dis_uops(w).v_split_first
-    }
-  } else {
+      //v_rename_stage.io.dis_fire_first(w) := dis_fire(w) && dis_uops(w).v_split_first
+    //}
+  //} else {
     dis_fire := dis_valids zip dis_stalls map {case (v,s) => v && !s}
 
     for (w <- 0 until coreWidth) {
       dis_fire_fb(w)    := dis_fire(w)
-      dis_split_actv(w) := false.B
-      dis_split_last(w) := true.B
+      //dis_split_actv(w) := false.B
+      //dis_split_last(w) := true.B
     }
-  }
+  //}
 
   //-------------------------------------------------------------
   // LDQ/STQ Allocation Logic
@@ -1240,12 +1240,12 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   rob.io.enq_valids := dis_fire
   rob.io.enq_uops   := dis_uops
-  if (usingVector) {
-    rob.io.enq_partial_stall := (dis_split_actv zip dis_stalls).foldRight(dis_stalls.last){
-      case((actv, stall), prev) => Mux(actv, stall, prev)}
-  } else {
+  //if (usingVector) {
+    //rob.io.enq_partial_stall := (dis_split_actv zip dis_stalls).foldRight(dis_stalls.last){
+      //case((actv, stall), prev) => Mux(actv, stall, prev)}
+  //} else {
     rob.io.enq_partial_stall := dis_stalls.last // TODO come up with better ROB compacting scheme.
-  }
+  //}
   rob.io.debug_tsc := debug_tsc_reg
   rob.io.csr_stall := csr.io.csr_stall
 
@@ -1471,9 +1471,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   issue_units.map(_.io.brupdate := brupdate)
   issue_units.map(_.io.flush_pipeline := RegNext(rob.io.flush.valid))
   if (usingVector) {
-    mem_iss_unit.io.vmupdate := vmupdate
-    int_iss_unit.io.vmupdate.map(_.valid := false.B)
-    int_iss_unit.io.vmupdate.map(_.bits := DontCare)
+    //mem_iss_unit.io.vmupdate := vmupdate
+    //int_iss_unit.io.vmupdate.map(_.valid := false.B)
+    //int_iss_unit.io.vmupdate.map(_.bits := DontCare)
     v_pipeline.io.intupdate := iregister_read.io.intupdate
     v_pipeline.io.fpupdate := fp_pipeline.io.fpupdate
   }
@@ -1694,9 +1694,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   // Handle Branch Mispeculations
   io.lsu.brupdate := brupdate
-  if (usingVector) {
-    io.lsu.vmupdate := vmupdate
-  }
+  //if (usingVector) {
+    //io.lsu.vmupdate := vmupdate
+  //}
   io.lsu.rob_head_idx := rob.io.rob_head_idx
   io.lsu.rob_pnr_idx  := rob.io.rob_pnr_idx
 
@@ -1798,7 +1798,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       ll_wbarb.io.in(attachBase + i) <> v_pipeline.io.to_int(i)
     }
     //v_pipeline.io.to_fp.ready := true.B
-    v_pipeline.io.ll_wports  <> exe_units.memory_units.map(_.io.ll_vresp)
+    v_pipeline.io.ll_wports  <> io.lsu.vrf_wbk
   }
 
   if (usingRoCC) {
@@ -1894,9 +1894,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // branch resolution
   rob.io.brupdate <> brupdate
   // vector mask update
-  if (usingVector) {
-    rob.io.vmupdate <> vmupdate
-  }
+  //if (usingVector) {
+    //rob.io.vmupdate <> vmupdate
+  //}
 
   exe_units.map(u => u.io.status := csr.io.status)
   if (usingFPU)

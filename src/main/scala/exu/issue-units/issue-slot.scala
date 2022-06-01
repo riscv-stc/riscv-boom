@@ -50,7 +50,7 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false)
   val in_uop        = Flipped(Valid(new MicroOp())) // if valid, this WILL overwrite an entry!
   val out_uop       = Output(new MicroOp()) // the updated slot uop; will be shifted upwards in a collasping queue.
   val uop           = Output(new MicroOp()) // the current Slot's uop. Sent down the pipeline when issued.
-  val vmupdate      = if (usingVector && !vector) Input(Vec(1, Valid(new MicroOp))) else null
+  //val vmupdate      = if (usingVector && !vector) Input(Vec(1, Valid(new MicroOp))) else null
   val intupdate     = if (vector) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
   val fpupdate      = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   //val vecUpdate     = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
@@ -373,18 +373,18 @@ class IssueSlot(
     next_state := s_invalid
   }
 
-  if (usingVector && !vector && iqType == IQT_MEM.litValue) {
+  //if (usingVector && !vector && iqType == IQT_MEM.litValue) {
     //next_pm := io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx).reduce(_||_)
-    when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx).reduce(_||_)) {
-      slot_uop.v_unmasked := true.B
-    }
-    when (next_uop.v_idx_ls && io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid)).reduce(_||_)) {
-      vxofs := Mux1H(io.vmupdate.map(x => (x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid), x.bits.v_xls_offset)))
-    }
-    when (IsKilledByVM(io.vmupdate, slot_uop)) {
-      next_state := s_invalid
-    }
-  }
+    //when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx).reduce(_||_)) {
+      //slot_uop.v_unmasked := true.B
+    //}
+    //when (next_uop.v_idx_ls && io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid)).reduce(_||_)) {
+      //vxofs := Mux1H(io.vmupdate.map(x => (x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid), x.bits.v_xls_offset)))
+    //}
+    //when (IsKilledByVM(io.vmupdate, slot_uop)) {
+      //next_state := s_invalid
+    //}
+  //}
 
   when (!io.in_uop.valid) {
     slot_uop.br_mask := next_br_mask
@@ -511,11 +511,11 @@ class IssueSlot(
 
   when (io.in_uop.valid) {
     slot_uop := io.in_uop.bits
-    if(usingVector && !vector && iqType == IQT_MEM.litValue) {
-      when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === io.in_uop.bits.rob_idx).reduce(_||_)) {
-        slot_uop.v_unmasked := true.B
-      }
-    }
+    //if(usingVector && !vector && iqType == IQT_MEM.litValue) {
+      //when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === io.in_uop.bits.rob_idx).reduce(_||_)) {
+        //slot_uop.v_unmasked := true.B
+      //}
+    //}
     assert (is_invalid || io.clear || io.kill, "trying to overwrite a valid issue slot.")
   }
 

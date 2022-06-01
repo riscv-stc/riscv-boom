@@ -65,7 +65,7 @@ class RegisterRead(
 
     // send micro-ops to the execution pipelines
     val exe_reqs = Vec(issueWidth, (new DecoupledIO(new FuncUnitReq(registerWidth))))
-    val vmupdate = if (vector) Output(Vec(1, Valid(new MicroOp))) else null
+    //val vmupdate = if (vector) Output(Vec(1, Valid(new MicroOp))) else null
     //val vecUpdate = if (vector) Output(Vec(1, Valid(new ExeUnitResp(eLen)))) else null
     val intupdate= if (usingVector && !vector && !float) Output(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
     val fpupdate = if (usingVector && float) Output(Vec(issueWidth, Valid(new ExeUnitResp(eLen)))) else null
@@ -394,10 +394,10 @@ class RegisterRead(
         //)).asUInt().orR()
 
         if (w >= vecWidth) {
-          io.vmupdate(w-vecWidth).valid  := exe_reg_valids(w) && ((is_sta || is_load) && (is_masked || is_idx_ls))
-          io.vmupdate(w-vecWidth).bits   := exe_reg_uops(w)
-          io.vmupdate(w-vecWidth).bits.v_active        := is_active
-          io.vmupdate(w-vecWidth).bits.v_xls_offset    := exe_reg_rs2_data(w)
+          //io.vmupdate(w-vecWidth).valid  := exe_reg_valids(w) && ((is_sta || is_load) && (is_masked || is_idx_ls))
+          //io.vmupdate(w-vecWidth).bits   := exe_reg_uops(w)
+          //io.vmupdate(w-vecWidth).bits.v_active        := is_active
+          //io.vmupdate(w-vecWidth).bits.v_xls_offset    := exe_reg_rs2_data(w)
         }
         //io.vecUpdate(w).valid               := false.B // FIXME: exe_reg_valids(w) && is_perm_fdbk
         //io.vecUpdate(w).bits.uop            := exe_reg_uops(w)

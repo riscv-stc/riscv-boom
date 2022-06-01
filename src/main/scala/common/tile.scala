@@ -136,9 +136,9 @@ class BoomTile private(
   tlMasterXbar.node := dCacheTap := dcache.node
 
   // VecMem
-  lazy val vecMem: VecMem = LazyModule(new VecMem)
-  val vecMemWidget = LazyModule(new TLWidthWidget(64))
-  tlMasterXbar.node := vecMemWidget.node := vecMem.node
+  lazy val vecmem: VecMem = LazyModule(new VecMem)
+  val vecmemWidget = LazyModule(new TLWidthWidget(64))
+  tlMasterXbar.node := vecmemWidget.node := vecmem.node
 
   // Frontend/ICache
   val frontend = LazyModule(new BoomFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
@@ -241,6 +241,7 @@ class BoomTileModuleImp(outer: BoomTile) extends BaseTileModuleImp(outer){
   hellaCacheArb.io.requestor <> hellaCachePorts
   lsu.io.hellacache <> hellaCacheArb.io.mem
   outer.dcache.module.io.lsu <> lsu.io.dmem
+  outer.vecmem.module.io.lsu <> lsu.io.vmem
 
   // Generate a descriptive string
   val frontendStr = outer.frontend.module.toString

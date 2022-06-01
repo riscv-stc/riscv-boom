@@ -498,14 +498,14 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
       rs2_edata := rs2_data(esel*16+15, esel*16)
       rs3_edata := rs3_data(esel*16+15, esel*16)
     } else {
-      if (esel < 16) {
+      if (esel < vLen/64) {
         rs1_edata := Mux(vs1_sew === 3.U, rs1_data(esel*64+63, esel*64),
                      Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32), rs1_data(esel*16+15, esel*16)))
         rs2_edata := Mux(vs2_sew === 3.U, rs2_data(esel*64+63, esel*64),
                      Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32), rs2_data(esel*16+15, esel*16)))
         rs3_edata := Mux(vd_sew === 3.U,  rs3_data(esel*64+63, esel*64),
                      Mux(vd_sew === 2.U,  rs3_data(esel*32+31, esel*32), rs3_data(esel*16+15, esel*16)))
-      } else if (esel < 32) {
+      } else if (esel < vLen/32) {
         rs1_edata := Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32), rs1_data(esel*16+15, esel*16))
         rs2_edata := Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32), rs2_data(esel*16+15, esel*16))
         rs3_edata := Mux(vd_sew === 2.U,  rs3_data(esel*32+31, esel*32), rs3_data(esel*16+15, esel*16))

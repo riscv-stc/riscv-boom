@@ -87,7 +87,7 @@ class IssueUnitIO(
   val fu_types         = Input(Vec(issueWidth, Bits(width=FUC_SZ.W)))
 
   val brupdate         = Input(new BrUpdateInfo())
-  val vmupdate         = if (usingVector && !vector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
+  //val vmupdate         = if (usingVector && !vector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
   val intupdate        = if (vector) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
   val fpupdate         = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   //val vecUpdate        = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
@@ -233,8 +233,8 @@ abstract class IssueUnit(
         issue_slots(i).intupdate      := io.intupdate
         issue_slots(i).fpupdate       := io.fpupdate
         //issue_slots(i).vecUpdate      := io.vecUpdate
-      } else {
-        issue_slots(i).vmupdate       := io.vmupdate
+      //} else {
+        //issue_slots(i).vmupdate       := io.vmupdate
       }
     }
   }

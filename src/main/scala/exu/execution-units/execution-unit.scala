@@ -239,7 +239,7 @@ class ALUExeUnit(
     writesIrf        = hasAlu || hasMul || hasDiv,
     writesLlIrf      = hasMem || hasRocc,
     writesLlFrf      = (hasIfpu || hasMem) && p(tile.TileKey).core.fpu != None,
-    writesLlVrf      = (p(tile.TileKey).core.useVector && hasMem),
+    //writesLlVrf      = (p(tile.TileKey).core.useVector && hasMem),
     numBypassStages  =
       if (hasAlu && hasMul) 3 //TODO XXX p(tile.TileKey).core.imulLatency
       else if (hasAlu) 1 else 0,
@@ -432,9 +432,9 @@ class ALUExeUnit(
     if (usingFPU) {
       io.ll_fresp <> io.lsu_io.fresp
     }
-    if (usingVector) {
-      io.ll_vresp <> io.lsu_io.vresp
-    }
+    //if (usingVector) {
+      //io.ll_vresp <> io.lsu_io.vresp
+    //}
   }
 
   // Outputs (Write Port #0)  ---------------
@@ -750,8 +750,8 @@ class VecExeUnit(
                                 //(io.req.bits.uop.fu_code_is(FU_FPU) ||
                                 //io.req.bits.uop.fu_code_is(FU_F2I)) // TODO move to using a separate unit
     assert(vfpu.io.req.bits.pred_data === false.B, "Expecting operations without predication for VFPU")
-    vfpu.io.fcsr_rm           := io.fcsr_rm
-    vfpu.io.resp.ready        := DontCare
+    vfpu.io.fcsr_rm          := io.fcsr_rm
+    vfpu.io.resp.ready       := DontCare
     fpu_resp_val             := vfpu.io.resp.valid
     fpu_resp_fflags          := vfpu.io.resp.bits.fflags
 
