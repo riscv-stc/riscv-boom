@@ -69,7 +69,7 @@ class VLSUArchitecturalParams(gp: VLSUGeneralParams,
   /** Maximum elements number in one vector. which means eew = 8b, lmul = 8. */
   val vlMax = log2Ceil(vLen) + 1
   require(vlMax < 20, "chisel compiler does not support left shift more than 20 bits.")
-  require(vLenb > cacheLineByteSize)
+  require(vLenb >= cacheLineByteSize)
   val vpregSz = log2Ceil(bp.numVecPhysRegisters)
   val coreWidth = bp.decodeWidth
   /** Indicates how many finished instructions can be retired from pipeline at each cycle. */
