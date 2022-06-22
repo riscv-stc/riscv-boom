@@ -1,5 +1,5 @@
 // See README.md for license details.
-package mxu
+package boom.exu
 
 import chisel3._
 import chisel3.util._
