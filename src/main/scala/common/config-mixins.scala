@@ -587,6 +587,67 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
 // DOC include end: StcBoomConfig
 
 // DOC include start: StcBoomConfig
+<<<<<<< HEAD
+
+/**
+ * Based on LargeBoomConfig with Matrix + RVV extension
+ */
+class WithNStcMatBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Config(
+  new WithTAGELBPD ++ // Default to TAGE-L BPD
+    new Config((site, here, up) => {
+      case TilesLocated(InSubsystem) => {
+        val prev = up(TilesLocated(InSubsystem), site)
+        val idOffset = overrideIdOffset.getOrElse(prev.size)
+        (0 until n).map { i =>
+          BoomTileAttachParams(
+            tileParams = BoomTileParams(
+              core = BoomCoreParams(
+                fetchWidth = 8,
+                decodeWidth = 2,
+                numRobEntries = 64,
+                issueParams = Seq(
+                  IssueParams(issueWidth=1, numEntries=24, iqType=IQT_MEM.litValue, dispatchWidth=2),
+                  IssueParams(issueWidth=2, numEntries=24, iqType=IQT_INT.litValue, dispatchWidth=2),
+                  IssueParams(issueWidth=1, numEntries=16, iqType=IQT_FP.litValue , dispatchWidth=2),
+                  IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VEC.litValue, dispatchWidth=2),
+                  IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VMX.litValue, dispatchWidth=2)),
+                numIntPhysRegisters = 64,
+                numFpPhysRegisters = 48,
+                numLdqEntries = 16,
+                numStqEntries = 16,
+                maxBrCount = 12,
+                maxVconfigCount = 4,
+                numFetchBufferEntries = 16,
+                ftq = FtqParameters(nEntries=32),
+                nPerfCounters = 29,
+                fpu = Some(freechips.rocketchip.tile.FPUParams(minFLen=16, fLen=64, sfmaLatency=4, dfmaLatency=4, divSqrt=true)),
+                useVector = true,
+                vLen = 1024,
+                mLen = 32768,  //vLen * 32
+                numMatTrRegisters = 8,
+                numMatAccRegisters = 2,
+                eLen = 64,
+                vMemDataBits = 64,
+                numVecPhysRegisters = 65
+              ),
+              dcache = Some(
+                DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4, nTLBWays=16)
+              ),
+              icache = Some(
+                ICacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, fetchBytes=4*4)
+              ),
+              hartId = i + idOffset
+            ),
+            crossingParams = RocketCrossingParams()
+          )
+        } ++ prev
+      }
+      case SystemBusKey => up(SystemBusKey, site).copy(beatBytes = 16)
+      case XLen => 64
+    })
+)
+// DOC include end: StcMatBoomConfig
+=======
 /**
  * Based on LargeBoomConfig with RVV extension, vlen=512
  */
@@ -642,3 +703,4 @@ class WithNStcRVVBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends
   })
 )
 // DOC include end: StcBoomRVVConfig
+>>>>>>> b7698504b83a89c9f6fe29cf78b95f6924bf0e59

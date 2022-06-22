@@ -105,6 +105,12 @@ case class BoomCoreParams(
   override val vMemDataBits: Int = 0,
   numVecPhysRegisters: Int = 0,
 
+   /* matrix extension */
+  override val useMatrix: Boolean = false,
+  override val mLen: Int = 0,
+  numMatTrRegisters: Int = 0,
+  numMatAccRegisters: Int = 0,
+
   /* debug stuff */
   enableCommitLogPrintf: Boolean = true,
   enableBranchPrintf: Boolean = true,
