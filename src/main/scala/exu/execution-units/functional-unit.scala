@@ -57,6 +57,10 @@ object FUConstants extends Enumeration
   val FU_VMASKU_ID = Value
   val FU_VRP_ID = Value  // reduction/permutation
   val FUC_SZ_ENUM = Value
+  // TODO: Function units can be grouped to save width, as one issue queue only relates to several of them, not all of them
+  val FU_GEMM   = Value
+  val FU_HSLICE = Value
+  val FU_VSLICE = Value
 
   val FUC_SZ    = FUC_SZ_ENUM.id
   val FU_X      = BitPat.dontCare(FUC_SZ)
@@ -108,7 +112,8 @@ class SupportedFuncUnits(
   val ifpu: Boolean = false,
   val fr7:  Boolean = false,
   val vmx:  Boolean = false,
-  val vector: Boolean = false)
+  val vector: Boolean = false,
+  val matrix: Boolean = false)
 {
 }
 

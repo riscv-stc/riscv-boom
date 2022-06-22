@@ -193,6 +193,8 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val usingFDivSqrt = boomParams.fpu.isDefined && boomParams.fpu.get.divSqrt
   val usingzfhExt   = boomParams.fpu.isDefined && boomParams.fpu.get.zfhExt
 
+  val usingMatrix   = boomParams.useMatrix
+
   val mulDivParams = boomParams.mulDiv.getOrElse(MulDivParams())
   // TODO: Allow RV32IF
   require(!(xLen == 32 && usingFPU), "RV32 does not support fp")
@@ -225,12 +227,14 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val fpIssueParam  = issueParams.find(_.iqType == IQT_FP.litValue).get
   val vecIssueParam = if (usingVector) issueParams.find(_.iqType == IQT_VEC.litValue).get else null
   val vecMemIssueParam = if (usingVector) issueParams.find(_.iqType == IQT_VMX.litValue).get else null
+  val matIssueParam = if(usingMatrix) issueParams.find(_.iqType == IQT_MAT.litValue).get else null
   val intWidth = intIssueParam.issueWidth
   val memWidth = memIssueParam.issueWidth
   val fpWidth  = fpIssueParam.issueWidth
   val vecWidth = if (usingVector) vecIssueParam.issueWidth else 0
   /** Width of VLSU accessing VRF at same cycle. Affecting VRF read/write port. */
   val vecMemWidth = if (usingVector) vecMemIssueParam.issueWidth else 0
+  val matWidth = if(usingMatrix) matIssueParam.issueWidth
 
   issueParams.map(x => require(x.dispatchWidth <= coreWidth && x.dispatchWidth > 0))
 

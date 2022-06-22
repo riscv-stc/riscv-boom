@@ -1348,3 +1348,93 @@ class WithVecExeUT extends Config((site, here, up) => {
 })
 
 class VecExeUTConfig extends Config(new WithVecExeUT)
+
+
+/**
+ * MAT execution unit that can have a MXU unit
+ */
+class MatExeUnit(
+  hasAlu         : Boolean = true,
+  hasMacc        : Boolean = true,
+  hasFpu         : Boolean = true
+) (implicit p: Parameters)
+  extends ExecutionUnit(
+    readsVrf         = true,
+    writesVrf        = true,
+    writesIrf        = false,
+    writesFrf        = false,
+    writesLlVrf      = false,
+    numBypassStages  = if (hasMacc) 3 else 1,
+    dataWidth        = p(tile.TileKey).core.vLen,
+    bypassable       = false,
+    alwaysBypassable = false,
+    hasAlu           = hasAlu,
+    hasMacc          = hasMacc,
+    hasFpu           = hasFpu
+) with freechips.rocketchip.rocket.constants.MemoryOpConstants
+{
+  val out_str =
+    BoomCoreStringPrefix("==MatExeUnit==")
+
+  override def toString: String = out_str.toString
+
+  val hSliceBusy = WireInit(false.B)
+  val vSliceBusy = WireInit(false.B)
+
+  io.fu_types := FU_GEMM | Mux(!hSliceBusy, FU_HSLICE, 0.U) | Mux(!vSliceBusy, FU_VSLICE, 0.U)
+
+  // -------------------------------MXU Unit -------------------------------
+  val mxu = Module(new MXU(meshRows, meshCols, tileRows, tileCols, dataWidth=vLen))
+
+  hSliceBusy := !mxu.io.rowSliceReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE) && io.req.bits.uop.sew > 0)
+  vSliceBusy := !mxu.io.colSliceReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_RSLICE) && io.req.bits.uop.sew > 0)
+
+  // matrix multiplication relate
+  mxu.io.macReq.valid           := io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM)
+  mxu.io.macReq.bits.ridx       := io.req.bits.uop.pdst
+  mxu.io.macReq.bits.srcType    := io.req.bits.uop.
+  mxu.io.macReq.bits.outType    := io.req.bits.uop.
+  mxu.io.macReq.bits.rm         := io.fcsr_rm
+  mxu.io.macReqSrcA             := io.req.bits.rs1_data
+  mxu.io.macReqSrcB             := io.req.bits.rs2_data
+  // read or write row slices
+  mxu.io.rowSliceReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE)
+  mxu.io.rowSliceReq.bits.cmd   := 
+  mxu.io.rowSliceReq.bits.ridx  := 
+  mxu.io.rowSliceReq.bits.sidx  :=
+  mxu.io.rowSliceReq.bits.rtype :=  
+  mxu.io.rowSliceWdata          := io.req.bits.rs1_data
+  mxu.io.rowSliceRdata.ready    := io.ll_vresp.ready
+  // read or write col slices
+  mxu.io.colSliceReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE)
+  mxu.io.colSliceReq.bits.cmd   := 
+  mxu.io.colSliceReq.bits.ridx  := 
+  mxu.io.colSliceReq.bits.sidx  :=
+  mxu.io.colSliceReq.bits.rtype :=  
+  mxu.io.colSliceWdata          := io.req.bits.rs1_data
+  mxu.io.colSliceRdata.ready    := io.ll_vresp.ready && !mxu.io.rowSliceRdata.valid
+
+  // Outputs (Write Port #0)  ---------------
+  if (writesLlVrf) {
+    io.ll_vresp.valid     :=
+    io.ll_vresp.bits.uop  :=
+    io.ll_vresp.bits.data := 
+  }
+
+  override def supportedFuncUnits = {
+    new SupportedFuncUnits(
+      alu    = hasAlu,
+      jmp    = hasJmpUnit,
+      mem    = hasMem,
+      muld   = hasMul || hasDiv,
+      fpu    = hasFpu,
+      csr    = hasCSR,
+      fdiv   = hasFdiv,
+      ifpu   = hasIfpu,
+      fr7    = hasFdiv,
+      vmx    = hasVMX,
+      vector = false,
+      matirx = true
+    )
+  }
+}

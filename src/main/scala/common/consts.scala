@@ -54,17 +54,19 @@ trait BOOMDebugConstants
  */
 trait IQType
 {
-  val IQT_SZ  = 5
+  val IQT_SZ  = 6
   val IQT_INT = 0x1.U(IQT_SZ.W)
   val IQT_MEM = 0x2.U(IQT_SZ.W)
   val IQT_FP  = 0x4.U(IQT_SZ.W)
   val IQT_VEC = 0x8.U(IQT_SZ.W)
   val IQT_VMX = 0x10.U(IQT_SZ.W)
+  val IQT_MAT = 0x20.U(IQT_SZ.W)
 
-  val IQT_MFP = 0x6.U(IQT_SZ.W)
-  val IQT_IVEC= 0x9.U(IQT_SZ.W)
-  val IQT_FVEC= 0xC.U(IQT_SZ.W)
-  val IQT_MVMX= 0x12.U(IQT_SZ.W)
+  val IQT_MFP  = 0x6.U(IQT_SZ.W)
+  val IQT_IVEC = 0x9.U(IQT_SZ.W)
+  val IQT_FVEC = 0xC.U(IQT_SZ.W)
+  val IQT_MVMX = 0x12.U(IQT_SZ.W)
+  val IQT_MMAT = 0x22.U(IQT_SZ.W)
 }
 
 
@@ -165,25 +167,28 @@ trait ScalarOpConstants
   val RS2 = 2.U(2.W)
   val RS3 = 3.U(2.W)
   // Decode Stage Control Signals
-  val RT_FIX   = 0x00.U(5.W)
-  val RT_FLT   = 0x01.U(5.W)
-  val RT_VI    = 0x02.U(5.W) // RS1 as simm5 (vop.vi), TODO: move to OP selection
-  val RT_FIXU  = 0x04.U(5.W) // RS1 used as unsigned for vector
-  val RT_VIU   = 0x06.U(5.W) // RS1 as uimm5 (vop.vi), TODO: move to OP selection
-  val RT_X     = 0x07.U(5.W) // not-a-register (but shouldn't get a busy-bit, etc.)
-  val RT_PERM  = 0x0A.U(5.W) // special mark for permutation VADD, aliasing RT_VI
-  val RT_VEC   = 0x10.U(5.W) // vector, signed width vsew
-  val RT_VN    = 0x11.U(5.W) // vector, signed width vsew/2
-  val RT_VW    = 0x12.U(5.W) // vector, signed width vsew*2 (for v*ext, maybe *4 *8)
-  val RT_VF    = 0x13.U(5.W) // vector, ieee FP format, currently not used
-  val RT_VU    = 0x14.U(5.W) // vector, unsigned width vsew
-  val RT_VNU   = 0x15.U(5.W) // vector, unsigned width vsew/2
-  val RT_VWU   = 0x16.U(5.W) // vector, unsigned width vsew*2 (for v*ext, maybe *4 *8)
-  val RT_VM    = 0x17.U(5.W) // VD is mask bit
-  val RT_VRED  = 0x18.U(5.W) // vector, signed reduction VD/VS1 with vsew
-  val RT_VRW   = 0x1A.U(5.W) // vector, signed reduction VD/VS1 with vsew*2
-  val RT_VRU   = 0x1C.U(5.W) // vector, unsigned reduction VD/VS1 with vsew
-  val RT_VRWU  = 0x1E.U(5.W) // vector, unsigned reduction VD/VS1 with vsew*2
+  val RT_FIX   = 0x00.U(6.W)
+  val RT_FLT   = 0x01.U(6.W)
+  val RT_VI    = 0x02.U(6.W) // RS1 as simm5 (vop.vi), TODO: move to OP selection
+  val RT_FIXU  = 0x04.U(6.W) // RS1 used as unsigned for vector
+  val RT_VIU   = 0x06.U(6.W) // RS1 as uimm5 (vop.vi), TODO: move to OP selection
+  val RT_X     = 0x07.U(6.W) // not-a-register (but shouldn't get a busy-bit, etc.)
+  val RT_PERM  = 0x0A.U(6.W) // special mark for permutation VADD, aliasing RT_VI
+  val RT_VEC   = 0x10.U(6.W) // vector, signed width vsew
+  val RT_VN    = 0x11.U(6.W) // vector, signed width vsew/2
+  val RT_VW    = 0x12.U(6.W) // vector, signed width vsew*2 (for v*ext, maybe *4 *8)
+  val RT_VF    = 0x13.U(6.W) // vector, ieee FP format, currently not used
+  val RT_VU    = 0x14.U(6.W) // vector, unsigned width vsew
+  val RT_VNU   = 0x15.U(6.W) // vector, unsigned width vsew/2
+  val RT_VWU   = 0x16.U(6.W) // vector, unsigned width vsew*2 (for v*ext, maybe *4 *8)
+  val RT_VM    = 0x17.U(6.W) // VD is mask bit
+  val RT_VRED  = 0x18.U(6.W) // vector, signed reduction VD/VS1 with vsew
+  val RT_VRW   = 0x1A.U(6.W) // vector, signed reduction VD/VS1 with vsew*2
+  val RT_VRU   = 0x1C.U(6.W) // vector, unsigned reduction VD/VS1 with vsew
+  val RT_VRWU  = 0x1E.U(6.W) // vector, unsigned reduction VD/VS1 with vsew*2
+  val RT_MAT   = 0x20.U(6.W) // matrix
+  val RT_TR    = 0x21.U(6.W) // tr_tile, TODO: include more variations
+  val RT_ACC   = 0x22.U(6.W) // acc_tile, TODO: include more variations
 
   def isInt      (rt: UInt): Bool = (rt === RT_FIX || rt === RT_FIXU)
   def isIntU     (rt: UInt): Bool = (rt === RT_FIXU)
@@ -201,6 +206,7 @@ trait ScalarOpConstants
   def isRvvUImm5 (rt: UInt): Bool = (rt === RT_VIU)
   def isRvvImm5  (rt: UInt): Bool = (rt === RT_VI || rt === RT_VIU || rt === RT_PERM)
   def isPermVADD (rt: UInt): Bool = (rt === RT_PERM)
+  def isMatrix   (rt: UInt): Bool = rt(5)
   //def isMaskV    (rt: UInt): Bool = (rt === RT_VM)
 
   val uopX    = BitPat.dontCare(boom.common.MicroOpcodes.UOPC_SZ)
