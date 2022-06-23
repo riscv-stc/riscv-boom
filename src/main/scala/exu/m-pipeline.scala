@@ -71,7 +71,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   //**********************************
   // construct all of the modules
   val mat_issue_unit = Module(new IssueUnitCollapsing(matIssueParams, numWakeupPorts, matrix = true))
-  val trtileReg      = Module(new TrTileReg(dataWidth, trNums, mlen, vlen, numReadPorts, numWritePorts))
+  val trtileReg      = Module(new TrTileReg(vLen, numMatTrPhysRegs, mLen, vLen, exe_units.numTrTileReadPorts+1, 2))
   val trtileReader   = Module(new TileRegisterRead())
   val exe_units      = new boom.exu.ExecutionUnits(matrix=true)
   mat_issue_unit.suggestName("mat_issue_unit")

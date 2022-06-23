@@ -217,6 +217,8 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val 
   val numLlVrfWritePorts  = exe_units.count(_.writesLlVrf)
 
   val numTrTileReaders    = exe_units.count(_.readsTrTile)
+  val numTrTileReadPorts  = exe_units.count(_.readsTrTile) * 2
+  val numLlTileWritePorts = exe_units.count(_.writeLlTile)
 
   // The mem-unit will also bypass writes to readers in the RRD stage.
   // NOTE: This does NOT include the ll_wport

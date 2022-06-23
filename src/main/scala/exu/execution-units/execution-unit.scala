@@ -89,6 +89,7 @@ abstract class ExecutionUnit(
   val writesLlFrf      : Boolean       = false,
   val writesLlVrf      : Boolean       = false,
   val readsTrTile      : Boolean       = false,
+  val writeLlTile      : Boolean       = false, // may write trTile or accTile
   val numBypassStages  : Int,
   val dataWidth        : Int,
   val bypassable       : Boolean       = false, // TODO make override def for code clarity
@@ -122,7 +123,7 @@ abstract class ExecutionUnit(
     val vresp    = if (writesVrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_iresp = if (writesLlIrf) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_fresp = if (writesLlFrf) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
-
+    val ll_tresp = if (writeLlTile) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
 
     val bypass   = Output(Vec(numBypassStages, Valid(new ExeUnitResp(dataWidth))))
     val brupdate = Input(new BrUpdateInfo())

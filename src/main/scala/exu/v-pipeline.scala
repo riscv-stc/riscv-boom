@@ -104,8 +104,8 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   vmx_issue_unit.suggestName("vmx_issue_unit")
   val viu = Seq(vec_issue_unit, vmx_issue_unit)
   val vregfile       = Module(new RegisterFileSynthesizable(numVecPhysRegs,
-                         exe_units.numVrfReadPorts + 1, // plus 1 for vlsu read request for stores.
-                         exe_units.numVrfWritePorts + 1,
+                         exe_units.numVrfReadPorts + 1,  // plus 1 for vlsu read request for stores.
+                         exe_units.numVrfWritePorts + 1, // plus 1 for long-latency write request
                          vLen,
                          // No bypassing for any VEC units, + memWidth for ll_wb
                          Seq.fill(exe_units.numVrfWritePorts + 1){ false },
@@ -244,13 +244,30 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     case (to_int, vec) => to_int <> vec
   }
 
+  (io.toMat zip exe_units.withFilter(_.hasALU).map(_.io.tresp)).foreach {
+    case(toMat, vec) => toMat <> vec
+  }
+
+  // FIXME: construct vlsuExeResp from vlsuWritePort
+  // arbitration between vslu and matirx pipeline
+  val ll_wbarb = Module(new Arbiter(new ExeUnitResp(vLen), matWidth+1))
   // Cut up critical path by delaying the write by a cycle.
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
-  vregfile.io.write_ports(0).valid := io.vlsuWritePort.valid
-  vregfile.io.write_ports(0).bits.addr := io.vlsuWritePort.bits.addr
-  vregfile.io.write_ports(0).bits.data := io.vlsuWritePort.bits.data
-  vregfile.io.write_ports(0).bits.mask := MaskExploder(io.vlsuWritePort.bits.byteMask, vLen)
+  ll_wbarb.io.in(0) <> DontCare
+  ll_wbarb.io.in(0).valid := io.vlsuWritePort.valid
+  for(w <- 0 until matWidth) {
+    ll_wbarb.io.in(w+1) <> io.fromMat(w)
+  }
+  when(io.vlsuWritePort.valid) {
+    vregfile.io.write_ports(0).valid     := io.vlsuWritePort.valid
+    vregfile.io.write_ports(0).bits.addr := io.vlsuWritePort.bits.addr
+    vregfile.io.write_ports(0).bits.data := io.vlsuWritePort.bits.data
+    vregfile.io.write_ports(0).bits.mask := MaskExploder(io.vlsuWritePort.bits.byteMask, vLen)
+  } .otherwise {
+    vregfile.io.write_ports(0) := WritePort(ll_wbarb.io.out, vElenSz, eLen, isVector, true)
+    // vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vElenSz, eLen, isVector, true))
+  }
 
   var w_cnt = 1
   //for (i <- 1 until vecMemWidth + 1) {//dedicated for vlsu
