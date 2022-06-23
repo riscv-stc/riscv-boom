@@ -25,7 +25,7 @@ import boom.util.{BoomCoreStringPrefix}
  *
  * @param fpu using a FPU?
  */
-class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(implicit val p: Parameters) extends HasBoomCoreParameters
+class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val matrix: Boolean = false)(implicit val p: Parameters) extends HasBoomCoreParameters
 {
   val totalIssueWidth = issueParams.map(_.issueWidth).sum
 
@@ -112,7 +112,7 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(impl
     exe_units.find(_.hasVMX).get
   }
 
-  if (!fpu && !vector) {
+  if (!fpu && !vector && !matrix) {
     // scalar integer
     val int_width = issueParams.find(_.iqType == IQT_INT.litValue).get.issueWidth
 
@@ -137,7 +137,7 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(impl
         hasIfpu        = is_nth(4) && usingFPU))
       exe_units += alu_exe_unit
     }
-  } else if (fpu && !vector) {
+  } else if (fpu && !vector && !matrix) {
     // scalar float
     val fp_width = issueParams.find(_.iqType == IQT_FP.litValue).get.issueWidth
     for (w <- 0 until fp_width) {
@@ -146,7 +146,7 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(impl
                                              hasFpiu = (w==0)))
       exe_units += fpu_exe_unit
     }
-  } else { // vector
+  } else if (vector && !matrix) { // vector
     val vec_width = issueParams.find(_.iqType == IQT_VEC.litValue).get.issueWidth
     for (w <- 0 until vec_width) {
       val vec_exe_unit = Module(new VecExeUnit(hasVMX = false,
@@ -164,6 +164,13 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(impl
                                              hasDiv = false))
     vmx_exe_unit.suggestName("vmx_exe_unit")
     exe_units += vmx_exe_unit
+  }
+  else { // matrix
+    for(w <- 0 until matWidth) {
+      val mat_exe_unit = Module(new MatExeUnit())
+      mat_exe_unit.suggestName("mat_exe_unit")
+      exe_units += mat_exe_unit
+    }
   }
 
   val exeUnitsStr = new StringBuilder

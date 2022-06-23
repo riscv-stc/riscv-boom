@@ -663,7 +663,8 @@ class WithNStcMatBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends
                   IssueParams(issueWidth=2, numEntries=24, iqType=IQT_INT.litValue, dispatchWidth=2),
                   IssueParams(issueWidth=1, numEntries=16, iqType=IQT_FP.litValue , dispatchWidth=2),
                   IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VEC.litValue, dispatchWidth=2),
-                  IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VMX.litValue, dispatchWidth=2)),
+                  IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VMX.litValue, dispatchWidth=2),
+                  IssueParams(issueWidth=1, numEntries=16, iqType=IQT_MAT.litValue, dispatchWidth=2)),
                 numIntPhysRegisters = 64,
                 numFpPhysRegisters = 48,
                 numLdqEntries = 16,
@@ -681,7 +682,8 @@ class WithNStcMatBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends
                 numMatAccRegisters = 2,
                 eLen = 64,
                 vMemDataBits = 64,
-                numVecPhysRegisters = 65
+                numVecPhysRegisters = 65,
+                useMatrix = true
               ),
               dcache = Some(
                 DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4, nTLBWays=16)

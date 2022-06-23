@@ -418,6 +418,7 @@ class Mesh(
     val macReqIn       = Input(Vec(meshCols, Valid(new MacCtrls())))
     val macReqSrcA     = Input(Vec(meshRows, UInt((tileRows*16).W)))
     val macReqSrcB     = Input(Vec(meshCols, UInt((tileCols*16).W)))
+    val macResp        = Output(Valid(new MacCtrls()))
     // read or write row slices, control signals propagated vertically
     val rowSliceReqIn  = Input(Valid(new SliceCtrls(meshRows*tileRows)))
     val rowSliceWdata  = Input(UInt((meshCols*tileCols*64).W))
@@ -484,6 +485,7 @@ class Mesh(
   }
 
   // bottom IOs
+  io.macResp        := mesh(meshRows-1)(meshCols-1).io.macReqOut
   io.rowSliceReqOut := RegNext(mesh(meshRows-1)(meshCols-1).io.rowSliceReqOut)
   io.colSliceReqOut := RegNext(mesh(meshRows-1)(meshCols-1).io.colSliceReqOut)
   val colSliceRdataMux = WireInit(VecInit(Seq.fill(meshRows)(0.U((tileRows*32).W))))
@@ -511,18 +513,19 @@ class MXU(
 ) extends Module 
 {
   val io = IO(new Bundle{
-    // matrix-multiply related
+    // matrix multiplication relate
     val macReq        = Flipped(Decoupled(new MacCtrls()))
     val macReqSrcA    = Input(UInt(dataWidth.W))
     val macReqSrcB    = Input(UInt(dataWidth.W))
+    val macResp       = Output(Valid(new MacCtrls()))
     // read or write row slices
     val rowSliceReq   = Flipped(Decoupled(new SliceCtrls(meshRows*tileRows)))
     val rowSliceWdata = Input(UInt(dataWidth.W))
-    val rowSliceRdata = Output(Valid(UInt(dataWidth.W)))
+    val rowSliceRdata = Decoupled(UInt(dataWidth.W))
     // read or write col slices
     val colSliceReq   = Flipped(Decoupled(new SliceCtrls(meshCols*tileCols*2)))
     val colSliceWdata = Input(UInt(dataWidth.W))
-    val colSliceRdata = Output(Valid(UInt(dataWidth.W)))
+    val colSliceRdata = Decoupled(UInt(dataWidth.W))
   })
 
   require(dataWidth >= meshRows*tileRows*16)
@@ -679,9 +682,11 @@ class MXU(
   io.rowSliceReq.ready   := (rowSliceState === sliceReady)
   io.colSliceReq.ready   := (colSliceState === sliceReady)
   // output control
+  io.macResp             := mesh.io.macResp
+
   val rowRespCtrls     = mesh.io.rowSliceReqOut.bits
   val rowSliceRdataMux = WireInit(VecInit(Seq.fill(meshCols*tileCols*2)(0.U(8.W))))
-  when(mesh.io.rowSliceReqOut.valid && rowRespCtrls.cmd === SLICE_READ) {
+  when(mesh.io.rowSliceReqOut.valid && rowRespCtrls.cmd === SLICE_READ && io.rowSliceRdata.ready) {
     when(rowRespCtrls.rtype === INT8TYPE) {
       (0 until meshCols*tileCols*2).foreach(i => rowSliceRdataMux(i)     := mesh.io.rowSliceRdata(32*i+7, 32*i))
     } .elsewhen(rowRespCtrls.rtype === INT16TYPE) {
@@ -704,7 +709,7 @@ class MXU(
       (0 until meshCols*tileCols/2).foreach(i => rowSliceRdataMux(4*i+3) := mesh.io.rowSliceRdata(64*i+31, 64*i+24))
       rowRespCount := 1.U
     }
-  } .elsewhen(rowRespCount > 0.U) {
+  } .elsewhen(rowRespCount > 0.U && io.rowSliceRdata.ready) {
     when(rowRespCount === 3.U) {
       (0 until meshCols*tileCols/2).foreach(i => rowSliceRdataMux(4*i)   := mesh.io.rowSliceRdata(16*meshCols*tileCols+32*i+7,  16*meshCols*tileCols+32*i))
       (0 until meshCols*tileCols/2).foreach(i => rowSliceRdataMux(4*i+1) := mesh.io.rowSliceRdata(16*meshCols*tileCols+32*i+15, 16*meshCols*tileCols+32*i+8))
@@ -734,7 +739,7 @@ class MXU(
 
   val colRespCtrls     = mesh.io.colSliceReqOut.bits
   val colSliceRdataMux = WireInit(VecInit(Seq.fill(meshRows*tileRows*2)(0.U(8.W))))
-  when(mesh.io.colSliceReqOut.valid && colRespCtrls.cmd === SLICE_READ) {
+  when(mesh.io.colSliceReqOut.valid && colRespCtrls.cmd === SLICE_READ && io.colSliceRdata.ready) {
     when(colRespCtrls.rtype === INT8TYPE) {
       (0 until meshRows*tileRows).foreach(i => colSliceRdataMux(i)       := mesh.io.colSliceRdata(32*i+7, 32*i))
     } .elsewhen(colRespCtrls.rtype === INT16TYPE || colRespCtrls.rtype === FP16TYPE) {
@@ -747,7 +752,7 @@ class MXU(
       (0 until meshRows*tileRows/2).foreach(i => colSliceRdataMux(4*i+3) := mesh.io.colSliceRdata(32*i+31, 32*i+24))
       colRespCount := 1.U
     }
-  } .elsewhen(colRespCount > 0.U) {
+  } .elsewhen(colRespCount > 0.U && io.colSliceRdata.ready) {
     (0 until meshRows*tileRows/2).foreach(i => colSliceRdataMux(4*i)     := mesh.io.colSliceRdata(16*meshRows*tileRows+32*i+7,  16*meshRows*tileRows+32*i))
     (0 until meshRows*tileRows/2).foreach(i => colSliceRdataMux(4*i+1)   := mesh.io.colSliceRdata(16*meshRows*tileRows+32*i+15, 16*meshRows*tileRows+32*i+8))
     (0 until meshRows*tileRows/2).foreach(i => colSliceRdataMux(4*i+2)   := mesh.io.colSliceRdata(16*meshRows*tileRows+32*i+23, 16*meshRows*tileRows+32*i+16))
@@ -762,6 +767,7 @@ class MXU(
   io.colSliceRdata.bits  := colSliceRdataMux.asUInt
 }
 
+// MXUWrapper for test only
 class MXUWrapper(
   val meshRows:    Int, 
   val meshCols:    Int, 
@@ -797,15 +803,17 @@ class MXUWrapper(
   mxu.io.colSliceReq.bits  := io.colSliceReq.bits
   mxu.io.colSliceWdata     := io.colSliceWdata.asUInt
 
-  io.macReq.ready      := mxu.io.macReq.ready
-  io.rowSliceReq.ready := mxu.io.rowSliceReq.ready
-  io.colSliceReq.ready := mxu.io.colSliceReq.ready
+  io.macReq.ready          := mxu.io.macReq.ready
+  io.rowSliceReq.ready     := mxu.io.rowSliceReq.ready
+  io.colSliceReq.ready     := mxu.io.colSliceReq.ready
 
+  mxu.io.rowSliceRdata.ready := true.B
   io.rowSliceRdata.valid := mxu.io.rowSliceRdata.valid
   for(i <- 0 until meshCols*tileCols) {
     io.rowSliceRdata.bits(i) := mxu.io.rowSliceRdata.bits(16*i+15, 16*i)
   }
 
+  mxu.io.colSliceRdata.ready := true.B
   io.colSliceRdata.valid := mxu.io.colSliceRdata.valid
   for(i <- 0 until meshRows*tileRows) {
     io.colSliceRdata.bits(i) := mxu.io.colSliceRdata.bits(16*i+15, 16*i)
