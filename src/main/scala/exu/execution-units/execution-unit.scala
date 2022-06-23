@@ -88,6 +88,7 @@ abstract class ExecutionUnit(
   val writesLlIrf      : Boolean       = false,
   val writesLlFrf      : Boolean       = false,
   val writesLlVrf      : Boolean       = false,
+  val readsTrTile      : Boolean       = false,
   val numBypassStages  : Int,
   val dataWidth        : Int,
   val bypassable       : Boolean       = false, // TODO make override def for code clarity
@@ -1353,24 +1354,12 @@ class VecExeUTConfig extends Config(new WithVecExeUT)
 /**
  * MAT execution unit that can have a MXU unit
  */
-class MatExeUnit(
-  hasAlu         : Boolean = true,
-  hasMacc        : Boolean = true,
-  hasFpu         : Boolean = true
-) (implicit p: Parameters)
+class MatExeUnit() (implicit p: Parameters)
   extends ExecutionUnit(
-    readsVrf         = true,
-    writesVrf        = true,
-    writesIrf        = false,
-    writesFrf        = false,
-    writesLlVrf      = false,
-    numBypassStages  = if (hasMacc) 3 else 1,
-    dataWidth        = p(tile.TileKey).core.vLen,
-    bypassable       = false,
-    alwaysBypassable = false,
-    hasAlu           = hasAlu,
-    hasMacc          = hasMacc,
-    hasFpu           = hasFpu
+    readsTrTile      = true,
+    writesLlVrf      = true,
+    numBypassStages  = 1,
+    dataWidth        = p(tile.TileKey).core.vLen
 ) with freechips.rocketchip.rocket.constants.MemoryOpConstants
 {
   val out_str =
@@ -1392,25 +1381,25 @@ class MatExeUnit(
   // matrix multiplication relate
   mxu.io.macReq.valid           := io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM)
   mxu.io.macReq.bits.ridx       := io.req.bits.uop.pdst
-  mxu.io.macReq.bits.srcType    := io.req.bits.uop.
-  mxu.io.macReq.bits.outType    := io.req.bits.uop.
+  mxu.io.macReq.bits.srcType    := io.req.bits.uop.vs1_eew
+  mxu.io.macReq.bits.outType    := io.req.bits.uop.vd_eew
   mxu.io.macReq.bits.rm         := io.fcsr_rm
   mxu.io.macReqSrcA             := io.req.bits.rs1_data
   mxu.io.macReqSrcB             := io.req.bits.rs2_data
   // read or write row slices
   mxu.io.rowSliceReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE)
-  mxu.io.rowSliceReq.bits.cmd   := 
-  mxu.io.rowSliceReq.bits.ridx  := 
-  mxu.io.rowSliceReq.bits.sidx  :=
-  mxu.io.rowSliceReq.bits.rtype :=  
+  mxu.io.rowSliceReq.bits.cmd   := Mux(, SLICE_READ, Mux(, SLICE_WRITE, SLICE_CLEAR))
+  mxu.io.rowSliceReq.bits.ridx  := io.req.bits.uop.
+  mxu.io.rowSliceReq.bits.sidx  := io.req.bits.uop.
+  mxu.io.rowSliceReq.bits.rtype := io.req.bits.uop.vs1_eew
   mxu.io.rowSliceWdata          := io.req.bits.rs1_data
   mxu.io.rowSliceRdata.ready    := io.ll_vresp.ready
   // read or write col slices
   mxu.io.colSliceReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE)
-  mxu.io.colSliceReq.bits.cmd   := 
-  mxu.io.colSliceReq.bits.ridx  := 
-  mxu.io.colSliceReq.bits.sidx  :=
-  mxu.io.colSliceReq.bits.rtype :=  
+  mxu.io.colSliceReq.bits.cmd   := Mux(, SLICE_READ, Mux(, SLICE_WRITE, SLICE_CLEAR))
+  mxu.io.colSliceReq.bits.ridx  := io.req.bits.uop.
+  mxu.io.colSliceReq.bits.sidx  := io.req.bits.uop.
+  mxu.io.colSliceReq.bits.rtype := io.req.bits.uop.
   mxu.io.colSliceWdata          := io.req.bits.rs1_data
   mxu.io.colSliceRdata.ready    := io.ll_vresp.ready && !mxu.io.rowSliceRdata.valid
 
@@ -1420,6 +1409,8 @@ class MatExeUnit(
     io.ll_vresp.bits.uop  :=
     io.ll_vresp.bits.data := 
   }
+
+  io.
 
   override def supportedFuncUnits = {
     new SupportedFuncUnits(

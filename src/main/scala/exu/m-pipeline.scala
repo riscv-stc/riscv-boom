@@ -70,31 +70,13 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 
   //**********************************
   // construct all of the modules
-
+  val mat_issue_unit = Module(new IssueUnitCollapsing(matIssueParams, numWakeupPorts, matrix = true))
+  val trtileReg      = Module(new TrTileReg(dataWidth, trNums, mlen, vlen, numReadPorts, numWritePorts))
+  val trtileReader   = Module(new TileRegisterRead())
   val exe_units      = new boom.exu.ExecutionUnits(matrix=true)
-  val mat_issue_unit = Module(new IssueUnitCollapsing(
-                         matIssueParams,
-                         numWakeupPorts, matrix = true))
   mat_issue_unit.suggestName("mat_issue_unit")
-  val vregfile       = Module(new RegisterFileSynthesizable(numVecPhysRegs,
-                         exe_units.numVrfReadPorts + 1, // plus 1 for vlsu read request for stores.
-                         exe_units.numVrfWritePorts + 1,
-                         vLen,
-                         // No bypassing for any VEC units, + memWidth for ll_wb
-                         Seq.fill(exe_units.numVrfWritePorts + 1){ false },
-                         vector = true))
-  val trTiles        = Module()
-  val trTileReads    = Module()
-  val vregister_read = Module(new RegisterRead(
-                         vecWidth+1,
-                         exe_units.withFilter(_.readsVrf).map(_.supportedFuncUnits),
-                         exe_units.numVrfReadPorts,
-                         exe_units.withFilter(_.readsVrf).map(x => if (x.hasVMX) 2 else 4),
-                         0, // No bypass for VEC
-                         0,
-                         vLen, float = false, vector = true))
 
-  require (exe_units.count(_.readsVrf) == vecWidth + 1)
+  require (exe_units.count(_.readsVrf) == matWidth + 1)
   require (exe_units.numVrfWritePorts + vecMemWidth == numWakeupPorts,
     s"${exe_units.numVrfWritePorts} + ${memWidth} + ${vecMemWidth} + ${numWakeupPorts}")
   require (vecWidth >= memWidth)
@@ -102,10 +84,10 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   //*************************************************************
   // Issue window logic
 
-  val iss_valids = Wire(Vec(exe_units.numVrfReaders, Bool()))
-  val iss_uops   = Wire(Vec(exe_units.numVrfReaders, new MicroOp()))
+  val iss_valids = Wire(Vec(exe_units.numTrTileReaders, Bool()))
+  val iss_uops   = Wire(Vec(exe_units.numTrTileReaders, new MicroOp()))
 
-  viu.map(_.io.vbusy_status := io.vbusy_status)
+  mat_issue_unit.map(_.io.vbusy_status := io.vbusy_status)
   viu.map(_.io.tsc_reg := io.debug_tsc_reg)
   viu.map(_.io.brupdate := io.brupdate)
   viu.map(_.io.flush_pipeline := io.flush_pipeline)
@@ -140,7 +122,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     var fu_types = exe_units(i).io.fu_types
     mat_issue_unit.io.fu_types(i) := fu_types & ~Fill(FUC_SZ, vregister_read.io.rrd_stall.asUInt)
 
-    require (exe_units(i).readsVrf)
+    require (exe_units(i).readsTrTile)
   }
 
   // Wakeup
@@ -170,6 +152,24 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   //io.vmupdate := vregister_read.io.vmupdate
 
   // Only one port for vector load write back.
+  // ts1
+  trtileReg.io.readPorts(0).msew      := 
+  trtileReg.io.readPorts(0).tilewidth := 
+  trtileReg.io.readPorts(0).tt        := 
+  trtileReg.io.readPorts(0).addr      := io.mseReadReq.bits.reqaddr.addr
+  trtileReg.io.readPorts(0).index     := io.mseReadReq.bits.reqaddr.index
+  // ts2
+  trtileReg.io.readPorts(1).msew      := 
+  trtileReg.io.readPorts(1).tilewidth := 
+  trtileReg.io.readPorts(1).tt        := 
+  trtileReg.io.readPorts(1).addr      := io.mseReadReq.bits.reqaddr.addr
+  trtileReg.io.readPorts(1).index     := io.mseReadReq.bits.reqaddr.index
+  // vlsu read store data
+  trtileReg.io.readPorts(2).msew      := 
+  trtileReg.io.readPorts(2).tilewidth := 
+  trtileReg.io.readPorts(2).tt        := 
+  trtileReg.io.readPorts(2).addr      := io.mseReadReq.bits.reqaddr.addr
+  trtileReg.io.readPorts(2).index     := io.mseReadReq.bits.reqaddr.index
   vregfile.io.read_ports.last.addr := Mux(io.vlsuReadReq.valid, io.vlsuReadReq.bits, 0.U)
   io.vlsuReadResp.valid := RegNext(io.vlsuReadReq.valid)
   io.vlsuReadResp.bits := vregfile.io.read_ports.last.data
@@ -188,65 +188,29 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
   // **** Writeback Stage ****
   //-------------------------------------------------------------
-
-  (io.to_fp zip exe_units.withFilter(_.hasAlu).map(_.io.fresp)).foreach {
-    case (to_fp, vec) => to_fp <> vec
-  }
-
-  (io.to_int zip exe_units.withFilter(_.hasAlu).map(_.io.iresp)).foreach {
+  (io.toVec zip exe_units.withFilter(_.hasAlu).map(_.io.iresp)).foreach {
     case (to_int, vec) => to_int <> vec
   }
 
+  // assign a write port for vlsu and vector pipeline each, no arbitration needed
   // Cut up critical path by delaying the write by a cycle.
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
-  vregfile.io.write_ports(0).valid := io.vlsuWritePort.valid
-  vregfile.io.write_ports(0).bits.addr := io.vlsuWritePort.bits.addr
-  vregfile.io.write_ports(0).bits.data := io.vlsuWritePort.bits.data
-  vregfile.io.write_ports(0).bits.mask := MaskExploder(io.vlsuWritePort.bits.byteMask, vLen)
-
-  var w_cnt = 1
-  //for (i <- 1 until vecMemWidth + 1) {//dedicated for vlsu
-    //vregfile.io.write_ports(w_cnt) := WritePort(io.vlsuWritePort, vpregSz, vLen, isVector, true)
-    //w_cnt += 1
-  //}
-  for (eu <- exe_units.withFilter(_.writesVrf)) {
-    // vmx does not write vrf
-    val eu_vresp = WireInit(eu.io.vresp)
-    val eu_vresp_uop = eu_vresp.bits.uop
-    when (eu_vresp_uop.rt(RD, isReduceV)) {
-      eu_vresp.bits.uop.v_eidx := 0.U
-    }
-    eu_vresp.valid    := eu.io.vresp.valid && eu_vresp_uop.rf_wen
-    eu.io.vresp.ready := true.B
-    vregfile.io.write_ports(w_cnt) := WritePort(eu_vresp, vpregSz, vLen, isVector, true)
-    when (eu_vresp.valid && !(eu_vresp_uop.is_rvv && eu_vresp_uop.ctrl.is_sta)) {
-      //assert(eu.io.vresp.ready, "No backpressuring the Vec EUs")
-      assert(eu.io.vresp.bits.uop.rf_wen, "rf_wen must be high here")
-      assert(eu.io.vresp.bits.uop.rt(RD, isVector), "wb type must be vector")
-    }
-    w_cnt += 1
-  }
-  require (w_cnt == vregfile.io.write_ports.length)
-
-  val vmx_unit = exe_units.vmx_unit
-  val vlsuReqRr: ValidIO[FuncUnitReq] = vmx_unit.io.vlsuReqRr
-  val vlsuReqRrUop = vmx_unit.io.vlsuReqRr.bits.uop
-
-  //io.to_sdq.valid := vmx_resp.valid && vmx_resp_uop.is_rvv && vmx_resp_uop.ctrl.is_sta
-  //io.to_sdq.bits  := vmx_resp.bits
-  //io.to_sdq.bits.data := VDataSel(vmx_resp.bits.data, vmx_resp_uop.vd_eew, vmx_resp_uop.v_eidx, vLen, eLen)
-  /* vls that reads vrf goes via vmx-unit. */
-  io.toVlsuRr.valid := vlsuReqRr.valid && vlsuReqRrUop.is_rvv && (vlsuReqRrUop.v_idx_ls || !vlsuReqRrUop.v_unmasked)
-  io.toVlsuRr.bits := vlsuReqRr.bits
-  //vmx_resp.ready :=  true.B
-  //io.to_int.valid := false.B
-  //io.to_int.bits  := DontCare
-  //io.to_fp.valid := false.B
-  //io.to_fp.bits  := DontCare
-
-  //io.to_int_iss       = Decoupled(new ExeUnitResp(eLen))
-
+  trtileReg.io.writePorts(0).valid          := io.vlsuWritePort.valid
+  trtileReg.io.writePorts(0).bits.msew      := io.vlsuWritePort.bits.addr
+  trtileReg.io.writePorts(0).bits.tilewidth := io.vlsuWritePort.bits.data
+  trtileReg.io.writePorts(0).bits.tt        := MaskExploder(io.vlsuWritePort.bits.byteMask, vLen)
+  trtileReg.io.writePorts(0).bits.addr      := 
+  trtileReg.io.writePorts(0).bits.index     := 
+  trtileReg.io.writePorts(0).bits.data      := 
+  // from vector pipeline
+  trtileReg.io.writePorts(1).valid          := io.vlsuWritePort.valid
+  trtileReg.io.writePorts(1).bits.msew      := io.vlsuWritePort.bits.addr
+  trtileReg.io.writePorts(1).bits.tilewidth := io.vlsuWritePort.bits.data
+  trtileReg.io.writePorts(1).bits.tt        := MaskExploder(io.vlsuWritePort.bits.byteMask, vLen)
+  trtileReg.io.writePorts(1).bits.addr      := 
+  trtileReg.io.writePorts(1).bits.index     := 
+  trtileReg.io.writePorts(1).bits.data      := 
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Commit Stage ****
@@ -259,35 +223,29 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 
   w_cnt = 0
   //vld write back clears busy table in rename but not busy bit in rob entry.
-  for (i <- 0 until vecMemWidth) {// vector load write back port
-    io.wakeups(w_cnt) <> DontCare
-    io.wakeups(w_cnt).valid := io.vlsuLoadWakeUp.valid
-    io.wakeups(w_cnt).bits.data := 0.U
-    io.wakeups(w_cnt).bits.uop.is_rvv := true.B
-    io.wakeups(w_cnt).bits.uop.uses_ldq := true.B
-    io.wakeups(w_cnt).bits.uop.dst_rtype := RT_VEC
-    io.wakeups(w_cnt).bits.uop.pdst := io.vlsuLoadWakeUp.bits
-    w_cnt += 1
-  }
-  for (eu <- exe_units) {
-    if (eu.writesVrf) {
-      val exe_resp = eu.io.vresp
-      val wb_uop = eu.io.vresp.bits.uop
-      val wport = io.wakeups(w_cnt)
-      if (eu.hasVMX) {
-        wport.valid := exe_resp.valid && wb_uop.rf_wen && !(wb_uop.is_rvv && wb_uop.ctrl.is_sta)
-      } else {
-        wport.valid := exe_resp.valid && wb_uop.rf_wen
-      }
-      wport.bits := exe_resp.bits
-
-      w_cnt += 1
-
-      //assert(!(exe_resp.valid && wb_uop.uses_ldq))
-      //assert(!(exe_resp.valid && wb_uop.uses_stq))
-      //assert(!(exe_resp.valid && wb_uop.is_amo))
-    }
-  }
+  io.wakeups(w_cnt) <> DontCare
+  io.wakeups(w_cnt).valid := io.vlsuLoadWakeUp.valid
+  io.wakeups(w_cnt).bits.data := 0.U
+  io.wakeups(w_cnt).bits.uop.is_rvm    := true.B
+  io.wakeups(w_cnt).bits.uop.uses_ldq  := true.B
+  io.wakeups(w_cnt).bits.uop.dst_rtype := RT_MAT
+  io.wakeups(w_cnt).bits.uop.pdst      := io.vlsuLoadWakeUp.bits
+  // from vector pipeline
+  w_cnt = 1
+  io.wakeups(w_cnt).valid := io.vlsuLoadWakeUp.valid
+  io.wakeups(w_cnt).bits.data := 0.U
+  io.wakeups(w_cnt).bits.uop.is_rvm    := true.B
+  io.wakeups(w_cnt).bits.uop.uses_ldq  := true.B
+  io.wakeups(w_cnt).bits.uop.dst_rtype := RT_MAT
+  io.wakeups(w_cnt).bits.uop.pdst      := io.vlsuLoadWakeUp.bits
+  // from mxu unit
+  w_cnt = 2
+  io.wakeups(w_cnt).valid := io.vlsuLoadWakeUp.valid
+  io.wakeups(w_cnt).bits.data := 0.U
+  io.wakeups(w_cnt).bits.uop.is_rvm    := true.B
+  io.wakeups(w_cnt).bits.uop.uses_ldq  := true.B
+  io.wakeups(w_cnt).bits.uop.dst_rtype := RT_MAT
+  io.wakeups(w_cnt).bits.uop.pdst      := io.vlsuLoadWakeUp.bits
 
   for ((wdata, wakeup) <- io.debug_wb_wdata zip io.wakeups) {
     wdata := wakeup.bits.data
@@ -307,27 +265,9 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   }
 
   override def toString: String =
-    (BoomCoreStringPrefix("===Vec Pipeline===") + "\n"
-    + vregfile.toString
+    (BoomCoreStringPrefix("===Matrix Pipeline===") + "\n"
+    // + vregfile.toString
     + BoomCoreStringPrefix(
       "Num Wakeup Ports      : " + numWakeupPorts,
       "Num Bypass Ports      : " + exe_units.numTotalBypassPorts))
-}
-/** Convert byte mask into bit mask. */
-class MaskExploder(bitWidth: Int) extends Module {
-  val io = IO(new Bundle{
-    val byteMaskIn = Input(UInt((bitWidth/8).W))
-    val bitMaskOut = Output(UInt(bitWidth.W))
-  })
-  io.bitMaskOut := VecInit(io.byteMaskIn.asBools().map(byte => Fill(8, byte))).asUInt()
-}
-
-object MaskExploder{
-  def apply(byteMask: UInt, bitWidth: Int): UInt = {
-    val bitMask: UInt = Wire(UInt(bitWidth.W))
-    val maskExploder = Module(new MaskExploder(bitWidth))
-    maskExploder.io.byteMaskIn := byteMask
-    bitMask := maskExploder.io.bitMaskOut
-    bitMask
-  }
 }

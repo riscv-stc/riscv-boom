@@ -683,7 +683,11 @@ class WithNStcMatBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends
                 eLen = 64,
                 vMemDataBits = 64,
                 numVecPhysRegisters = 65,
-                useMatrix = true
+                useMatrix = true,
+                tileRows = 4,
+                tileCols = 4,
+                meshRows = mLen/(vLen*tileRows),
+                meshCols = vLen/(16*tileCols)
               ),
               dcache = Some(
                 DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4, nTLBWays=16)
