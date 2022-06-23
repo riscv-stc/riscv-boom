@@ -187,6 +187,8 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
 
   val numIntPhysRegs= boomParams.numIntPhysRegisters // size of the integer physical register file
   val numFpPhysRegs = boomParams.numFpPhysRegisters  // size of the floating point physical register file
+  val numMatTrPhysRegs = boomParams.numMatTrRegisters
+  val numMatAccPhysRegs = boomParams.numMatAccRegisters
 
   //************************************
   // Functional Units

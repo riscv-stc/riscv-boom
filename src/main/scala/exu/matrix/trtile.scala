@@ -1,114 +1,94 @@
 package boom.exu
 
+import boom.common.{BoomBundle, BoomModule}
 import boom.util._
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util._
 
-case class TrTileParams(
-                         vlen: Int = 64,
-                         mlen: Int = 256,
-                         dataWidth: Int = 64,
-                         addrWidth: Int = 3,
-                         trNums: Int = 8
-                       )
-
-/*trait Transposer[T <: Data] extends Module {
-  def tilem: Int
-  def tilen: Int
-  def tilek: Int
-  def dataType: T
-  def vlen: Int
-  def mlen: Int
-
-}*/
-class TrTileCSR(val vlen: Int) extends Bundle {
+class TrTileCSR(implicit p: Parameters) extends BoomBundle {
   val msew = UInt(2.W)
-  val tilem = UInt((log2Ceil(vlen / 8) + 1).W)
-  val tilen = UInt((log2Ceil(vlen / 8) + 1).W)
-  val tilek = UInt((log2Ceil(vlen / 8) + 1).W)
+  val tilem = UInt((log2Ceil(vLenb) + 1).W)
+  val tilen = UInt((log2Ceil(vLenb) + 1).W)
+  val tilek = UInt((log2Ceil(vLenb) + 1).W)
 }
 
-class TrtileAddr(val trNums: Int) extends Bundle {
-  val addr = UInt(log2Ceil(trNums).W)
+class TrtileAddr(implicit p: Parameters) extends BoomBundle {
+  val addr = UInt(log2Ceil(numMatTrPhysRegs).W)
   val index: UInt = UInt(32.W) //index slice number, value is rs2
   val tt: UInt = UInt(2.W) //2: tr_r, 3: tr_c
   val dim: UInt = UInt(2.W) //1:tile_k, 2:tile_m, 3:tile_n
 }
 
-class TrTileMleWrReq(val dataWidth: Int, val trNums: Int) extends Bundle {
+class TrTileMleWrReq(implicit p: Parameters) extends BoomBundle {
   val mlereq = UInt(1.W) //mle, wr trtile register
-  val data = UInt(dataWidth.W)
-  val reqaddr = new TrtileAddr(trNums)
+  val data = UInt(mLen.W)
+  val reqaddr = new TrtileAddr
 }
 
-class TrTileMseReadReq(val dataWidth: Int, val trNums: Int) extends Bundle {
+class TrTileMseReadReq(implicit p: Parameters) extends BoomBundle {
   val msereq = UInt(1.W) //000 mse, read trtile register
-  val reqaddr = new TrtileAddr(trNums)
+  val reqaddr = new TrtileAddr
 }
 
-class TrTileMmvWrReq(val dataWidth: Int, val trNums: Int) extends Bundle {
+class TrTileMmvWrReq(implicit p: Parameters) extends BoomBundle {
   val mmvWrReq = UInt(3.W) //001 mmv.v.{tt}.{dim}  -> vreg move to tile
   //01 mwmv.v.{tt}.{dim} -> vreg nove to tile, ELEN is 2*sew
   //10 mqmv.v.{tt}.{dim} -> vreg nove to tile, ELEN is 4*sew
-  val data = UInt(dataWidth.W)
-  val reqaddr = new TrtileAddr(trNums)
+  val data = UInt(mLen.W)
+  val reqaddr = new TrtileAddr
 }
 
-class TrTileMmvReadReq(val dataWidth: Int, val trNums: Int) extends Bundle {
+class TrTileMmvReadReq(implicit p: Parameters) extends BoomBundle {
   val mmvReadreq = UInt(3.W) //00 mmv.{tt}.v.{dim}  -> tile move to vreg
   //01 mwmv.{tt}.v.{dim} -> tile move to vreg, ELEN is 2*sew
   //10 mqmv.{tt}.v.{dim} -> tile move to vreg, ELEN is 4*sew
-  val reqaddr = new TrtileAddr(trNums)
+  val reqaddr = new TrtileAddr
 }
 
-class TrTileRegReadPortIO(val dataWidth: Int, val trNums: Int, val vlen: Int) extends Bundle {
-  val addr: UInt = Input(UInt(log2Ceil(trNums).W)) // value of td num
-  val data: UInt = Output(UInt(dataWidth.W))
+class TrTileRegReadPortIO(implicit p: Parameters) extends BoomBundle {
+  val addr: UInt = Input(UInt(log2Ceil(numMatTrPhysRegs).W)) // value of td num
+  val data: UInt = Output(UInt(mLen.W))
   val index: UInt = Input(UInt(32.W)) //index slice number, value is rs2
   val tt: UInt = Input(UInt(2.W)) //2: tr_r, 3: tr_c
   val msew: UInt = Input(UInt(2.W))
-  val tilewidth: UInt = Input(UInt((log2Ceil(vlen / 8) +1).W))
+  val tilewidth: UInt = Input(UInt((log2Ceil(vLenb) +1).W))
 }
 
-class TrTileRegWritePortIO(val dataWidth: Int, val trNums: Int, val vlen: Int) extends Bundle {
-  val addr: UInt = UInt(log2Ceil(trNums).W) // value of td num
-  val data: UInt = UInt(dataWidth.W)
+class TrTileRegWritePortIO(implicit p: Parameters) extends BoomBundle {
+  val addr: UInt = UInt(log2Ceil(numMatTrPhysRegs).W) // value of td num
+  val data: UInt = UInt(mLen.W)
   val index: UInt = UInt(32.W) //index slice number, value is rs2
   val tt: UInt = UInt(2.W) //2: tr_r, 3: tr_c
   val msew: UInt = UInt(2.W)
-  val tilewidth: UInt = UInt((log2Ceil(vlen / 8) +1).W)
+  val tilewidth: UInt = UInt((log2Ceil(vLenb) +1).W)
 }
-
-class TrTileRegOnedim(val dataWidth: Int,
-                      val trNums: Int,
-                      val mlen: Int,
-                      val vlen: Int,
-                      val numReadPorts: Int,
-                      val numWritePorts: Int) extends Module {
+/*
+class TrTileRegOnedim(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Parameters)  extends BoomModule {
   val io = IO(new Bundle {
-    val readPorts: Vec[TrTileRegReadPortIO] = Vec(numReadPorts, new TrTileRegReadPortIO(dataWidth, trNums, vlen))
-    val writePorts: Vec[ValidIO[TrTileRegWritePortIO]] = Flipped(Vec(numWritePorts, Valid(new TrTileRegWritePortIO(dataWidth, trNums, vlen))))
+    val readPorts: Vec[TrTileRegReadPortIO] = Vec(numReadPorts, new TrTileRegReadPortIO())
+    val writePorts: Vec[ValidIO[TrTileRegWritePortIO]] = Flipped(Vec(numWritePorts, Valid(new TrTileRegWritePortIO())))
   })
 
-  require(isPow2(mlen))
-  require(isPow2(vlen))
-  require(mlen >= vlen)
-  val rowlen = mlen / vlen
-  val vlenSz = log2Ceil(vlen)
-  val vlenb = vlen / 8
+  require(isPow2(mLen))
+  require(isPow2(vLen))
+  require(mLen >= vLen)
+  val rowlen = mLen / vLen
+  //val vlenSz = log2Ceil(vLen)
+  //val vlenb = vlen / 8
 
   val readdircol = Wire(Vec(numReadPorts, Bool()))
   val readdirrow = Wire(Vec(numReadPorts, Bool()))
   val readmsew = Wire(Vec(numReadPorts, UInt(2.W)))
   val readindex = Wire(Vec(numReadPorts, UInt(32.W)))
-  val readaddr = Wire(Vec(numReadPorts, UInt(log2Ceil(trNums).W)))
-  val readwidth = Wire(Vec(numReadPorts, UInt((vlenb+1).W)))
+  val readaddr = Wire(Vec(numReadPorts, UInt(log2Ceil(numMatTrPhysRegs).W)))
+  val readwidth = Wire(Vec(numReadPorts, UInt((vLenb+1).W)))
   val writedircol = Wire(Vec(numWritePorts, Bool()))
   val writedirrow = Wire(Vec(numWritePorts, Bool()))
   val writemsew = Wire(Vec(numWritePorts, UInt(2.W)))
   val writeindex = Wire(Vec(numWritePorts, UInt(32.W)))
-  val writewidth = Wire(Vec(numWritePorts, UInt((vlenb+1).W)))
+  val writewidth = Wire(Vec(numWritePorts, UInt((vLenb+1).W)))
 
   for (i <- 0 until numReadPorts) {
     readdircol(i) := RegNext(io.readPorts(i).tt === 3.U)
@@ -119,97 +99,90 @@ class TrTileRegOnedim(val dataWidth: Int,
     readwidth(i) := RegNext(io.readPorts(i).tilewidth)
   }
 
-  val trtile = Mem(trNums, UInt(mlen.W)) //trNums = 8
+  val trtile = Mem(numMatTrPhysRegs, UInt(mLen.W)) //trNums = 8
   for (i <- 0 until numReadPorts) {
     val readRegData = trtile(readaddr(i)) //mlen
-    val readRowData = VecInit.tabulate(mlen / vlen)(x => readRegData(x * vlen + (vlen - 1), x * vlen))
+    val readRowData = VecInit.tabulate(rowlen)(x => readRegData(x * vLen + (vLen - 1), x * vLen))
     when(readdirrow(i)) {
-      val readRowMask = Fill(vlen, 1.U) >> (vlen.asUInt - (readwidth(i) << (readmsew(i) +& 3.U)) (vlenSz - 1, 0))
+      val readRowMask = Fill(vLen, 1.U) >> (vLen.asUInt - (readwidth(i) << (readmsew(i) +& 3.U)) (vLenSz - 1, 0))
       io.readPorts(i).data := readRowData(readindex(i)) & readRowMask.asUInt
     }
     when(readdircol(i)) {
-      val readColData = Wire(Vec(mlen / vlen, UInt(vlen.W)))
+      val readColData = Wire(Vec(rowlen, UInt(vLen.W)))
       val readColMask = UIntToOH(readwidth(i))
-      for (r <- 0 until mlen / vlen) {
-        readColData(r) := VDataSel(readRowData(r), writemsew(i), writeindex(i), vlen, vlen)
+      for (r <- 0 until rowlen) {
+        readColData(r) := VDataSel(readRowData(r), writemsew(i), writeindex(i), vLen, vLen)
       }
       when(writemsew(i) === 0.U) {
-        io.readPorts(i).data := Cat((0 until mlen / vlen).map(r => Mux(readColMask(i), readColData(r)(7, 0), 0.U)).reverse)
+        io.readPorts(i).data := Cat((0 until rowlen).map(r => Mux(readColMask(i), readColData(r)(7, 0), 0.U)).reverse)
       }.elsewhen(writemsew(i) === 1.U) {
-        io.readPorts(i).data := Cat((0 until mlen / vlen).map(r => Mux(readColMask(i), readColData(r)(15, 0), 0.U)).reverse)
+        io.readPorts(i).data := Cat((0 until rowlen).map(r => Mux(readColMask(i), readColData(r)(15, 0), 0.U)).reverse)
       }.elsewhen(writemsew(i) === 2.U) {
-        io.readPorts(i).data := Cat((0 until mlen / vlen).map(r => Mux(readColMask(i), readColData(r)(31, 0), 0.U)).reverse)
+        io.readPorts(i).data := Cat((0 until rowlen).map(r => Mux(readColMask(i), readColData(r)(31, 0), 0.U)).reverse)
       }.elsewhen(writemsew(i) === 1.U) {
-        io.readPorts(i).data := Cat((0 until mlen / vlen).map(r => Mux(readColMask(i), readColData(r)(63, 0), 0.U)).reverse)
+        io.readPorts(i).data := Cat((0 until rowlen).map(r => Mux(readColMask(i), readColData(r)(63, 0), 0.U)).reverse)
       }
     }
   }
 
   for (i <- 0 until numWritePorts) {
     val oldData = trtile(io.writePorts(i).bits.addr)
-    val newData = Wire(Vec(mlen, UInt(1.W)))
-    val writeRowDataMask = Fill(vlen, 1.U) >> (vlen.asUInt - (writewidth(i) << (writemsew(i) +& 3.U)) (vlenSz - 1, 0))
-    val writeRowData = (io.writePorts(i).bits.data & writeRowDataMask.asUInt << (vlen.asUInt() << writeindex(i)) (vlenSz - 1, 0)) (mlen - 1, 0)
-    for (tr <- 0 until trNums) {
+    val newData = Wire(Vec(mLen, UInt(1.W)))
+    val writeRowDataMask = Fill(vLen, 1.U) >> (vLen.asUInt - (writewidth(i) << (writemsew(i) +& 3.U)) (vLenSz - 1, 0))
+    val writeRowData = (io.writePorts(i).bits.data & writeRowDataMask.asUInt << (vLen.asUInt() << writeindex(i)) (vLenSz - 1, 0)) (mLen - 1, 0)
+    for (tr <- 0 until numMatTrPhysRegs) {
       when(writedirrow(i) && io.writePorts(i).valid && tr.U === io.writePorts(i).bits.addr) {
         //write to reg
-        val writeRowbitMask = (Fill(vlen, 1.U) << (vlen.asUInt() << writeindex(i)) (vlenSz - 1, 0)) (mlen - 1, 0)
-        trtile(tr) := Cat((0 until mlen).map(i => Mux(writeRowbitMask(i), writeRowData(i), oldData(i))).reverse)
+        val writeRowbitMask = (Fill(vLen, 1.U) << (vLen.asUInt() << writeindex(i)) (vLenSz - 1, 0)) (mLen - 1, 0)
+        trtile(tr) := Cat((0 until mLen).map(i => Mux(writeRowbitMask(i), writeRowData(i), oldData(i))).reverse)
       }
       when(writedircol(i) && io.writePorts(i).valid && tr.U === io.writePorts(i).bits.addr) {
-        val indexOldData = VecInit.tabulate(mlen / vlen)(x => oldData(x * vlen + (vlen - 1), x * vlen))
-        val indexNewData = Wire(Vec(mlen / vlen, UInt(vlen.W)))
-        for (r <- 0 until mlen / vlen) {
-          val writeColMask = UIntToOH(writewidth(i), mlen / vlen)
+        val indexOldData = VecInit.tabulate(rowlen)(x => oldData(x * vLen + (vLen - 1), x * vLen))
+        val indexNewData = Wire(Vec(rowlen, UInt(vLen.W)))
+        for (r <- 0 until rowlen) {
+          val writeColMask = UIntToOH(writewidth(i), rowlen)
           when(writemsew(i) === 0.U) {
-            val coldata = io.writePorts(i).bits.data(r * 8 + 7, r * 8) << (writeindex(i) << (writemsew(i) +& 3.U)) (vlenSz - 1, 0)
+            val coldata = io.writePorts(i).bits.data(r * 8 + 7, r * 8) << (writeindex(i) << (writemsew(i) +& 3.U)) (vLenSz - 1, 0)
             indexNewData(r) := Mux(writeColMask(r), coldata(r), indexOldData(r))
           }.elsewhen(writemsew(i) === 1.U) {
-            val coldata = io.writePorts(i).bits.data(r * 16 + 15, r * 16) << (writeindex(i) << (writemsew(i) +& 3.U)) (vlenSz - 1, 0)
+            val coldata = io.writePorts(i).bits.data(r * 16 + 15, r * 16) << (writeindex(i) << (writemsew(i) +& 3.U)) (vLenSz - 1, 0)
             indexNewData(r) := Mux(writeColMask(r), coldata(r), indexOldData(r))
           }.elsewhen(writemsew(i) === 2.U) {
-            val coldata = io.writePorts(i).bits.data(r * 32 + 31, r * 32) << (writeindex(i) << (writemsew(i) +& 3.U)) (vlenSz - 1, 0)
+            val coldata = io.writePorts(i).bits.data(r * 32 + 31, r * 32) << (writeindex(i) << (writemsew(i) +& 3.U)) (vLenSz - 1, 0)
             indexNewData(r) := Mux(writeColMask(r), coldata(r), indexOldData(r))
           }.elsewhen(writemsew(i) === 1.U) {
-            val coldata = io.writePorts(i).bits.data(r * 64 + 63, r * 64) << (writeindex(i) << (writemsew(i) +& 3.U)) (vlenSz - 1, 0)
+            val coldata = io.writePorts(i).bits.data(r * 64 + 63, r * 64) << (writeindex(i) << (writemsew(i) +& 3.U)) (vLenSz - 1, 0)
             indexNewData(r) := Mux(writeColMask(r), coldata(r), indexOldData(r))
           }
         }
-        trtile(tr) := Cat((0 until mlen).map(i => indexNewData(i)).reverse)
+        trtile(tr) := Cat((0 until mLen).map(i => indexNewData(i)).reverse)
       }
     }
   }
 }
-
-class TrTileReg(val dataWidth: Int,
-                val trNums: Int,
-                val mlen: Int,
-                val vlen: Int,
-                val numReadPorts: Int,
-                val numWritePorts: Int) extends Module {
+*/
+class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Parameters)  extends BoomModule {
   val io = IO(new Bundle {
-    val readPorts: Vec[TrTileRegReadPortIO] = Vec(numReadPorts, new TrTileRegReadPortIO(dataWidth, trNums, vlen))
-    val writePorts: Vec[ValidIO[TrTileRegWritePortIO]] = Flipped(Vec(numWritePorts, Valid(new TrTileRegWritePortIO(dataWidth, trNums, vlen))))
+    val readPorts: Vec[TrTileRegReadPortIO] = Vec(numReadPorts, new TrTileRegReadPortIO())
+    val writePorts: Vec[ValidIO[TrTileRegWritePortIO]] = Flipped(Vec(numWritePorts, Valid(new TrTileRegWritePortIO())))
   })
 
-  require(isPow2(mlen))
-  require(isPow2(vlen))
-  require(mlen >= vlen)
-  val rowlen = mlen / vlen
-  val vlenSz = log2Ceil(vlen)
-  val vlenb = vlen / 8
+  require(isPow2(mLen))
+  require(isPow2(vLen))
+  require(mLen >= vLen)
+  val rowlen = mLen / vLen
 
   val readdircol = Wire(Vec(numReadPorts, Bool()))
   val readdirrow = Wire(Vec(numReadPorts, Bool()))
   val readmsew = Wire(Vec(numReadPorts, UInt(2.W)))
   val readindex = Wire(Vec(numReadPorts, UInt(32.W)))
-  val readaddr = Wire(Vec(numReadPorts, UInt(log2Ceil(trNums).W)))
-  val readwidth = Wire(Vec(numReadPorts, UInt(log2Ceil((vlen / 8)+1).W)))
+  val readaddr = Wire(Vec(numReadPorts, UInt(log2Ceil(numMatTrPhysRegs).W)))
+  val readwidth = Wire(Vec(numReadPorts, UInt(log2Ceil(vLenb+1).W)))
   val writedircol = Wire(Vec(numWritePorts, Bool()))
   val writedirrow = Wire(Vec(numWritePorts, Bool()))
   val writemsew = Wire(Vec(numWritePorts, UInt(2.W)))
   val writeindex = Wire(Vec(numWritePorts, UInt(32.W)))
-  val writewidth = Wire(Vec(numWritePorts, UInt(log2Ceil((vlen / 8)+1).W)))
+  val writewidth = Wire(Vec(numWritePorts, UInt(log2Ceil(vLenb+1).W)))
 
   for (i <- 0 until numReadPorts) {
     readdircol(i) := RegNext(io.readPorts(i).tt === 3.U)
@@ -229,25 +202,25 @@ class TrTileReg(val dataWidth: Int,
 
 
   //val trtile = Mem(trNums, UInt(mlen.W))  //trNums = 8
-  val trtile = Mem(trNums, Vec(rowlen, UInt(vlen.W))) //trNums = 8
+  val trtile = Mem(numMatTrPhysRegs, Vec(rowlen, UInt(vLen.W))) //trNums = 8
 
   //Read Tr_Tile
-  val readRegData: Vec[Vec[UInt]] = Wire(Vec(numReadPorts, Vec(rowlen, UInt(vlen.W))))
+  val readRegData: Vec[Vec[UInt]] = Wire(Vec(numReadPorts, Vec(rowlen, UInt(vLen.W))))
 
   for (w <- 0 until numReadPorts) {
     io.readPorts(w).data := 0.U
     readRegData(w) := trtile(readaddr(w))
     when(readdirrow(w)) {
-      val readRowMask = Wire(UInt(vlen.W))
+      val readRowMask = Wire(UInt(vLen.W))
       //use all `1` generate mask bit, by shift right (vlen-readwidth) bit, 1111...1111 >> x = 000..0111..11
-      readRowMask := (Fill(vlen, 1.U) >> (vlen.asUInt - (readwidth(w) << (readmsew(w) +& 3.U)) (vlenSz, 0))).asUInt
+      readRowMask := (Fill(vLen, 1.U) >> (vLen.asUInt - (readwidth(w) << (readmsew(w) +& 3.U)) (vLenSz, 0))).asUInt
       //io.readPorts(w).data := Cat((0 until vlen).map(i => Mux(readRowMask(i), (readRegData(w)(index))(i) , 0.U)).reverse)
       io.readPorts(w).data := readRegData(w)(readindex(w)) & readRowMask
     }
     when(readdircol(w)) {
       val readColMask = Wire(UInt(rowlen.W))
       readColMask := UIntToOH(readwidth(w)) - 1.U
-      val readColData = (0 until rowlen).map(r => VDataSel(readRegData(w)(r), readmsew(w), readindex(w), vlen, vlen))
+      val readColData = (0 until rowlen).map(r => VDataSel(readRegData(w)(r), readmsew(w), readindex(w), vLen, vLen))
       when(readmsew(w) === 0.U) {
         io.readPorts(w).data := Cat((0 until rowlen).map(r => Mux(readColMask(r), readColData(r)(7, 0), 0.U(8.W))).reverse)
       }.elsewhen(readmsew(w) === 1.U) {
@@ -261,14 +234,14 @@ class TrTileReg(val dataWidth: Int,
   }
 
   //Write Tr_tile
-  for (tr <- 0 until trNums) {
+  for (tr <- 0 until numMatTrPhysRegs) {
     for (w <- 0 until numWritePorts) {
       when(writedirrow(w) && io.writePorts(w).valid && tr.U === io.writePorts(w).bits.addr) {
         for (index <- 0 until rowlen) {
           when(writeindex(w) === index.U) {
             val writeRowOldData = trtile(io.writePorts(w).bits.addr)(index)
-            val writeRowMask = Fill(vlen, 1.U) >> (vlen.asUInt - (writewidth(w) << (readmsew(w) +& 3.U)) (vlenSz, 0))
-            trtile(io.writePorts(w).bits.addr)(index) := Cat((0 until vlen).map(i => Mux(writeRowMask(i), io.writePorts(w).bits.data(i), writeRowOldData(i))).reverse)
+            val writeRowMask = Fill(vLen, 1.U) >> (vLen.asUInt - (writewidth(w) << (readmsew(w) +& 3.U)) (vLenSz, 0))
+            trtile(io.writePorts(w).bits.addr)(index) := Cat((0 until vLen).map(i => Mux(writeRowMask(i), io.writePorts(w).bits.data(i), writeRowOldData(i))).reverse)
           }
         }
       }
@@ -277,54 +250,58 @@ class TrTileReg(val dataWidth: Int,
         val writeColMask = ((1.U << writewidth(w))(rowlen, 0) - 1.U)(rowlen-1, 0)
         for (row <- 0 until rowlen) {
           val oldData = trtile(io.writePorts(w).bits.addr)(row) //vlen
-          val writeColData = VDataSel(io.writePorts(w).bits.data, writemsew(w), row.asUInt(), vlen, vlen)
-          val writeColDataSel = Wire(UInt(vlen.W))
-          val writeColShift = Wire(UInt(vlenSz.W))
-          val writeColRowMask = Wire(UInt((vlen + 1).W))
-          val writeColRowData = Wire(UInt(vlen.W))
+          val writeColData = VDataSel(io.writePorts(w).bits.data, writemsew(w), row.asUInt(), vLen, vLen)
+          val writeColDataSel = Wire(UInt(vLen.W))
+          val writeColShift = Wire(UInt(vLenSz.W))
+          val writeColRowMask = Wire(UInt((vLen + 1).W))
+          val writeColRowData = Wire(UInt(vLen.W))
           writeColShift := (writeindex(w) << (writemsew(w) +& 3.U))
-          writeColRowMask := Mux1H(UIntToOH(writemsew(w)), Seq(Cat(Fill(vlen - 8, 0.U), Fill(8, 1.U)) << writeColShift,
-            Cat(Fill(vlen - 16, 0.U), Fill(16, 1.U)) << writeColShift,
-            Cat(Fill(vlen - 32, 0.U), Fill(32, 1.U)) << writeColShift,
-            Cat(Fill(vlen - 63, 0.U), Fill(64, 1.U)) << writeColShift
+          writeColRowMask := Mux1H(UIntToOH(writemsew(w)), Seq(Cat(Fill(vLen - 8, 0.U), Fill(8, 1.U)) << writeColShift,
+            Cat(Fill(vLen - 16, 0.U), Fill(16, 1.U)) << writeColShift,
+            Cat(Fill(vLen - 32, 0.U), Fill(32, 1.U)) << writeColShift,
+            Cat(Fill(vLen - 63, 0.U), Fill(64, 1.U)) << writeColShift
           ))
           writeColRowData := writeColData << writeColShift
-          writeColDataSel := Cat((0 until vlen).map(i => Mux(writeColRowMask(i), writeColRowData(i), oldData(i))).reverse)
+          writeColDataSel := Cat((0 until vLen).map(i => Mux(writeColRowMask(i), writeColRowData(i), oldData(i))).reverse)
           trtile(io.writePorts(w).bits.addr)(row) := Mux(writeColMask(row), writeColDataSel, oldData)
         }
       }
     }
   }
+  //ensure there is only 1 writer per trtile
+  if (numWritePorts > 1) {
+    for (i <- 0 until (numWritePorts - 1)) {
+      for (j <- (i + 1) until numWritePorts) {
+        assert(!io.writePorts(i).valid ||
+          !io.writePorts(j).valid ||
+          (io.writePorts(i).bits.addr =/= io.writePorts(j).bits.addr),
+          "[regfile] too many writers a register")
+      }
+    }
+  }
 }
 
-class TrTile(val dataWidth: Int,
-             val trNums: Int,
-             val mlen: Int,
-             val vlen: Int,
-             val numReadPorts: Int,
-             val numWritePorts: Int) extends Module {
+class TrTile(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Parameters)  extends BoomModule {
   val io = IO(new Bundle {
-    val trtilecsr = Input(new TrTileCSR(vlen))
+    val trtilecsr = Input(new TrTileCSR)
     //vreg <-> tr_tile
-    val mleWrReq: ValidIO[TrTileMleWrReq] = Flipped(ValidIO(new TrTileMleWrReq(dataWidth, trNums)))
-    val mseReadReq: ValidIO[TrTileMseReadReq] = Flipped(ValidIO(new TrTileMseReadReq(dataWidth, trNums)))
-    val mseReadResp: ValidIO[UInt] = ValidIO(UInt(dataWidth.W))
+    val mleWrReq: ValidIO[TrTileMleWrReq] = Flipped(ValidIO(new TrTileMleWrReq))
+    val mseReadReq: ValidIO[TrTileMseReadReq] = Flipped(ValidIO(new TrTileMseReadReq))
+    val mseReadResp: ValidIO[UInt] = ValidIO(UInt(mLen.W))
     //vreg <-> vlsu
-    val mmvWrReq: ValidIO[TrTileMmvWrReq] = Flipped(ValidIO(new TrTileMmvWrReq(dataWidth, trNums)))
-    val mmvReadReq: ValidIO[TrTileMmvReadReq] = Flipped(ValidIO(new TrTileMmvReadReq(dataWidth, trNums)))
-    val mmvReadResp = ValidIO(UInt(dataWidth.W))
+    val mmvWrReq: ValidIO[TrTileMmvWrReq] = Flipped(ValidIO(new TrTileMmvWrReq))
+    val mmvReadReq: ValidIO[TrTileMmvReadReq] = Flipped(ValidIO(new TrTileMmvReadReq))
+    val mmvReadResp = ValidIO(UInt(mLen.W))
   })
-  val vlenb = vlen / 8
-  val vlenbSz = log2Ceil(vlenb)
-  val rowlen = mlen / vlen
+  val rowlen = mLen / vLen
 
   assert(!(io.mleWrReq.valid && io.mmvWrReq.valid && (io.mleWrReq.bits.reqaddr.addr === io.mmvWrReq.bits.reqaddr.addr)))
 
-  val trtileReg = Module(new TrTileReg(dataWidth, trNums, mlen, vlen, numReadPorts, numWritePorts))
+  val trtileReg = Module(new TrTileReg(numReadPorts, numWritePorts))
 
-  val tilem = WireInit(0.U((vlenbSz + 1).W))
-  val tilen = WireInit(0.U((vlenbSz + 1).W))
-  val tilek = WireInit(0.U((vlenbSz + 1).W))
+  val tilem = WireInit(0.U((log2Ceil(vLenb) + 1).W))
+  val tilen = WireInit(0.U((log2Ceil(vLenb) + 1).W))
+  val tilek = WireInit(0.U((log2Ceil(vLenb) + 1).W))
   tilem := io.trtilecsr.tilem
   tilen := io.trtilecsr.tilen
   tilek := io.trtilecsr.tilek
@@ -372,27 +349,27 @@ class TrTile(val dataWidth: Int,
 
   assert(!(io.mseReadReq.valid &&
     ((trtileReg.io.readPorts(0).tt === 2.U) && (trtileReg.io.readPorts(0).index >= rowlen.asUInt())
-      || (trtileReg.io.readPorts(0).tt === 3.U) && (trtileReg.io.readPorts(0).index >= (vlenb.asUInt() >> trtileReg.io.readPorts(0).msew).asUInt()))),
+      || (trtileReg.io.readPorts(0).tt === 3.U) && (trtileReg.io.readPorts(0).index >= (vLenb.asUInt() >> trtileReg.io.readPorts(0).msew).asUInt()))),
     "mseRead index large than element width")
   assert(!(io.mseReadReq.valid &&
-    ((trtileReg.io.readPorts(0).tt === 2.U) && (trtileReg.io.readPorts(0).tilewidth > (vlenb.asUInt() >> trtileReg.io.readPorts(0).msew).asUInt())
+    ((trtileReg.io.readPorts(0).tt === 2.U) && (trtileReg.io.readPorts(0).tilewidth > (vLenb.asUInt() >> trtileReg.io.readPorts(0).msew).asUInt())
       || (trtileReg.io.readPorts(0).tt === 3.U) && (trtileReg.io.readPorts(0).tilewidth > rowlen.asUInt()))),
     "mseRead tilewidth large than element width")
   assert(!(io.mmvReadReq.valid &&
     ((trtileReg.io.readPorts(1).tt === 2.U) && (trtileReg.io.readPorts(1).index >= rowlen.asUInt())
-      || (trtileReg.io.readPorts(1).tt === 3.U) && (trtileReg.io.readPorts(1).index >= (vlenb.asUInt() >> trtileReg.io.readPorts(1).msew).asUInt()))),
+      || (trtileReg.io.readPorts(1).tt === 3.U) && (trtileReg.io.readPorts(1).index >= (vLenb.asUInt() >> trtileReg.io.readPorts(1).msew).asUInt()))),
     "mmvRead index large than element width")
   assert(!(io.mmvReadReq.valid &&
-    ((trtileReg.io.readPorts(1).tt === 2.U) && (trtileReg.io.readPorts(1).tilewidth > (vlenb.asUInt() >> trtileReg.io.readPorts(1).msew).asUInt())
+    ((trtileReg.io.readPorts(1).tt === 2.U) && (trtileReg.io.readPorts(1).tilewidth > (vLenb.asUInt() >> trtileReg.io.readPorts(1).msew).asUInt())
       || (trtileReg.io.readPorts(1).tt === 3.U) && (trtileReg.io.readPorts(1).tilewidth > rowlen.asUInt()))),
     "mmvRead tilewidth large than element width")
   for (i <- 0 until numWritePorts) {
     assert(!(trtileReg.io.writePorts(i).valid &&
       ((trtileReg.io.writePorts(i).bits.tt === 2.U) && (trtileReg.io.writePorts(i).bits.index >= rowlen.asUInt())
-        || (trtileReg.io.writePorts(i).bits.tt === 3.U) && (trtileReg.io.writePorts(i).bits.index >= (vlenb.asUInt() >> trtileReg.io.writePorts(i).bits.msew).asUInt()))),
+        || (trtileReg.io.writePorts(i).bits.tt === 3.U) && (trtileReg.io.writePorts(i).bits.index >= (vLenb.asUInt() >> trtileReg.io.writePorts(i).bits.msew).asUInt()))),
       "Write index large than element width")
     assert(!(trtileReg.io.writePorts(i).valid &&
-      ((trtileReg.io.writePorts(i).bits.tt === 2.U) && (trtileReg.io.writePorts(i).bits.tilewidth > (vlenb.asUInt() >> trtileReg.io.writePorts(i).bits.msew).asUInt())
+      ((trtileReg.io.writePorts(i).bits.tt === 2.U) && (trtileReg.io.writePorts(i).bits.tilewidth > (vLenb.asUInt() >> trtileReg.io.writePorts(i).bits.msew).asUInt())
         || (trtileReg.io.writePorts(i).bits.tt === 3.U) && (trtileReg.io.writePorts(i).bits.tilewidth > rowlen.asUInt()))),
       "Write tilewidth large than element width")
   }
@@ -418,8 +395,8 @@ class TrTileUT(timeout: Int = 4000)(implicit p: Parameters)
 
   val dataWidth: Int = 64
   val trNums: Int = 8
-  val mlen: Int = 256
-  val vlen: Int = 64
+  val mLen: Int = 256
+  val vLen: Int = 64
   val numReadPorts: Int = 2
   val numWritePorts: Int = 2
 
@@ -434,7 +411,7 @@ class TrTileUT(timeout: Int = 4000)(implicit p: Parameters)
   val data3 = 39.U(8.W) //27
   val data4 = 51.U(8.W) //33
 
-  val csr = Wire(new TrTileCSR(64))
+  val csr = Wire(new TrTileCSR())
   csr := DontCare
   //val msew = RegInit(0.U(2.W))
   // msew := LCG(2, active)
@@ -443,7 +420,7 @@ class TrTileUT(timeout: Int = 4000)(implicit p: Parameters)
   csr.tilek := LCG(4, active)
   csr.tilem := LCG(4, active)
   //mle
-  val mleWrReq = Wire(DecoupledIO(new TrTileMleWrReq(64, 8)))
+  val mleWrReq = Wire(DecoupledIO(new TrTileMleWrReq()))
   mleWrReq := DontCare
   mleWrReq.valid := false.B
   mleWrReq.bits.reqaddr.addr := LCG(3, active)
@@ -453,7 +430,7 @@ class TrTileUT(timeout: Int = 4000)(implicit p: Parameters)
   mleWrReq.bits.mlereq := 0.U
 
   //mseReadReq
-  val mseReadReq = Wire(DecoupledIO(new TrTileMseReadReq(64, 8)))
+  val mseReadReq = Wire(DecoupledIO(new TrTileMseReadReq))
   mseReadReq := DontCare
   mseReadReq.valid := false.B
   mseReadReq.bits.reqaddr.addr := LCG(3, active)
@@ -462,7 +439,7 @@ class TrTileUT(timeout: Int = 4000)(implicit p: Parameters)
   mseReadReq.bits.msereq := 0.U
 
   //mmvWrReq
-  val mmvWrReq = Wire(DecoupledIO(new TrTileMmvWrReq(64, 8)))
+  val mmvWrReq = Wire(DecoupledIO(new TrTileMmvWrReq))
   mmvWrReq := DontCare
   mmvWrReq.valid := false.B
   mmvWrReq.bits.reqaddr.addr := LCG(3, active)
@@ -471,7 +448,7 @@ class TrTileUT(timeout: Int = 4000)(implicit p: Parameters)
   mmvWrReq.bits.data := LCG(dataWidth, active)
   mmvWrReq.bits.mmvWrReq := 0.U
   //mmvRead
-  val mmvReadReq = Wire(DecoupledIO(new TrTileMmvReadReq(64, 8)))
+  val mmvReadReq = Wire(DecoupledIO(new TrTileMmvReadReq))
   mmvReadReq := DontCare
   mmvReadReq.valid := false.B
   mmvReadReq.bits.reqaddr.addr := LCG(3, active)
