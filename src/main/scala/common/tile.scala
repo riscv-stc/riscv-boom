@@ -132,8 +132,9 @@ class BoomTile private(
 
   // DCache
   lazy val dcache: BoomNonBlockingDCache = LazyModule(new BoomNonBlockingDCache(staticIdForMetadataUseOnly))
-  val dCacheTap = TLIdentityNode()
-  tlMasterXbar.node := dCacheTap := dcache.node
+  //val dCacheTap = TLIdentityNode()
+  val dCacheWidget = LazyModule(new TLWidthWidget(16))
+  tlMasterXbar.node := dCacheWidget.node := dcache.node
 
   // VecMem
   lazy val vecmem: VecMem = LazyModule(new VecMem)
@@ -143,7 +144,8 @@ class BoomTile private(
   // Frontend/ICache
   val frontend = LazyModule(new BoomFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
   frontend.resetVectorSinkNode := resetVectorNexusNode
-  tlMasterXbar.node := frontend.masterNode
+  val frontWidget = LazyModule(new TLWidthWidget(16))
+  tlMasterXbar.node := frontWidget.node := frontend.masterNode
 
   // ROCC
   val roccs = p(BuildRoCC).map(_(p))

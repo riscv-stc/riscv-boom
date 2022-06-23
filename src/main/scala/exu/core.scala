@@ -1798,7 +1798,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       ll_wbarb.io.in(attachBase + i) <> v_pipeline.io.to_int(i)
     }
     //v_pipeline.io.to_fp.ready := true.B
-    v_pipeline.io.ll_wports  <> io.lsu.vrf_wbk
+    //v_pipeline.io.lsu_vrf_wbk  <> io.lsu.vrf_wbk
+    v_pipeline.io.ll_wports     <> io.lsu.vrf_wbk
+    //v_pipeline.io.lsu_vrf_rport <> io.lsu.vrf_rport
+    io.lsu.vrf_rport <> v_pipeline.io.lsu_vrf_rport
   }
 
   if (usingRoCC) {

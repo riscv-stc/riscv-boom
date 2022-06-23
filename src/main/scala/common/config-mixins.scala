@@ -561,13 +561,13 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               nPerfCounters = 29,
               fpu = Some(freechips.rocketchip.tile.FPUParams(minFLen=16, fLen=64, sfmaLatency=4, dfmaLatency=4, divSqrt=true)),
               useVector = true,
-              vLen = 512,
+              vLen = 1024,
               eLen = 64,
               vMemDataBits = 64,
               numVecPhysRegisters = 65
             ),
             dcache = Some(
-              DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4, nTLBWays=16)
+              DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=8, nTLBWays=16)
             ),
             icache = Some(
               ICacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, fetchBytes=4*4)
@@ -579,6 +579,7 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
       } ++ prev
     }
     case SystemBusKey => up(SystemBusKey, site).copy(beatBytes = 16)
+    //case CacheBlockBytes => 128
     case XLen => 64
   })
 )

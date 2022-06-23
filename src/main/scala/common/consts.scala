@@ -220,6 +220,8 @@ trait ScalarOpConstants
     uop.fp_val     := false.B
     uop.uses_stq   := false.B
     uop.uses_ldq   := false.B
+    uop.is_fence   := false.B
+    uop.is_fencei  := false.B
     uop.pdst       := 0.U
     uop.prs1       := 0.U
     uop.prs2       := 0.U
