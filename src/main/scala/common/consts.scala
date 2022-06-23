@@ -65,6 +65,8 @@ trait IQType
   val IQT_IVEC= 0x9.U(IQT_SZ.W)
   val IQT_FVEC= 0xC.U(IQT_SZ.W)
   val IQT_MVMX= 0x12.U(IQT_SZ.W)
+
+  val IQT_MT= 0x14.U(IQT_SZ.W)  //matrix
 }
 
 
@@ -184,6 +186,8 @@ trait ScalarOpConstants
   val RT_VRW   = 0x1A.U(5.W) // vector, signed reduction VD/VS1 with vsew*2
   val RT_VRU   = 0x1C.U(5.W) // vector, unsigned reduction VD/VS1 with vsew
   val RT_VRWU  = 0x1E.U(5.W) // vector, unsigned reduction VD/VS1 with vsew*2
+  val RT_TR    = 0x08.U(5.W) //matrix, trtile
+  val RT_ACC   = 0x09.U(5.W) //matrix, acc
 
   def isInt      (rt: UInt): Bool = (rt === RT_FIX || rt === RT_FIXU)
   def isIntU     (rt: UInt): Bool = (rt === RT_FIXU)

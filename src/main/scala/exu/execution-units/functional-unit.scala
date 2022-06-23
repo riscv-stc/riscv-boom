@@ -56,6 +56,7 @@ object FUConstants extends Enumeration
   val FU_FR7_ID = Value // vfrsqrt7 / vfrec7
   val FU_VMASKU_ID = Value
   val FU_VRP_ID = Value  // reduction/permutation
+  val FU_MT_ID  = Value
   val FUC_SZ_ENUM = Value
 
   val FUC_SZ    = FUC_SZ_ENUM.id
@@ -75,6 +76,7 @@ object FUConstants extends Enumeration
   val FU_FR7    = (1<<FU_FR7_ID.id).U(FUC_SZ.W)
   val FU_VMASKU = (1<<FU_VMASKU_ID.id).U(FUC_SZ.W)
   val FU_VRP    = (1<<FU_VRP_ID.id).U(FUC_SZ.W)
+  val FU_MT     = (1 <<FU_MT_ID.id).U(FUC_SZ.W)
 
   // FP stores generate data through FP F2I, and generate address through MemAddrCalc
   def FU_F2IMEM = ((1<<FU_MEM_ID.id) | (1<<FU_F2I_ID.id)).U(FUC_SZ.W)

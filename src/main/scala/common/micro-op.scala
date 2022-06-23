@@ -1079,6 +1079,68 @@ object MicroOpcodes extends Enumeration {
   val uopVFSLIDE1UP     = uopVFSLIDE1UP_enum.id.U(UOPC_SZ.W)
   val uopVFSLIDE1DOWN_enum = Value
   val uopVFSLIDE1DOWN   = uopVFSLIDE1DOWN_enum.id.U(UOPC_SZ.W)
+
+//Matrix Extension
+  //mconfig
+  val uopMSETTYPEI_enum   = Value
+  val uopMSETTYPEI        = uopMSETTYPEI_enum.id.U(UOPC_SZ.W)
+  val uopMSETTILEMI_enum  = Value
+  val uopMSETTILEMI       = uopMSETTILEMI_enum.id.U(UOPC_SZ.W)
+  val uopMSETTILEKI_enum  = Value
+  val uopMSETTILEKI       = uopMSETTILEKI_enum.id.U(UOPC_SZ.W)
+  val uopMSETTILENI_enum  = Value
+  val uopMSETTILENI       = uopMSETTILENI_enum.id.U(UOPC_SZ.W)
+  val uopMSETSIDXI_enum   = Value
+  val uopMSETSIDXI        = uopMSETSIDXI_enum.id.U(UOPC_SZ.W)
+
+  val uopMSETTYPE_enum    = Value
+  val uopMSETTYPE         = uopMSETTYPE_enum.id.U(UOPC_SZ.W)
+  val uopMSETTILEM_enum   = Value
+  val uopMSETTILEM        = uopMSETTILEM_enum.id.U(UOPC_SZ.W)
+  val uopMSETTILEK_enum   = Value
+  val uopMSETTILEK        = uopMSETTILEK_enum.id.U(UOPC_SZ.W)
+  val uopMSETTILEN_enum   = Value
+  val uopMSETTILEN        = uopMSETTILEN_enum.id.U(UOPC_SZ.W)
+  val uopMSETTSIDX_enum    = Value
+  val uopMSETTSIDX         = uopMSETTSIDX_enum.id.U(UOPC_SZ.W)
+  //mload, mstore
+  val uopMLE_enum         = Value
+  val uopMLE              = uopMLE_enum.id.U(UOPC_SZ.W)
+  val uopMSE_enum         = Value
+  val uopMSE              = uopMSE_enum.id.U(UOPC_SZ.W)
+  //marith
+  val uopMOPA_enum        = Value
+  val uopMOPA             = uopMOPA_enum.id.U(UOPC_SZ.W)
+  val uopMWOPA_enum       = Value
+  val uopMWOPA            = uopMWOPA_enum.id.U(UOPC_SZ.W)
+  val uopMQOPA_enum       = Value
+  val uopMQOPA            = uopMQOPA_enum.id.U(UOPC_SZ.W)
+  val uopMFOPA_enum       = Value
+  val uopMFOPA            = uopMFOPA_enum.id.U(UOPC_SZ.W)
+  val uopMFWOPA_enum      = Value
+  val uopMFWOPA           = uopMFWOPA_enum.id.U(UOPC_SZ.W)
+  val uopMMUL_enum        = Value
+  val uopMMUL             = uopMMUL_enum.id.U(UOPC_SZ.W)
+  val uopMWMUL_enum       = Value
+  val uopMWMUL            = uopMWMUL_enum.id.U(UOPC_SZ.W)
+  val uopMQMUL_enum       = Value
+  val uopMQMUL            = uopMQMUL_enum.id.U(UOPC_SZ.W)
+  val uopMFNCVT_enum      = Value
+  val uopMFNCVT           = uopMFNCVT_enum.id.U(UOPC_SZ.W)
+  //mmov
+  val uopMMV_V_enum       = Value
+  val uopMMV_V            = uopMMV_V_enum.id.U(UOPC_SZ.W)
+  val uopMMV_T_enum       = Value
+  val uopMMV_T            = uopMMV_T_enum.id.U(UOPC_SZ.W)
+  val uopMWMV_V_enum      = Value
+  val uopMWMV_V           = uopMWMV_V_enum.id.U(UOPC_SZ.W)
+  val uopMWMV_T_enum      = Value
+  val uopMWMV_T           = uopMWMV_T_enum.id.U(UOPC_SZ.W)
+  val uopMQMV_V_enum      = Value
+  val uopMQMV_V           = uopMQMV_V_enum.id.U(UOPC_SZ.W)
+  val uopMQMV_T_enum      = Value
+  val uopMQMV_T           = uopMQMV_T_enum.id.U(UOPC_SZ.W)
+
   require(log2Ceil(maxId) <= UOPC_SZ)
 
   def alias(v: Value): String = {

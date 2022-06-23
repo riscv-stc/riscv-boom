@@ -38,10 +38,10 @@ abstract trait DecodeConstants
   //     |  |  |  |     iq-type  func unit   |      |      |  |     |  |  |  is_fence   |    |  |                  |  |  |  ew of ls vector
   //     |  |  |  |     |        |           |      |      |  |     |  |  |  |  is_fencei    |  |  is breakpoint or ecall?  |       |  |  vd_unequal_vs1
   //     |  |  |  |     |        |     dst   |      |      |  |     |  |  |  |  |  mem  |    |  |  |  is unique? (clear pipeline for it)  |  vd_unequal_vs2
-  //     |  |  |  |     |        |     regtype      |      |  |     |  |  |  |  |  cmd  |    |  |  |  |  flush on commit |  |       |  |  |  |
-  //     |  |  |  |     |        |     |     |      |      |  |     |  |  |  |  |  |    |    |  |  |  |  |  csr cmd   |  |  |    vstart_is_zero
-  //     |  |  |  |     |        |     |     |      |      |  |     |  |  |  |  |  |    |    |  |  |  |  |  |      |  |  |  |    |  |  |  |  |
-    List(N, N, X, uopX, IQT_INT, FU_X, RT_X, RT_DC, RT_DC, X, IS_X, X, X, X, X, N, M_X, DC2, X, X, N, N, X, CSR.X, N, N, N, DC2, X, X, X, X, X)
+  //     |  |  |  |     |        |     regtype      |      |  |     |  |  |  |  |  cmd  |    |  |  |  |  flush on commit |  |       |  |  |  |  is matrix inst?
+  //     |  |  |  |     |        |     |     |      |      |  |     |  |  |  |  |  |    |    |  |  |  |  |  csr cmd   |  |  |    vstart_is_zero |
+  //     |  |  |  |     |        |     |     |      |      |  |     |  |  |  |  |  |    |    |  |  |  |  |  |      |  |  |  |    |  |  |  |  |  |
+    List(N, N, X, uopX, IQT_INT, FU_X, RT_X, RT_DC, RT_DC, X, IS_X, X, X, X, X, N, M_X, DC2, X, X, N, N, X, CSR.X, N, N, N, DC2, X, X, X, X, X, N)
 
   val table: Array[(BitPat, List[BitPat])]
 }
@@ -105,6 +105,7 @@ class CtrlSigs extends Bundle with DecodeConstants
   val not_use_vtype   = Bool()
   val vd_unequal_vs1  = Bool()
   val vd_unequal_vs2  = Bool()
+  val is_matrix       = Bool()
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     //val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, decode_default, table)
@@ -115,7 +116,8 @@ class CtrlSigs extends Bundle with DecodeConstants
           is_fence, is_fencei, mem_cmd, wakeup_delay, bypassable,
           is_br, is_sys_pc2epc, inst_unique, flush_on_commit, csr_cmd,
           is_rvv, can_be_split, uses_vm, v_ls_ew, vstart_is_zero,
-          allow_vd_is_v0, not_use_vtype, vd_unequal_vs1, vd_unequal_vs2)
+          allow_vd_is_v0, not_use_vtype, vd_unequal_vs1, vd_unequal_vs2,
+          is_matrix)
       sigs zip decoder map {case(s,d) => s := d}
       rocc := false.B
       this
@@ -202,6 +204,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     decode_table ++= getTable("VectorMask")
     decode_table ++= getTable("VectorPerm")
   }
+  if(usingMatrix) decode_table ++= getTable("Matrix")
 
   val inst = uop.inst
 
@@ -262,7 +265,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.lrs2       := instRS2
   uop.lrs3       := instRS3
 
-  uop.ldst_val   := isSomeReg(cs.dst_type) && !(uop.ldst === 0.U && uop.rt(RD, isInt)) && Mux(cs.is_rvv, !cs.uses_stq, true.B) 
+  uop.ldst_val   := isSomeReg(cs.dst_type) && !(uop.ldst === 0.U && uop.rt(RD, isInt)) && Mux(cs.is_rvv, !cs.uses_stq, true.B)
   uop.dst_rtype  := cs.dst_type
   uop.lrs1_rtype := cs.rs1_type
   uop.lrs2_rtype := cs.rs2_type
