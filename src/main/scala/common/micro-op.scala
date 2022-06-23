@@ -184,6 +184,22 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val v_perm_idx       = if (usingVector) UInt(eLen.W) else UInt(0.W) // maximum VLMAX is 65536
   val vstart           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // VSTART CSR
   val vstartSrc        = if (usingVector) UInt(1.W) else false.B      // vstart source: CSR or speculative zero
+  // matrix extension
+  val is_rvm           = if (usingMatrix) Bool() else false.B
+  val ptd              = if (usingMatrix) UInt(tpregSz.W) else null
+  val stale_ptd        = if (usingMatrix) UInt(tpregSz.W) else null
+  val pts1             = if (usingMatrix) UInt(tpregSz.W) else null
+  val pts2             = if (usingMatrix) UInt(tpregSz.W) else null
+  val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null   // eew encoded in load/store instructions
+  val m_sidx           = if (usingMatrix) UInt(vLenSz.w)  else null   // slice index
+  val m_is_split       = if (usingMatrix) Bool() else false.B
+  val m_split_ecnt     = if (usingMatrix) UInt((vLenSz+1).W) else null
+  val m_split_first    = if (usingMatrix) Bool() else false.B
+  val m_split_last     = if (usingMatrix) Bool() else false.B
+  val ts1_eew          = if (usingMatrix) UInt(2.W)       else null
+  val ts2_eew          = if (usingMatrix) UInt(2.W)       else null
+  val td_eew           = if (usingMatrix) UInt(2.W)       else null
+  val mconfig          = if (usingMatrix) new MConfig     else null
   // purely debug information
   val debug_wdata      = UInt(xLen.W)
   val debug_events     = new DebugStageEvents
