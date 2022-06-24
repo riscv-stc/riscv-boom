@@ -103,7 +103,8 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   }
 
   var m_pipeline: MatPipeline = null
-  if(usingMatrix) {
+  if (usingMatrix) {
+    require(usingVector)
     m_pipeline = Module(new MatPipeline)
   }
 
@@ -126,12 +127,12 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   val fp_rename_stage  = if (usingFPU) Module(new RenameStage(coreWidth, numFpPhysRegs, numFpWakeupPorts, true)) else null
   val pred_rename_stage= Module(new PredRenameStage(coreWidth, ftqSz, 1))
   val v_rename_stage   = if (usingVector) Module(new VecRenameStage(coreWidth, numVecPhysRegs, numVecWakeupPorts)) else null
-  val m_rename_stage = if (usingMatrix) Module(new MatRenameStage(coreWidth, numMatTrPhysRegs, numMatWakeupPorts)) else null
+  val m_rename_stage   = if (usingMatrix) Module(new MatRenameStage(coreWidth, numMatTrPhysRegs, numMatAccPhysRegs, numMatWakeupPorts)) else null
   //vconfig decode and mask
   val dec_vconfigmask_logic = Module(new VconfigMaskGenerationLogic(coreWidth))
 
   // usingVector implies usingFPU
-  val rename_stages    = if(usingMatrix)
+  val rename_stages    = if (usingMatrix)
       Seq(rename_stage, fp_rename_stage, v_rename_stage, m_rename_stage, pred_rename_stage)
     else if (usingVector)
       Seq(rename_stage, fp_rename_stage, v_rename_stage, pred_rename_stage)
@@ -182,7 +183,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
                            jmp_unit.numBypassStages,
                            xLen))
   val rob              = Module(new Rob(
-                           numIrfWritePorts+numFpWakeupPorts+numVecWakeupPorts, // +memWidth for ll writebacks
+                           numIrfWritePorts+numFpWakeupPorts+numVecWakeupPorts+numMatWakeupPorts, // +memWidth for ll writebacks
                            numFpWakeupPorts))
   // Used to wakeup registers in rename and issue. ROB needs to listen to something else.
   val int_iss_wakeups  = Wire(Vec(numIntIssueWakeupPorts, Valid(new ExeUnitResp(xLen))))
@@ -325,6 +326,11 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     v_pipeline.io.vl_wakeup :=  vl_wakeup
   }
 
+  if (usingMatrix) {
+    m_pipeline.io.brupdate := brupdate
+    // m_pipeline.io.ml_wakeup
+  }
+
   // Load/Store Unit & ExeUnits
   val mem_units = exe_units.memory_units
   val mem_resps = mem_units.map(_.io.ll_iresp)
@@ -332,13 +338,14 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     mem_units(i).io.lsu_io <> io.lsu.exe(i)
   }
   if(usingVector){
-    val vlsuReqVld = mem_units(0).io.vlsuReqRr.valid && mem_units(0).io.vlsuReqRr.bits.uop.is_rvv &&
+    val vlsuReqVld = mem_units(0).io.vlsuReqRr.valid && 
+      (mem_units(0).io.vlsuReqRr.bits.uop.is_rvv || mem_units(0).io.vlsuReqRr.bits.uop.is_rvm) &&
       (mem_units(0).io.vlsuReqRr.bits.uop.uses_ldq || mem_units(0).io.vlsuReqRr.bits.uop.uses_stq)
     /* For unmasked/unindexed vector load store that doesn't need to read vrf. */
     vlsuIO.fromRr.vuop(0).valid := vlsuReqVld
     vlsuIO.fromRr.vuop(0).bits := uopConvertToVuop(mem_units(0).io.vlsuReqRr.bits.uop)
-    vlsuIO.fromRr.vuop(0).bits.rs1 := mem_units(0).io.vlsuReqRr.bits.rs1_data
-    vlsuIO.fromRr.vuop(0).bits.rs2 := mem_units(0).io.vlsuReqRr.bits.rs2_data // for unmasked constant stride
+    vlsuIO.fromRr.vuop(0).bits.rs1 := mem_units(0).io.vlsuReqRr.bits.rs1_data  // base address
+    vlsuIO.fromRr.vuop(0).bits.rs2 := mem_units(0).io.vlsuReqRr.bits.rs2_data // for unmasked constant stride in vls
     vlsuIO.fromRr.vuop(0).bits.vm := Fill(vLen, 1.U(1.W))
 
     /* For masked/indexed vector load store. */
@@ -353,7 +360,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     vlsuIO.brUpdate.b1.resolveMask := brupdate.b1.resolve_mask
     vlsuIO.brUpdate.b1.mispredictMask := brupdate.b1.mispredict_mask
 
-    vlsuIO.brUpdate.b2.mispredicted := brupdate.b2.mispredict && brupdate.b2.uop.is_rvv
+    vlsuIO.brUpdate.b2.mispredicted := brupdate.b2.mispredict && (brupdate.b2.uop.is_rvv || brupdate.b2.uop.is_rvm)
     vlsuIO.brUpdate.b2.vStqIdx := brupdate.b2.uop.stq_idx
     vlsuIO.brUpdate.b2.vLdqIdx := brupdate.b2.uop.ldq_idx
   }
@@ -1190,9 +1197,11 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     val i_uop   = rename_stage.io.ren2_uops(w)
     val f_uop   = if (usingFPU) fp_rename_stage.io.ren2_uops(w) else NullMicroOp()
     val v_uop   = if (usingVector) v_rename_stage.io.ren2_uops(w) else NullMicroOp()
+    val m_uop   = if (usingMatrix) m_rename_stage.io.ren2_uops(w) else NullMicroOp()
     val p_uop   = if (enableSFBOpt) pred_rename_stage.io.ren2_uops(w) else NullMicroOp()
     val f_stall = if (usingFPU) fp_rename_stage.io.ren_stalls(w) else false.B
     val v_stall = if (usingVector) v_rename_stage.io.ren_stalls(w) else false.B
+    val m_stall = if (usingMatrix) m_rename_stage.io.ren_stalls(w) else false.B
     val p_stall = if (enableSFBOpt) pred_rename_stage.io.ren_stalls(w) else false.B
 
     // lrs1 can "pass through" to prs1. Used solely to index the csr file.
@@ -1222,6 +1231,15 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       disUops(w).vstart    := Mux(v_uop.vstartSrc === VSTART_ZERO, 0.U, csr.io.vector.get.vstart)
       disUops(w).v_scalar_busy := disUops(w).is_rvv && disUops(w).uses_scalar
       disUops(w).uopc      := Mux(i_uop.uopc.isOneOf(uopVLM), uopVL, i_uop.uopc)
+      if (usingMatrix) {
+        disUops(w).pts1_busy := m_uop.pts1_busy
+        disUops(w).pts2_busy := m_uop.pts2_busy
+        disUops(w).ptd       := m_uop.ptd
+        disUops(w).stale_ptd := m_uop.stale_ptd
+        disUops(w).pts1      := m_uop.pts1
+        disUops(w).pts2      := m_uop.pts2
+        disUops(w).m_scalar_busy := disUops(w).is_rvm && disUops(w).uses_scalar
+      }
     } else {
       disUops(w).prs1_busy := i_uop.prs1_busy & (disUops(w).rt(RS1, isInt)) |
                                f_uop.prs1_busy & (disUops(w).rt(RS1, isFloat))
@@ -1229,7 +1247,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
                                f_uop.prs2_busy & (disUops(w).rt(RS2, isFloat))
     }
 
-    ren_stalls(w) := rename_stage.io.ren_stalls(w) || f_stall || p_stall || v_stall
+    ren_stalls(w) := rename_stage.io.ren_stalls(w) || f_stall || p_stall || v_stall || m_stall
   }
 
   //-------------------------------------------------------------
@@ -1270,8 +1288,8 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
                       || brupdate.b1.mispredict_mask =/= 0.U
                       || brupdate.b2.mispredict
                       || io.ifu.redirect_flush
-                      || vlsuIO.toDis.vLdQFull(w) && disUops(w).uses_ldq && disUops(w).is_rvv
-                      || vlsuIO.toDis.vStQFull(w) && disUops(w).uses_stq && disUops(w).is_rvv))
+                      || vlsuIO.toDis.vLdQFull(w) && disUops(w).uses_ldq && (disUops(w).is_rvv || disUops(w).is_rvm)
+                      || vlsuIO.toDis.vStQFull(w) && disUops(w).uses_stq && (disUops(w).is_rvv || disUops(w).is_rvm))
 
 
   io.lsu.fence_dmem := (disValids zip wait_for_empty_pipeline).map {case (v,w) => v && w} .reduce(_||_)
@@ -1356,8 +1374,8 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
   for (w <- 0 until coreWidth) {
     // Dispatching instructions request load/store queue entries when they can proceed.
-    disUops(w).ldq_idx := Mux(disUops(w).is_rvv, vlsuIO.toDis.disVLdQIdx(w).bits.qIdx, io.lsu.dis_ldq_idx(w))
-    disUops(w).stq_idx := Mux(disUops(w).is_rvv, vlsuIO.toDis.disVStQIdx(w).bits.qIdx, io.lsu.dis_stq_idx(w))
+    disUops(w).ldq_idx := Mux(disUops(w).is_rvv || disUops(w).is_rvm, vlsuIO.toDis.disVLdQIdx(w).bits.qIdx, io.lsu.dis_ldq_idx(w))
+    disUops(w).stq_idx := Mux(disUops(w).is_rvv || disUops(w).is_rvm, vlsuIO.toDis.disVStQIdx(w).bits.qIdx, io.lsu.dis_stq_idx(w))
   }
 
   //-------------------------------------------------------------
@@ -1416,13 +1434,13 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   // Backpressure through dispatcher if necessary
   for (i <- 0 until issueParams.size) {
     if (issueParams(i).iqType == IQT_VEC.litValue) {
-       v_pipeline.io.vec_dis_uops <> dispatcher.io.dis_uops(i)
-     } else if (issueParams(i).iqType == IQT_VMX.litValue) {
+      v_pipeline.io.vec_dis_uops <> dispatcher.io.dis_uops(i)
+    } else if (issueParams(i).iqType == IQT_VMX.litValue) {
       v_pipeline.io.vmx_dis_uops <> dispatcher.io.dis_uops(i)
+    } else if (issueParams(i).iqType == IQT_FP.litValue) {
+      fp_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
     } else if(issueParams(i).iqType == IQT_MAT.litValue) {
       m_pipeline.io.mat_dis_uops <> dispatcher.io.dis_uops(i)
-    } else if (issueParams(i).iqType == IQT_FP.litValue) {
-       fp_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
     } else {
        issue_units(iu_idx).io.dis_uops <> dispatcher.io.dis_uops(i)
        iu_idx += 1
@@ -1549,6 +1567,11 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
        renport <> vport
     }
   }
+  if (usingMatrix) {
+    for ((renport, mport) <- m_rename_stage.io.wakeups zip m_pipeline.io.wakeups) {
+       renport <> mport
+    }
+  }
   if (enableSFBOpt) {
     pred_rename_stage.io.wakeups(0) := pred_wakeup
   } else {
@@ -1607,6 +1630,17 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     v_pipeline.io.vlsuReadReq.bits := vlsuIO.toVrf.readReq.bits.addr
     vlsuIO.fromVrf.readResp.valid := v_pipeline.io.vlsuReadResp.valid
     vlsuIO.fromVrf.readResp.bits.data := v_pipeline.io.vlsuReadResp.bits
+  }
+
+  if (usingMatrix) {
+    v_pipeline.io.fromMat   := m_pipeline.io.toVec
+    m_pipeline.io.fromVec   := v_pipeline.io.toMat
+    m_pipeline.io.intupdate := iregister_read.io.intupdate
+    m_pipeline.io.fpupdate  := fp_pipeline.io.fpupdate
+    m_pipeline.io.vlsuReadReq.valid    := vlsuIO.toTile.readReq.valid
+    m_pipeline.io.vlsuReadReq.bits     := vlsuIO.toTile.readReq.bits.addr
+    vlsuIO.fromTile.readResp.valid     := m_pipeline.io.vlsuReadResp.valid
+    vlsuIO.fromTile.readResp.bits.data := m_pipeline.io.vlsuReadResp.bits
   }
 
   // Load-hit Misspeculations
@@ -1671,7 +1705,19 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
   // Extra I/O
   // Delay retire/exception 1 cycle
-  if(usingVector) {
+  if (usingMatrix) {
+    val cmt_valids = (0 until coreParams.retireWidth).map(i =>
+      rob.io.commit.valids(i) && (!rob.io.commit.uops(i).is_rvv || !rob.io.commit.uops(i).is_rvm ||
+      (rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).v_split_last) ||
+      (rob.io.commit.uops(i).is_rvm && rob.io.commit.uops(i).m_split_last) )
+      //rob.io.commit.arch_valids(i) && (!rob.io.commit.uops(i).is_rvv || rob.io.commit.uops(i).v_split_last))
+    csr.io.retire  := RegNext(PopCount(cmt_valids))
+    when(cmt_valids.orR) {
+      retire_cnt := retire_cnt + PopCount(cmt_valids)
+      printf("retire_cnt: %d\n", retire_cnt.asUInt())
+    }
+  }
+  else if(usingVector) {
     val cmt_valids = (0 until coreParams.retireWidth).map(i =>
       rob.io.commit.valids(i) && (!rob.io.commit.uops(i).is_rvv || rob.io.commit.uops(i).v_split_last))
       //rob.io.commit.arch_valids(i) && (!rob.io.commit.uops(i).is_rvv || rob.io.commit.uops(i).v_split_last))
@@ -1772,6 +1818,22 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     csr_exe_unit.io.vconfig := csr.io.vector.get.vconfig
   }
 
+  if (usingMatrix) {
+    val csr_vld  = csr_exe_unit.io.iresp.valid
+    val csr_uop  = csr_exe_unit.io.iresp.bits.uop
+    val msettype = csr_uop.uopc === uopMSETTYPE
+    val cmt_rvm = (0 until coreParams.retireWidth).map{i =>
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvm}.reduce(_ || _)
+    val cmt_archlast_rvm = (0 until coreParams.retireWidth).map{i =>
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvm &&
+        rob.io.commit.uops(i).m_split_last}.reduce(_ || _)
+    m_pipeline.io.fcsr_rm := csr.io.fcsr_rm
+    csr.io.matrix.get.set_vs_dirty := cmt_rvv
+    csr.io.matrix.get.set_mconfig.valid := csr_vld && msettype
+    csr.io.matrix.get.set_mconfig.bits  := csr_uop.mconfig
+    csr.io.matrix.get.set_mconfig.bits.vtype.reserved := DontCare
+  }
+
 // TODO can we add this back in, but handle reset properly and save us
 //      the mux above on csr.io.rw.cmd?
 //   assert (!(csr_rw_cmd =/= rocket.CSR.N && !exe_units(0).io.resp(0).valid),
@@ -1812,9 +1874,14 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
   // enqueue basic load/store info in Decode
   for (w <- 0 until coreWidth) {
-    io.lsu.dis_uops(w).valid := disFire(w) && !disUops(w).is_rvv
+    io.lsu.dis_uops(w).valid := disFire(w)
     io.lsu.dis_uops(w).bits  := disUops(w)
-    if(usingVector){
+    if (usingMatrix) {
+      io.lsu.dis_uops(w).valid := disFire(w) && !disUops(w).is_rvv && !disUops(w).is_rvm
+      vlsuIO.fromDis.vuopDis(w).valid := disFire(w) && (disUops(w).is_rvv || disUops(w).is_rvm) && (disUops(w).uses_ldq || disUops(w).uses_stq)
+      vlsuIO.fromDis.vuopDis(w).bits := uopConvertToVuop(disUops(w))
+    } else if (usingVector){
+      io.lsu.dis_uops(w).valid := disFire(w) && !disUops(w).is_rvv
       vlsuIO.fromDis.vuopDis(w).valid := disFire(w) && disUops(w).is_rvv && (disUops(w).uses_ldq || disUops(w).uses_stq)
       vlsuIO.fromDis.vuopDis(w).bits := uopConvertToVuop(disUops(w))
     }
@@ -1822,7 +1889,14 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
   // tell LSU about committing loads and stores to clear entries
   io.lsu.commit                  := rob.io.commit
-  if(usingVector){
+  if(usingMatrix) {
+    vlsuIO.fromRob.retireEntries.zipWithIndex.foreach {case (entry, i) =>
+      entry.valid := (rob.io.commit.valids(i) || rob.io.commit.arch_valids(i)) && (rob.io.commit.uops(i).is_rvv || rob.io.commit.uops(i).is_rvm)
+      entry.bits.isStore := rob.io.commit.uops(i).uses_stq
+      entry.bits.isLoad := rob.io.commit.uops(i).uses_ldq
+      entry.bits.qEntryIdx := Mux(rob.io.commit.uops(i).uses_stq, rob.io.commit.uops(i).stq_idx, rob.io.commit.uops(i).ldq_idx)
+    }
+  } else if(usingVector){
     vlsuIO.fromRob.retireEntries.zipWithIndex.foreach {case (entry, i) =>
       entry.valid := (rob.io.commit.valids(i) || rob.io.commit.arch_valids(i)) && rob.io.commit.uops(i).is_rvv
       entry.bits.isStore := rob.io.commit.uops(i).uses_stq
@@ -1944,6 +2018,15 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     v_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
     v_pipeline.io.vlsuLoadWakeUp.valid := vlsuIO.wakeUpVReg.valid
     v_pipeline.io.vlsuLoadWakeUp.bits := vlsuIO.wakeUpVReg.bits
+  }
+
+  if (usingMatrix) {
+    m_pipeline.io.vlsuWritePort.valid := vlsuIO.toVrf.write.valid
+    m_pipeline.io.vlsuWritePort.bits.data := vlsuIO.toVrf.write.bits.data
+    m_pipeline.io.vlsuWritePort.bits.addr := vlsuIO.toVrf.write.bits.addr
+    m_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
+    m_pipeline.io.vlsuLoadWakeUp.valid := vlsuIO.wakeUpVReg.valid
+    m_pipeline.io.vlsuLoadWakeUp.bits := vlsuIO.wakeUpVReg.bits
   }
 
   if (usingRoCC) {
@@ -2094,6 +2177,10 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     v_pipeline.io.flush_pipeline := RegNext(rob.io.flush.valid)
   }
 
+  if (usingMatrix) {
+    m_pipeline.io.flush_pipeline := RegNext(rob.io.flush.valid)
+  }
+
   for (w <- 0 until exe_units.length) {
     exe_units(w).io.req.bits.kill := RegNext(rob.io.flush.valid)
   }
@@ -2167,7 +2254,13 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
               rob.io.commit.uops(w).v_eidx,
               rob.io.commit.debug_wdata(w))
           }
-        } .otherwise {
+        } .elsewhen (rob.io.commit.uops(w).rt(RD, isMatrix)) {{
+          if (usingMatrix) {
+            printf(" v%d[%d] 0x%x\n",
+              rob.io.commit.uops(w).ldst,
+              rob.io.commit.debug_wdata(w))
+          }
+        }.otherwise {
           printf("\n")
         }
       }
