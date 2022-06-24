@@ -59,8 +59,8 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     //val to_sdq           = Decoupled(new ExeUnitResp(eLen))
     val to_int           = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
     val to_fp            = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
-    val toMat            = Vec(vecWidth, Decoupled(new ExeUnitResp(vLen)))
-    val fromMat          = Vec(matWidth, Flipped(Decoupled(new ExeUnitResp(vLen))))
+    val toMat            = if (usingMatrix) Vec(vecWidth, Decoupled(new ExeUnitResp(vLen))) else null
+    val fromMat          = if (usingMatrix) Vec(matWidth, Flipped(Decoupled(new ExeUnitResp(vLen)))) else null
     /** Send vrf data to vlsu for indexed or masked load store. */
     val toVlsuRr: ValidIO[FuncUnitReq] = ValidIO(new FuncUnitReq(vLen))
     val vlsuReadReq: DecoupledIO[UInt] = Flipped(Decoupled(UInt(vpregSz.W)))

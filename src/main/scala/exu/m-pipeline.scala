@@ -60,8 +60,8 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     // vector pipeline related
     val fromVec          = Vec(matWidth, Flipped(Decoupled(new ExeUnitResp(vLen))))
     val toVec            = Vec(matWidth, Decoupled(new ExeUnitResp(vLen)))
-    // vl_wakeup, vsetvl related wakeup
-    val vl_wakeup        = Input(Valid(new VlWakeupResp()))
+    // mset_wakeup, vsetvl related wakeup
+    // val mset_wakeup        = Input(Valid(new MlWakeupResp()))  // TODO: msettype/msettile speculation optimization
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units for mem, int and fp
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
