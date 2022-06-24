@@ -31,7 +31,7 @@ import freechips.rocketchip.util._
  *
  * @param numWakeupPorts number of wakeup ports for the slot
  */
-class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false)
+class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false, val matrix: Boolean = false)
 (implicit p: Parameters) extends BoomBundle {
   val valid         = Output(Bool())
   val will_be_valid = Output(Bool()) // TODO code review, do we need this signal so explicitely?
@@ -52,16 +52,16 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false)
   val out_uop       = Output(new MicroOp()) // the updated slot uop; will be shifted upwards in a collasping queue.
   val uop           = Output(new MicroOp()) // the current Slot's uop. Sent down the pipeline when issued.
   //val vmupdate      = if (usingVector && !vector) Input(Vec(1, Valid(new MicroOp))) else null
-  val intupdate     = if (vector) Input(Vec(intWidth + memWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val intupdate     = if (vector || matrix) Input(Vec(intWidth + memWidth, Valid(new ExeUnitResp(eLen)))) else null
   val fpupdate      = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   //val vecUpdate     = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
   val vbusy_status  = if (vector) Input(UInt(numVecPhysRegs.W)) else null
 
   val debug = {
     val result = new Bundle {
-      val p1 = if (vector) UInt(vLenb.W) else Bool()
-      val p2 = if (vector) UInt(vLenb.W) else Bool()
-      val p3 = if (vector) UInt(vLenb.W) else Bool()
+      val p1 = if (matrix) UInt(vLenb.W) else Bool()
+      val p2 = if (matrix) UInt(vLenb.W) else Bool()
+      val p3 = Bool()
       val ppred = Bool()
       val state = UInt(width=2.W)
     }
@@ -77,7 +77,8 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false)
 class IssueSlot(
   val numWakeupPorts: Int,
   val iqType: BigInt = IQT_INT.litValue,
-  val vector: Boolean = false
+  val vector: Boolean = false,
+  val matrix: Boolean = false
 )(implicit p: Parameters)
   extends BoomModule
   with IssueUnitConstants
@@ -97,12 +98,12 @@ class IssueSlot(
   val next_lrs2_rtype = Wire(UInt()) // the next reg type of this slot (which might then get moved to a new slot)
 
   val state = RegInit(s_invalid)
-  val p1    = if(vector) RegInit(0.U(vLenb.W)) else RegInit(false.B)
-  val p2    = if(vector) RegInit(0.U(vLenb.W)) else RegInit(false.B)
-  val p3    = if(vector) RegInit(0.U(vLenb.W)) else RegInit(false.B)
+  val p1    = if(matrix) RegInit(0.U(vLenb.W)) else RegInit(false.B)
+  val p2    = if(matrix) RegInit(0.U(vLenb.W)) else RegInit(false.B)
+  val p3    = RegInit(false.B)
   //val pm    = if(vector) RegInit(0.U(vLenb.W)) else if (usingVector && iqType == IQT_MEM.litValue) RegInit(false.B) else null
-  val ps    = if(vector) RegInit(false.B) else null
-  val sdata = if(vector) RegInit(0.U(eLen.W)) else null
+  val ps    = if(vector || matrix) RegInit(false.B) else null
+  val sdata = if(vector || matrix) RegInit(0.U(eLen.W)) else null
   val strideLength = if(iqType == IQT_VMX.litValue) RegInit(0.U(eLen.W)) else null
   val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
@@ -129,6 +130,8 @@ class IssueSlot(
     if (vector) {
       ret := io.uop.v_split_last || io.uop.is_reduce ||
              io.uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
+    } else if(matrix) {
+      ret := io.uop.m_split_last
     } else {
       ret := true.B
     }
@@ -144,6 +147,9 @@ class IssueSlot(
       val pvs1   = uop.pvs1(rsel).bits
       ret       := Mux(uop.rt(RS1, isVector), !io.vbusy_status(pvs1),
                    Mux(uop.uses_scalar, ps, true.B))
+    } else if(matrix) {
+      ret := Mux(uop.rt(RS1, isAccTile), p1.andR(),
+             Mux(uop.rt(RS1, isTrTile),  p1(uop.m_sidx), true.B))
     } else {
       ret := p1(0)
     }
@@ -163,7 +169,11 @@ class IssueSlot(
       val rsel   = Mux(isIndexed, indexPick, VRegSel(v_eidx, eew, eLenSelSz))
       val pvs2   = uop.pvs2(rsel).bits
       val reduce_busy = uop.pvs2.map(pvs2 => pvs2.valid && io.vbusy_status(pvs2.bits)).reduce(_ || _)
-      ret       := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))
+      ret := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))
+    } else if(matrix) {
+      ret := Mux(uop.rt(RS2, isAccTile), p2.andR(),
+             Mux(uop.rt(RS2, isTrTile),  p2(uop.m_sidx), 
+             Mux(uop.uses_scalar, ps, true.B)))
     } else {
       ret := p2(0)
     }
@@ -178,6 +188,8 @@ class IssueSlot(
       val rsel      = VRegSel(v_eidx, uop.vd_eew, eLenSelSz)
       val stale_pvd = uop.stale_pvd(rsel).bits
       ret          := !uop.rt(RD, isVector) || !io.vbusy_status(stale_pvd)
+    } else if(matrix) {
+      ret := true.B
     } else {
       ret := p3(0)
     }
@@ -246,7 +258,7 @@ class IssueSlot(
     next_state := s_invalid
   } .elsewhen ((io.grant && (state === s_valid_1)) ||
     (io.grant && (state === s_valid_2) && rs1check && rs2check && ppred && vl_ready)) {
-    if (vector) {
+    if (vector || matrix) {
       when (state === s_valid_1) {
         when(last_check) {
           next_state := s_invalid
@@ -281,14 +293,21 @@ class IssueSlot(
   val next_p2 = WireInit(p2)
   val next_p3 = WireInit(p3)
   //val next_pm = if (vector || usingVector && iqType == IQT_MEM.litValue) WireInit(pm) else null
-  val in_p1 = if (vector) WireInit(p1) else null
-  val in_p2 = if (vector) WireInit(p2) else null
+  val in_p1 = if (vector || matrix) WireInit(p1) else null
+  val in_p2 = if (vector || matrix) WireInit(p2) else null
   val in_p3 = if (vector) WireInit(p3) else null
   val next_ppred = WireInit(ppred)
+  val wake_p1 = if (matrix) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
+  val wake_p2 = if (matrix) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
 
   when (io.in_uop.valid) {
-    if (usingVector) {
-      if (vector) {
+    if(usingMatrix && matrix) {
+      in_p1 := ~io.in_uop.bits.pts1_busy
+      in_p2 := ~io.in_uop.bits.pts2_busy
+      ps    := ~io.in_uop.bits.v_scalar_busy
+      sdata :=  io.in_uop.bits.v_scalar_data
+    } else if (usingVector) {
+      if(vector) {
         in_p1 := ~io.in_uop.bits.prs1_busy
         in_p2 := ~io.in_uop.bits.prs2_busy
         in_p3 := ~io.in_uop.bits.prs3_busy
@@ -317,7 +336,7 @@ class IssueSlot(
 
   when (io.ldspec_miss && next_p1_poisoned) {
     assert(next_uop.prs1 =/= 0.U, "Poison bit can't be set for prs1=x0!")
-    if (vector) {
+    if (matrix) {
       next_p1 := 0.U
     } else {
       next_p1 := false.B
@@ -325,7 +344,7 @@ class IssueSlot(
   }
   when (io.ldspec_miss && next_p2_poisoned) {
     assert(next_uop.prs2 =/= 0.U, "Poison bit can't be set for prs2=x0!")
-    if (vector) {
+    if (matrix) {
       next_p2 := 0.U
     } else {
       next_p2 := false.B
@@ -335,8 +354,12 @@ class IssueSlot(
   for (i <- 0 until numWakeupPorts) {
     val wk_valid = io.wakeup_ports(i).valid
     val wk_pdst = io.wakeup_ports(i).bits.pdst
-    if (vector) {
-      // no wakeup logics anymore
+    if (matrix) {
+      val wk_uop = io.wakeup_ports(i).bits.uop
+      val wk_ts1 = wk_valid && (wk_pdst === next_uop.pts1)
+      val wk_ts2 = wk_valid && (wk_pdst === next_uop.pts2)
+      wake_p1(i) := wk_ts1 << wk_uop.m_sidx
+      wake_p2(i) := wk_ts2 << wk_uop.m_sidx
     } else {
       when (wk_valid && (wk_pdst === next_uop.prs1)) {
         next_p1 := true.B
@@ -363,7 +386,7 @@ class IssueSlot(
     when (io.spec_ld_wakeup(w).valid &&
       io.spec_ld_wakeup(w).bits === next_uop.prs1 &&
       next_uop.rt(RS1, isInt)) {
-      if (vector) {
+      if (vector || matrix) {
         next_p1 := 0.U
       } else {
         next_p1 := true.B
@@ -374,7 +397,7 @@ class IssueSlot(
     when (io.spec_ld_wakeup(w).valid &&
       io.spec_ld_wakeup(w).bits === next_uop.prs2 &&
       next_uop.rt(RS2, isInt)) {
-      if (vector) {
+      if (vector || matrix) {
         next_p2 := 0.U
       } else {
         next_p2 := true.B
@@ -411,6 +434,12 @@ class IssueSlot(
     slot_uop.br_mask := next_br_mask
   }
 
+  if (matrix) {
+    next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.orR
+    next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.orR
+    next_ps := Mux(io.in_uop.valid, in_ps, ps) | wake_ps
+    next_sdata := Mux(wake_ps, wake_sdata, Mux(io.in_uop.valid, in_sdata, sdata))
+  }
   if (vector) {
     // when intupdate or fpupdate, we need to tell if data is really we need.
     when (io.intupdate.map(_.valid).reduce(_||_) || io.fpupdate.map(_.valid).reduce(_||_)) {
@@ -475,7 +504,13 @@ class IssueSlot(
   io.out_uop.lrs1_rtype := next_lrs1_rtype
   io.out_uop.lrs2_rtype := next_lrs2_rtype
   io.out_uop.br_mask    := next_br_mask
-  if (usingVector) {
+  if(usingMatrix && matrix) {
+    io.uop.m_sidx := slot_uop.m_sidx
+    io.out_uop.ts1_busy := ~p1
+    io.out_uop.ts2_busy := ~p2
+    io.out_uop.m_scalar_busy := ~ps
+    io.out_uop.m_scalar_data := sdata
+  } else if (usingVector) {
     io.uop.v_eidx := slot_uop.v_eidx
     if (vector) {
       // value to next slot should be current latched version

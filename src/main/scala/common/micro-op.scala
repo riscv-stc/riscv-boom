@@ -185,17 +185,21 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val vstart           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // VSTART CSR
   val vstartSrc        = if (usingVector) UInt(1.W) else false.B      // vstart source: CSR or speculative zero
   // matrix extension
-  val is_rvm           = if (usingMatrix) Bool() else false.B
+  val is_rvm           = if (usingMatrix) Bool()          else false.B
   val ptd              = if (usingMatrix) UInt(tpregSz.W) else null
   val stale_ptd        = if (usingMatrix) UInt(tpregSz.W) else null
   val pts1             = if (usingMatrix) UInt(tpregSz.W) else null
   val pts2             = if (usingMatrix) UInt(tpregSz.W) else null
+  val pts1_busy        = if (usingMatrix) UInt(vLenb.W)   else null
+  val pts2_busy        = if (usingMatrix) UInt(vLenb.W)   else null
+  val m_scalar_busy    = if (usingMatrix) Bool()          else null
+  val m_scalar_data    = if (usingMatrix) UInt(eLen.W)    else null
   val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null   // eew encoded in load/store instructions
   val m_sidx           = if (usingMatrix) UInt(vLenSz.w)  else null   // slice index
-  val m_is_split       = if (usingMatrix) Bool() else false.B
+  val m_is_split       = if (usingMatrix) Bool()          else false.B
   val m_split_ecnt     = if (usingMatrix) UInt((vLenSz+1).W) else null
-  val m_split_first    = if (usingMatrix) Bool() else false.B
-  val m_split_last     = if (usingMatrix) Bool() else false.B
+  val m_split_first    = if (usingMatrix) Bool()          else false.B
+  val m_split_last     = if (usingMatrix) Bool()          else false.B
   val ts1_eew          = if (usingMatrix) UInt(2.W)       else null
   val ts2_eew          = if (usingMatrix) UInt(2.W)       else null
   val td_eew           = if (usingMatrix) UInt(2.W)       else null
@@ -221,7 +225,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
 
   def fu_code_is(_fu: UInt) = (fu_code & _fu) =/= 0.U
 
-  def uses_scalar      = is_rvv && (iq_type & (IQT_INT | IQT_FP)) =/= 0.U
+  def uses_scalar      = (is_rvv || is_rvm) && (iq_type & (IQT_INT | IQT_FP)) =/= 0.U
   def uses_v_simm5     = rt(RS1, isRvvSImm5)
   def uses_v_uimm5     = rt(RS1, isRvvUImm5)
   def is_perm_vadd     = rt(RS1, isPermVADD)
@@ -267,6 +271,8 @@ class CtrlSignals(implicit p: Parameters) extends BoomBundle()
   val is_vmlogic  = if (usingVector) Bool() else null
   val is_vmscmp   = if (usingVector) Bool() else null
   //val is_vmfscmp   = if (usingVector) Bool() else null
+  val is         = if (usingMatrix) Bool() else null
+  val isV         = if (usingMatrix) Bool() else null
 }
 
 /**

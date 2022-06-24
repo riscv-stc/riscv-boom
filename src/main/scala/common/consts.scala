@@ -125,6 +125,9 @@ trait ScalarOpConstants
   val OP1_PC  = 2.U(3.W)
   val OP1_VS2 = 3.U(3.W) // for vector
   val OP1_INV_VS2 = 4.U(3.W) // for vector mask insn
+  val OP1_TS1 = 5.U(3.W) // for matrix
+  val OP1_ACC = 6.U(3.W) // for matrix
+  val OP1_VS1 = 7.U(3.W) // for matrix
   val OP1_X   = BitPat("b???")
 
   // RS2 Operand Select Signal
@@ -136,6 +139,7 @@ trait ScalarOpConstants
   val OP2_VL  = 5.U(3.W) // for vset{i}vl{i}
   val OP2_VS1 = 6.U(3.W) // for vector
   val OP2_INV_VS1 = 7.U(3.W) // for vector mask insn
+  val OP2_TS2 = 6.U(3.W) // for matrix
   val OP2_X   = BitPat("b???")
 
   // Register File Write Enable Signal
@@ -207,6 +211,8 @@ trait ScalarOpConstants
   def isRvvImm5  (rt: UInt): Bool = (rt === RT_VI || rt === RT_VIU || rt === RT_PERM)
   def isPermVADD (rt: UInt): Bool = (rt === RT_PERM)
   def isMatrix   (rt: UInt): Bool = rt(5)
+  def isTrTile   (rt: UInt): Bool = (rt === RT_TR)
+  def isAccTile  (rt: UInt): Bool = (rt === RT_ACC)
   //def isMaskV    (rt: UInt): Bool = (rt === RT_VM)
 
   val uopX    = BitPat.dontCare(boom.common.MicroOpcodes.UOPC_SZ)

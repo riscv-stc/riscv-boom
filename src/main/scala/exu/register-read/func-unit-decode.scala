@@ -214,9 +214,9 @@ object VecRRdDecode extends RRdDecodeConstants
         ,BitPat(uopVRGATHER)   -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2 ,    OP2_ZERO,    IS_X, REN_1, CSR.N)
         ,BitPat(uopVRGATHEREI16)->List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2 ,    OP2_ZERO,    IS_X, REN_1, CSR.N)
         ,BitPat(uopVCOMPRESS)  -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2 ,    OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopMMV_T)      -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopMWMV_T)     -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopMQMV_T)     -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopMMV_T)      -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS1,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopMWMV_T)     -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS1,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+        ,BitPat(uopMQMV_T)     -> List(BR_N, Y, N, N, FN_ADD,   DW_XPR, OP1_VS1,     OP2_ZERO,    IS_X, REN_1, CSR.N)
   )
 }
 
@@ -442,23 +442,23 @@ object MatRRdDecode extends RRdDecodeConstants
   val table: Array[(BitPat, List[BitPat])] =
              Array[(BitPat, List[BitPat])](
                                     // br type
-                                    // |     use alu pipe               op1 sel      op2 sel
-                                    // |     |  use muldiv pipe         |            |            immsel       csr_cmd
-                                    // |     |  |  use mem pipe         |            |            |     rf wen |
-                                    // |     |  |  |  alu fcn   wd/word?|            |            |     |      |
-                                    // |     |  |  |  |         |       |            |            |     |      |
-         BitPat(uopMOPA)       -> List(BR_N, Y, N, N, FN_GEMM,  DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
-        ,BitPat(uopMWOPA)      -> List(BR_N, Y, N, N, FN_GEMM,  DW_XPR, OP1_VS2,     OP2_VS1,     IS_X, REN_1, CSR.N)
-        ,BitPat(uopMQOPA)      -> List(BR_N, Y, N, N, FN_GEMM,  DW_XPR, OP1_RS1,     OP2_RS2,     IS_X, REN_1, CSR.N)
-        ,BitPat(uopMFOPA)      -> List(BR_N, Y, N, N, FN_GEMM,  DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopMFWOPA)     -> List(BR_N, Y, N, N, FN_GEMM,  DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopMMUL)       -> List(BR_N, Y, N, N, FN_MMUL,  DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopMWMUL)      -> List(BR_N, Y, N, N, FN_MMUL,  DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopMQMUL)      -> List(BR_N, Y, N, N, FN_MMUL,  DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopMFNCVT)     -> List(BR_N, Y, N, N, FN_FCVT,  DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopMMV_V)      -> List(BR_N, Y, N, N, FN_SLICE, DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopMWMV_V)     -> List(BR_N, Y, N, N, FN_SLICE, DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
-        ,BitPat(uopMQMV_V)     -> List(BR_N, Y, N, N, FN_SLICE, DW_XPR, OP1_VS2,     OP2_ZERO,    IS_X, REN_1, CSR.N)
+                                    // |     use alu pipe               op1 sel   op2 sel
+                                    // |     |  use muldiv pipe         |         |          immsel       csr_cmd
+                                    // |     |  |  use mem pipe         |         |          |     rf wen |
+                                    // |     |  |  |  alu fcn   wd/word?|         |          |     |      |
+                                    // |     |  |  |  |         |       |         |          |     |      |
+         BitPat(uopMOPA)       -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_TS2,   IS_X, REN_1, CSR.N)
+        ,BitPat(uopMWOPA)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_TS2,   IS_X, REN_1, CSR.N)
+        ,BitPat(uopMQOPA)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_TS2,   IS_X, REN_1, CSR.N)
+        ,BitPat(uopMFOPA)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_TS2,   IS_X, REN_1, CSR.N)
+        ,BitPat(uopMFWOPA)     -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_TS2,   IS_X, REN_1, CSR.N)
+        ,BitPat(uopMMUL)       -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_ACC,  OP2_ZERO,  IS_X, REN_1, CSR.N)
+        ,BitPat(uopMWMUL)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_ACC,  OP2_ZERO,  IS_X, REN_1, CSR.N)
+        ,BitPat(uopMQMUL)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_ACC,  OP2_ZERO,  IS_X, REN_1, CSR.N)
+        ,BitPat(uopMFNCVT)     -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_ACC,  OP2_ZERO,  IS_X, REN_1, CSR.N)
+        ,BitPat(uopMMV_V)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_ACC,  OP2_ZERO,  IS_X, REN_1, CSR.N)
+        ,BitPat(uopMWMV_V)     -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_ACC,  OP2_ZERO,  IS_X, REN_1, CSR.N)
+        ,BitPat(uopMQMV_V)     -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_ACC,  OP2_ZERO,  IS_X, REN_1, CSR.N)
   )
 }
 
@@ -510,6 +510,11 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
     io.rrd_uop.ctrl.is_vmscmp   := io.rrd_uop.uopc.isOneOf(uopVMSEQ, uopVMSNE, uopVMSLTU, uopVMSLT, uopVMSLEU, uopVMSLE, uopVMSGTU, uopVMSGT)
     when(io.rrd_uop.uopc.isOneOf(uopVDIV, uopVDIVU, uopVREM, uopVREMU)) {
       io.rrd_uop.ctrl.fcn_dw := Mux(io.rrd_uop.vconfig.vtype.vsew === 3.U, true.B, false.B)
+    }
+    if(usingMatrix) {
+      when(io.rrd_uop.uopc.isOneOf(uopMMV_V) && io.rrd_uop.rt(RS1, isTrTile)) {
+        io.rrd_uop.ctrl.op1_sel := OP1_TS1
+      }
     }
   } else {
     io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD)

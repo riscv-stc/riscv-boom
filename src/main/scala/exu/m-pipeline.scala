@@ -70,9 +70,15 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 
   //**********************************
   // construct all of the modules
-  val mat_issue_unit = Module(new IssueUnitCollapsing(matIssueParams, numWakeupPorts, matrix = true))
+  val mat_issue_unit = Module(new IssueUnitCollapsing(matIssueParams, numWakeupPorts, vector = false, matrix = true))
   val trtileReg      = Module(new TrTileReg(vLen, numMatTrPhysRegs, mLen, vLen, exe_units.numTrTileReadPorts+1, 2))
-  val trtileReader   = Module(new TileRegisterRead())
+  val trtileReader   = Module(new TileRegisterRead(
+                         matWidth, 
+                         exe_units.withFilter(_.readsTrTile).map(_.supportedFuncUnits),
+                         exe_units.numTrTileReadPorts,
+                         0,
+                         0,
+                         vLen, float = false, vector = false, matrix = true))
   val exe_units      = new boom.exu.ExecutionUnits(matrix=true)
   mat_issue_unit.suggestName("mat_issue_unit")
 
@@ -118,10 +124,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   for (i <- 0 until matWidth) {
     iss_valids(i) := mat_issue_unit.io.iss_valids(i)
     iss_uops(i) := mat_issue_unit.io.iss_uops(i)
-
-    var fu_types = exe_units(i).io.fu_types
-    mat_issue_unit.io.fu_types(i) := fu_types & ~Fill(FUC_SZ, vregister_read.io.rrd_stall.asUInt)
-
+    mat_issue_unit.io.fu_types(i) := exe_units(i).io.fu_types
     require (exe_units(i).readsTrTile)
   }
 

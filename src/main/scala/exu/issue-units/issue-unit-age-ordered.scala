@@ -29,14 +29,16 @@ import boom.common._
 class IssueUnitCollapsing(
   params: IssueParams,
   numWakeupPorts: Int,
-  vector: Boolean = false)
+  vector: Boolean = false,
+  matrix: Boolean = false)
 (implicit p: Parameters) extends IssueUnit(
   params.numEntries,
   params.issueWidth,
   numWakeupPorts,
   params.iqType,
   params.dispatchWidth,
-  vector
+  vector,
+  matrix
 ) {
   //-------------------------------------------------------------
   // Figure out how much to shift entries by

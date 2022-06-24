@@ -57,11 +57,12 @@ object FUConstants extends Enumeration
   val FU_VMASKU_ID = Value
   val FU_VRP_ID = Value  // reduction/permutation
   val FU_MT_ID  = Value
-  val FUC_SZ_ENUM = Value
   // TODO: Function units can be grouped to save width, as one issue queue only relates to several of them, not all of them
-  val FU_GEMM   = Value
-  val FU_HSLICE = Value
-  val FU_VSLICE = Value
+  val FU_GEMM_ID   = Value
+  val FU_MMUL_ID   = Value
+  val FU_SLICE_ID  = Value
+  val FU_MFCVT_ID  = Value
+  val FUC_SZ_ENUM  = Value
 
   val FUC_SZ    = FUC_SZ_ENUM.id
   val FU_X      = BitPat.dontCare(FUC_SZ)
@@ -80,7 +81,11 @@ object FUConstants extends Enumeration
   val FU_FR7    = (1<<FU_FR7_ID.id).U(FUC_SZ.W)
   val FU_VMASKU = (1<<FU_VMASKU_ID.id).U(FUC_SZ.W)
   val FU_VRP    = (1<<FU_VRP_ID.id).U(FUC_SZ.W)
-  val FU_MT     = (1 <<FU_MT_ID.id).U(FUC_SZ.W)
+  val FU_MT     = (1<<FU_MT_ID.id).U(FUC_SZ.W)
+  val FU_GEMM   = (1<<FU_GEMM_ID.id).U(FUC_SZ.W)
+  val FU_MMUL   = (1<<FU_MMUL_ID.id).U(FUC_SZ.W)
+  val FU_SLICE  = (1<<FU_SLICE_ID.id).U(FUC_SZ.W)
+  val FU_MFCVT  = (1<<FU_MFCVT_ID.id).U(FUC_SZ.W)
 
   // FP stores generate data through FP F2I, and generate address through MemAddrCalc
   def FU_F2IMEM = ((1<<FU_MEM_ID.id) | (1<<FU_F2I_ID.id)).U(FUC_SZ.W)

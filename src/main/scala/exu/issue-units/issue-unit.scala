@@ -72,7 +72,8 @@ class IssueUnitIO(
   val issueWidth: Int,
   val numWakeupPorts: Int,
   val dispatchWidth: Int,
-  val vector: Boolean = false)
+  val vector: Boolean = false,
+  val matirx: Boolean = false)
 (implicit p: Parameters) extends BoomBundle {
   val dis_uops         = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
 
@@ -89,7 +90,7 @@ class IssueUnitIO(
 
   val brupdate         = Input(new BrUpdateInfo())
   //val vmupdate         = if (usingVector && !vector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
-  val intupdate        = if (vector) Input(Vec(intWidth + memWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val intupdate        = if (vector || matrix) Input(Vec(intWidth + memWidth, Valid(new ExeUnitResp(eLen)))) else null
   val fpupdate         = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   //val vecUpdate        = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
   val vbusy_status     = if (vector) Input(UInt(numVecPhysRegs.W)) else null
@@ -120,9 +121,10 @@ abstract class IssueUnit(
   val numWakeupPorts: Int,
   val iqType: BigInt,
   val dispatchWidth: Int,
-  val vector: Boolean = false)
+  val vector: Boolean = false,
+  val matrix: Boolean = false)
 (implicit p: Parameters) extends BoomModule with IssueUnitConstants {
-  val io = IO(new IssueUnitIO(issueWidth, numWakeupPorts, dispatchWidth, vector))
+  val io = IO(new IssueUnitIO(issueWidth, numWakeupPorts, dispatchWidth, vector, matrix))
 
   //-------------------------------------------------------------
   // Set up the dispatch uops
@@ -204,6 +206,16 @@ abstract class IssueUnit(
       } .elsewhen (dis_uops(w).uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
         dis_uops(w).prs1_busy   := 0.U
       }
+    } else if (iqType == IQT.MAT.litValue) {
+      when(dis_uops(w).uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA, uopMFOPA, uopMFWOPA)) {
+        dis_uops(w).prs1_busy := 0.U
+        dis_uops(w).prs2_busy := 0.U
+      } .elsewhen(dis_uops(w).uopc.isOneOf(uopMMV_V, uopMWMV_V, uopMQMV_V)) {
+        dis_uops(w).prs1_busy := 0.U
+        dis_uops(w).pts2_busy := 0.U
+      } .elsewhen(dis_uops(w).uopc.isOneOf(uopMMUL, uopMWMUL, uopMQMUL)) {
+        dis_uops(w).trs2_busy := 0.U
+      }
     }
 
     if (iqType != IQT_INT.litValue) {
@@ -216,7 +228,7 @@ abstract class IssueUnit(
   // Issue Table
 
   val slots = for (i <- 0 until numIssueSlots) yield {
-    val slot = Module(new IssueSlot(numWakeupPorts, iqType, vector));
+    val slot = Module(new IssueSlot(numWakeupPorts, iqType, vector, matrix))
     slot
   }
   val issue_slots = VecInit(slots.map(_.io))
@@ -229,7 +241,10 @@ abstract class IssueUnit(
     issue_slots(i).brupdate         := io.brupdate
     issue_slots(i).kill             := io.flush_pipeline
     issue_slots(i).vl_wakeup_port   := io.vl_wakeup_port
-    if (usingVector) {
+    if (usingMatrix && matrix) {
+      issue_slots(i).intupdate      := io.intupdate
+    }
+    else if (usingVector) {
       if (vector) {
         issue_slots(i).vbusy_status   := io.vbusy_status
         issue_slots(i).intupdate      := io.intupdate
@@ -271,5 +286,6 @@ abstract class IssueUnit(
     else if (iqType == IQT_MEM.litValue) "mem"
     else if (iqType == IQT_FP.litValue) " fp"
     else if (iqType == IQT_VEC.litValue) "vec"
+    else if (iqType == IQT_MAT.litValue) "mat"
     else "unknown"
 }
