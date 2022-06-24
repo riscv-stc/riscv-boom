@@ -108,8 +108,13 @@ case class BoomCoreParams(
    /* matrix extension */
   override val useMatrix: Boolean = false,
   override val mLen: Int = 0,
+  override val tileRows: Int = 0,
+  override val tileCols: Int = 0,
+
   numMatTrRegisters: Int = 0,
   numMatAccRegisters: Int = 0,
+  meshRows: Int = 0,
+  meshCols: Int = 0,
 
   /* debug stuff */
   enableCommitLogPrintf: Boolean = true,
@@ -195,7 +200,8 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val usingFDivSqrt = boomParams.fpu.isDefined && boomParams.fpu.get.divSqrt
   val usingzfhExt   = boomParams.fpu.isDefined && boomParams.fpu.get.zfhExt
 
-  val usingMatrix   = boomParams.useMatrix
+  val usingMatrix      = boomParams.useMatrix
+  val numMatTrPhysRegs = if(usingMatrix) boomParams.numVecPhysRegisters else 0
 
   val mulDivParams = boomParams.mulDiv.getOrElse(MulDivParams())
   // TODO: Allow RV32IF
@@ -304,7 +310,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val ipregSz         = log2Ceil(numIntPhysRegs)
   val fpregSz         = log2Ceil(numFpPhysRegs)
   val vpregSz         = if (usingVector) log2Ceil(numVecPhysRegs) else 0
-  val tpregSz         = if (usingMatrix) log2Ceil(numMatTrRegisters) else 0
+  val tpregSz         = if (usingMatrix) log2Ceil(numMatTrPhysRegs) else 0
   //val vElenSz         = if (usingVector) log2Ceil(numVecPhysElens) else 0
   val maxPregSz       = ipregSz max fpregSz max vpregSz
   val ldqAddrSz       = log2Ceil(numLdqEntries)

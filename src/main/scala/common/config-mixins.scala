@@ -531,7 +531,7 @@ class WithSWBPD extends Config((site, here, up) => {
 
 // DOC include start: StcBoomConfig
 /**
- * Based on LargeBoomConfig with RVV extension
+ * Based on LargeBoomConfig with RVV + Matrix extension
  */
 class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Config(
   new WithTAGELBPD ++ // Default to TAGE-L BPD
@@ -677,17 +677,15 @@ class WithNStcMatBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends
                 fpu = Some(freechips.rocketchip.tile.FPUParams(minFLen=16, fLen=64, sfmaLatency=4, dfmaLatency=4, divSqrt=true)),
                 useVector = true,
                 vLen = 512,
-                mLen = 16384,  //vLen * 32
-                numMatTrRegisters = 8,
-                numMatAccRegisters = 2,
                 eLen = 64,
                 vMemDataBits = 64,
                 numVecPhysRegisters = 65,
                 useMatrix = true,
+                mLen = 16384,  //vLen * 32
+                numMatTrRegisters = 8,
+                numMatAccRegisters = 2,
                 tileRows = 4,
-                tileCols = 4,
-                meshRows = mLen/(vLen*tileRows),
-                meshCols = vLen/(16*tileCols)
+                tileCols = 4
               ),
               dcache = Some(
                 DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4, nTLBWays=16)

@@ -832,6 +832,8 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
         "VLEN Bits             : " + vLen,
         "ELEN Bits             : " + eLen,
         "Using FDivSqrt?       : " + usingFDivSqrt.toString,
+        "Using Matrix?         : " + usingMatrix.toString,
+        "MLEN Bits             : " + mLen,
         "Using VM?             : " + usingVM.toString) + "\n")
 
   //-------------------------------------------------------------
