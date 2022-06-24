@@ -322,3 +322,109 @@ class VecRenameMapTable(
     }
   }
 }
+
+
+class MatMapReq(val lregSz: Int) extends Bundle
+{
+  val lrs1 = UInt(lregSz.W)
+  val lrs2 = UInt(lregSz.W)
+  val lrs3 = UInt(lregSz.W)
+  val ldst = UInt(lregSz.W)
+}
+
+class MatMapResp(val pregSz: Int) extends Bundle
+{
+  val prs1 = UInt(pregSz.W)
+  val prs2 = UInt(pregSz.W)
+  val prs3 = UInt(pregSz.W)
+  val stale_pdst = UInt(pregSz.W)
+}
+
+class MatRemapReq(val lregSz: Int, val pregSz: Int) extends Bundle
+{
+  val ldst = UInt(lregSz.W)
+  val pdst = UInt(pregSz.W)
+  val valid = Bool()
+}
+
+class MatRenameMapTable(
+                      val plWidth: Int,
+                      val numLregs: Int,
+                      val numPregs: Int,
+                      val bypass: Boolean)
+                    (implicit p: Parameters) extends BoomModule
+{
+  val pregSz = log2Ceil(numPregs)
+
+  val io = IO(new BoomBundle()(p) {
+    // Logical sources -> physical sources.
+    val map_reqs    = Input(Vec(plWidth, new MapReq(lregSz)))
+    val map_resps   = Output(Vec(plWidth, new MapResp(pregSz)))
+
+    // Remapping an ldst to a newly allocated pdst?
+    val remap_reqs  = Input(Vec(plWidth, new RemapReq(lregSz, pregSz)))
+
+    // Dispatching branches: need to take snapshots of table state.
+    val ren_br_tags = Input(Vec(plWidth, Valid(UInt(brTagSz.W))))
+
+    // Signals for restoring state following misspeculation.
+    val brupdate    = Input(new BrUpdateInfo)
+    val rollback    = Input(Bool())
+  })
+
+  // The map table register array and its branch snapshots.
+  val map_table = RegInit(VecInit(Seq.fill(numLregs){0.U(pregSz.W)}))
+  val br_snapshots = Reg(Vec(maxBrCount, Vec(numLregs, UInt(pregSz.W))))
+
+  // The intermediate states of the map table following modification by each pipeline slot.
+  val remap_table = Wire(Vec(plWidth+1, Vec(numLregs, UInt(pregSz.W))))
+
+  def lvdBitmap(lvd: UInt, emul: UInt, nf: UInt): UInt = {
+    val ret = UIntToOH(lvd, numLregs)
+    ret
+  }
+
+  // Uops requesting changes to the map table.
+  val remap_pdsts = io.remap_reqs map (_.pdst)
+  val remap_ldsts_oh = io.remap_reqs map (req => lvdBitmap(req.ldst, 0.U, 1.U) & Fill(numLregs, req.valid.asUInt))
+
+  // Figure out the new mappings seen by each pipeline slot.
+  for (i <- 0 until numLregs) {
+    val remapped_row = (remap_ldsts_oh.map(ldst => ldst(i)) zip remap_pdsts)
+      .scanLeft(map_table(i)) {case (pdst, (ldst, new_pdst)) => Mux(ldst, new_pdst.asUInt, pdst)}
+    for (j <- 0 until plWidth+1) {
+      remap_table(j)(i) := remapped_row(j)
+    }
+  }
+
+  // Create snapshots of new mappings.
+  for (i <- 0 until plWidth) {
+    when (io.ren_br_tags(i).valid) {
+      br_snapshots(io.ren_br_tags(i).bits) := remap_table(i+1)
+    }
+  }
+
+  when (io.brupdate.b2.mispredict) {
+    // Restore the map table to a branch snapshot.
+    map_table := br_snapshots(io.brupdate.b2.uop.br_tag)
+  } .otherwise {
+    // Update mappings.
+    map_table := remap_table(plWidth)
+  }
+
+  // Read out mappings.
+  for (i <- 0 until plWidth) {
+    val mreq_lrs_es = Seq(io.map_reqs(i).lrs1,  io.map_reqs(i).lrs2, io.map_reqs(i).lrs3,  io.map_reqs(i).ldst)
+    val mrsp_prs_es = Seq(io.map_resps(i).prs1, io.map_resps(i).prs2,io.map_resps(i).prs3, io.map_resps(i).stale_pdst)
+    (mreq_lrs_es zip mrsp_prs_es).map{case (mreq_lrs, mrsp_prs) => {
+      mrsp_prs := (0 until i).foldLeft(map_table(mreq_lrs)) ((prev,curr) =>
+        Mux(bypass.B && io.remap_reqs(curr).valid && io.remap_reqs(curr).ldst === mreq_lrs, io.remap_reqs(curr).pdst, prev))
+    }}
+  }
+
+  // These cases may occur soon after reset, as all maptable entries are initialized to 'p0'.
+  io.remap_reqs map (req => (req.pdst, req.valid)) foreach {case (pd,r) =>
+    assert(!r || !map_table.contains(pd.asUInt),
+      "[maptable] Trying to write a duplicate mapping.")
+  }
+}

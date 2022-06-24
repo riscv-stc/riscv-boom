@@ -118,3 +118,64 @@ class VecRenameBusyTable(
     //io.vbusy_status := RegNext(Cat((0 until numPregs).map(p => busy_table(p).orR)))
     io.debug.busytable := busy_table
 }
+
+class MatBusyResp(val nBits: Int) extends Bundle
+{
+  val prs1_busy = UInt(nBits.W)
+  val prs2_busy = UInt(nBits.W)
+  val prs3_busy = UInt(nBits.W)
+}
+
+class MatRenameBusyTable(
+                       val plWidth: Int,
+                       val numPregs: Int,
+                       val numWbPorts: Int)
+                     (implicit p: Parameters) extends BoomModule
+{
+  val pregSz = log2Ceil(numPregs)
+
+  val io = IO(new BoomBundle()(p) {
+    val ren_uops = Input(Vec(plWidth, new MicroOp))
+    val rebusy_reqs = Input(Vec(plWidth, Bool()))
+    val busy_resps  = Output(Vec(plWidth, new MatBusyResp(vLenb)))
+
+    val wb_pdsts    = Input(Vec(numWbPorts, UInt(pregSz.W)))
+    val wb_valids   = Input(Vec(numWbPorts, Bool()))
+    val wb_bits     = Input(Vec(numWbPorts, UInt(vLenb.W)))
+
+    val debug = new Bundle {
+      val busytable = Output(Bits(numPregs.W))
+    }
+  })
+
+  val busy_table = RegInit(VecInit(Seq.fill(numPregs){0.U(vLenb.W)}))
+  val busy_table_wb = Wire(Vec(numPregs, UInt(vLenb.W)))
+  val busy_table_next = Wire(Vec(numPregs, UInt(vLenb.W)))
+
+  for(r <- 0 until numPregs) {
+    // Unbusy written back registers.
+    busy_table_wb(r) := busy_table(r) & ~(io.wb_pdsts zip io.wb_valids zip io.wb_bits)
+      .map {case ((pdst, valid), bits) => bits & Fill(vLenb, (r.U === pdst && valid).asUInt())}.reduce(_|_)
+    // Rebusy newly allocated registers.
+    busy_table_next(r) := busy_table_wb(r) | (io.ren_uops zip io.rebusy_reqs)
+      .map {case (uop, req) => Fill(vLenb, ((r.U === uop.pdst) && req).asUInt())}.reduce(_|_)
+
+  // Read the busy table.
+  for (i <- 0 until plWidth) {
+    val prs1_was_bypassed = (0 until i).map(j =>
+      io.ren_uops(i).lrs1 === io.ren_uops(j).ldst && io.rebusy_reqs(j)).foldLeft(false.B)(_||_)
+    val prs2_was_bypassed = (0 until i).map(j =>
+      io.ren_uops(i).lrs2 === io.ren_uops(j).ldst && io.rebusy_reqs(j)).foldLeft(false.B)(_||_)
+    val prs3_was_bypassed = (0 until i).map(j =>
+      io.ren_uops(i).lrs3 === io.ren_uops(j).ldst && io.rebusy_reqs(j)).foldLeft(false.B)(_||_)
+
+    io.busy_resps(i).prs1_busy := busy_table(io.ren_uops(i).prs1)
+    io.busy_resps(i).prs2_busy := busy_table(io.ren_uops(i).prs2)
+    io.busy_resps(i).prs3_busy := busy_table(io.ren_uops(i).prs3)
+  }
+
+  busy_table := busy_table_next
+  io.debug.busytable := busy_table
+}
+
+

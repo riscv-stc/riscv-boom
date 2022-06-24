@@ -728,6 +728,170 @@ extends AbstractRenameStage(
   io.debug.busytable := busytable.io.debug.busytable
 }
 
+/**
+ * Rename stage that connets the map table, free list, and busy table.
+ * Can be used in both the FP pipeline and the normal execute pipeline.
+ *
+ * @param plWidth pipeline width
+ * @param numWbPorts number of Mat writeback ports
+ */
+class MatRenameStage(
+                   plWidth: Int,
+                   numPhysRegs: Int,
+                   numWbPorts: Int)(implicit p: Parameters)
+  extends AbstractRenameStage(
+    plWidth,
+    numPhysRegs,
+    numWbPorts)(p)
+{
+  val pregSz = log2Ceil(numPhysRegs)
+  val rtype: UInt => Bool = isMatrix
+
+  //-------------------------------------------------------------
+  // Rename Structures
+
+  val maptable = Module(new MatRenameMapTable(
+    plWidth,
+    8,
+    numPhysRegs,
+    false))
+  val freelist = Module(new MatRenameFreeList(
+    plWidth,
+    numPhysRegs,
+    8))
+  val busytable = Module(new MatRenameBusyTable(
+    plWidth,
+    numPhysRegs,
+    numWbPorts))
+
+  val ren2_br_tags    = Wire(Vec(plWidth, Valid(UInt(brTagSz.W))))
+
+  // Commit/Rollback
+  val com_valids      = Wire(Vec(plWidth, Bool()))
+  val rbk_valids      = Wire(Vec(plWidth, Bool()))
+
+  for (w <- 0 until plWidth) {
+    ren2_alloc_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && ren2_fire(w)
+    ren2_br_tags(w).valid := ren2_fire(w) && ren2_uops(w).allocate_brtag
+
+    com_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.com_valids(w)
+    rbk_valids(w) := io.com_uops(w).ldst_val && io.com_uops(w).rt(RD, rtype) && io.rbk_valids(w)
+    ren2_br_tags(w).bits  := ren2_uops(w).br_tag
+  }
+
+  //-------------------------------------------------------------
+  // Rename Table
+
+  // Maptable inputs.
+  val map_reqs   = Wire(Vec(plWidth, new MapReq(lregSz)))
+  val remap_reqs = Wire(Vec(plWidth, new RemapReq(lregSz, pregSz)))
+
+  // Generate maptable requests.
+  for ((((ren1,ren2),com),w) <- ren1_uops zip ren2_uops zip io.com_uops.reverse zipWithIndex) {
+    map_reqs(w).lrs1 := ren1.lrs1
+    map_reqs(w).lrs2 := ren1.lrs2
+    map_reqs(w).lrs3 := ren1.lrs3
+    map_reqs(w).ldst := ren1.ldst
+
+    remap_reqs(w).ldst := Mux(io.rollback, com.ldst      , ren2.ldst)
+    remap_reqs(w).pdst := Mux(io.rollback, com.stale_pdst, ren2.pdst)
+  }
+  ren2_alloc_reqs zip rbk_valids.reverse zip remap_reqs map {
+    case ((a,r),rr) => rr.valid := a || r}
+
+  // Hook up inputs.
+  maptable.io.map_reqs    := map_reqs
+  maptable.io.remap_reqs  := remap_reqs
+  maptable.io.ren_br_tags := ren2_br_tags
+  maptable.io.brupdate    := io.brupdate
+  maptable.io.rollback    := io.rollback
+
+  // Maptable outputs.
+  for ((uop, w) <- ren1_uops.zipWithIndex) {
+    val mappings = maptable.io.map_resps(w)
+
+    uop.prs1       := mappings.prs1
+    uop.prs2       := mappings.prs2
+    uop.prs3       := mappings.prs3
+    uop.stale_pdst := mappings.stale_pdst
+  }
+
+  //-------------------------------------------------------------
+  // Free List
+
+  // Freelist inputs.
+  for (w <- 0 until plWidth) {
+    freelist.io.reqs(w).valid := ren2_alloc_reqs(w)
+    freelist.io.reqs(w).bits  := ren2_uops(w)
+  }
+  freelist.io.dealloc_pregs zip com_valids zip rbk_valids map
+    {case ((d,c),r) => d.valid := c || r}
+  freelist.io.dealloc_pregs zip io.com_uops map
+    {case (d,c) => d.bits := Mux(io.rollback, c.pdst, c.stale_pdst)}
+  assert (ren2_alloc_reqs zip freelist.io.alloc_pregs map {case (r,p) => !r || p.bits =/= 0.U} reduce (_&&_),
+    "[rename-stage] A uop is trying to allocate the zero physical register.")
+  freelist.io.ren_br_tags := ren2_br_tags
+  freelist.io.brupdate := io.brupdate
+  freelist.io.debug.pipeline_empty := io.debug_rob_empty
+
+  //val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(plWidth, UInt(maxPregSz.W)))
+  // Freelist outputs.
+  for ((uop, w) <- ren2_uops.zipWithIndex) {
+    val preg = freelist.io.alloc_pregs(w).bits
+    uop.pdst := preg
+  }
+
+  //-------------------------------------------------------------
+  // Busy Table
+
+  busytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
+  busytable.io.rebusy_reqs := ren2_alloc_reqs
+  busytable.io.wb_valids := io.wakeups.map(_.valid)
+  busytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
+
+  assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
+    "[rename] Wakeup has wrong rtype.")
+
+  for ((uop, w) <- ren2_uops.zipWithIndex) {
+    val busy = busytable.io.busy_resps(w)
+    uop.prs1_busy := uop.rt(RS1, rtype) && busy.prs1_busy
+    uop.prs2_busy := uop.rt(RS2, rtype) && busy.prs2_busy
+    uop.prs3_busy := uop.frs3_en && busy.prs3_busy
+
+    val valid = ren2_valids(w)
+  }
+
+  //-------------------------------------------------------------
+  // Outputs
+
+  for (w <- 0 until plWidth) {
+    val can_allocate = freelist.io.alloc_pregs(w).valid
+
+    // Push back against Decode stage if Rename1 can't proceed.
+    io.ren_stalls(w) := (ren2_uops(w).rt(RD, rtype)) && !can_allocate
+
+    val bypassed_uop = Wire(new MicroOp)
+    if (w > 0) bypassed_uop := BypassAllocations(ren2_uops(w), ren2_uops.slice(0,w), ren2_alloc_reqs.slice(0,w))
+    else       bypassed_uop := ren2_uops(w)
+
+    io.ren2_uops(w) := GetNewUopAndBrMask(bypassed_uop, io.brupdate)
+  }
+
+  for (w <- 0 until plWidth) {
+    when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === io.ren2_uops(w).vconfig_tag) {
+      io.ren2_uops(w).vl_ready := true.B
+      io.ren2_uops(w).vconfig.vl := io.vl_wakeup_port.bits.vl
+    }
+  }
+  //-------------------------------------------------------------
+  // Debug signals
+
+  io.debug.freelist  := freelist.io.debug.freelist
+  io.debug.isprlist  := freelist.io.debug.isprlist
+  io.debug.busytable := busytable.io.debug.busytable
+}
+
+
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.config._
 import freechips.rocketchip.unittest._

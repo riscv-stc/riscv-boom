@@ -102,6 +102,11 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     v_pipeline.io.fpupdate := DontCare
   }
 
+  var m_pipeline: MatPipeline = null
+  if(usingMatrix) {
+    m_pipeline = Module(new MatPipeline)
+  }
+
   val numIrfWritePorts        = exe_units.numIrfWritePorts + memWidth
   val numLlIrfWritePorts      = exe_units.numLlIrfWritePorts
   val numIrfReadPorts         = exe_units.numIrfReadPorts
@@ -113,6 +118,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   val numIntRenameWakeupPorts = numIntIssueWakeupPorts
   val numFpWakeupPorts        = if (usingFPU) fp_pipeline.io.wakeups.length else 0
   val numVecWakeupPorts       = if (usingVector) v_pipeline.io.wakeups.length else 0
+  val numMatWakeupPorts       = if (usingMatrix) m_pipeline.io.wakeups.length else 0
 
   val decode_units     = for (w <- 0 until decodeWidth) yield { val d = Module(new DecodeUnit); d }
   val dec_brmask_logic = Module(new BranchMaskGenerationLogic(coreWidth))
@@ -120,11 +126,14 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   val fp_rename_stage  = if (usingFPU) Module(new RenameStage(coreWidth, numFpPhysRegs, numFpWakeupPorts, true)) else null
   val pred_rename_stage= Module(new PredRenameStage(coreWidth, ftqSz, 1))
   val v_rename_stage   = if (usingVector) Module(new VecRenameStage(coreWidth, numVecPhysRegs, numVecWakeupPorts)) else null
+  val m_rename_stage = if (usingMatrix) Module(new MatRenameStage(coreWidth, numMatTrPhysRegs, numMatWakeupPorts)) else null
   //vconfig decode and mask
   val dec_vconfigmask_logic = Module(new VconfigMaskGenerationLogic(coreWidth))
 
   // usingVector implies usingFPU
-  val rename_stages    = if (usingVector)
+  val rename_stages    = if(usingMatrix)
+      Seq(rename_stage, fp_rename_stage, v_rename_stage, m_rename_stage, pred_rename_stage)
+    else if (usingVector)
       Seq(rename_stage, fp_rename_stage, v_rename_stage, pred_rename_stage)
     else if (usingFPU)
       Seq(rename_stage, fp_rename_stage, pred_rename_stage)
@@ -134,6 +143,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   rename_stage.suggestName("i_rename_stage")
   if (usingFPU) fp_rename_stage.suggestName("fp_rename_stage")
   if (usingVector) v_rename_stage.suggestName("v_rename_stage")
+  if (usingMatrix) m_rename_stage.suggestName("m_rename_stage")
 
   val mem_iss_unit     = Module(new IssueUnitCollapsing(memIssueParam, numIntIssueWakeupPorts))
   mem_iss_unit.suggestName("mem_issue_unit")
@@ -1406,7 +1416,9 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     if (issueParams(i).iqType == IQT_VEC.litValue) {
        v_pipeline.io.vec_dis_uops <> dispatcher.io.dis_uops(i)
      } else if (issueParams(i).iqType == IQT_VMX.litValue) {
-       v_pipeline.io.vmx_dis_uops <> dispatcher.io.dis_uops(i)
+      v_pipeline.io.vmx_dis_uops <> dispatcher.io.dis_uops(i)
+    } else if(issueParams(i).iqType == IQT_MAT.litValue) {
+      m_pipeline.io.mat_dis_uops <> dispatcher.io.dis_uops(i)
     } else if (issueParams(i).iqType == IQT_FP.litValue) {
        fp_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
     } else {
