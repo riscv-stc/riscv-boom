@@ -534,6 +534,7 @@ class WithSWBPD extends Config((site, here, up) => {
  * Based on LargeBoomConfig with RVV extension
  */
 class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Config(
+  new freechips.rocketchip.subsystem.WithCacheBlockBytes(128) ++
   new WithTAGELBPD ++ // Default to TAGE-L BPD
   new Config((site, here, up) => {
     case TilesLocated(InSubsystem) => {
@@ -567,10 +568,10 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               numVecPhysRegisters = 65
             ),
             dcache = Some(
-              DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=8, nTLBWays=16)
+              DCacheParams(rowBits = 128, nSets=32, nWays=8, nMSHRs=8, nTLBWays=16, blockBytes=site(CacheBlockBytes))
             ),
             icache = Some(
-              ICacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, fetchBytes=4*4)
+              ICacheParams(rowBits = 128, nSets=32, nWays=8, fetchBytes=4*4, blockBytes=site(CacheBlockBytes))
             ),
             hartId = i + idOffset
           ),
@@ -578,8 +579,8 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
         )
       } ++ prev
     }
-    case SystemBusKey => up(SystemBusKey, site).copy(beatBytes = 16)
-    //case CacheBlockBytes => 128
+    case SystemBusKey => up(SystemBusKey, site).copy(beatBytes = 64)
+    //case MemoryBusKey => up(MemoryBusKey, site).copy(beatBytes = 64)
     case XLen => 64
   })
 )
