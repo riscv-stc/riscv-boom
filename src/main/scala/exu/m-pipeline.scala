@@ -37,7 +37,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 {
   val matIssueParams = issueParams.find(_.iqType == IQT_MAT.litValue).get
   val dispatchWidth  = matIssueParams.dispatchWidth
-  val numWakeupPorts = matWidth
+  val numWakeupPorts = matWidth + 2       // MXU; fromVec; VLSU
 
   val io = IO(new Bundle {
     // pipeline ctrl signals
@@ -45,16 +45,13 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     val flush_pipeline   = Input(Bool())
     // CSR infos
     val fcsr_rm          = Input(UInt(width=FPConstants.RM_SZ.W))
-    val vxrm             = Input(UInt(2.W))
     val status           = Input(new MStatus())
     // dispatched uops
-    val mat_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
+    val dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
     // vlsu related
     /** vld ops may write one vreg multiple times but be freed when all done. */
     val vlsuWritePort    = Flipped(ValidIO(new VLSUWriteBack(vLen)))
     val vlsuLoadWakeUp   = Flipped(ValidIO(UInt(vpregSz.W)))
-    /** Send vrf data to vlsu for indexed or masked load store. */
-    val toVlsuRr: ValidIO[FuncUnitReq] = ValidIO(new FuncUnitReq(vLen))
     val vlsuReadReq: DecoupledIO[UInt] = Flipped(Decoupled(UInt(vpregSz.W)))
     val vlsuReadResp     = ValidIO(UInt(vLen.W))
     // vector pipeline related
@@ -81,11 +78,6 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
                          vLen, float = false, vector = false, matrix = true))
   val exe_units      = new boom.exu.ExecutionUnits(matrix=true)
   mat_issue_unit.suggestName("mat_issue_unit")
-
-  require (exe_units.count(_.readsVrf) == matWidth + 1)
-  require (exe_units.numVrfWritePorts + vecMemWidth == numWakeupPorts,
-    s"${exe_units.numVrfWritePorts} + ${memWidth} + ${vecMemWidth} + ${numWakeupPorts}")
-  require (vecWidth >= memWidth)
 
   //*************************************************************
   // Issue window logic
@@ -114,7 +106,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 
   // Input (Dispatch)
   for (w <- 0 until dispatchWidth) {
-    mat_issue_unit.io.dis_uops(w) <> io.mat_dis_uops(w)
+    mat_issue_unit.io.dis_uops(w) <> io.dis_uops(w)
   }
 
   //-------------------------------------------------------------

@@ -1440,7 +1440,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     } else if (issueParams(i).iqType == IQT_FP.litValue) {
       fp_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
     } else if(issueParams(i).iqType == IQT_MAT.litValue) {
-      m_pipeline.io.mat_dis_uops <> dispatcher.io.dis_uops(i)
+      m_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
     } else {
        issue_units(iu_idx).io.dis_uops <> dispatcher.io.dis_uops(i)
        iu_idx += 1

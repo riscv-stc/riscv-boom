@@ -53,7 +53,7 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false, val matr
   val uop           = Output(new MicroOp()) // the current Slot's uop. Sent down the pipeline when issued.
   //val vmupdate      = if (usingVector && !vector) Input(Vec(1, Valid(new MicroOp))) else null
   val intupdate     = if (vector || matrix) Input(Vec(intWidth + memWidth, Valid(new ExeUnitResp(eLen)))) else null
-  val fpupdate      = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val fpupdate      = if (vector || matrix) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   //val vecUpdate     = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
   val vbusy_status  = if (vector) Input(UInt(numVecPhysRegs.W)) else null
 
@@ -83,7 +83,7 @@ class IssueSlot(
   extends BoomModule
   with IssueUnitConstants
 {
-  val io = IO(new IssueSlotIO(numWakeupPorts, vector))
+  val io = IO(new IssueSlotIO(numWakeupPorts, vector, matrix))
 
   // slot invalid?
   // slot is valid, holding 1 uop
@@ -104,6 +104,8 @@ class IssueSlot(
   //val pm    = if(vector) RegInit(0.U(vLenb.W)) else if (usingVector && iqType == IQT_MEM.litValue) RegInit(false.B) else null
   val ps    = if(vector || matrix) RegInit(false.B) else null
   val sdata = if(vector || matrix) RegInit(0.U(eLen.W)) else null
+  val psidx = if(matrix) RegInit(false.B) else null
+  val sidx  = if(matrix) RegInit(0.U(vLenb.W)) else null
   val strideLength = if(iqType == IQT_VMX.litValue) RegInit(0.U(eLen.W)) else null
   val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
@@ -148,8 +150,9 @@ class IssueSlot(
       ret       := Mux(uop.rt(RS1, isVector), !io.vbusy_status(pvs1),
                    Mux(uop.uses_scalar, ps, true.B))
     } else if(matrix) {
-      ret := Mux(uop.rt(RS1, isAccTile), p1.andR(),
-             Mux(uop.rt(RS1, isTrTile),  p1(uop.m_sidx), true.B))
+      ret := Mux(uop.rt(RS1, isAccTile), p1(uop.m_sidx),
+             Mux(uop.rt(RS1, isTrTile),  p1(uop.m_sidx), 
+             Mux(uop.rt(RS1, isFloat),   ps, true.B)))
     } else {
       ret := p1(0)
     }
@@ -171,9 +174,10 @@ class IssueSlot(
       val reduce_busy = uop.pvs2.map(pvs2 => pvs2.valid && io.vbusy_status(pvs2.bits)).reduce(_ || _)
       ret := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))
     } else if(matrix) {
-      ret := Mux(uop.rt(RS2, isAccTile), p2.andR(),
+      // mltr and mrtr should be considered
+      ret := Mux(uop.rt(RS2, isAccTile), p2(uop.m_sidx),
              Mux(uop.rt(RS2, isTrTile),  p2(uop.m_sidx), 
-             Mux(uop.uses_scalar, ps, true.B)))
+             Mux(uop.rt(RS2, isInt),     psidx, true.B)))
     } else {
       ret := p2(0)
     }
