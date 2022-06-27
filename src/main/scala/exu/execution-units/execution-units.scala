@@ -152,7 +152,8 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val 
       val vec_exe_unit = Module(new VecExeUnit(hasVMX = false,
                                                hasIfpu = true,
                                                hasFpu = true,
-                                               hasFdiv = usingFDivSqrt))
+                                               hasFdiv = usingFDivSqrt,
+                                               writesLlTile = usingMatrix))
       vec_exe_unit.suggestName("vec_exe_unit")
       exe_units += vec_exe_unit
     }

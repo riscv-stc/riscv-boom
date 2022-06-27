@@ -47,7 +47,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     val fcsr_rm          = Input(UInt(width=FPConstants.RM_SZ.W))
     val status           = Input(new MStatus())
     // dispatched uops
-    val dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
+    val dis_uops         = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
     // vlsu related
     /** vld ops may write one vreg multiple times but be freed when all done. */
     val vlsuWritePort    = Flipped(ValidIO(new VLSUWriteBack(vLen)))
@@ -57,6 +57,9 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     // vector pipeline related
     val fromVec          = Vec(matWidth, Flipped(Decoupled(new ExeUnitResp(vLen))))
     val toVec            = Vec(matWidth, Decoupled(new ExeUnitResp(vLen)))
+    // scalar pipeline related
+    val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
+    val fpupdate         = Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen))))
     // mset_wakeup, vsetvl related wakeup
     // val mset_wakeup        = Input(Valid(new MlWakeupResp()))  // TODO: msettype/msettile speculation optimization
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units for mem, int and fp
@@ -67,17 +70,14 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 
   //**********************************
   // construct all of the modules
-  val mat_issue_unit = Module(new IssueUnitCollapsing(matIssueParams, numWakeupPorts, vector = false, matrix = true))
-  val trtileReg      = Module(new TrTileReg(vLen, numMatTrPhysRegs, mLen, vLen, exe_units.numTrTileReadPorts+1, 2))
-  val trtileReader   = Module(new TileRegisterRead(
-                         matWidth, 
-                         exe_units.withFilter(_.readsTrTile).map(_.supportedFuncUnits),
-                         exe_units.numTrTileReadPorts,
-                         0,
-                         0,
-                         vLen, float = false, vector = false, matrix = true))
-  val exe_units      = new boom.exu.ExecutionUnits(matrix=true)
-  mat_issue_unit.suggestName("mat_issue_unit")
+  val issue_unit   = Module(new IssueUnitCollapsing(matIssueParams, numWakeupPorts, vector = false, matrix = true))
+  val exe_units    = new boom.exu.ExecutionUnits(matrix=true)
+  val trtileReg    = Module(new TrTileReg(exe_units.numTrTileReadPorts+1, 2))
+  val trtileReader = Module(new TileRegisterRead(
+                       matWidth, 
+                       exe_units.withFilter(_.readsTrTile).map(_.supportedFuncUnits),
+                       exe_units.numTrTileReadPorts, vLen))
+  issue_unit.suggestName("mat_issue_unit")
 
   //*************************************************************
   // Issue window logic
@@ -85,18 +85,19 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   val iss_valids = Wire(Vec(exe_units.numTrTileReaders, Bool()))
   val iss_uops   = Wire(Vec(exe_units.numTrTileReaders, new MicroOp()))
 
-  mat_issue_unit.map(_.io.vbusy_status := io.vbusy_status)
-  viu.map(_.io.tsc_reg := io.debug_tsc_reg)
-  viu.map(_.io.brupdate := io.brupdate)
-  viu.map(_.io.flush_pipeline := io.flush_pipeline)
-  viu.map(_.io.vl_wakeup_port := io.vl_wakeup)
+  issue_unit.io.tsc_reg := io.debug_tsc_reg
+  issue_unit.io.brupdate := io.brupdate
+  issue_unit.io.flush_pipeline := io.flush_pipeline
+  issue_unit.io.intupdate := io.intupdate
+  issue_unit.io.fpupdate  := io.fpupdate
+
   //viu.map(_.io.vecUpdate := vregister_read.io.vecUpdate)
   // Don't support ld-hit speculation to VEC window.
   for (w <- 0 until memWidth) {
-    viu.map(_.io.spec_ld_wakeup(w).valid := false.B)
-    viu.map(_.io.spec_ld_wakeup(w).bits := 0.U)
+    issue_unit.io.spec_ld_wakeup(w).valid := false.B
+    issue_unit.io.spec_ld_wakeup(w).bits := 0.U
   }
-  viu.map(_.io.ld_miss := false.B)
+  issue_unit.io.ld_miss := false.B
 
   require (exe_units.numTotalBypassPorts == 0)
 
@@ -106,7 +107,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 
   // Input (Dispatch)
   for (w <- 0 until dispatchWidth) {
-    mat_issue_unit.io.dis_uops(w) <> io.dis_uops(w)
+    issue_unit.io.dis_uops(w) <> io.dis_uops(w)
   }
 
   //-------------------------------------------------------------
@@ -114,68 +115,56 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
   // Output (Issue)
   for (i <- 0 until matWidth) {
-    iss_valids(i) := mat_issue_unit.io.iss_valids(i)
-    iss_uops(i) := mat_issue_unit.io.iss_uops(i)
-    mat_issue_unit.io.fu_types(i) := exe_units(i).io.fu_types
+    iss_valids(i) := issue_unit.io.iss_valids(i)
+    iss_uops(i)   := issue_unit.io.iss_uops(i)
+    issue_unit.io.fu_types(i) := exe_units(i).io.fu_types
     require (exe_units(i).readsTrTile)
   }
 
   // Wakeup
-  mat_issue_unit.map(iu => {
-    // matrix issue units are not using these wake up directly, so tie them up.
-    iu.io.wakeup_ports.foreach{ wake =>
-      wake.valid := false.B
-      wake.bits := DontCare
-    }
-    iu.io.pred_wakeup_port.valid  := false.B
-    iu.io.pred_wakeup_port.bits   := DontCare
-  })
+  for ((writeback, issue_wakeup) <- io.wakeups zip issue_unit.io.wakeup_ports) {
+    issue_wakeup.valid         := writeback.valid
+    issue_wakeup.bits.pdst     := writeback.bits.uop.pdst
+    issue_wakeup.bits.poisoned := false.B
+    issue_wakeup.bits.uop      := writeback.bits.uop
+  }
+  issue_unit.io.pred_wakeup_port.valid := false.B
+  issue_unit.io.pred_wakeup_port.bits  := DontCare
 
   //-------------------------------------------------------------
   // **** Register Read Stage ****
   //-------------------------------------------------------------
 
   // Register Read <- Issue (rrd <- iss)
-  vregister_read.io.rf_read_ports <> VecInit(vregfile.io.read_ports.init)
-  vregister_read.io.prf_read_ports map { port => port.data := false.B }
+  trtileReader.io.iss_valids <> iss_valids
+  trtileReader.io.iss_uops := iss_uops
 
-  vregister_read.io.iss_valids <> iss_valids
-  vregister_read.io.iss_uops := iss_uops
-
-  vregister_read.io.brupdate := io.brupdate
-  vregister_read.io.kill := io.flush_pipeline
-  //io.vmupdate := vregister_read.io.vmupdate
+  trtileReader.io.brupdate := io.brupdate
+  trtileReader.io.kill     := io.flush_pipeline
 
   // Only one port for vector load write back.
-  // ts1
-  trtileReg.io.readPorts(0).msew      := 
-  trtileReg.io.readPorts(0).tilewidth := 
-  trtileReg.io.readPorts(0).tt        := 
-  trtileReg.io.readPorts(0).addr      := io.mseReadReq.bits.reqaddr.addr
-  trtileReg.io.readPorts(0).index     := io.mseReadReq.bits.reqaddr.index
-  // ts2
-  trtileReg.io.readPorts(1).msew      := 
-  trtileReg.io.readPorts(1).tilewidth := 
-  trtileReg.io.readPorts(1).tt        := 
-  trtileReg.io.readPorts(1).addr      := io.mseReadReq.bits.reqaddr.addr
-  trtileReg.io.readPorts(1).index     := io.mseReadReq.bits.reqaddr.index
-  // vlsu read store data
-  trtileReg.io.readPorts(2).msew      := 
-  trtileReg.io.readPorts(2).tilewidth := 
-  trtileReg.io.readPorts(2).tt        := 
-  trtileReg.io.readPorts(2).addr      := io.mseReadReq.bits.reqaddr.addr
-  trtileReg.io.readPorts(2).index     := io.mseReadReq.bits.reqaddr.index
-  vregfile.io.read_ports.last.addr := Mux(io.vlsuReadReq.valid, io.vlsuReadReq.bits, 0.U)
+  for(i <- 0 until numTrTileReadPorts) {
+    trtileReg.io.readPorts(i) := trtileReader.io.tileReadPorts(i)
+  }
+  // TODO: wrap vlsuReadReq with uops
+  val vlsuReadPort = WireInit(new TrTileRegReadPortIO())
+  vlsuReadPort.msew      := 
+  vlsuReadPort.tilewidth := 
+  vlsuReadPort.tt        := 
+  vlsuReadPort.addr      := 
+  vlsuReadPort.index     := 
+  trtileReg.io.readPorts.last := vlsuReadPort
+
   io.vlsuReadResp.valid := RegNext(io.vlsuReadReq.valid)
-  io.vlsuReadResp.bits := vregfile.io.read_ports.last.data
+  io.vlsuReadResp.bits  := trtileReg.io.readPorts.last.data
   //-------------------------------------------------------------
   // **** Execute Stage ****
   //-------------------------------------------------------------
 
   exe_units.map(_.io.brupdate := io.brupdate)
 
-  for ((ex,w) <- exe_units.withFilter(_.readsVrf).map(x=>x).zipWithIndex) {
-    ex.io.req <> vregister_read.io.exe_reqs(w)
+  for ((ex,w) <- exe_units.withFilter(_.readsTrTile).map(x=>x).zipWithIndex) {
+    ex.io.req <> trtileReader.io.exe_reqs(w)
     require (!ex.bypassable)
   }
   require (exe_units.numTotalBypassPorts == 0)
@@ -183,14 +172,15 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
   // **** Writeback Stage ****
   //-------------------------------------------------------------
-  (io.toVec zip exe_units.withFilter(_.hasAlu).map(_.io.iresp)).foreach {
-    case (to_int, vec) => to_int <> vec
+  (io.toVec zip exe_units.withFilter(_.writesLlVrf).map(_.io.ll_vresp)).foreach {
+    case (toVec, vec) => toVec <> vec
   }
 
   // assign a write port for vlsu and vector pipeline each, no arbitration needed
   // Cut up critical path by delaying the write by a cycle.
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
+  // TODO: wrap vlsu write with uops for tr_tile write control
   trtileReg.io.writePorts(0).valid          := io.vlsuWritePort.valid
   trtileReg.io.writePorts(0).bits.msew      := io.vlsuWritePort.bits.addr
   trtileReg.io.writePorts(0).bits.tilewidth := io.vlsuWritePort.bits.data
@@ -199,13 +189,14 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   trtileReg.io.writePorts(0).bits.index     := 
   trtileReg.io.writePorts(0).bits.data      := 
   // from vector pipeline
-  trtileReg.io.writePorts(1).valid          := io.vlsuWritePort.valid
-  trtileReg.io.writePorts(1).bits.msew      := io.vlsuWritePort.bits.addr
-  trtileReg.io.writePorts(1).bits.tilewidth := io.vlsuWritePort.bits.data
-  trtileReg.io.writePorts(1).bits.tt        := MaskExploder(io.vlsuWritePort.bits.byteMask, vLen)
-  trtileReg.io.writePorts(1).bits.addr      := 
-  trtileReg.io.writePorts(1).bits.index     := 
-  trtileReg.io.writePorts(1).bits.data      := 
+  io.fromVec.ready := true.B
+  trtileReg.io.writePorts(1).valid          := io.fromVec.valid
+  trtileReg.io.writePorts(1).bits.msew      := io.fromVec.bits.uop.td_eew
+  trtileReg.io.writePorts(1).bits.tilewidth := io.fromVec.bits.uop.mconfig.
+  trtileReg.io.writePorts(1).bits.tt        := io.fromVec.bits.uop.
+  trtileReg.io.writePorts(1).bits.addr      := io.fromVec.bits.uop.ptd
+  trtileReg.io.writePorts(1).bits.index     := io.fromVec.bits.uop.m_sidx
+  trtileReg.io.writePorts(1).bits.data      := io.fromVec.bits.data
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Commit Stage ****
@@ -223,7 +214,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   io.wakeups(w_cnt).bits.data := 0.U
   io.wakeups(w_cnt).bits.uop.is_rvm    := true.B
   io.wakeups(w_cnt).bits.uop.uses_ldq  := true.B
-  io.wakeups(w_cnt).bits.uop.dst_rtype := RT_MAT
+  io.wakeups(w_cnt).bits.uop.dst_rtype := RT_TR
   io.wakeups(w_cnt).bits.uop.pdst      := io.vlsuLoadWakeUp.bits
   // from vector pipeline
   w_cnt = 1
@@ -231,8 +222,8 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   io.wakeups(w_cnt).bits.data := 0.U
   io.wakeups(w_cnt).bits.uop.is_rvm    := true.B
   io.wakeups(w_cnt).bits.uop.uses_ldq  := true.B
-  io.wakeups(w_cnt).bits.uop.dst_rtype := RT_MAT
-  io.wakeups(w_cnt).bits.uop.pdst      := io.vlsuLoadWakeUp.bits
+  io.wakeups(w_cnt).bits.uop.dst_rtype := io.fromVec.bits.uop.dst_rtype
+  io.wakeups(w_cnt).bits.uop.pdst      := io.fromVec.bits.uop.ptd
   // from mxu unit
   w_cnt = 2
   io.wakeups(w_cnt).valid := io.vlsuLoadWakeUp.valid
@@ -247,7 +238,6 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   }
 
   exe_units.withFilter(_.hasFcsr).map(_.io.fcsr_rm := io.fcsr_rm)
-  exe_units.withFilter(_.hasVxrm).map(_.io.vxrm := io.vxrm)
   exe_units.map(_.io.status := io.status)
 
   //-------------------------------------------------------------

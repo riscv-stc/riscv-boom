@@ -204,6 +204,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val ts2_eew          = if (usingMatrix) UInt(2.W)       else null
   val td_eew           = if (usingMatrix) UInt(2.W)       else null
   val mconfig          = if (usingMatrix) new MConfig     else null
+  val isHSlice         = if (usingMatrix) Bool()          else null
   // purely debug information
   val debug_wdata      = UInt(xLen.W)
   val debug_events     = new DebugStageEvents
@@ -1131,6 +1132,8 @@ object MicroOpcodes extends Enumeration {
   val uopMSE_enum         = Value
   val uopMSE              = uopMSE_enum.id.U(UOPC_SZ.W)
   //marith
+  val uopMCLRACC_enum     = Value
+  val uopMCLRACC          = uopMCLRACC_enum.id.U(UOPC_SZ.W)
   val uopMOPA_enum        = Value
   val uopMOPA             = uopMOPA_enum.id.U(UOPC_SZ.W)
   val uopMWOPA_enum       = Value
