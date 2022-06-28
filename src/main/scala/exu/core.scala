@@ -976,32 +976,33 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   for (w <- 0 until coreWidth) {
     dec_vconfigmask_logic.io.is_vconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_vsetvli && !(dec_uops(w).ldst === 0.U && dec_uops(w).lrs1 === 0.U) || dec_uops(w).is_vsetivli)
     dec_vconfigmask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_vsetvli && !(dec_uops(w).ldst === 0.U && dec_uops(w).lrs1 === 0.U) || dec_uops(w).is_vsetivli)
+    //dec_uops(w).vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag(w)
     dec_uops(w).vconfig_mask := dec_vconfigmask_logic.io.vconfig_mask(w)
-    dec_uops(w).vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag(w) + (dec_vconfigmask_logic.io.is_vconfig(w - 1) && dec_vconfigmask_logic.io.will_fire(w - 1)).asUInt()
   }
 
-  //dec_uops.head.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head
-  //dec_uops.last.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head + (dec_vconfigmask_logic.io.is_vconfig.head && dec_vconfigmask_logic.io.will_fire.head).asUInt()
+  dec_uops.head.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head
+  dec_uops.last.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head + (dec_vconfigmask_logic.io.is_vconfig.head && dec_vconfigmask_logic.io.will_fire.head).asUInt()
 
   //vconfig instruction decode info enq to VCQ
   val vcq = Module(new VconfigQueue())
-    vcq.io.enq.bits  := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
-    vcq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_vsetivli||u.is_vsetvli)}.reduce(_ | _)
-    vcq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_vsetivli||u.is_vsetvli, false.B)}.reduce(_ | _)
-    vcq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
-    vcq_data         := Mux(vcq.io.enq.valid, vcq.io.enq.bits, vcq.io.get_vconfig)
-    vcq_empty        := vcq.io.empty
+  vcq.io.enq.bits  := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
+  vcq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_vsetivli||u.is_vsetvli)}.reduce(_ | _)
+  vcq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_vsetivli||u.is_vsetvli, false.B)}.reduce(_ | _)
+  vcq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  vcq_empty        := vcq.io.empty
 
-    //vcq_data.vconfig := Mux(dec_vconfig_valid.head, dec_vconfig.head.vconfig, Mux(vcq_empty, csr.io.vector.get.vconfig, vcq.io.get_vconfig.vconfig))
-    //vcq_data.vl_ready := Mux(dec_vconfig_valid.head, dec_vconfig.head.vl_ready, Mux(vcq_empty, true.B, vcq.io.get_vconfig.vl_ready))
+  vcq_data.vconfig := Mux(dec_vconfig_valid.head, dec_vconfig.head.vconfig, Mux(vcq_empty, csr.io.vector.get.vconfig, vcq.io.get_vconfig.vconfig))
 
-    vcq.io.update_vl.valid := vl_wakeup.valid
-    vcq.io.update_vl.bits.vl_ready := vl_wakeup.valid
-    vcq.io.update_vl.bits.vconfig.vl := vl_wakeup.bits.vl
-    vcq.io.update_vl.bits.vconfig.vtype := update_vtype
-    vcq.io.update_vl_idx := vl_wakeup.bits.vcq_idx
+  //vcq_data.vl_ready := Mux(vcq_empty, true.B, vcq.io.get_vconfig.vl_ready)
+  vcq_data.vl_ready := Mux(dec_vconfig_valid.head, dec_vconfig.head.vl_ready, Mux(vcq_empty, true.B, vcq.io.get_vconfig.vl_ready))
 
-    dec_uops.map(d => d.vcq_idx := vcq.io.enq_idx)
+  vcq.io.update_vl.valid := vl_wakeup.valid
+  vcq.io.update_vl.bits.vl_ready := vl_wakeup.valid
+  vcq.io.update_vl.bits.vconfig.vl := vl_wakeup.bits.vl
+  vcq.io.update_vl.bits.vconfig.vtype := update_vtype
+  vcq.io.update_vl_idx := vl_wakeup.bits.vcq_idx
+
+  dec_uops.map(d => d.vcq_idx := vcq.io.enq_idx)
   //-------------------------------------------------------------
   // FTQ GetPC Port Arbitration
 
