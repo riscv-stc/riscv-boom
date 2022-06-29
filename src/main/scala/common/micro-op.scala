@@ -185,21 +185,16 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val vstart           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // VSTART CSR
   val vstartSrc        = if (usingVector) UInt(1.W) else false.B      // vstart source: CSR or speculative zero
   // matrix extension
-  val is_rvm           = if (usingMatrix) Bool()          else false.B
-  val ptd              = if (usingMatrix) UInt(tpregSz.W) else null
-  val stale_ptd        = if (usingMatrix) UInt(tpregSz.W) else null
-  val pts1             = if (usingMatrix) UInt(tpregSz.W) else null
-  val pts2             = if (usingMatrix) UInt(tpregSz.W) else null
+  val is_rvm           = if (usingMatrix) Bool()          else null
   val pts1_busy        = if (usingMatrix) UInt(vLenb.W)   else null
   val pts2_busy        = if (usingMatrix) UInt(vLenb.W)   else null
+  val pts3_busy        = if (usingMatrix) UInt(vLenb.W)   else null
   val m_scalar_busy    = if (usingMatrix) Bool()          else null
-  val m_scalar_data    = if (usingMatrix) UInt(eLen.W)    else null
+  val m_sidx           = if (usingMatrix) UInt(vLenSz.W)  else null   // slice index
   val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null   // eew encoded in load/store instructions
-  val m_sidx           = if (usingMatrix) UInt(vLenSz.w)  else null   // slice index
-  val m_is_split       = if (usingMatrix) Bool()          else false.B
-  val m_split_ecnt     = if (usingMatrix) UInt((vLenSz+1).W) else null
-  val m_split_first    = if (usingMatrix) Bool()          else false.B
-  val m_split_last     = if (usingMatrix) Bool()          else false.B
+  val m_is_split       = if (usingMatrix) Bool()          else null
+  val m_split_first    = if (usingMatrix) Bool()          else null
+  val m_split_last     = if (usingMatrix) Bool()          else null
   val ts1_eew          = if (usingMatrix) UInt(2.W)       else null
   val ts2_eew          = if (usingMatrix) UInt(2.W)       else null
   val td_eew           = if (usingMatrix) UInt(2.W)       else null
