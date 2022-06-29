@@ -2292,6 +2292,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
     val vrf_raddr = new DecoupledIO(UInt(vpregSz.W))
     val vrf_rdata = Input(UInt(vLen.W))
     val vrf_emul  = Output(UInt(3.W))
+    //val vrf_mask  = Output(UInt(log2Ceil(vLenb).W)) // FIXME: sends vm for masked ud-copy
   })
 
   val clSize = p(freechips.rocketchip.subsystem.CacheBlockBytes)
@@ -2420,8 +2421,11 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   io.resp.bits.uop              := UpdateBrMask(io.brupdate, uop)
   io.resp.bits.uop.pdst         := uop.pvd(emulCtr).bits
   io.resp.bits.uop.stale_pdst   := uop.stale_pvd(emulCtr).bits
-  io.resp.bits.uop.v_eidx       := uop.v_eidx
   io.resp.bits.uop.v_split_ecnt := eidxInc
+  when (state === s_udcpy) {
+    io.resp.bits.uop.v_eidx       := vLenECnt * emulCtr(2,0)
+    io.resp.bits.uop.v_split_ecnt := vLenECnt
+  }
   io.resp.bits.uop.v_split_first:= uop.v_eidx === 0.U
   io.resp.bits.uop.v_split_last := uop.v_eidx + eidxInc === uop.vconfig.vl
   io.resp_vm                    := VRegMask(uop.v_eidx, eew, eidxInc, vLenb)
