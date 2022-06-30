@@ -531,6 +531,7 @@ class IssueSlot(
       io.uop.m_split_first := sidx === 0.U
       io.uop.m_split_last  := sidx === next_uop.m_split_ecnt - 1.U
       io.out_uop.m_sidx    := sidx + 1.U
+      io.out_uop.prs3      := next_uop.pdst
     }
     next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.orR
     next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.orR

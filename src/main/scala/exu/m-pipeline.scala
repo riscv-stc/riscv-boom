@@ -37,7 +37,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 {
   val matIssueParams = issueParams.find(_.iqType == IQT_MAT.litValue).get
   val dispatchWidth  = matIssueParams.dispatchWidth
-  val numWakeupPorts = matWidth + 2       // MXU; fromVec; VLSU
+  val numWakeupPorts = matWidth*2 + 1     // (MCLRACC; MOPA) + VLSU
 
   val io = IO(new Bundle {
     // pipeline ctrl signals
@@ -55,14 +55,12 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     val vlsuReadReq: DecoupledIO[UInt] = Flipped(Decoupled(UInt(vpregSz.W)))
     val vlsuReadResp     = ValidIO(UInt(vLen.W))
     // vector pipeline related
-    val fromVec          = Vec(matWidth, Flipped(Decoupled(new ExeUnitResp(vLen))))
     val toVec            = Vec(matWidth, Decoupled(new ExeUnitResp(vLen)))
     // scalar pipeline related
     val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
-    val fpupdate         = Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen))))
     // mset_wakeup, vsetvl related wakeup
     // val mset_wakeup        = Input(Valid(new MlWakeupResp()))  // TODO: msettype/msettile speculation optimization
-    val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units for mem, int and fp
+    val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
     val debug_wb_wdata   = Output(Vec(numWakeupPorts, UInt((vLen).W)))
@@ -72,7 +70,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   // construct all of the modules
   val issue_unit   = Module(new IssueUnitCollapsing(matIssueParams, numWakeupPorts, vector = false, matrix = true))
   val exe_units    = new boom.exu.ExecutionUnits(matrix=true)
-  val trtileReg    = Module(new TrTileReg(exe_units.numTrTileReadPorts+1, 2))
+  val trtileReg    = Module(new TrTileReg(exe_units.numTrTileReadPorts+1, 1))
   val trtileReader = Module(new TileRegisterRead(
                        matWidth, 
                        exe_units.withFilter(_.readsTrTile).map(_.supportedFuncUnits),
@@ -89,13 +87,10 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   issue_unit.io.brupdate := io.brupdate
   issue_unit.io.flush_pipeline := io.flush_pipeline
   issue_unit.io.intupdate := io.intupdate
-  issue_unit.io.fpupdate  := io.fpupdate
 
-  //viu.map(_.io.vecUpdate := vregister_read.io.vecUpdate)
-  // Don't support ld-hit speculation to VEC window.
   for (w <- 0 until memWidth) {
     issue_unit.io.spec_ld_wakeup(w).valid := false.B
-    issue_unit.io.spec_ld_wakeup(w).bits := 0.U
+    issue_unit.io.spec_ld_wakeup(w).bits  := 0.U
   }
   issue_unit.io.ld_miss := false.B
 
@@ -188,15 +183,6 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   trtileReg.io.writePorts(0).bits.addr      := 
   trtileReg.io.writePorts(0).bits.index     := 
   trtileReg.io.writePorts(0).bits.data      := 
-  // from vector pipeline
-  io.fromVec.ready := true.B
-  trtileReg.io.writePorts(1).valid          := io.fromVec.valid
-  trtileReg.io.writePorts(1).bits.msew      := io.fromVec.bits.uop.td_eew
-  trtileReg.io.writePorts(1).bits.tilewidth := io.fromVec.bits.uop.mconfig.
-  trtileReg.io.writePorts(1).bits.tt        := io.fromVec.bits.uop.
-  trtileReg.io.writePorts(1).bits.addr      := io.fromVec.bits.uop.ptd
-  trtileReg.io.writePorts(1).bits.index     := io.fromVec.bits.uop.m_sidx
-  trtileReg.io.writePorts(1).bits.data      := io.fromVec.bits.data
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Commit Stage ****
@@ -216,22 +202,13 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   io.wakeups(w_cnt).bits.uop.uses_ldq  := true.B
   io.wakeups(w_cnt).bits.uop.dst_rtype := RT_TR
   io.wakeups(w_cnt).bits.uop.pdst      := io.vlsuLoadWakeUp.bits
-  // from vector pipeline
+  // from MatExeUnit
   w_cnt = 1
-  io.wakeups(w_cnt).valid := io.vlsuLoadWakeUp.valid
-  io.wakeups(w_cnt).bits.data := 0.U
-  io.wakeups(w_cnt).bits.uop.is_rvm    := true.B
-  io.wakeups(w_cnt).bits.uop.uses_ldq  := true.B
-  io.wakeups(w_cnt).bits.uop.dst_rtype := io.fromVec.bits.uop.dst_rtype
-  io.wakeups(w_cnt).bits.uop.pdst      := io.fromVec.bits.uop.ptd
-  // from mxu unit
-  w_cnt = 2
-  io.wakeups(w_cnt).valid := io.vlsuLoadWakeUp.valid
-  io.wakeups(w_cnt).bits.data := 0.U
-  io.wakeups(w_cnt).bits.uop.is_rvm    := true.B
-  io.wakeups(w_cnt).bits.uop.uses_ldq  := true.B
-  io.wakeups(w_cnt).bits.uop.dst_rtype := RT_MAT
-  io.wakeups(w_cnt).bits.uop.pdst      := io.vlsuLoadWakeUp.bits
+  for(eu <- exe_units) {
+    io.wakeups(wk_cnt)   := eu.io.mclrResp
+    io.wakeuop(wk_cnt+1) := eu.io.mopaResp
+    wk_cnt += 2
+  }
 
   for ((wdata, wakeup) <- io.debug_wb_wdata zip io.wakeups) {
     wdata := wakeup.bits.data
