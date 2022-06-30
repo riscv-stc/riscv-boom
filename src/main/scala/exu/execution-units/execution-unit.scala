@@ -90,7 +90,6 @@ abstract class ExecutionUnit(
   val writesLlVrf      : Boolean       = false,
   val readsTrTile      : Boolean       = false,
   val writesAccTile    : Boolean       = false,
-  val writesLlTile     : Boolean       = false, // may write trTile or accTile
   val numBypassStages  : Int,
   val dataWidth        : Int,
   val bypassable       : Boolean       = false, // TODO make override def for code clarity
@@ -126,7 +125,6 @@ abstract class ExecutionUnit(
     val ll_iresp = if (writesLlIrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_fresp = if (writesLlFrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_vresp = if (writesLlVrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
-    val ll_tresp = if (writesLlTile)  new DecoupledIO(new ExeUnitResp(dataWidth)) else null
 
     val bypass   = Output(Vec(numBypassStages, Valid(new ExeUnitResp(dataWidth))))
     val brupdate = Input(new BrUpdateInfo())
@@ -636,8 +634,7 @@ class VecExeUnit(
   hasDiv         : Boolean = true,
   hasIfpu        : Boolean = false,
   hasFpu         : Boolean = false,
-  hasFdiv        : Boolean = false,
-  writesLlTile   : Boolean = false
+  hasFdiv        : Boolean = false
 ) (implicit p: Parameters)
   extends ExecutionUnit(
     readsVrf         = true,
@@ -645,7 +642,6 @@ class VecExeUnit(
     writesIrf        = hasAlu,
     writesFrf        = hasAlu,
     writesLlVrf      = false,
-    writesLlTile     = writesLlTile,
     numBypassStages  = if (hasMacc) 3 else 1,
     dataWidth        = p(tile.TileKey).core.vLen,
     bypassable       = false,
@@ -998,13 +994,6 @@ class VecExeUnit(
     vecToIntQueue.io.flush := io.req.bits.kill
     io.iresp <> vecToIntQueue.io.deq
     assert(!(vecToIntQueue.io.enq.valid && !vecToIntQueue.io.enq.ready))
-  }
-
-  if (writesLlTile && hasALU) {
-    io.ll_tresp.valid     := valu.io.resp.valid && valu.io.resp.bits.uop.uopc.isOneOf(uopMMV_T, uopMWMV_T, uopMQMV_T)
-    io.ll_tresp.bits.uop  := valu.io.resp.bits.uop
-    io.ll_tresp.bits.data := valu.io.resp.bits.data
-    io.ll_tresp.bits.predicated := valu.io.resp.bits.predicated
   }
 
   /*
@@ -1389,7 +1378,7 @@ class MatExeUnit() (implicit p: Parameters)
   io.fu_types := FU_GEMM | Mux(!hSliceBusy, FU_HSLICE, 0.U) | Mux(!vSliceBusy, FU_VSLICE, 0.U)
 
   // -------------------------------MXU Unit -------------------------------
-  val mxu = Module(new MXU(meshRows, meshCols, tileRows, tileCols, dataWidth=vLen))
+  val mxu = Module(new MXU(mxuMeshRows, mxuMeshCols, mxuTileRows, mxuTileCols, dataWidth=vLen))
 
   hSliceBusy := !mxu.io.rowSliceReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE) && io.req.bits.uop.vd_emul > 0)
   vSliceBusy := !mxu.io.colSliceReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE) && io.req.bits.uop.vd_emul > 0)

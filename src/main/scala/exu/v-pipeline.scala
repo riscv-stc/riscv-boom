@@ -59,7 +59,6 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     //val to_sdq           = Decoupled(new ExeUnitResp(eLen))
     val to_int           = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
     val to_fp            = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
-    val toMat            = if (usingMatrix) Vec(vecWidth, Decoupled(new ExeUnitResp(vLen))) else null
     val fromMat          = if (usingMatrix) Vec(matWidth, Flipped(Decoupled(new ExeUnitResp(vLen)))) else null
     /** Send vrf data to vlsu for indexed or masked load store. */
     val toVlsuRr: ValidIO[FuncUnitReq] = ValidIO(new FuncUnitReq(vLen))
@@ -242,10 +241,6 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   (io.to_int zip exe_units.withFilter(_.hasAlu).map(_.io.iresp)).foreach {
     case (to_int, vec) => to_int <> vec
-  }
-
-  (io.toMat zip exe_units.withFilter(_.hasALU).map(_.io.tresp)).foreach {
-    case(toMat, vec) => toMat <> vec
   }
 
   // FIXME: construct vlsuExeResp from vlsuWritePort

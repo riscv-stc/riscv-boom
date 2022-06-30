@@ -195,6 +195,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val m_is_split       = if (usingMatrix) Bool()          else null
   val m_split_first    = if (usingMatrix) Bool()          else null
   val m_split_last     = if (usingMatrix) Bool()          else null
+  val m_split_ecnt     = if (usingMatrix) UInt(vLenSz.W)  else null
   val ts1_eew          = if (usingMatrix) UInt(2.W)       else null
   val ts2_eew          = if (usingMatrix) UInt(2.W)       else null
   val td_eew           = if (usingMatrix) UInt(2.W)       else null

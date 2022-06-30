@@ -210,9 +210,11 @@ abstract class IssueUnit(
       when(dis_uops(w).uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA, uopMFOPA, uopMFWOPA)) {
         dis_uops(w).prs1_busy := false.B
         dis_uops(w).prs2_busy := false.B
+        dis_uops(w).prs3_busy := false.B
       } .elsewhen(dis_uops(w).uopc.isOneOf(uopMMV_V, uopMWMV_V, uopMQMV_V)) {
         dis_uops(w).prs1_busy := false.B
         dis_uops(w).pts2_busy := 0.U
+        dis_uops(w).pts3_busy := 0.U
       } .elsewhen(dis_uops(w).uopc.isOneOf(uopMMUL, uopMWMUL, uopMQMUL)) {
         dis_uops(w).pts2_busy := 0.U
       }
@@ -243,7 +245,6 @@ abstract class IssueUnit(
     issue_slots(i).vl_wakeup_port   := io.vl_wakeup_port
     if (usingMatrix && matrix) {
       issue_slots(i).intupdate      := io.intupdate
-      issue_slots(i).fpupdate       := io.fpupdate
     } else if (usingVector) {
       if (vector) {
         issue_slots(i).vbusy_status   := io.vbusy_status

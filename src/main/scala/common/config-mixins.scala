@@ -684,10 +684,10 @@ class WithNStcMatBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends
                 mLen = 16384,  //vLen * 32
                 numMatTrRegisters = 8,
                 numMatAccRegisters = 2,
-                tileRows = 4,
-                tileCols = 4,
-                meshRows = (mLen/vLen)/tileRows,
-                meshCols = (vLen/16)/tileCols
+                mxuTileRows = 4,
+                mxuTileCols = 4,
+                mxuMeshRows = (mLen/vLen)/mxuTileRows,
+                mxuMeshCols = (vLen/16)/mxuTileCols
               ),
               dcache = Some(
                 DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4, nTLBWays=16)
