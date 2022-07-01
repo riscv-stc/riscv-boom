@@ -5,7 +5,6 @@
 
 package boom.exu
 
-import Chisel.UInt
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
@@ -531,20 +530,19 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val csr_mltr = io.csr_mconfig.mtype.mltr
     val csr_mrtr = io.csr_mconfig.mtype.mrtr
 
+    val is_mls = cs.is_rvm & (cs.uses_ldq | cs.uses_stq)
+    val mslice_tt0 = uop.inst(28).asBool()     //1: col,  0: row
+    val mslice_dim = uop.inst(27,26)
+    val sel_tilem = (mslice_dim === 1.U) && !csr_mltr || (mslice_dim === 0.U)
+    //val sel_tilen = (mslice_dim === 2.U) && csr_mrtr
+    val sel_tilek = (mslice_dim === 1.U) && csr_mltr || (mslice_dim === 2.U) && !csr_mrtr
+
+    val sel_slice = Mux(sel_tilek, csr_tilek, Mux(sel_tilem, csr_tilem, csr_tilen))
+
     val msew = Mux(is_mls, cs.v_ls_ew, csr_msew)
     val ts1_eew = msew        //FIXME: remain to add W/Q op
     val ts2_eew = msew
     val td_eew  = msew
-
-    val is_mls = cs.is_rvm & (cs.uses_ldq | cs.uses_stq)
-    val mslice_tt0 = uop.inst(28).asBool()     //1: col,  0: row
-    val mslice_dim = uop.inst(27,26)
-    val sel_tilem = (mslice_dim === 1.U) && !(mslice_tt0 ^ csr_mltr) || (mslice_dim === 0.U) && !mslice_tt0
-    val sel_tilen = (mslice_dim === 2.U) && mslice_tt0 ^ csr_mrtr || (mslice_dim === 0.U) && mslice_tt0
-    val sel_tilek = (mslice_dim === 1.U) && mslice_tt0 ^ csr_mltr || (mslice_dim === 2.U) && !(mslice_tt0 ^ csr_mrtr)
-
-    val sel_slice = Mux(sel_tilek, csr_tilek, Mux(sel_tilem, csr_tilem, csr_tilen))
-
     when (io.deq_fire && cs.is_rvm) {
       assert(msew <= 3.U, "Unsupported msew")
     }
@@ -575,7 +573,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     uop.m_split_first := mslice_idx === 0.U
     uop.m_split_last  := slice_last
-    uop.isHSlice    := !mslice_tt0
+    uop.isHSlice      := !mslice_tt0
+    uop.mslice_dim    := mslice_dim
 
   } // if usingMatrix
   io.deq.uop := uop

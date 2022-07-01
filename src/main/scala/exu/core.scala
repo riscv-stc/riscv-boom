@@ -1240,10 +1240,10 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       if (usingMatrix) {
         disUops(w).pts1_busy := m_uop.pts1_busy
         disUops(w).pts2_busy := m_uop.pts2_busy
-        disUops(w).ptd       := m_uop.ptd
-        disUops(w).stale_ptd := m_uop.stale_ptd
-        disUops(w).pts1      := m_uop.pts1
-        disUops(w).pts2      := m_uop.pts2
+        disUops(w).pdst       := Mux(disUops(w).rt(RD, isInt), i_uop.pdst, Mux(disUops(w).rt(RD, isVector), v_uop.pdst, m_uop.pdst))
+        disUops(w).stale_pdst := Mux(disUops(w).rt(RD, isInt), i_uop.stale_pdst , Mux(disUops(w).rt(RD, isVector), v_uop.stale_pdst , m_uop.stale_pdst))
+        disUops(w).prs1      := Mux(disUops(w).rt(RS1, isInt   ), i_uop.prs1, m_uop.prs1)
+        disUops(w).prs2      := Mux(disUops(w).rt(RS2, isInt   ), i_uop.prs1, m_uop.prs2)
         disUops(w).m_scalar_busy := disUops(w).is_rvm && disUops(w).uses_scalar
       }
     } else {

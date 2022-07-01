@@ -878,10 +878,12 @@ class MatRenameStage(
   trbusytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
   trbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_TR).reduce(_||_)
   trbusytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
+  trbusytable.io.wb_bits  := io.wakeups.map(w => UIntToOH(w.bits.uop.m_sidx))
 
   accbusytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
   accbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_ACC).reduce(_||_)
   accbusytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
+  accbusytable.io.wb_bits  := io.wakeups.map(w => UIntToOH(w.bits.uop.m_sidx))
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
     "[rename] Wakeup has wrong rtype.")
