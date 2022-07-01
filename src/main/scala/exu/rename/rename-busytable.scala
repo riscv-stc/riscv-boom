@@ -129,53 +129,57 @@ class MatBusyResp(val nBits: Int) extends Bundle
 class MatRenameBusyTable(
                        val plWidth: Int,
                        val numPregs: Int,
+                       val bypass: Boolean,
                        val numWbPorts: Int)
-                     (implicit p: Parameters) extends BoomModule
-{
+                     (implicit p: Parameters) extends BoomModule {
   val pregSz = log2Ceil(numPregs)
 
   val io = IO(new BoomBundle()(p) {
     val ren_uops = Input(Vec(plWidth, new MicroOp))
     val rebusy_reqs = Input(Vec(plWidth, Bool()))
-    val busy_resps  = Output(Vec(plWidth, new MatBusyResp(vLenb)))
+    val busy_resps = Output(Vec(plWidth, new MatBusyResp(vLenb + 1))) //the first bit indicate slice direction
 
-    val wb_pdsts    = Input(Vec(numWbPorts, UInt(pregSz.W)))
-    val wb_valids   = Input(Vec(numWbPorts, Bool()))
-    val wb_bits     = Input(Vec(numWbPorts, UInt(vLenb.W)))
+    val wb_pdsts = Input(Vec(numWbPorts, UInt(pregSz.W)))
+    val wb_valids = Input(Vec(numWbPorts, Bool()))
+    val wb_bits = Input(Vec(numWbPorts, UInt(vLenb.W)))   //write back without direction bit?
 
     val debug = new Bundle {
-      val busytable = Output(Bits(numPregs.W))
+      val busytable = Output(Vec(numPregs, UInt((vLenb + 1).W)))
     }
   })
 
-  val busy_table = RegInit(VecInit(Seq.fill(numPregs){0.U(vLenb.W)}))
-  val busy_table_wb = Wire(Vec(numPregs, UInt(vLenb.W)))
-  val busy_table_next = Wire(Vec(numPregs, UInt(vLenb.W)))
+  val busy_table = RegInit(VecInit(Seq.fill(numPregs) {0.U((vLenb+1).W)}))
+  val busy_table_wb = Wire(Vec(numPregs, UInt((vLenb+1).W)))
+  val busy_table_next = Wire(Vec(numPregs, UInt((vLenb+1).W)))
 
-  for(r <- 0 until numPregs) {
+  for (r <- 0 until numPregs) {
     // Unbusy written back registers.
     busy_table_wb(r) := busy_table(r) & ~(io.wb_pdsts zip io.wb_valids zip io.wb_bits)
-      .map {case ((pdst, valid), bits) => bits & Fill(vLenb, (r.U === pdst && valid).asUInt())}.reduce(_|_)
+      .map { case ((pdst, valid), bits) => bits & Fill(vLenb, (r.U === pdst && valid).asUInt()) }.reduce(_ | _)
     // Rebusy newly allocated registers.
     busy_table_next(r) := busy_table_wb(r) | (io.ren_uops zip io.rebusy_reqs)
-      .map {case (uop, req) => Fill(vLenb, ((r.U === uop.pdst) && req).asUInt())}.reduce(_|_)
+      .map { case (uop, req) => Cat(Mux((r.U === uop.pdst) && req && uop.m_split_first, uop.m_isHSlice, busy_table(r)(vLenb)) ,
+        Fill(vLenb, ((r.U === uop.pdst) && req).asUInt()) & UIntToOH(uop.m_sidx)) }.reduce(_ | _)
 
-  // Read the busy table.
-  for (i <- 0 until plWidth) {
-    val prs1_was_bypassed = (0 until i).map(j =>
-      io.ren_uops(i).lrs1 === io.ren_uops(j).ldst && io.rebusy_reqs(j)).foldLeft(false.B)(_||_)
-    val prs2_was_bypassed = (0 until i).map(j =>
-      io.ren_uops(i).lrs2 === io.ren_uops(j).ldst && io.rebusy_reqs(j)).foldLeft(false.B)(_||_)
-    val prs3_was_bypassed = (0 until i).map(j =>
-      io.ren_uops(i).lrs3 === io.ren_uops(j).ldst && io.rebusy_reqs(j)).foldLeft(false.B)(_||_)
+    // Read the busy table.
+    for (i <- 0 until plWidth) {
+      val prs1_was_bypassed = (0 until i).map(j =>
+        (io.ren_uops(i).lrs1 === io.ren_uops(j).ldst) && (io.ren_uops(i).m_sidx === io.ren_uops(j).m_sidx)
+         && (io.ren_uops(i).m_isHSlice === io.ren_uops(j).m_isHSlice) && io.rebusy_reqs(j)).foldLeft(false.B)(_ || _)
+      val prs2_was_bypassed = (0 until i).map(j =>
+        io.ren_uops(i).lrs2 === io.ren_uops(j).ldst && (io.ren_uops(i).m_sidx === io.ren_uops(j).m_sidx)
+         && (io.ren_uops(i).m_isHSlice === io.ren_uops(j).m_isHSlice) && io.rebusy_reqs(j)).foldLeft(false.B)(_ || _)
+      val prs3_was_bypassed = (0 until i).map(j =>
+        io.ren_uops(i).lrs3 === io.ren_uops(j).ldst && (io.ren_uops(i).m_sidx === io.ren_uops(j).m_sidx)
+         && (io.ren_uops(i).m_isHSlice === io.ren_uops(j).m_isHSlice) && io.rebusy_reqs(j)).foldLeft(false.B)(_ || _)
 
-    io.busy_resps(i).prs1_busy := busy_table(io.ren_uops(i).prs1)
-    io.busy_resps(i).prs2_busy := busy_table(io.ren_uops(i).prs2)
-    io.busy_resps(i).prs3_busy := busy_table(io.ren_uops(i).prs3)
+      io.busy_resps(i).prs1_busy := busy_table(io.ren_uops(i).prs1) | Fill(vLenb, (prs1_was_bypassed && bypass.B).asUInt)
+      io.busy_resps(i).prs2_busy := busy_table(io.ren_uops(i).prs2) | Fill(vLenb, (prs2_was_bypassed && bypass.B).asUInt)
+      io.busy_resps(i).prs3_busy := busy_table(io.ren_uops(i).prs3) | Fill(vLenb, (prs3_was_bypassed && bypass.B).asUInt)
+    }
+    busy_table := busy_table_next
+    io.debug.busytable := busy_table
   }
-
-  busy_table := busy_table_next
-  io.debug.busytable := busy_table
 }
 
 

@@ -11,7 +11,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.rocket.RVCExpander
-import freechips.rocketchip.rocket.{CSR, Causes, VConfig, VType}
+import freechips.rocketchip.rocket._
 import freechips.rocketchip.util.{UIntIsOneOf, rightOR, uintToBitPat}
 import FUConstants._
 import boom.common._
@@ -105,7 +105,7 @@ class CtrlSigs extends Bundle with DecodeConstants
   val not_use_vtype   = Bool()
   val vd_unequal_vs1  = Bool()
   val vd_unequal_vs2  = Bool()
-  val is_matrix       = Bool()
+  val is_rvm          = Bool()
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     //val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, decode_default, table)
@@ -117,7 +117,7 @@ class CtrlSigs extends Bundle with DecodeConstants
           is_br, is_sys_pc2epc, inst_unique, flush_on_commit, csr_cmd,
           is_rvv, can_be_split, uses_vm, v_ls_ew, vstart_is_zero,
           allow_vd_is_v0, not_use_vtype, vd_unequal_vs1, vd_unequal_vs2,
-          is_matrix)
+          is_rvm)
       sigs zip decoder map {case(s,d) => s := d}
       rocc := false.B
       this
@@ -147,6 +147,12 @@ class DecodeUnitIo(implicit p: Parameters) extends BoomBundle
   val csr_vstart = Input(UInt(vLenSz.W))
   val interrupt = Input(Bool())
   val interrupt_cause = Input(UInt(xLen.W))
+
+  val csr_mconfig = Input(new MConfig)
+  val csr_tilem = Input(UInt(xLen.W))
+  val csr_tilen = Input(UInt(xLen.W))
+  val csr_tilek = Input(UInt(xLen.W))
+  val csr_tsidx = Input(UInt(xLen.W))
 }
 
 /**
@@ -514,6 +520,64 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                             illegal_regnum_multiple_emul        ||
                             illegal_vs2_overlap_vd_lowpart)
   } // if usingvector
+
+  // matrix stuff
+  if (usingMatrix) {
+    val csr_msew = io.csr_mconfig.mtype.msew
+    val csr_tilem = io.csr_tilem
+    val csr_tilen = io.csr_tilen
+    val csr_tilek = io.csr_tilek
+    val csr_tsidx = io.csr_tsidx
+    val csr_mltr = io.csr_mconfig.mtype.mltr
+    val csr_mrtr = io.csr_mconfig.mtype.mrtr
+
+    val msew = Mux(is_mls, cs.v_ls_ew, csr_msew)
+    val ts1_eew = msew        //FIXME: remain to add W/Q op
+    val ts2_eew = msew
+    val td_eew  = msew
+
+    val is_mls = cs.is_rvm & (cs.uses_ldq | cs.uses_stq)
+    val mslice_tt0 = uop.inst(28).asBool()     //1: col,  0: row
+    val mslice_dim = uop.inst(27,26)
+    val sel_tilem = (mslice_dim === 1.U) && !(mslice_tt0 ^ csr_mltr) || (mslice_dim === 0.U) && !mslice_tt0
+    val sel_tilen = (mslice_dim === 2.U) && mslice_tt0 ^ csr_mrtr || (mslice_dim === 0.U) && mslice_tt0
+    val sel_tilek = (mslice_dim === 1.U) && mslice_tt0 ^ csr_mltr || (mslice_dim === 2.U) && !(mslice_tt0 ^ csr_mrtr)
+
+    val sel_slice = Mux(sel_tilek, csr_tilek, Mux(sel_tilem, csr_tilem, csr_tilen))
+
+    when (io.deq_fire && cs.is_rvm) {
+      assert(msew <= 3.U, "Unsupported msew")
+    }
+
+    val mslice_idx = RegInit(0.U((vLenSz+1).W))
+    val total_slice = Mux(is_mls, sel_slice, 1.U)
+    val slice_last = mslice_idx >= total_slice
+
+    when (io.kill) {
+      mslice_idx := 0.U
+    }.elsewhen(!is_mls | slice_last & io.deq_fire) {
+      mslice_idx := 0.U
+    }.elsewhen(is_mls & !slice_last & io.deq_fire) {
+      mslice_idx := mslice_idx + 1.U
+    }.otherwise {
+      mslice_idx := 0.U
+    }
+
+    uop.m_is_split    := cs.can_be_split
+    uop.m_split_ecnt  := total_slice
+    uop.m_sidx        := mslice_idx
+    uop.ts1_eew       := ts1_eew
+    uop.ts2_eew       := ts2_eew
+    uop.td_eew        := td_eew
+    uop.is_rvm        := cs.is_rvm
+    uop.m_ls_ew       := cs.v_ls_ew
+    uop.mconfig       := io.csr_mconfig
+
+    uop.m_split_first := mslice_idx === 0.U
+    uop.m_split_last  := slice_last
+    uop.m_isHSlice    := !mslice_tt0
+
+  } // if usingMatrix
   io.deq.uop := uop
   //assert(!id_illegal_insn)
 }

@@ -737,31 +737,50 @@ extends AbstractRenameStage(
  */
 class MatRenameStage(
                    plWidth: Int,
-                   numPhysRegs: Int,
+                   numTrPhysRegs: Int,
+                   numAccPhysRegs: Int,
                    numWbPorts: Int)(implicit p: Parameters)
   extends AbstractRenameStage(
     plWidth,
-    numPhysRegs,
+    numTrPhysRegs,
+    numAccPhysRegs,
     numWbPorts)(p)
 {
-  val pregSz = log2Ceil(numPhysRegs)
+  val trpregSz = log2Ceil(numTrPhysRegs)
+  val accpregSz = log2Ceil(numTrPhysRegs)
   val rtype: UInt => Bool = isMatrix
 
   //-------------------------------------------------------------
   // Rename Structures
 
-  val maptable = Module(new MatRenameMapTable(
+  val trmaptable = Module(new MatRenameMapTable(
     plWidth,
     8,
-    numPhysRegs,
+    numTrPhysRegs,
     false))
-  val freelist = Module(new MatRenameFreeList(
+  val trfreelist = Module(new MatRenameFreeList(
     plWidth,
-    numPhysRegs,
+    numTrPhysRegs,
     8))
-  val busytable = Module(new MatRenameBusyTable(
+  val trbusytable = Module(new MatRenameBusyTable(
     plWidth,
-    numPhysRegs,
+    numTrPhysRegs,
+    false,
+    numWbPorts))
+
+  val accmaptable = Module(new MatRenameMapTable(
+    plWidth,
+    8,
+    numAccPhysRegs,
+    false))
+  val accfreelist = Module(new MatRenameFreeList(
+    plWidth,
+    numAccPhysRegs,
+    8))
+  val accbusytable = Module(new MatRenameBusyTable(
+    plWidth,
+    numAccPhysRegs,
+    false,
     numWbPorts))
 
   val ren2_br_tags    = Wire(Vec(plWidth, Valid(UInt(brTagSz.W))))
@@ -784,7 +803,7 @@ class MatRenameStage(
 
   // Maptable inputs.
   val map_reqs   = Wire(Vec(plWidth, new MapReq(lregSz)))
-  val remap_reqs = Wire(Vec(plWidth, new RemapReq(lregSz, pregSz)))
+  val remap_reqs = Wire(Vec(plWidth, new RemapReq(lregSz, trpregSz)))   //trpregSz > accpredSz, use the same remap_reqs
 
   // Generate maptable requests.
   for ((((ren1,ren2),com),w) <- ren1_uops zip ren2_uops zip io.com_uops.reverse zipWithIndex) {
@@ -800,15 +819,21 @@ class MatRenameStage(
     case ((a,r),rr) => rr.valid := a || r}
 
   // Hook up inputs.
-  maptable.io.map_reqs    := map_reqs
-  maptable.io.remap_reqs  := remap_reqs
-  maptable.io.ren_br_tags := ren2_br_tags
-  maptable.io.brupdate    := io.brupdate
-  maptable.io.rollback    := io.rollback
+  trmaptable.io.map_reqs    := map_reqs
+  trmaptable.io.remap_reqs  := remap_reqs
+  trmaptable.io.ren_br_tags := ren2_br_tags
+  trmaptable.io.brupdate    := io.brupdate
+  trmaptable.io.rollback    := io.rollback
+
+  accmaptable.io.map_reqs    := map_reqs
+  accmaptable.io.remap_reqs  := remap_reqs
+  accmaptable.io.ren_br_tags := ren2_br_tags
+  accmaptable.io.brupdate    := io.brupdate
+  accmaptable.io.rollback    := io.rollback
 
   // Maptable outputs.
   for ((uop, w) <- ren1_uops.zipWithIndex) {
-    val mappings = maptable.io.map_resps(w)
+    val mappings = trmaptable.io.map_resps(w)
 
     uop.prs1       := mappings.prs1
     uop.prs2       := mappings.prs2
@@ -821,42 +846,74 @@ class MatRenameStage(
 
   // Freelist inputs.
   for (w <- 0 until plWidth) {
-    freelist.io.reqs(w).valid := ren2_alloc_reqs(w)
-    freelist.io.reqs(w).bits  := ren2_uops(w)
+    trfreelist.io.reqs(w).valid := ren2_alloc_reqs(w) && ren2_uops(w).m_split_first
+    trfreelist.io.reqs(w).bits  := ren2_uops(w)
+    accfreelist.io.reqs(w).valid := ren2_alloc_reqs(w) && ren2_uops(w).m_split_first
+    accfreelist.io.reqs(w).bits  := ren2_uops(w)
   }
-  freelist.io.dealloc_pregs zip com_valids zip rbk_valids map
+  trfreelist.io.dealloc_pregs zip com_valids zip rbk_valids map
     {case ((d,c),r) => d.valid := c || r}
-  freelist.io.dealloc_pregs zip io.com_uops map
+  trfreelist.io.dealloc_pregs zip io.com_uops map
     {case (d,c) => d.bits := Mux(io.rollback, c.pdst, c.stale_pdst)}
-  assert (ren2_alloc_reqs zip freelist.io.alloc_pregs map {case (r,p) => !r || p.bits =/= 0.U} reduce (_&&_),
-    "[rename-stage] A uop is trying to allocate the zero physical register.")
-  freelist.io.ren_br_tags := ren2_br_tags
-  freelist.io.brupdate := io.brupdate
-  freelist.io.debug.pipeline_empty := io.debug_rob_empty
+  trfreelist.io.ren_br_tags := ren2_br_tags
+  trfreelist.io.brupdate := io.brupdate
+  trfreelist.io.debug.pipeline_empty := io.debug_rob_empty
 
   //val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(plWidth, UInt(maxPregSz.W)))
   // Freelist outputs.
   for ((uop, w) <- ren2_uops.zipWithIndex) {
-    val preg = freelist.io.alloc_pregs(w).bits
-    uop.pdst := preg
+    when(uop.m_split_first) {
+      uop.pdst := Mux(uop.dst_rtype === RT_TR, trfreelist.io.alloc_pregs(w).bits, accfreelist.io.alloc_pregs(w).bits)
+    }.otherwise {
+      uop.pdst := uop.stale_pdst  //one cycle after maptable?
+    }
   }
 
   //-------------------------------------------------------------
   // Busy Table
+  for (w <- 0 until plWidth) {
+    trbusytable.io.rebusy_reqs(w) := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_TR
+    accbusytable.io.rebusy_reqs(w) := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_ACC
+  }
+  trbusytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
+  trbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_TR).reduce(_||_)
+  trbusytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
 
-  busytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
-  busytable.io.rebusy_reqs := ren2_alloc_reqs
-  busytable.io.wb_valids := io.wakeups.map(_.valid)
-  busytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
+  accbusytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
+  accbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_ACC).reduce(_||_)
+  accbusytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
     "[rename] Wakeup has wrong rtype.")
 
+  //Trtile/ACC Register busy state
   for ((uop, w) <- ren2_uops.zipWithIndex) {
-    val busy = busytable.io.busy_resps(w)
-    uop.prs1_busy := uop.rt(RS1, rtype) && busy.prs1_busy
-    uop.prs2_busy := uop.rt(RS2, rtype) && busy.prs2_busy
-    uop.prs3_busy := uop.frs3_en && busy.prs3_busy
+    val trbusy = trbusytable.io.busy_resps(w)
+    val accbusy = accbusytable.io.busy_resps(w)
+    when(uop.m_isHSlice =/= trbusy.prs1_busy(vLenb) && trbusy.prs1_busy(vLenb-1, 0).orR()) {
+      uop.pts1_busy := Fill(vLenb, 1.U(1.W))
+    }.otherwise {
+      uop.pts1_busy := trbusy.prs1_busy
+    }
+    when(uop.m_isHSlice =/= trbusy.prs2_busy(vLenb) && trbusy.prs2_busy(vLenb-1, 0).orR()) {
+      uop.pts2_busy := Fill(vLenb, 1.U(1.W))
+    }.otherwise {
+      uop.pts2_busy := trbusy.prs2_busy
+    }
+    when(uop.dst_rtype === RT_TR) {
+      when(uop.m_isHSlice =/= trbusy.prs3_busy(vLenb) && trbusy.prs3_busy(vLenb-1, 0).orR()) {
+        uop.pts3_busy := Fill(vLenb, 1.U(1.W))
+      }.otherwise {
+        uop.pts3_busy := trbusy.prs3_busy
+      }
+    }
+    when(uop.dst_rtype === RT_ACC) {
+      when(accbusy.prs3_busy(vLenb) && accbusy.prs3_busy(vLenb-1, 0).orR()) {
+        uop.pts3_busy := Fill(vLenb, 1.U(1.W))
+      }.otherwise {
+        uop.pts3_busy := accbusy.prs3_busy
+      }
+    }
 
     val valid = ren2_valids(w)
   }
@@ -865,7 +922,7 @@ class MatRenameStage(
   // Outputs
 
   for (w <- 0 until plWidth) {
-    val can_allocate = freelist.io.alloc_pregs(w).valid
+    val can_allocate = trfreelist.io.alloc_pregs(w).valid || accfreelist.io.alloc_pregs(w).valid
 
     // Push back against Decode stage if Rename1 can't proceed.
     io.ren_stalls(w) := (ren2_uops(w).rt(RD, rtype)) && !can_allocate
@@ -886,9 +943,9 @@ class MatRenameStage(
   //-------------------------------------------------------------
   // Debug signals
 
-  io.debug.freelist  := freelist.io.debug.freelist
-  io.debug.isprlist  := freelist.io.debug.isprlist
-  io.debug.busytable := busytable.io.debug.busytable
+  io.debug.freelist  := trfreelist.io.debug.freelist
+  io.debug.isprlist  := trfreelist.io.debug.isprlist
+  io.debug.busytable := trbusytable.io.debug.busytable
 }
 
 

@@ -984,27 +984,33 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   //val vcq_idx = Wire(UInt(log2Ceil(vcqSz).W))
 
   for (w <- 0 until coreWidth) {
-    dec_valids(w)                      := io.ifu.fetchpacket.valid && dec_fbundle.uops(w).valid &&
-                                          !dec_finished_mask(w)
-    decode_units(w).io.enq.uop         := dec_fbundle.uops(w).bits
-    decode_units(w).io.deq_fire        := dec_fire(w)
-    decode_units(w).io.kill            := io.ifu.redirect_flush
-    decode_units(w).io.status          := csr.io.status
-    decode_units(w).io.csr_decode      <> csr.io.decode(w)
-    decode_units(w).io.interrupt       := csr.io.interrupt
+    dec_valids(w) := io.ifu.fetchpacket.valid && dec_fbundle.uops(w).valid &&
+      !dec_finished_mask(w)
+    decode_units(w).io.enq.uop := dec_fbundle.uops(w).bits
+    decode_units(w).io.deq_fire := dec_fire(w)
+    decode_units(w).io.kill := io.ifu.redirect_flush
+    decode_units(w).io.status := csr.io.status
+    decode_units(w).io.csr_decode <> csr.io.decode(w)
+    decode_units(w).io.interrupt := csr.io.interrupt
     decode_units(w).io.interrupt_cause := csr.io.interrupt_cause
     if (usingVector) {
-      decode_units(w).io.csr_vstart       := csr.io.vector.get.vstart
-      decode_units(w).io.csr_vconfig      := vcq_data.vconfig
+      decode_units(w).io.csr_vstart := csr.io.vector.get.vstart
+      decode_units(w).io.csr_vconfig := vcq_data.vconfig
       decode_units(w).io.enq.uop.vl_ready := vcq_data.vl_ready
 
       decode_units(w).io.csr_vconfig.vtype.reserved := DontCare
 
-      dec_vconfig_valid(w)              := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6,0) === 87.U) && (dec_fbundle.uops(w).bits.inst(14,12) === 7.U) && ((dec_fbundle.uops(w).bits.inst(31,30) === 3.U) || !dec_fbundle.uops(w).bits.inst(31))
-      dec_vconfig(w).vconfig.vl         := Mux(dec_fbundle.uops(w).bits.inst(31), dec_fbundle.uops(w).bits.inst(19,15), VType.fromUInt(dec_fbundle.uops(w).bits.inst(27,20)).vlMax)
-      dec_vconfig(w).vconfig.vtype      := VType.fromUInt(dec_fbundle.uops(w).bits.inst(27,20))
-      dec_vconfig(w).vl_ready           := (dec_fbundle.uops(w).bits.inst(19,15) === 0.U && dec_fbundle.uops(w).bits.inst(11,7)  =/= 0.U) || dec_fbundle.uops(w).bits.inst(31)
-
+      dec_vconfig_valid(w) := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 87.U) && (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && ((dec_fbundle.uops(w).bits.inst(31, 30) === 3.U) || !dec_fbundle.uops(w).bits.inst(31))
+      dec_vconfig(w).vconfig.vl := Mux(dec_fbundle.uops(w).bits.inst(31), dec_fbundle.uops(w).bits.inst(19, 15), VType.fromUInt(dec_fbundle.uops(w).bits.inst(27, 20)).vlMax)
+      dec_vconfig(w).vconfig.vtype := VType.fromUInt(dec_fbundle.uops(w).bits.inst(27, 20))
+      dec_vconfig(w).vl_ready := (dec_fbundle.uops(w).bits.inst(19, 15) === 0.U && dec_fbundle.uops(w).bits.inst(11, 7) =/= 0.U) || dec_fbundle.uops(w).bits.inst(31)
+    }
+    if (usingMatrix) {
+      decode_units(w).io.csr_mconfig := csr.io.matrix.get.mconfig
+      decode_units(w).io.csr_tilem := csr.io.matrix.get.tilem
+      decode_units(w).io.csr_tilek := csr.io.matrix.get.tilek
+      decode_units(w).io.csr_tilen := csr.io.matrix.get.tilen
+      decode_units(w).io.csr_tsidx := csr.io.matrix.get.tsidx
     }
 
     dec_uops(w) := decode_units(w).io.deq.uop

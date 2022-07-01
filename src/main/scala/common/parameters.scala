@@ -108,13 +108,11 @@ case class BoomCoreParams(
    /* matrix extension */
   override val useMatrix: Boolean = false,
   override val mLen: Int = 0,
-  override val tileRows: Int = 0,
-  override val tileCols: Int = 0,
+  override val mxuTileRows: Int = 0,
+  override val mxuTileCols: Int = 0,
 
   numMatTrRegisters: Int = 0,
   numMatAccRegisters: Int = 0,
-  meshRows: Int = 0,
-  meshCols: Int = 0,
 
   /* debug stuff */
   enableCommitLogPrintf: Boolean = true,
@@ -192,16 +190,11 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
 
   val numIntPhysRegs= boomParams.numIntPhysRegisters // size of the integer physical register file
   val numFpPhysRegs = boomParams.numFpPhysRegisters  // size of the floating point physical register file
-  val numMatTrPhysRegs = boomParams.numMatTrRegisters
-  val numMatAccPhysRegs = boomParams.numMatAccRegisters
 
   //************************************
   // Functional Units
   val usingFDivSqrt = boomParams.fpu.isDefined && boomParams.fpu.get.divSqrt
   val usingzfhExt   = boomParams.fpu.isDefined && boomParams.fpu.get.zfhExt
-
-  val usingMatrix      = boomParams.useMatrix
-  val numMatTrPhysRegs = if(usingMatrix) boomParams.numVecPhysRegisters else 0
 
   val mulDivParams = boomParams.mulDiv.getOrElse(MulDivParams())
   // TODO: Allow RV32IF
@@ -299,6 +292,16 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   def eLenb = eLen/8
   def eLenSz = if (usingVector) log2Ceil(eLen) else 0
   //val minFLen = boomParams.minFLen
+
+  // matrix stuff
+  require (issueParams.count(_.iqType == IQT_MAT.litValue) ==1 || !usingMatrix)
+  val numMatTrPhysRegs = if(usingMatrix) boomParams.numMatTrRegisters else 0
+  val numMatAccPhysRegs = if(usingMatrix) boomParams.numMatAccRegisters else 0
+  def maxTrTileCols = vLenb
+  def numTrTileRows = mLen/vLen
+  def mxuMeshRows = mLen/(vLen*mxuTileRows)
+  def mxuMeshCols = vLen/(16*mxuTileCols)
+
 
   //************************************
   // Implicitly calculated constants
