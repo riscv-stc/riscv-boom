@@ -46,6 +46,9 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     // CSR infos
     val fcsr_rm          = Input(UInt(width=FPConstants.RM_SZ.W))
     val status           = Input(new MStatus())
+    val tilem            = Input(UInt(xLen.W))
+    val tilen            = Input(UInt(xLen.W))
+    val tilek            = Input(UInt(xLen.W))
     // dispatched uops
     val dis_uops         = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
     // vlsu related
@@ -136,6 +139,9 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 
   trtileReader.io.brupdate := io.brupdate
   trtileReader.io.kill     := io.flush_pipeline
+  trtileReader.io.tilem    := io.tilem
+  trtileReader.io.tilen    := io.tilen
+  trtileReader.io.tilek    := io.tilek
 
   // Only one port for vector load write back.
   for(i <- 0 until numTrTileReadPorts) {

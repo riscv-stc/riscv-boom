@@ -1834,10 +1834,14 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvm &&
         rob.io.commit.uops(i).m_split_last}.reduce(_ || _)
     m_pipeline.io.fcsr_rm := csr.io.fcsr_rm
-    csr.io.matrix.get.set_vs_dirty := cmt_rvv
+    m_pipeline.io.tilem  := csr.io.matrix.get.tilem
+    m_pipeline.io.tilen  := csr.io.matrix.get.tilen
+    m_pipeline.io.tilek  := csr.io.matrix.get.tilek
     csr.io.matrix.get.set_mconfig.valid := csr_vld && msettype
     csr.io.matrix.get.set_mconfig.bits  := csr_uop.mconfig
-    csr.io.matrix.get.set_mconfig.bits.vtype.reserved := DontCare
+    csr.io.matrix.get.set_tilem.valid   := csr_vld && msettilem
+    csr.io.matrix.get.set_tilen.valid   := csr_vld && msettilen
+    csr.io.matrix.get.set_tilek.valid   := csr_vld && msettilek
   }
 
 // TODO can we add this back in, but handle reset properly and save us

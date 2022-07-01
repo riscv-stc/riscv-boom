@@ -360,7 +360,24 @@ class Rob(
       val wb_resp = io.wb_resps(i)
       val wb_uop = wb_resp.bits.uop
       val row_idx = GetRowIdx(wb_uop.rob_idx)
-      if (usingVector) {
+      if (usingMatrix) {
+        when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
+          val wb_rvv_load = wb_uop.is_rvv && wb_uop.uses_ldq
+          val wb_rvm_load = wb_uop.is_rvm && wb_uop.uses_ldq
+          val wbSplitting = (wb_uop.v_is_split && !wb_uop.v_split_last) || 
+                            (wb_uop.m_is_split && !wb_uop.m_split_last)
+          rob_bsy(row_idx) := Mux(wb_rvv_load || wb_rvm_load, rob_bsy(row_idx), wbSplitting)
+          rob_unsafe(row_idx)   := false.B
+          rob_predicated(row_idx)  := wb_resp.bits.predicated
+          rob_uop(row_idx).vxsat := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
+          if (O3PIPEVIEW_PRINTF) {
+            printf("%d; O3PipeView:complete:%d\n",
+              rob_uop(row_idx).debug_events.fetch_seq,
+              io.debug_tsc)
+          }
+        }
+      }
+      else if (usingVector) {
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
           //val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           //val wb_rvv_sta  = wb_uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
