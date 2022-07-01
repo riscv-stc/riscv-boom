@@ -158,20 +158,20 @@ class MatRenameBusyTable(
       .map { case ((pdst, valid), bits) => bits & Fill(vLenb, (r.U === pdst && valid).asUInt()) }.reduce(_ | _)
     // Rebusy newly allocated registers.
     busy_table_next(r) := busy_table_wb(r) | (io.ren_uops zip io.rebusy_reqs)
-      .map { case (uop, req) => Cat(Mux((r.U === uop.pdst) && req && uop.m_split_first, uop.m_isHSlice, busy_table(r)(vLenb)) ,
+      .map { case (uop, req) => Cat(Mux((r.U === uop.pdst) && req && uop.m_split_first, uop.isHSlice, busy_table(r)(vLenb)) ,
         Fill(vLenb, ((r.U === uop.pdst) && req).asUInt()) & UIntToOH(uop.m_sidx)) }.reduce(_ | _)
 
     // Read the busy table.
     for (i <- 0 until plWidth) {
       val prs1_was_bypassed = (0 until i).map(j =>
         (io.ren_uops(i).lrs1 === io.ren_uops(j).ldst) && (io.ren_uops(i).m_sidx === io.ren_uops(j).m_sidx)
-         && (io.ren_uops(i).m_isHSlice === io.ren_uops(j).m_isHSlice) && io.rebusy_reqs(j)).foldLeft(false.B)(_ || _)
+         && (io.ren_uops(i).isHSlice === io.ren_uops(j).isHSlice) && io.rebusy_reqs(j)).foldLeft(false.B)(_ || _)
       val prs2_was_bypassed = (0 until i).map(j =>
         io.ren_uops(i).lrs2 === io.ren_uops(j).ldst && (io.ren_uops(i).m_sidx === io.ren_uops(j).m_sidx)
-         && (io.ren_uops(i).m_isHSlice === io.ren_uops(j).m_isHSlice) && io.rebusy_reqs(j)).foldLeft(false.B)(_ || _)
+         && (io.ren_uops(i).isHSlice === io.ren_uops(j).isHSlice) && io.rebusy_reqs(j)).foldLeft(false.B)(_ || _)
       val prs3_was_bypassed = (0 until i).map(j =>
         io.ren_uops(i).lrs3 === io.ren_uops(j).ldst && (io.ren_uops(i).m_sidx === io.ren_uops(j).m_sidx)
-         && (io.ren_uops(i).m_isHSlice === io.ren_uops(j).m_isHSlice) && io.rebusy_reqs(j)).foldLeft(false.B)(_ || _)
+         && (io.ren_uops(i).isHSlice === io.ren_uops(j).isHSlice) && io.rebusy_reqs(j)).foldLeft(false.B)(_ || _)
 
       io.busy_resps(i).prs1_busy := busy_table(io.ren_uops(i).prs1) | Fill(vLenb, (prs1_was_bypassed && bypass.B).asUInt)
       io.busy_resps(i).prs2_busy := busy_table(io.ren_uops(i).prs2) | Fill(vLenb, (prs2_was_bypassed && bypass.B).asUInt)

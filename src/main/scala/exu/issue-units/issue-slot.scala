@@ -61,7 +61,7 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false, val matr
     val result = new Bundle {
       val p1 = if (matrix) UInt(vLenb.W) else Bool()
       val p2 = if (matrix) UInt(vLenb.W) else Bool()
-      val p3 = Bool()
+      val p3 = if (matrix) UInt(vLenb.W) else Bool()
       val ppred = Bool()
       val state = UInt(width=2.W)
     }
@@ -83,7 +83,7 @@ class IssueSlot(
   extends BoomModule
   with IssueUnitConstants
 {
-  val io = IO(new IssueSlotIO(numWakeupPorts, vector))
+  val io = IO(new IssueSlotIO(numWakeupPorts, vector, matrix))
 
   // slot invalid?
   // slot is valid, holding 1 uop
@@ -100,10 +100,11 @@ class IssueSlot(
   val state = RegInit(s_invalid)
   val p1    = if(matrix) RegInit(0.U(vLenb.W)) else RegInit(false.B)
   val p2    = if(matrix) RegInit(0.U(vLenb.W)) else RegInit(false.B)
-  val p3    = RegInit(false.B)
+  val p3    = if(matrix) RegInit(0.U(vLenb.W)) else RegInit(false.B)
   //val pm    = if(vector) RegInit(0.U(vLenb.W)) else if (usingVector && iqType == IQT_MEM.litValue) RegInit(false.B) else null
   val ps    = if(vector || matrix) RegInit(false.B) else null
-  val sdata = if(vector || matrix) RegInit(0.U(eLen.W)) else null
+  val sdata = if(vector) RegInit(0.U(eLen.W)) else null
+  val sidx  = if(matrix) RegInit(0.U(vLenb.W)) else null
   val strideLength = if(iqType == IQT_VMX.litValue) RegInit(0.U(eLen.W)) else null
   val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
@@ -124,6 +125,9 @@ class IssueSlot(
   val vrg_has_vupd = slot_uop.rt(RS1, isVector) && slot_uop.uopc === uopVRGATHER || slot_uop.uopc === uopVRGATHEREI16
   val next_uop_has_vupd = next_uop.rt(RS1, isVector) && next_uop.uopc === uopVRGATHER || next_uop.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
   val next_uop_vcompress = next_uop.uopc === uopVCOMPRESS
+  val next_uop_mopa       = if (matrix) next_uop.uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA, uopMFOPA, uopMFWOPA) else null
+  val next_uop_ts1_hslice = if (matrix) Mux(next_uop_mopa, false.B, next_uop.isHSlice) else null
+  val next_uop_ts2_hslice = if (matrix) Mux(next_uop_mopa, true.B,  next_uop.isHSlice) else null
 
   val last_check: Bool = {
     val ret = Wire(Bool())
@@ -148,8 +152,7 @@ class IssueSlot(
       ret       := Mux(uop.rt(RS1, isVector), !io.vbusy_status(pvs1),
                    Mux(uop.uses_scalar, ps, true.B))
     } else if(matrix) {
-      ret := Mux(uop.rt(RS1, isAccTile), p1.andR(),
-             Mux(uop.rt(RS1, isTrTile),  p1(uop.m_sidx), true.B))
+      ret := Mux(uop.rt(RS1, isMatrix), p1(uop.m_sidx), true.B)
     } else {
       ret := p1(0)
     }
@@ -171,9 +174,8 @@ class IssueSlot(
       val reduce_busy = uop.pvs2.map(pvs2 => pvs2.valid && io.vbusy_status(pvs2.bits)).reduce(_ || _)
       ret := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))
     } else if(matrix) {
-      ret := Mux(uop.rt(RS2, isAccTile), p2.andR(),
-             Mux(uop.rt(RS2, isTrTile),  p2(uop.m_sidx), 
-             Mux(uop.uses_scalar, ps, true.B)))
+      ret := Mux(uop.rt(RS2, isTrTile), p2(uop.m_sidx),
+             Mux(uop.rt(RS2, isInt),    ps, true.B))
     } else {
       ret := p2(0)
     }
@@ -189,7 +191,7 @@ class IssueSlot(
       val stale_pvd = uop.stale_pvd(rsel).bits
       ret          := !uop.rt(RD, isVector) || !io.vbusy_status(stale_pvd)
     } else if(matrix) {
-      ret := true.B
+      ret := Mux(uop.rt(RD, isAccTile), p3(uop.m_sidx), true.B)
     } else {
       ret := p3(0)
     }
@@ -295,17 +297,19 @@ class IssueSlot(
   //val next_pm = if (vector || usingVector && iqType == IQT_MEM.litValue) WireInit(pm) else null
   val in_p1 = if (vector || matrix) WireInit(p1) else null
   val in_p2 = if (vector || matrix) WireInit(p2) else null
-  val in_p3 = if (vector) WireInit(p3) else null
+  val in_p3 = if (vector || matrix) WireInit(p3) else null
   val next_ppred = WireInit(ppred)
   val wake_p1 = if (matrix) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
   val wake_p2 = if (matrix) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
+  val wake_p3 = if (matrix) Wire(Vec(numWakeupPorts, UInt(vLenb.W))) else null
 
   when (io.in_uop.valid) {
-    if(usingMatrix && matrix) {
+    if (usingMatrix && matrix) {
       in_p1 := ~io.in_uop.bits.pts1_busy
       in_p2 := ~io.in_uop.bits.pts2_busy
-      ps    := ~io.in_uop.bits.v_scalar_busy
-      sdata :=  io.in_uop.bits.v_scalar_data
+      in_p3 := ~io.in_uop.bits.pts3_busy
+      ps    := ~io.in_uop.bits.m_scalar_busy
+      sidx  :=  io.in_uop.bits.m_sidx
     } else if (usingVector) {
       if(vector) {
         in_p1 := ~io.in_uop.bits.prs1_busy
@@ -353,13 +357,17 @@ class IssueSlot(
 
   for (i <- 0 until numWakeupPorts) {
     val wk_valid = io.wakeup_ports(i).valid
-    val wk_pdst = io.wakeup_ports(i).bits.pdst
+    val wk_pdst  = io.wakeup_ports(i).bits.pdst
     if (matrix) {
       val wk_uop = io.wakeup_ports(i).bits.uop
-      val wk_ts1 = wk_valid && (wk_pdst === next_uop.pts1)
-      val wk_ts2 = wk_valid && (wk_pdst === next_uop.pts2)
-      wake_p1(i) := wk_ts1 << wk_uop.m_sidx
-      wake_p2(i) := wk_ts2 << wk_uop.m_sidx
+      val wk_ts1 = wk_valid && (wk_pdst === next_uop.prs1) && (wk_uop.dst_rtype === next_uop.lrs1_rtype)
+      val wk_ts2 = wk_valid && (wk_pdst === next_uop.prs2) && (wk_uop.dst_rtype === next_uop.lrs2_rtype)
+      val wk_ts3 = wk_valid && (wk_pdst === next_uop.prs3) &&  wk_uop.rt(RD, isAccTile)
+      wake_p1(i) := Mux(next_uop.rt(RS1, isTrTile) && wk_uop.isHSlice === next_uop_ts1_hslice, wk_ts1 << wk_uop.m_sidx,
+                    Mux(wk_uop.m_split_last, Fill(vLenb, wk_ts1), 0.U))
+      wake_p2(i) := Mux(next_uop.rt(RS2, isTrTile) && wk_uop.isHSlice === next_uop_ts2_hslice, wk_ts2 << wk_uop.m_sidx,
+                    Mux(wk_uop.m_split_last, Fill(vLenb, wk_ts2), 0.U))
+      wake_p3(i) := Mux(wk_uop.m_split_last, Fill(vLenb, wk_ts3), 0.U)
     } else {
       when (wk_valid && (wk_pdst === next_uop.prs1)) {
         next_p1 := true.B
@@ -386,7 +394,7 @@ class IssueSlot(
     when (io.spec_ld_wakeup(w).valid &&
       io.spec_ld_wakeup(w).bits === next_uop.prs1 &&
       next_uop.rt(RS1, isInt)) {
-      if (vector || matrix) {
+      if (matrix) {
         next_p1 := 0.U
       } else {
         next_p1 := true.B
@@ -397,7 +405,7 @@ class IssueSlot(
     when (io.spec_ld_wakeup(w).valid &&
       io.spec_ld_wakeup(w).bits === next_uop.prs2 &&
       next_uop.rt(RS2, isInt)) {
-      if (vector || matrix) {
+      if (matrix) {
         next_p2 := 0.U
       } else {
         next_p2 := true.B
@@ -435,10 +443,19 @@ class IssueSlot(
   }
 
   if (matrix) {
-    next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.orR
-    next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.orR
-    next_ps := Mux(io.in_uop.valid, in_ps, ps) | wake_ps
-    next_sdata := Mux(wake_ps, wake_sdata, Mux(io.in_uop.valid, in_sdata, sdata))
+    // when intupdate, we need to tell if data is really we need.
+    when (io.intupdate.map(_.valid).reduce(_||_)) {
+      val int_sel  = io.intupdate.map(u => u.valid && u.bits.uop.prs2 === next_uop.prs2 && next_uop.rt(RS2, isInt))
+      val int_data = io.intupdate.map(u => u.bits.data)
+      val needUpdatePS = VecInit(int_sel ++ fp_sel).asUInt().orR()
+      val updatedSData = Mux1H(int_sel ++ fp_sel, int_data ++ fp_data)
+      when(int_sel.asUInt.orR) {
+        ps   := true.B
+        sidx := Mux1H(int_sel, int_data)
+      }
+      assert(PopCount(int_sel) <= 1.U, "Multiple drivers to matrix intupdate")
+    }
+
   }
   if (vector) {
     // when intupdate or fpupdate, we need to tell if data is really we need.
@@ -505,11 +522,20 @@ class IssueSlot(
   io.out_uop.lrs2_rtype := next_lrs2_rtype
   io.out_uop.br_mask    := next_br_mask
   if(usingMatrix && matrix) {
-    io.uop.m_sidx := slot_uop.m_sidx
-    io.out_uop.ts1_busy := ~p1
-    io.out_uop.ts2_busy := ~p2
+    io.out_uop.pts1_busy := ~p1
+    io.out_uop.pts2_busy := ~p2
+    io.out_uop.pts3_busy := ~p3
+    io.out_uop.m_sidx    := sidx
     io.out_uop.m_scalar_busy := ~ps
-    io.out_uop.m_scalar_data := sdata
+    when(io.request && io.grant && next_uop_mopa) {
+      io.uop.m_split_first := sidx === 0.U
+      io.uop.m_split_last  := sidx === next_uop.m_split_ecnt - 1.U
+      io.out_uop.m_sidx    := sidx + 1.U
+      io.out_uop.prs3      := next_uop.pdst
+    }
+    next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.orR
+    next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.orR
+    next_p3 := Mux(io.in_uop.valid, in_p3, p3) | wake_p3.orR
   } else if (usingVector) {
     io.uop.v_eidx := slot_uop.v_eidx
     if (vector) {

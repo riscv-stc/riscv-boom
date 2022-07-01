@@ -575,7 +575,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     uop.m_split_first := mslice_idx === 0.U
     uop.m_split_last  := slice_last
-    uop.m_isHSlice    := !mslice_tt0
+    uop.isHSlice    := !mslice_tt0
 
   } // if usingMatrix
   io.deq.uop := uop

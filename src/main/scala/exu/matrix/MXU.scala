@@ -27,7 +27,8 @@ import AccTileConstants._
 
 class MacCtrls(val numAccTiles: Int = 2) extends Bundle 
 {
-  val ridx    = UInt(log2Ceil(numAccTiles).W)
+  val srcRidx = UInt(log2Ceil(numAccTiles).W)
+  val dstRidx = UInt(log2Ceil(numAccTiles).W)
   val srcType = UInt(3.W)
   val outType = UInt(3.W)
   val rm      = UInt(3.W)                      // rounding mode
@@ -216,7 +217,7 @@ class PE(
   val fpMac = Module(new FpMacUnit())
   fpMac.io.src1           := io.macReqSrcA
   fpMac.io.src2           := io.macReqSrcB
-  fpMac.io.src3           := c0(macReqCtrls.ridx)
+  fpMac.io.src3           := c0(macReqCtrls.srcRidx)
   fpMac.io.srcType        := macReqCtrls.srcType
   fpMac.io.outType        := macReqCtrls.outType
   fpMac.io.roundingMode   := macReqCtrls.rm
@@ -227,22 +228,22 @@ class PE(
   val intMac1 = Module(new IntMacUnit())
   intMac0.io.src1    := io.macReqSrcA( 7, 0)
   intMac0.io.src2    := io.macReqSrcB( 7, 0)
-  intMac0.io.src3    := c0(macReqCtrls.ridx)
+  intMac0.io.src3    := c0(macReqCtrls.srcRidx)
   intMac0.io.srcType := macReqCtrls.srcType
   intMac0.io.outType := macReqCtrls.outType
   intMac1.io.src1    := io.macReqSrcA( 7, 0)
   intMac1.io.src2    := io.macReqSrcB(15, 8)
-  intMac1.io.src3    := c1(macReqCtrls.ridx)
+  intMac1.io.src3    := c1(macReqCtrls.srcRidx)
   intMac1.io.srcType := macReqCtrls.srcType
   intMac1.io.outType := macReqCtrls.outType
 
   // latency = 1 for int8 mac; 3 for fp16 mac
   when(macReqValid && macReqCtrls.srcType(2)) {
-    c0(macReqCtrls.ridx) := fpMac.io.out
+    c0(macReqCtrls.dstRidx) := fpMac.io.out
     // c0(macReqCtrls.ridx) := intMac0.io.out
   } .elsewhen(macReqValid) {
-    c0(macReqCtrls.ridx) := intMac0.io.out
-    c1(macReqCtrls.ridx) := intMac1.io.out
+    c0(macReqCtrls.dstRidx) := intMac0.io.out
+    c1(macReqCtrls.dstRidx) := intMac1.io.out
   }
 
   io.macReqOut   := io.macReqIn
@@ -521,10 +522,12 @@ class MXU(
     // read or write row slices
     val rowSliceReq   = Flipped(Decoupled(new SliceCtrls(meshRows*tileRows)))
     val rowSliceWdata = Input(UInt(dataWidth.W))
+    val rowSliceResp  = Output(Valid(new SliceCtrls(meshRows*tileRows)))
     val rowSliceRdata = Decoupled(UInt(dataWidth.W))
     // read or write col slices
     val colSliceReq   = Flipped(Decoupled(new SliceCtrls(meshCols*tileCols*2)))
     val colSliceWdata = Input(UInt(dataWidth.W))
+    val colSliceResp  = Output(Valid(new SliceCtrls(meshCols*tileCols*2)))
     val colSliceRdata = Decoupled(UInt(dataWidth.W))
   })
 
@@ -533,11 +536,16 @@ class MXU(
 
   val macReqFire = io.macReq.valid & io.macReq.ready
 
+  // row slice writes and col slice writes may occured simultaneously when writing different acc tiles,
+  // should be guaranteed by rename/issue logic
   val sliceReady :: sliceWait :: Nil = Enum(2)
+  // val sliceReady :: sliceWait :: sliceCross :: Nil = Enum(3)
   val rowSliceState = RegInit(sliceReady)
   val colSliceState = RegInit(sliceReady)
   val rowVsCount    = RegInit(0.U(3.W))
   val colVsCount    = RegInit(0.U(3.W))
+  // val rowCrossCount = RegInit(0.U(log2Ceil(meshCols).W))
+  // val colCrossCount = RegInit(0.U(log2Ceil(meshRows).W))
   val rowRespCount  = RegInit(0.U(2.W))
   val colRespCount  = RegInit(0.U(2.W))
   val rowSliceReqValid  = RegInit(false.B)
@@ -683,6 +691,8 @@ class MXU(
   io.colSliceReq.ready   := (colSliceState === sliceReady)
   // output control
   io.macResp             := mesh.io.macResp
+  io.rowSliceResp        := mesh.io.rowSliceReqOut
+  io.colSliceResp        := mesh.io.colSliceReqOut
 
   val rowRespCtrls     = mesh.io.rowSliceReqOut.bits
   val rowSliceRdataMux = WireInit(VecInit(Seq.fill(meshCols*tileCols*2)(0.U(8.W))))

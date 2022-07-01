@@ -185,27 +185,22 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val vstart           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // VSTART CSR
   val vstartSrc        = if (usingVector) UInt(1.W) else false.B      // vstart source: CSR or speculative zero
   // matrix extension
-  val is_rvm           = if (usingMatrix) Bool()          else false.B
-  val ptd              = if (usingMatrix) UInt(tpregSz.W) else null
-  val stale_ptd        = if (usingMatrix) UInt(tpregSz.W) else null
-  val pts1             = if (usingMatrix) UInt(tpregSz.W) else null
-  val pts2             = if (usingMatrix) UInt(tpregSz.W) else null
+  val is_rvm           = if (usingMatrix) Bool()          else null
   val pts1_busy        = if (usingMatrix) UInt(vLenb.W)   else null
   val pts2_busy        = if (usingMatrix) UInt(vLenb.W)   else null
   val pts3_busy        = if (usingMatrix) UInt(vLenb.W)   else null
   val m_scalar_busy    = if (usingMatrix) Bool()          else null
-  val m_scalar_data    = if (usingMatrix) UInt(eLen.W)    else null
-  val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null   // eew encoded in load/store instructions
   val m_sidx           = if (usingMatrix) UInt(vLenSz.W)  else null   // slice index
-  val m_is_split       = if (usingMatrix) Bool()          else false.B
-  val m_split_ecnt     = if (usingMatrix) UInt((vLenSz+1).W) else null
-  val m_split_first    = if (usingMatrix) Bool()          else false.B
-  val m_split_last     = if (usingMatrix) Bool()          else false.B
-  val m_isHSlice       = if (usingMatrix) Bool()          else false.B
+  val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null   // eew encoded in load/store instructions
+  val m_is_split       = if (usingMatrix) Bool()          else null
+  val m_split_first    = if (usingMatrix) Bool()          else null
+  val m_split_last     = if (usingMatrix) Bool()          else null
+  val m_split_ecnt     = if (usingMatrix) UInt(vLenSz.W)  else null
   val ts1_eew          = if (usingMatrix) UInt(2.W)       else null
   val ts2_eew          = if (usingMatrix) UInt(2.W)       else null
   val td_eew           = if (usingMatrix) UInt(2.W)       else null
   val mconfig          = if (usingMatrix) new MConfig     else null
+  val isHSlice         = if (usingMatrix) Bool()          else null
   // purely debug information
   val debug_wdata      = UInt(xLen.W)
   val debug_events     = new DebugStageEvents
@@ -273,7 +268,7 @@ class CtrlSignals(implicit p: Parameters) extends BoomBundle()
   val is_vmlogic  = if (usingVector) Bool() else null
   val is_vmscmp   = if (usingVector) Bool() else null
   //val is_vmfscmp   = if (usingVector) Bool() else null
-  val is         = if (usingMatrix) Bool() else null
+  val is          = if (usingMatrix) Bool() else null
   val isV         = if (usingMatrix) Bool() else null
 }
 
@@ -1133,6 +1128,8 @@ object MicroOpcodes extends Enumeration {
   val uopMSE_enum         = Value
   val uopMSE              = uopMSE_enum.id.U(UOPC_SZ.W)
   //marith
+  val uopMCLRACC_enum     = Value
+  val uopMCLRACC          = uopMCLRACC_enum.id.U(UOPC_SZ.W)
   val uopMOPA_enum        = Value
   val uopMOPA             = uopMOPA_enum.id.U(UOPC_SZ.W)
   val uopMWOPA_enum       = Value

@@ -32,7 +32,6 @@ import boom.util._
  * @param supportedUnitsArray seq of SupportedFuncUnits classes indicating what the functional units do
  * @param numTotalReadPorts number of read ports
  * @param numReadPortsArray execution units read port sequence
- * @param numTotalBypassPorts number of bypass ports out of the execution units
  * @param registerWidth size of register in bits
  */
 class TileRegisterRead(
@@ -43,8 +42,6 @@ class TileRegisterRead(
                         // each exe_unit must tell us how many max
                         // operands it can accept (the sum should equal
                         // numTotalReadPorts)
-  numTotalBypassPorts: Int,
-  numTotalPredBypassPorts: Int,
   registerWidth: Int
 )(implicit p: Parameters) extends BoomModule with freechips.rocketchip.tile.HasFPUParameters
 {
@@ -54,7 +51,7 @@ class TileRegisterRead(
     val iss_uops   = Input(Vec(issueWidth, new MicroOp()))
 
     // interface with register file's read ports
-    val tileReadPorts = Vec(numTotalReadPorts, new TrTileRegReadPortIO())
+    val tileReadPorts = Flipped(Vec(numTotalReadPorts, new TrTileRegReadPortIO()))
 
     // send micro-ops to the execution pipelines
     val exe_reqs = Vec(issueWidth, (new DecoupledIO(new FuncUnitReq(registerWidth))))
@@ -124,8 +121,6 @@ class TileRegisterRead(
   //-------------------------------------------------------------
   // set outputs to execute pipelines
   for (w <- 0 until issueWidth) {
-    val numReadPorts = numReadPortsArray(w)
-
     io.exe_reqs(w).valid          := exe_reg_valids(w)
     io.exe_reqs(w).bits.uop       := exe_reg_uops(w)
     io.exe_reqs(w).bits.rs1_data  := exe_reg_ts1_data(w)
