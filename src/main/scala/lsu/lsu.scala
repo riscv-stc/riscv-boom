@@ -1455,7 +1455,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   io.core.vrf_wbk.bits.uop      := Mux(vldq_resp_valid, vldq_resp_e.bits.uop,   vlud_dat_q.io.deq.bits.uop)
   io.core.vrf_wbk.bits.data     := Mux(vldq_resp_valid, Mux(vldq_resp_e.bits.shdir, vldq_resp_data_shr, vldq_resp_data_shl),
                                                         vlud_dat_q.io.deq.bits.data)
-//io.core.vrf_wbk.bits.vmask    := ... //FIXME
+  io.core.vrf_wbk.bits.vmask    := Mux(vldq_resp_valid, vldq_resp_e.bits.vmask, Fill(vLenb, 1.U(1.W)))
   io.core.vrf_wbk.bits.predicated := false.B
   io.core.vrf_wbk.bits.fflags.valid := false.B
   when (vlud_dat_q.io.deq.valid && !vldq_resp_valid) {

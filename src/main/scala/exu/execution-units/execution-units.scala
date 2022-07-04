@@ -149,7 +149,7 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false)(impl
   } else { // vector
     val vec_width = issueParams.find(_.iqType == IQT_VEC.litValue).get.issueWidth
     for (w <- 0 until vec_width) {
-      val vec_exe_unit = Module(new VecExeUnit(hasVMX = false,
+      val vec_exe_unit = Module(new VecExeUnit(//hasVMX = false,
                                                hasIfpu = true,
                                                hasFpu = true,
                                                hasFdiv = usingFDivSqrt))

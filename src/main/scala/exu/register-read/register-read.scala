@@ -368,7 +368,7 @@ class RegisterRead(
         //val vslideup           = exe_reg_uops(w).uopc === uopVSLIDEUP
         //val vcompress          = exe_reg_uops(w).uopc === uopVCOMPRESS
         //val perm_idx           = exe_reg_uops(w).v_perm_idx
-        val is_active          = Mux(is_masked, exe_reg_rvm_data(w)(v_eidx), true.B) && v_eidx < vl && v_eidx >= exe_reg_uops(w).vstart
+        //val is_active          = Mux(is_masked, exe_reg_rvm_data(w)(v_eidx), true.B) && v_eidx < vl && v_eidx >= exe_reg_uops(w).vstart
                                  //Mux(is_vmaskInsn, vmaskInsn_active,
                                  //Mux(vslideup,  exe_reg_uops(w).v_eidx >= exe_reg_uops(w).v_scalar_data && (exe_reg_rvm_data(w) || !is_masked),
                                  //Mux(is_masked || vcompress, exe_reg_rvm_data(w), true.B))) && Mux(vcompress, perm_idx, v_eidx) < vl && v_eidx >= io.csr_vstart
@@ -386,7 +386,7 @@ class RegisterRead(
 
         //val is_perm_fdbk       = exe_reg_uops(w).uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS) && exe_reg_uops(w).v_perm_busy
         //io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && is_active) && (!is_perm_fdbk || vcompress && (!exe_reg_uops(w).v_perm_busy || exe_reg_rvm_data(w)))
-        io.exe_reqs(w).valid    := exe_reg_valids(w) && (!is_sta || is_active)
+        io.exe_reqs(w).valid    := exe_reg_valids(w) //&& (!is_sta || is_active)
         //val vmove: Bool = VecInit(Seq(exe_reg_uops(w).uopc === uopVFMV_S_F,
           //exe_reg_uops(w).uopc === uopVFMV_F_S,
           //exe_reg_uops(w).uopc === uopVMV_X_S,
@@ -404,7 +404,7 @@ class RegisterRead(
         //io.vecUpdate(w).bits.uop.v_active   := false.B //exe_reg_rvm_data(w) && (v_eidx < vl)
         //io.vecUpdate(w).bits.uop.v_perm_idx := 0.U //perm_idx + (v_eidx < vl)
         //io.vecUpdate(w).bits.data           := 0.U //exe_reg_rs1_data(w)
-        io.exe_reqs(w).bits.uop.v_active := is_active //Mux(vmove, !v_eidx.orR(), is_active)
+        //io.exe_reqs(w).bits.uop.v_active := is_active //Mux(vmove, !v_eidx.orR(), is_active)
         when(io.exe_reqs(w).bits.uop.is_rvv && io.exe_reqs(w).bits.uop.uopc.isOneOf(uopVFMV_V_F, uopVFMV_S_F)) {
           io.exe_reqs(w).bits.uop.fu_code := boom.exu.FUConstants.FU_ALU
         }

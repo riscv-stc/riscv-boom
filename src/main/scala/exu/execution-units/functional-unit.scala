@@ -51,7 +51,7 @@ object FUConstants extends Enumeration
   val FU_FDV_ID = Value
   val FU_I2F_ID = Value
   val FU_F2I_ID = Value
-  val FU_VMX_ID = Value // vec load /store index vec store data
+  //val FU_VMX_ID = Value // vec load /store index vec store data
   val FU_MAC_ID = Value
   val FU_FR7_ID = Value // vfrsqrt7 / vfrec7
   val FU_VMASKU_ID = Value
@@ -70,7 +70,7 @@ object FUConstants extends Enumeration
   val FU_FDV    = (1<<FU_FDV_ID.id).U(FUC_SZ.W)
   val FU_I2F    = (1<<FU_I2F_ID.id).U(FUC_SZ.W)
   val FU_F2I    = (1<<FU_F2I_ID.id).U(FUC_SZ.W)
-  val FU_VMX    = (1<<FU_VMX_ID.id).U(FUC_SZ.W)
+  //val FU_VMX    = (1<<FU_VMX_ID.id).U(FUC_SZ.W)
   val FU_MAC    = (1<<FU_MAC_ID.id).U(FUC_SZ.W)
   val FU_FR7    = (1<<FU_FR7_ID.id).U(FUC_SZ.W)
   val FU_VMASKU = (1<<FU_VMASKU_ID.id).U(FUC_SZ.W)
@@ -79,7 +79,7 @@ object FUConstants extends Enumeration
   // FP stores generate data through FP F2I, and generate address through MemAddrCalc
   def FU_F2IMEM = ((1<<FU_MEM_ID.id) | (1<<FU_F2I_ID.id)).U(FUC_SZ.W)
   // VEC load / store, vs3 read by ALU of Vec Exe Unit
-  def FU_MEMV   = ((1<<FU_MEM_ID.id) | (1<<FU_VMX_ID.id)).U(FUC_SZ.W)
+  //def FU_MEMV   = ((1<<FU_MEM_ID.id) | (1<<FU_VMX_ID.id)).U(FUC_SZ.W)
   def FU_IVRP   = ((1<<FU_ALU_ID.id) | (1<<FU_VRP_ID.id)).U(FUC_SZ.W)
   def FU_FVRP   = ((1<<FU_FPU_ID.id) | (1<<FU_VRP_ID.id)).U(FUC_SZ.W)
 }
@@ -107,7 +107,7 @@ class SupportedFuncUnits(
   val fdiv: Boolean = false,
   val ifpu: Boolean = false,
   val fr7:  Boolean = false,
-  val vmx:  Boolean = false,
+  //val vmx:  Boolean = false,
   val vector: Boolean = false)
 {
 }
@@ -142,6 +142,7 @@ class FuncUnitResp(val dataWidth: Int)(implicit p: Parameters) extends BoomBundl
 {
   val predicated = Bool() // Was this response from a predicated-off instruction
   val data = UInt(dataWidth.W)
+  val vmask = if (usingVector) UInt(vLenb.W) else UInt(0.W)
   val fflags = new ValidIO(new FFlagsResp)
   val addr = UInt((vaddrBits+1).W) // only for maddr -> LSU
   val mxcpt = new ValidIO(UInt((freechips.rocketchip.rocket.Causes.all.max+2).W)) //only for maddr->LSU
@@ -705,7 +706,7 @@ class IntToFPUnit(latency: Int, vector: Boolean = false)(implicit p: Parameters)
     val vs2_fmt = Mux(vs2_sew === 3.U, D, Mux(vs2_sew === 2.U, S, H))
     when (io.req.valid && io_req.uop.is_rvv) {
       assert(io_req.uop.fp_val, "unexpected fp_val")
-      assert(io_req.uop.v_active, "unexpected inactive split")
+      //assert(io_req.uop.v_active, "unexpected inactive split")
       assert(vsew <= 3.U, "unsupported vsew")
       assert(vd_sew >= 1.U && vd_sew <= 3.U, "unsupported vd_sew")
     }
@@ -817,7 +818,7 @@ class DivUnit(dataWidth: Int)(implicit p: Parameters)
   div.io.req.bits.in1 := io.req.bits.rs1_data
   div.io.req.bits.in2 := io.req.bits.rs2_data
   if(usingVector) {
-    when(io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active) {
+    when(io.req.bits.uop.is_rvv) { //&& !io.req.bits.uop.v_active) {
       div.io.req.bits.in1 := io.req.bits.rs3_data
       div.io.req.bits.in2 := 1.U
     } .elsewhen(io.req.bits.uop.is_rvv) {
@@ -1177,6 +1178,7 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   io.resp.bits.uop.vxsat := vxsatOut.orR
   io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew), 
                              Seq(e8Out.asUInt, e16Out.asUInt, e32Out.asUInt, e64Out.asUInt))
+  io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
 }
 
 /**
@@ -1234,6 +1236,7 @@ class FR7Unit(latency: Int)(implicit p: Parameters)
   fr7.io.active  := true.B
 
   io.resp.bits.data              := fr7.io.out.bits.data
+  io.resp.bits.vmask             := Fill(vLenb, 1.U(1.W))
   io.resp.bits.fflags.valid      := fr7.io.out.valid
   io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
   io.resp.bits.fflags.bits.flags := fr7.io.out.bits.exc
@@ -1337,6 +1340,7 @@ class VecFR7Unit(latency: Int, dataWidth: Int)(implicit p: Parameters)
         Cat(hfr7.zipWithIndex.map{case(m,i) => Mux(m.io.out.valid, m.io.out.bits.data(15,0), reqpipe.bits.rs3_data(i*16+15, i*16))}.reverse)))
 
   io.resp.bits.data := fr7_out_data
+  io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
   io.resp.bits.fflags.valid := io.resp.valid
   io.resp.bits.fflags.bits.flags :=
     Mux(frepipe.dfr7, dfr7.map(m => Mux(m.io.out.valid, m.io.out.bits.exc, 0.U)).reduce(_ | _),
@@ -1474,7 +1478,7 @@ class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
  * @param dataWidth data to be passed into the functional unit
  */
 // implemented with BranchKillableQueue
-class VMXUnit(dataWidth: Int)(implicit p: Parameters) extends FunctionalUnit(
+/*class VMXUnit(dataWidth: Int)(implicit p: Parameters) extends FunctionalUnit(
     isPipelined = false,
     numStages = 4,
     numBypassStages = 0,
@@ -1501,7 +1505,7 @@ class VMXUnit(dataWidth: Int)(implicit p: Parameters) extends FunctionalUnit(
   io.resp.bits.data              := queue.io.deq.bits.data
   io.resp.bits.predicated        := queue.io.deq.bits.predicated
   io.resp.bits.fflags            := queue.io.deq.bits.fflags
-}
+}*/
 
 /**
  * Divide functional unit.
@@ -1525,17 +1529,18 @@ class SRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFunct
   div.io.isW        := !io.req.bits.uop.ctrl.fcn_dw
   if(usingVector) {
     val isSigned = !io.req.bits.uop.rt(RS2, isUnsignedV)
-    when(io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active) {
-      div.io.isHi   := false.B
-      div.io.src(0) := Mux(isSigned, Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
-                                           Seq(io.req.bits.rs3_data( 7, 0).sextTo(eLen),
-                                               io.req.bits.rs3_data(15, 0).sextTo(eLen),
-                                               io.req.bits.rs3_data(31, 0).sextTo(eLen),
-                                               io.req.bits.rs3_data(63, 0))),
-                                     Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
-                                           Seq(io.req.bits.rs3_data(7, 0), io.req.bits.rs3_data(15, 0), io.req.bits.rs3_data(31, 0), io.req.bits.rs3_data(63, 0))))
-      div.io.src(1) := 1.U
-    } .elsewhen(io.req.bits.uop.is_rvv) {
+    //when(io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active) {
+    when(io.req.bits.uop.is_rvv) {
+      //div.io.isHi   := false.B
+      //div.io.src(0) := Mux(isSigned, Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
+                                           //Seq(io.req.bits.rs3_data( 7, 0).sextTo(eLen),
+                                               //io.req.bits.rs3_data(15, 0).sextTo(eLen),
+                                               //io.req.bits.rs3_data(31, 0).sextTo(eLen),
+                                               //io.req.bits.rs3_data(63, 0))),
+                                     //Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
+                                           //Seq(io.req.bits.rs3_data(7, 0), io.req.bits.rs3_data(15, 0), io.req.bits.rs3_data(31, 0), io.req.bits.rs3_data(63, 0))))
+      //div.io.src(1) := 1.U
+    //} .elsewhen(io.req.bits.uop.is_rvv) {
       div.io.src(0) := Mux(isSigned, Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
                                            Seq(io.req.bits.rs2_data( 7, 0).sextTo(eLen),
                                                io.req.bits.rs2_data(15, 0).sextTo(eLen),
@@ -1811,6 +1816,7 @@ class VecALUUnit(
     r_pred(i) := r_pred(i-1)
   }
   io.resp.bits.data := r_data(numStages-1)
+  io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
   io.resp.bits.predicated := r_pred(numStages-1)
   // Bypass
   // for the ALU, we can bypass same cycle as compute
@@ -2439,6 +2445,7 @@ class VecMaskUnit(
             Mux(respUop.uopc.isOneOf(uopVMSBF, uopVMSIF, uopVMSOF), vmaskOutSt2,
                 0.U))))
   io.resp.bits.data         := out
+  io.resp.bits.vmask        := Fill(vLenb, 1.U(1.W))
   io.resp.bits.predicated   := false.B
   io.resp.bits.fflags.valid := false.B
 }
@@ -2552,6 +2559,7 @@ class VecIntToFPUnit(dataWidth: Int, latency: Int)(implicit p: Parameters)
 
   io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
                              Seq(0.U, e16DataOut.asUInt, e32DataOut.asUInt, e64DataOut.asUInt))
+  io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
   io.resp.bits.fflags.valid      := io.resp.valid
   io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
   io.resp.bits.fflags.bits.flags := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),

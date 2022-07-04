@@ -787,12 +787,12 @@ object VDataSel {
 /**
  * Object to check if MicroOp was killed due to an inactive vector mask
  */
-object IsKilledByVM
+/*object IsKilledByVM
 {
   def apply(vmop: Vec[Valid[MicroOp]], uop: MicroOp): Bool = {
     return vmop.map(u => u.valid && !u.bits.v_active && u.bits.rob_idx === uop.rob_idx).reduce(_||_)
   }
-}
+}*/
 
 object nrVecGroup
 {

@@ -102,7 +102,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
                          vecWidth,
                          exe_units.withFilter(_.readsVrf).map(_.supportedFuncUnits),
                          exe_units.numVrfReadPorts,
-                         exe_units.withFilter(_.readsVrf).map(x => if (x.hasVMX) 2 else 4),
+                         exe_units.withFilter(_.readsVrf).map(x => 4),
                          0, // No bypass for VEC
                          0,
                          vLen, float = false, vector = true))

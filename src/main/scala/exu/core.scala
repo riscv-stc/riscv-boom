@@ -176,6 +176,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val int_iss_wakeups = Wire(Vec(numIntIssueWakeupPorts, Valid(new ExeUnitResp(xLen))))
   val int_ren_wakeups = Wire(Vec(numIntRenameWakeupPorts, Valid(new ExeUnitResp(xLen))))
   val pred_wakeup = Wire(Valid(new ExeUnitResp(1)))
+  pred_wakeup.bits.vmask := 0.U
 
   val vl_wakeup_dec = RegInit(0.U.asTypeOf(Valid(new VlWakeupResp())))
   val vl_wakeup = WireInit(0.U.asTypeOf(Valid(new VlWakeupResp())))

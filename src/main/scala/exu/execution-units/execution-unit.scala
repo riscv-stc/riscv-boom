@@ -41,6 +41,7 @@ class ExeUnitResp(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
   with HasBoomUOP
 {
   val data = Bits(dataWidth.W)
+  val vmask = if (usingVector) UInt((dataWidth/8).W) else UInt(0.W)
   val predicated = Bool() // Was this predicated off?
   val fflags = new ValidIO(new FFlagsResp) // write fflags to ROB // TODO: Do this better
 }
@@ -108,7 +109,7 @@ abstract class ExecutionUnit(
   val hasIfpu          : Boolean       = false,
   val hasFpiu          : Boolean       = false,
   val hasVector        : Boolean       = false,
-  val hasVMX           : Boolean       = false,
+  //val hasVMX           : Boolean       = false,
   val hasRocc          : Boolean       = false
   )(implicit p: Parameters) extends BoomModule
 {
@@ -377,6 +378,7 @@ class ALUExeUnit(
     queue.io.enq.valid       := ifpu.io.resp.valid
     queue.io.enq.bits.uop    := ifpu.io.resp.bits.uop
     queue.io.enq.bits.data   := ifpu.io.resp.bits.data
+    queue.io.enq.bits.vmask  := Fill(dataWidth/8, 1.U(1.W))
     queue.io.enq.bits.predicated := ifpu.io.resp.bits.predicated
     queue.io.enq.bits.fflags := ifpu.io.resp.bits.fflags
     queue.io.brupdate := io.brupdate
@@ -578,6 +580,7 @@ class FPUExeUnit(
                                  fpu.io.resp.bits.uop.uopc =/= uopSTA) // STA means store data gen for floating point
     queue.io.enq.bits.uop    := fpu.io.resp.bits.uop
     queue.io.enq.bits.data   := fpu.io.resp.bits.data
+    queue.io.enq.bits.vmask  := Fill(dataWidth/8, 1.U(1.W))
     queue.io.enq.bits.predicated := fpu.io.resp.bits.predicated
     queue.io.enq.bits.fflags := fpu.io.resp.bits.fflags
     queue.io.brupdate          := io.brupdate
@@ -590,6 +593,7 @@ class FPUExeUnit(
     fp_sdq.io.enq.valid      := io.req.valid && io.req.bits.uop.uopc === uopSTA && !IsKilledByBranch(io.brupdate, io.req.bits.uop)
     fp_sdq.io.enq.bits.uop   := io.req.bits.uop
     fp_sdq.io.enq.bits.data  := ieee(io.req.bits.rs2_data)
+    fp_sdq.io.enq.bits.vmask := Fill(dataWidth/8, 1.U(1.W))
     fp_sdq.io.enq.bits.predicated := false.B
     fp_sdq.io.enq.bits.fflags := DontCare
     fp_sdq.io.brupdate         := io.brupdate
@@ -617,7 +621,7 @@ class FPUExeUnit(
  * @param hasDiv does the exe unit have a divider
  */
 class VecExeUnit(
-  hasVMX         : Boolean = false,
+  //hasVMX         : Boolean = false,
   hasAlu         : Boolean = true,
   hasMacc        : Boolean = true,
   hasVMaskUnit   : Boolean = true,
@@ -643,8 +647,8 @@ class VecExeUnit(
     hasFpu           = hasFpu,
     hasFpiu          = hasFpu,
     hasFdiv          = hasFdiv,
-    hasVector        = true,
-    hasVMX           = hasVMX
+    hasVector        = true
+    //hasVMX           = hasVMX
 ) with freechips.rocketchip.rocket.constants.MemoryOpConstants
 {
   val out_str =
@@ -661,7 +665,7 @@ class VecExeUnit(
   override def toString: String = out_str.toString
 
   val div_busy  = WireInit(false.B)
-  val vmx_busy  = WireInit(false.B)
+  //val vmx_busy  = WireInit(false.B)
   val fdiv_busy = WireInit(false.B)
   val vrp_busy  = WireInit(false.B)
 
@@ -675,7 +679,7 @@ class VecExeUnit(
                  Mux(!div_busy && hasDiv.B,   FU_DIV, 0.U) |
                  Mux(hasIfpu.B,               FU_I2F, 0.U) |
                  Mux(!vrp_busy && hasFpu.B,   FU_FPU | FU_F2I, 0.U) |
-                 Mux(!vmx_busy && hasVMX.B,   FU_VMX, 0.U) |
+                 //Mux(!vmx_busy && hasVMX.B,   FU_VMX, 0.U) |
                  Mux(!fdiv_busy && hasFdiv.B, FU_FDV, 0.U) |
                  Mux(hasFdiv.B,               FU_FR7, 0.U) |
                  Mux(!vrp_busy && hasAlu.B,   FU_VRP, 0.U)
@@ -771,18 +775,18 @@ class VecExeUnit(
 
   // VMX Unit -------------------------------
   // It is the only FU in VMX pipe
-  var vmx: VMXUnit = null
-  if (hasVMX) {
-    vmx = Module(new VMXUnit(vLen))
-    vmx.suggestName("vmx_unit")
-    vmx.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMX)
+  //var vmx: VMXUnit = null
+  //if (hasVMX) {
+    //vmx = Module(new VMXUnit(vLen))
+    //vmx.suggestName("vmx_unit")
+    //vmx.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMX)
 
     // separate write port
-    vmx.io.resp.ready := io.vresp.ready
-    vmx_busy := !vmx.io.req.ready
+    //vmx.io.resp.ready := io.vresp.ready
+    //vmx_busy := !vmx.io.req.ready
 
-    vec_fu_units += vmx
-  }
+    //vec_fu_units += vmx
+  //}
 
   // Div/Rem Unit with SRT4 Divider --------
   /*
@@ -875,8 +879,7 @@ class VecExeUnit(
     f.io.req.bits.pred_data := io.req.bits.pred_data
     f.io.req.bits.kill      := io.req.bits.kill
     f.io.brupdate           := io.brupdate
-    if (f != vdiv && f != fdivsqrt && f!= vmx) 
-      f.io.resp.ready := io.vresp.ready
+    if (f != vdiv && f != fdivsqrt) f.io.resp.ready := io.vresp.ready
   })
 
   if (hasAlu) {
@@ -943,6 +946,7 @@ class VecExeUnit(
     assert(!vecToFPQueue.io.enq.valid || vsew =/= 0.U, "Unexpected FP vsew");
     vecToFPQueue.io.enq.bits.uop.mem_size := vsew - 1.U //2.U
     vecToFPQueue.io.enq.bits.data := rs2_data_elem0
+    vecToFPQueue.io.enq.bits.vmask := Fill(eLen/8, 1.U(1.W))
     vecToFPQueue.io.enq.bits.predicated := false.B
     vecToFPQueue.io.enq.bits.fflags := DontCare
     vecToFPQueue.io.brupdate := io.brupdate
@@ -968,6 +972,7 @@ class VecExeUnit(
     vecToIntQueue.io.enq.valid := vmv_valid | vmaskValid
     vecToIntQueue.io.enq.bits.uop := Mux(vmv_valid, io.req.bits.uop, vmaskUop)
     vecToIntQueue.io.enq.bits.data := Mux(vmv_valid, rs2_data_elem0, Mux(vmaskValid, vmaskUnit.io.resp.bits.data, 0.U))
+    vecToIntQueue.io.enq.bits.vmask:= Fill(eLen/8, 1.U(1.W))
     vecToIntQueue.io.enq.bits.uop.v_split_last := Mux(vmv_valid, vmv_is_last, vmaskUop.v_split_last)
     vecToIntQueue.io.enq.bits.predicated := false.B
     vecToIntQueue.io.enq.bits.fflags := DontCare
@@ -995,7 +1000,7 @@ class VecExeUnit(
       fdiv   = hasFdiv,
       ifpu   = hasIfpu,
       fr7    = hasFdiv,
-      vmx    = hasVMX,
+      //vmx    = hasVMX,
       vector = true
     )
   }
@@ -1295,7 +1300,7 @@ class VecExeUT(timeout: Int = 10000)(implicit p: Parameters)
     }
   }
 
-  val dut = Module(new VecExeUnit(hasVMX=false, hasIfpu=true, hasFpu=true, hasFdiv=true))
+  val dut = Module(new VecExeUnit(hasIfpu=true, hasFpu=true, hasFdiv=true))
   dut.io := DontCare
   dut.io.req <> dut_req
   dut.io.iresp.ready := true.B

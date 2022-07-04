@@ -156,7 +156,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val pvm              = if (usingVector) UInt(vpregSz.W) else UInt(0.W)
   val v_scalar_busy    = if (usingVector) Bool() else false.B
   val v_scalar_data    = if (usingVector) UInt(eLen.W) else UInt(0.W) // scalar value for vector pipe
-  val v_active         = if (usingVector) Bool() else false.B
+  //val v_active         = if (usingVector) Bool() else false.B
   val v_ls_ew          = if (usingVector) UInt(2.W) else UInt(0.W)    // EEW encoded in load/store instruction
   val v_unmasked       = if (usingVector) Bool() else false.B
   val v_eidx           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // element-index
