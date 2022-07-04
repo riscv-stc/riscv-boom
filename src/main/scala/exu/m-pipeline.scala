@@ -154,11 +154,10 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   }
   // TODO: wrap vlsuReadReq with uops
   val vlsuReadPort = WireInit(new TrTileRegReadPortIO())
-  vlsuReadPort.msew      := 
-  vlsuReadPort.tilewidth := 
-  vlsuReadPort.tt        := 
-  vlsuReadPort.addr      := 
-  vlsuReadPort.index     := 
+  vlsuReadPort.msew   := 0.U
+  vlsuReadPort.tt     := io.vlsuReadReq.tt
+  vlsuReadPort.addr   := io.vlsuReadReq.ridx
+  vlsuReadPort.index  := io.vlsuReadReq.sidx
   trtileReg.io.readPorts.last := vlsuReadPort
 
   io.vlsuReadResp.valid := RegNext(io.vlsuReadReq.valid)
@@ -188,12 +187,11 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
   // TODO: wrap vlsu write with uops for tr_tile write control
   trtileReg.io.writePorts(0).valid          := io.vlsuWritePort.valid
-  trtileReg.io.writePorts(0).bits.msew      := io.vlsuWritePort.bits.addr
-  trtileReg.io.writePorts(0).bits.tilewidth := io.vlsuWritePort.bits.data
-  trtileReg.io.writePorts(0).bits.tt        := MaskExploder(io.vlsuWritePort.bits.byteMask, vLen)
-  trtileReg.io.writePorts(0).bits.addr      := 
-  trtileReg.io.writePorts(0).bits.index     := 
-  trtileReg.io.writePorts(0).bits.data      := 
+  trtileReg.io.writePorts(0).bits.msew      := 0.U
+  trtileReg.io.writePorts(0).bits.tt        := io.vlsuWritePort.tt
+  trtileReg.io.writePorts(0).bits.addr      := io.vlsuWritePort.ridx
+  trtileReg.io.writePorts(0).bits.index     := io.vlsuWritePort.sidx
+  trtileReg.io.writePorts(0).bits.data      := MaskExploder(io.vlsuWritePort.bits.byteMask, vLen)
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Commit Stage ****
@@ -207,12 +205,14 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   w_cnt = 0
   //vld write back clears busy table in rename but not busy bit in rob entry.
   io.wakeups(w_cnt) <> DontCare
-  io.wakeups(w_cnt).valid := io.vlsuLoadWakeUp.valid
-  io.wakeups(w_cnt).bits.data := 0.U
+  io.wakeups(w_cnt).valid              := io.vlsuLoadWakeUp.valid
+  io.wakeups(w_cnt).bits.data          := 0.U
   io.wakeups(w_cnt).bits.uop.is_rvm    := true.B
   io.wakeups(w_cnt).bits.uop.uses_ldq  := true.B
-  io.wakeups(w_cnt).bits.uop.dst_rtype := RT_TR
-  io.wakeups(w_cnt).bits.uop.pdst      := io.vlsuLoadWakeUp.bits
+  io.wakeups(w_cnt).bits.uop.dst_rtype := Mux(io.vlsuLoadWakeUp.tt(1), RT_TR, RT_ACC)
+  io.wakeups(w_cnt).bits.uop.pdst      := io.vlsuLoadWakeUp.ridx
+  io.wakeups(w_cnt).bits.uop.m_sidx    := io.vlsuLoadWakeUp.sidx
+  io.wakeups(w_cnt).bits.uop.isHSlice  := !io.vlsuLoadWakeUp.tt(0)
   // from MatExeUnit
   w_cnt = 1
   for(eu <- exe_units) {
