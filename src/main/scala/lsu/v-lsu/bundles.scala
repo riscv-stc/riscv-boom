@@ -90,6 +90,10 @@ class LoadStoreQueueEntryBundleBase(ap: VLSUArchitecturalParams) extends VLSUBun
   val tlbMasks: Vec[UInt] = Vec(8, UInt(ap.vLenb.W))
 
   val brMask: UInt = UInt(ap.maxBrCount.W)
+  // appended for mle and mse instructions
+  val ridx: UInt = UInt(ap.vpregSz.W)
+  val sidx: UInt = UInt(ap.vLenSz.W)
+  val tt:   UInt = UInt(2.W)
 }
 
 
@@ -423,7 +427,7 @@ class VLSUTopBundle(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
 
   val brUpdate = Input(new BranchUpdateInfo(ap))
   /** VRFIO */
-  val toVrf: VLSUVRFIO = new VLSUVRFIO(ap)
+  val toVrf:   VLSUVRFIO = new VLSUVRFIO(ap)
   val fromVrf: VRFVLSUIO = new VRFVLSUIO(ap)
 
   /** Dispatch stage to VLSU. */

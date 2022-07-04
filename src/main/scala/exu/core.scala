@@ -1631,27 +1631,30 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   issue_units.map(_.io.tsc_reg := debug_tsc_reg)
   issue_units.map(_.io.brupdate := brupdate)
   issue_units.map(_.io.flush_pipeline := RegNext(rob.io.flush.valid))
-  if (usingVector) {
-    //mem_iss_unit.io.vmupdate := vmupdate
-    //int_iss_unit.io.vmupdate.map(_.valid := false.B)
-    //int_iss_unit.io.vmupdate.map(_.bits := DontCare)
-    v_pipeline.io.intupdate := iregister_read.io.intupdate
-    v_pipeline.io.fpupdate := fp_pipeline.io.fpupdate
-    v_pipeline.io.vlsuReadReq.valid := vlsuIO.toVrf.readReq.valid
-    v_pipeline.io.vlsuReadReq.bits := vlsuIO.toVrf.readReq.bits.addr
-    vlsuIO.fromVrf.readResp.valid := v_pipeline.io.vlsuReadResp.valid
-    vlsuIO.fromVrf.readResp.bits.data := v_pipeline.io.vlsuReadResp.bits
-  }
 
   if (usingMatrix) {
-    v_pipeline.io.fromMat   := m_pipeline.io.toVec
-    m_pipeline.io.fromVec   := v_pipeline.io.toMat
-    m_pipeline.io.intupdate := iregister_read.io.intupdate
-    m_pipeline.io.fpupdate  := fp_pipeline.io.fpupdate
-    m_pipeline.io.vlsuReadReq.valid    := vlsuIO.toTile.readReq.valid
-    m_pipeline.io.vlsuReadReq.bits     := vlsuIO.toTile.readReq.bits.addr
-    vlsuIO.fromTile.readResp.valid     := m_pipeline.io.vlsuReadResp.valid
-    vlsuIO.fromTile.readResp.bits.data := m_pipeline.io.vlsuReadResp.bits
+    // v_pipeline
+    v_pipeline.io.intupdate             := iregister_read.io.intupdate
+    v_pipeline.io.fpupdate              := fp_pipeline.io.fpupdate
+    v_pipeline.io.vlsuReadReq.valid     := vlsuIO.toVrf.readReq.valid
+    v_pipeline.io.vlsuReadReq.bits      := vlsuIO.toVrf.readReq.bits.addr
+    // m_pipeline
+    m_pipeline.io.intupdate             := iregister_read.io.intupdate
+    m_pipeline.io.vlsuReadReq.valid     := vlsuIO.toTile.readReq.valid
+    m_pipeline.io.vlsuReadReq.bits.ridx := vlsuIO.toTile.readReq.bits.ridx
+    m_pipeline.io.vlsuReadReq.bits.sidx := vlsuIO.toTile.readReq.bits.sidx
+    m_pipeline.io.vlsuReadReq.bits.tt   := vlsuIO.toTile.readReq.bits.tt
+    // supposed vector regs and tile regs have same access latency
+    vlsuIO.fromVrf.readResp.valid       := v_pipeline.io.vlsuReadResp.valid || m_pipeline.io.vlsuReadResp.valid
+    vlsuIO.fromVrf.readResp.bits.data   := Mux(v_pipeline.io.vlsuReadResp.valid, v_pipeline.io.vlsuReadResp.bits
+                                                                                 m_pipeline.io.vlsuReadResp.bits)
+  } else if(usingVector) {
+    v_pipeline.io.intupdate           := iregister_read.io.intupdate
+    v_pipeline.io.fpupdate            := fp_pipeline.io.fpupdate
+    v_pipeline.io.vlsuReadReq.valid   := vlsuIO.toVrf.readReq.valid
+    v_pipeline.io.vlsuReadReq.bits    := vlsuIO.toVrf.readReq.bits.addr
+    vlsuIO.fromVrf.readResp.valid     := v_pipeline.io.vlsuReadResp.valid
+    vlsuIO.fromVrf.readResp.bits.data := v_pipeline.io.vlsuReadResp.bits
   }
 
   // Load-hit Misspeculations
@@ -2019,7 +2022,31 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     fp_pipeline.io.ll_wports <> exe_units.memory_units.map(_.io.ll_fresp)
   }
 
-  if (usingVector) {
+  if (usingMatrix) {
+    fp_pipeline.io.fromVec <> v_pipeline.io.to_fp
+    Seq.tabulate(vecWidth)(i => i).foreach { i =>
+      val attachBase: Int = 2 + (if(usingRoCC) 1 else 0)
+      ll_wbarb.io.in(attachBase + i) <> v_pipeline.io.to_int(i)
+    }
+    v_pipeline.io.fromMat <> m_pipeline.io.toVec
+    v_pipeline.io.vlsuWritePort.valid         := vlsuIO.toVrf.write.valid && !vlsuIO.toVrf.write.bits.is_rvm
+    v_pipeline.io.vlsuWritePort.bits.data     := vlsuIO.toVrf.write.bits.data
+    v_pipeline.io.vlsuWritePort.bits.addr     := vlsuIO.toVrf.write.bits.addr
+    v_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
+    v_pipeline.io.vlsuLoadWakeUp.valid        := vlsuIO.wakeUpVReg.valid && !vlsuIO.wakeUpVReg.bits.is_rvm
+    v_pipeline.io.vlsuLoadWakeUp.bits         := vlsuIO.wakeUpVReg.bits.addr
+    //
+    m_pipeline.io.vlsuWritePort.valid         := vlsuIO.toVrf.write.valid && vlsuIO.toVrf.write.bits.is_rvm
+    m_pipeline.io.vlsuWritePort.bits.data     := vlsuIO.toVrf.write.bits.data
+    m_pipeline.io.vlsuWritePort.bits.ridx     := vlsuIO.toVrf.write.bits.ridx
+    m_pipeline.io.vlsuWritePort.bits.sidx     := vlsuIO.toVrf.write.bits.sidx
+    m_pipeline.io.vlsuWritePort.bits.tt       := vlsuIO.toVrf.write.bits.tt
+    m_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
+    m_pipeline.io.vlsuLoadWakeUp.valid        := vlsuIO.wakeUpVReg.valid && vlsuIO.wakeUpVReg.bits.is_rvm
+    m_pipeline.io.vlsuLoadWakeUp.bits.ridx    := vlsuIO.wakeUpVReg.bits.ridx
+    m_pipeline.io.vlsuLoadWakeUp.bits.sidx    := vlsuIO.wakeUpVReg.bits.sidx
+    m_pipeline.io.vlsuLoadWakeUp.bits.tt      := vlsuIO.wakeUpVReg.bits.tt
+  } else if (usingVector) {
     fp_pipeline.io.fromVec <> v_pipeline.io.to_fp
     Seq.tabulate(vecWidth)(i => i).foreach { i =>
       val attachBase: Int = 2 + (if(usingRoCC) 1 else 0)
@@ -2027,21 +2054,12 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     }
     //v_pipeline.io.to_fp.ready := true.B
     //v_pipeline.io.ll_wports  <> exe_units.memory_units.map(_.io.ll_vresp)
-    v_pipeline.io.vlsuWritePort.valid := vlsuIO.toVrf.write.valid
-    v_pipeline.io.vlsuWritePort.bits.data := vlsuIO.toVrf.write.bits.data
-    v_pipeline.io.vlsuWritePort.bits.addr := vlsuIO.toVrf.write.bits.addr
+    v_pipeline.io.vlsuWritePort.valid         := vlsuIO.toVrf.write.valid
+    v_pipeline.io.vlsuWritePort.bits.data     := vlsuIO.toVrf.write.bits.data
+    v_pipeline.io.vlsuWritePort.bits.addr     := vlsuIO.toVrf.write.bits.addr
     v_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
-    v_pipeline.io.vlsuLoadWakeUp.valid := vlsuIO.wakeUpVReg.valid
-    v_pipeline.io.vlsuLoadWakeUp.bits := vlsuIO.wakeUpVReg.bits
-  }
-
-  if (usingMatrix) {
-    m_pipeline.io.vlsuWritePort.valid := vlsuIO.toVrf.write.valid
-    m_pipeline.io.vlsuWritePort.bits.data := vlsuIO.toVrf.write.bits.data
-    m_pipeline.io.vlsuWritePort.bits.addr := vlsuIO.toVrf.write.bits.addr
-    m_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
-    m_pipeline.io.vlsuLoadWakeUp.valid := vlsuIO.wakeUpVReg.valid
-    m_pipeline.io.vlsuLoadWakeUp.bits := vlsuIO.wakeUpVReg.bits
+    v_pipeline.io.vlsuLoadWakeUp.valid        := vlsuIO.wakeUpVReg.valid
+    v_pipeline.io.vlsuLoadWakeUp.bits         := vlsuIO.wakeUpVReg.bits.addr
   }
 
   if (usingRoCC) {
@@ -2482,6 +2500,9 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       vuop.uCtrlSig.accessStyle.vl     := Mux(uop.is_rvv, uop.vconfig.vl, uop.)
       vuop.uCtrlSig.accessStyle.vlmul  := Mux(uop.is_rvv, uop.vd_emul, 0.U)
     }
+
+    def is_rvm() = if(usingMatrix) vuop.ridx(3) else false.B
+
     vuop
   }
 }

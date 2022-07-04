@@ -3,6 +3,16 @@ package boom.vlsu
 import chisel3._
 import chisel3.util._
 import boom.util.{AgePriorityEncoder, IsOlder, WrapInc, maskMatch}
+
+class WakeUpInfo extends Bundle {
+  // for wakeup vector register
+  val addr = UInt(ap.vpregSz.W)
+  // for wakeup tile register
+  val ridx = UInt(vpregSz.W)
+  val sidx = UInt(vLenSz.W)
+  val tt   = UInt(2.W)
+}
+
 /** vuop should be kept in order from dispatch, they might be flushed after a entry. */
 class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val io = IO(new Bundle{
@@ -24,7 +34,8 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     /** Retire finished load queue entry. */
     val fromRob = new ROBVLSUIO(ap)
 
-    val wakeUp = ValidIO(UInt(ap.vpregSz.W))
+    // val wakeUp = ValidIO(UInt(ap.vpregSz.W))
+    val wakeup = ValidIO(new WakeUpInfo())         // appended mle infos
 
     /** For untouched load, we need to copy original data and write back to new reg. */
     val vrfReadReq = Decoupled(new VLSUReadVRFReq(ap))
@@ -61,7 +72,8 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   }
   val toRobVec = WireInit(0.U.asTypeOf(Vec(nEntries, Decoupled(UInt(ap.robAddrSz.W)))))
   val finishVec = WireInit(0.U.asTypeOf(Vec(nEntries, Bool())))
-  val wakeUpVec = WireInit(0.U.asTypeOf(Vec(nEntries, Decoupled(UInt(ap.vpregSz.W)))))
+  // val wakeUpVec = WireInit(0.U.asTypeOf(Vec(nEntries, Decoupled(UInt(ap.vpregSz.W)))))
+  val wakeUpVec = WireInit(0.U.asTypeOf(Vec(nEntries, Decoupled(new WakeUpInfo()))))
   val vrfReadArb = Module(new Arbiter(new VLSUReadVRFReq(ap), ap.nVLdQEntries))
   val vrfWriteArb = Module(new Arbiter(new VLSUWriteVRFReq(ap), ap.nVLdQEntries))
   val entries: Seq[VLdQEntry] = Seq.tabulate(nEntries){ i =>
@@ -187,7 +199,8 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     val tailPtr = Input(UInt(ap.nVLdQIndexBits.W))
     val nonUnitStrideOHs = Input(UInt(ap.nVLdQEntries.W))
     /** Wake up core pipe line when single register is all done. */
-    val wakeUp = DecoupledIO(UInt(ap.vpregSz.W))
+    // val wakeUp = DecoupledIO(UInt(ap.vpregSz.W))
+    val wakeUp = DecoupledIO(new WakeUpInfo())
 
     val vrfReadReq = Decoupled(new VLSUReadVRFReq(ap))
     val vrfReadResp = Flipped(Valid(new VLSUReadVRFResp(ap)))
@@ -262,7 +275,11 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.segmentCount := Mux(io.vuopDis.bits.uCtrlSig.accessStyle.isIndexed, io.vuopDis.bits.uCtrlSig.accessStyle.fieldIdx, 0.U)
       //reg.bits.totalSegments := snippetInitializer.io.totalSegment
       reg.bits.brMask := GetNewBranchMask(io.brUpdate, io.vuopDis.bits.brMask)
-      state := sWaitRs
+      // appended for mle and mse
+      reg.bits.ridx := io.vuopDis.ridx
+      reg.bits.sidx := io.vuopDis.sidx
+      reg.bits.tt   := io.vuopDis.tt
+      state         := sWaitRs
     }
   }.elsewhen(state === sWaitRs){// Data is ready, start split
     when(io.vuopRR.valid){
@@ -376,7 +393,11 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     val wakeUpRegIdx: UInt = reg.bits.pRegVec(wakeUpGroupIdx)
     when(needWakeUp){
       io.wakeUp.valid := true.B
-      io.wakeUp.bits := wakeUpRegIdx
+      // io.wakeUp.bits := wakeUpRegIdx
+      io.wakeup.bits.addr := wakeUpRegIdx
+      io.wakeup.bits.ridx := reg.bits.ridx
+      io.wakeup.bits.sidx := reg.bits.sidx
+      io.wakeup.bits.tt   := reg.bits.tt
       when(io.wakeUp.fire()){
         reg.bits.wakeUpVec(wakeUpGroupIdx) := false.B
       }
