@@ -107,6 +107,10 @@ class VLSMicroOP(ap: VLSUArchitecturalParams) extends VLSUBundle(ap) {
   val vpdst: Vec[UInt] = Vec(8, UInt(ap.vpregSz.W))
   val staleRegIdxes: Vec[UInt] = Vec(8, UInt(ap.vpregSz.W))
   val brMask: UInt = UInt(ap.maxBrCount.W)
+  // appended for mle
+  val ridx: UInt = UInt(ap.vpregSz.W)
+  val sidx: UInt = UInt(ap.vLenSz.W.W)
+  val tt:   UInt = UInt(2.W)
 }
 
 class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
@@ -139,6 +143,12 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val committed: Bool = Bool()
 
   val brMask: UInt = UInt(ap.maxBrCount.W)
+
+  // appended for mle
+  val ridx: UInt = UInt(ap.vpregSz.W)
+  val sidx: UInt = UInt(ap.vLenSz.W)
+  val tt:   UInt = UInt(2.W)
+
   def UnitStrideSnippetsCalculator(offset: UInt): (UInt, UInt, UInt) = {
     val offsetLeft = ap.cacheLineByteSize.U - offset
     val head = Wire(UInt(ap.vLenb.W))
@@ -239,6 +249,10 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
     out.done := false.B
     val reqNecessary = RequestNecessaryCheck(reqSnippet, segmentCount, initialSnippet)
     out.regAccessCS.finishMaskSnippet := reqNecessary._2
+    // appended for mle and mse
+    out.ridx := ridx
+    out.sidx := sidx
+    out.tt   := tt
     (reqNecessary._1, out)
   }
   /** To avoid massive shift left, which is banned in chisel.
@@ -436,6 +450,9 @@ trait HasVLSUArchParameters {
 
 class VLSUReadVRFReq(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val addr: UInt = UInt(ap.vpregSz.W)
+  // appended for mle
+  val sidx: UInt = UInt(ap.vLenSz.W)
+  val tt  : UInt = UInt(2.W)
 }
 class VLSUReadVRFResp(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val data: UInt = UInt(ap.vLen.W)
@@ -444,6 +461,9 @@ class VLSUWriteVRFReq(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val addr: UInt = UInt(ap.vpregSz.W)
   val byteMask: UInt = UInt(ap.vLenb.W)
   val data: UInt = UInt(ap.vLen.W)
+  // appended for mle
+  val sidx: UInt = UInt(ap.vLenSz.W)
+  val tt  : UInt = UInt(2.W)
 }
 class VLSUVRFIO(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val write = ValidIO(new VLSUWriteVRFReq(ap))

@@ -55,6 +55,8 @@ class StoreRequestBuffer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   io.reqOutgoing <> arbWinnerReq
   io.vrfReadReq.valid := arbWinnerReq.valid
   io.vrfReadReq.bits.addr := arbWinnerReq.bits.regAccessCS.regIdx
+  io.vrfReadReq.bits.ridx := arbWinnerReq.bits.ridx
+  io.vrfReadReq.bits.sidx := arbWinnerReq.bits.sidx
   io.vtlbReq <> vTlbReqArbiter.io.out
 }
 

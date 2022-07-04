@@ -58,9 +58,6 @@ class TileRegisterRead(
 
     val kill     = Input(Bool())
     val brupdate = Input(new BrUpdateInfo())
-    val tilem    = Input(UInt(xLen.W))
-    val tilen    = Input(UInt(xLen.W))
-    val tilek    = Input(UInt(xLen.W))
   })
 
   val rrd_valids       = Wire(Vec(issueWidth, Bool()))
@@ -95,13 +92,11 @@ class TileRegisterRead(
 
     // port 0
     io.tileReadPorts(idx+0).msew      := io.iss_uops(w).ts1_eew
-    io.tileReadPorts(idx+0).tilewidth := Mux(io.iss_uops(w).dim, io.tile_m, io.tile_n, io.tile_k)
     io.tileReadPorts(idx+0).tt        := Mux(io.iss_uops(w).uopc.isOneOf(uopMMV_V) && io.iss_uops(w).isHSlice, 2.U, 3.U)
     io.tileReadPorts(idx+0).addr      := io.iss_uops(w).pts1
     io.tileReadPorts(idx+0).index     := io.iss_uops(w).m_sidx
     // port 1
     io.tileReadPorts(idx+1).msew      := io.iss_uops(w).ts2_eew
-    io.tileReadPorts(idx+1).tilewidth := Mux()
     io.tileReadPorts(idx+1).tt        := 2.U                          // tr_r, used in mopa instructions only
     io.tileReadPorts(idx+1).addr      := io.iss_uops(w).pts2
     io.tileReadPorts(idx+1).index     := io.iss_uops(w).m_sidx

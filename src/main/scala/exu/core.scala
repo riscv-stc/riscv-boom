@@ -337,20 +337,25 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   for (i <- 0 until memWidth) {
     mem_units(i).io.lsu_io <> io.lsu.exe(i)
   }
+
   if(usingVector){
-    val vlsuReqVld = mem_units(0).io.vlsuReqRr.valid && 
-      (mem_units(0).io.vlsuReqRr.bits.uop.is_rvv || mem_units(0).io.vlsuReqRr.bits.uop.is_rvm) &&
+    val vlsuReqVld = mem_units(0).io.vlsuReqRr.valid && mem_units(0).io.vlsuReqRr.bits.uop.is_rvv &&
       (mem_units(0).io.vlsuReqRr.bits.uop.uses_ldq || mem_units(0).io.vlsuReqRr.bits.uop.uses_stq)
+    if(usingMatrix) {
+      vlsuReqVld := mem_units(0).io.vlsuReqRr.valid && 
+        (mem_units(0).io.vlsuReqRr.bits.uop.is_rvv || mem_units(0).io.vlsuReqRr.bits.uop.is_rvv) &&
+        (mem_units(0).io.vlsuReqRr.bits.uop.uses_ldq || mem_units(0).io.vlsuReqRr.bits.uop.uses_stq)
+    }
     /* For unmasked/unindexed vector load store that doesn't need to read vrf. */
     vlsuIO.fromRr.vuop(0).valid := vlsuReqVld
-    vlsuIO.fromRr.vuop(0).bits := uopConvertToVuop(mem_units(0).io.vlsuReqRr.bits.uop)
+    vlsuIO.fromRr.vuop(0).bits := uopConvertToVuop(mem_units(0).io.vlsuReqRr.bits.uop, usingMatrix)
     vlsuIO.fromRr.vuop(0).bits.rs1 := mem_units(0).io.vlsuReqRr.bits.rs1_data  // base address
     vlsuIO.fromRr.vuop(0).bits.rs2 := mem_units(0).io.vlsuReqRr.bits.rs2_data // for unmasked constant stride in vls
     vlsuIO.fromRr.vuop(0).bits.vm := Fill(vLen, 1.U(1.W))
 
     /* For masked/indexed vector load store. */
     vlsuIO.fromRr.vuop(1).valid := v_pipeline.io.toVlsuRr.valid
-    vlsuIO.fromRr.vuop(1).bits := uopConvertToVuop(v_pipeline.io.toVlsuRr.bits.uop)
+    vlsuIO.fromRr.vuop(1).bits := uopConvertToVuop(v_pipeline.io.toVlsuRr.bits.uop, usingMatrix)
     vlsuIO.fromRr.vuop(1).bits.rs1 := v_pipeline.io.toVlsuRr.bits.uop.v_scalar_data
     vlsuIO.fromRr.vuop(1).bits.rs2 := v_pipeline.io.toVlsuRr.bits.uop.vStrideLength
     vlsuIO.fromRr.vuop(1).bits.vs2 := v_pipeline.io.toVlsuRr.bits.rs3_data  //for indexed load/stores
@@ -2433,11 +2438,11 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     io.ifu.debug_ftq_idx := DontCare
   }
 
-  def uopConvertToVuop(uop: MicroOp): VLSMicroOP = {
+  def uopConvertToVuop(uop: MicroOp, usingMatrix: Boolean = false): VLSMicroOP = {
     val vuop = WireInit(0.U.asTypeOf(new VLSMicroOP(vlsuparam.get)))
     vuop.vLdQIdx := uop.ldq_idx
     vuop.vStQIdx := uop.stq_idx
-    vuop.robIdx := uop.rob_idx
+    vuop.robIdx  := uop.rob_idx
     vuop.uCtrlSig.accessType.isLoad := uop.uses_ldq
     vuop.uCtrlSig.accessType.isStore := uop.uses_stq
     vuop.uCtrlSig.accessStyle.isUnitStride := uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA)
@@ -2459,10 +2464,24 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     vuop.vs2 := 0.U
     vuop.rs1 := 0.U
     vuop.rs2 := 0.U
-    vuop.vm := 0.U
+    vuop.vm  := 0.U
     vuop.vpdst := Mux(uop.uses_ldq, VecInit(uop.pvd.map(_.bits)), VecInit(uop.stale_pvd.map(_.bits)))
     vuop.staleRegIdxes := VecInit(uop.stale_pvd.map(_.bits))
     vuop.brMask := uop.br_mask
+    vuop.ridx := 0.U
+    vuop.sidx := 0.U
+    vuop.tt   := 0.U
+    if (usingMatrix) {
+      vuop.ridx := Mux(uop.is_rvv, 8.U, uop.pdst)    // ridx(3) indicates rvv or rvm
+      vuop.sidx := uop.m_sidx
+      vuop.tt   := Cat(Mux(uop.rt(RD, RT_TR), 1.U(1.W), 0.U(1.W)), 
+                       Mux(uop.isHSlice,      0.U(1.W), 1.U(1.W)))
+      vuop.uCtrlSig.accessStyle.isUnitStride := uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopMLE, uopMSE)
+      uop.uCtrlSig.accessStyle.dataEew := Mux(uop.is_rvv, uop.vd_eew, uop.td_eew)
+      vuop.uCtrlSig.accessStyle.vStart := Mux(uop.is_rvv, uop.vstart, 0.U)
+      vuop.uCtrlSig.accessStyle.vl     := Mux(uop.is_rvv, uop.vconfig.vl, uop.)
+      vuop.uCtrlSig.accessStyle.vlmul  := Mux(uop.is_rvv, uop.vd_emul, 0.U)
+    }
     vuop
   }
 }

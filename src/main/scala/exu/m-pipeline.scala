@@ -139,9 +139,6 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 
   trtileReader.io.brupdate := io.brupdate
   trtileReader.io.kill     := io.flush_pipeline
-  trtileReader.io.tilem    := io.tilem
-  trtileReader.io.tilen    := io.tilen
-  trtileReader.io.tilek    := io.tilek
 
   // Only one port for vector load write back.
   for(i <- 0 until numTrTileReadPorts) {
