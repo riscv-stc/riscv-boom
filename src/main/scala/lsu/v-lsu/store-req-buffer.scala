@@ -53,10 +53,10 @@ class StoreRequestBuffer(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   //--------------------------Requests Output-----------------------------------------//
   val arbWinnerReq = vStReqArbiter.io.out
   io.reqOutgoing <> arbWinnerReq
-  io.vrfReadReq.valid := arbWinnerReq.valid
-  io.vrfReadReq.bits.addr := arbWinnerReq.bits.regAccessCS.regIdx
-  io.vrfReadReq.bits.ridx := arbWinnerReq.bits.ridx
-  io.vrfReadReq.bits.sidx := arbWinnerReq.bits.sidx
+  io.vrfReadReq.valid       := arbWinnerReq.valid
+  io.vrfReadReq.bits.addr   := Mux(arbWinnerReq.bits.isTile, arbWinnerReq.bits.ridx, arbWinnerReq.bits.regAccessCS.regIdx)
+  io.vrfReadReq.bits.sidx   := arbWinnerReq.bits.sidx
+  io.vrfReadReq.bits.isTile := arbWinnerReq.bits.isTile
   io.vtlbReq <> vTlbReqArbiter.io.out
 }
 

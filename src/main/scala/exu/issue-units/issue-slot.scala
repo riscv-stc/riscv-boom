@@ -447,8 +447,6 @@ class IssueSlot(
     when (io.intupdate.map(_.valid).reduce(_||_)) {
       val int_sel  = io.intupdate.map(u => u.valid && u.bits.uop.prs2 === next_uop.prs2 && next_uop.rt(RS2, isInt))
       val int_data = io.intupdate.map(u => u.bits.data)
-      val needUpdatePS = VecInit(int_sel ++ fp_sel).asUInt().orR()
-      val updatedSData = Mux1H(int_sel ++ fp_sel, int_data ++ fp_data)
       when(int_sel.asUInt.orR) {
         ps   := true.B
         sidx := Mux1H(int_sel, int_data)
@@ -533,9 +531,9 @@ class IssueSlot(
       io.out_uop.m_sidx    := sidx + 1.U
       io.out_uop.prs3      := next_uop.pdst
     }
-    next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.orR
-    next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.orR
-    next_p3 := Mux(io.in_uop.valid, in_p3, p3) | wake_p3.orR
+    next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_)
+    next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_)
+    next_p3 := Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_)
   } else if (usingVector) {
     io.uop.v_eidx := slot_uop.v_eidx
     if (vector) {

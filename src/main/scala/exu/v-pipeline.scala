@@ -260,7 +260,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     vregfile.io.write_ports(0).bits.data := io.vlsuWritePort.bits.data
     vregfile.io.write_ports(0).bits.mask := MaskExploder(io.vlsuWritePort.bits.byteMask, vLen)
   } .otherwise {
-    vregfile.io.write_ports(0) := WritePort(ll_wbarb.io.out, vElenSz, eLen, isVector, true)
+    vregfile.io.write_ports(0) := WritePort(ll_wbarb.io.out, vpregSz, vLen, isVector, true)
     // vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vElenSz, eLen, isVector, true))
   }
 

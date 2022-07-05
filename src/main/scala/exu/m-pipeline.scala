@@ -23,7 +23,7 @@ import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
 
-class TileAccessInfo() extends Bundle {
+class TileAccessInfo(implicit p: Parameters) extends BoomBundle {
   val ridx = UInt(vpregSz.W)
   val sidx = UInt(vLenSz.W)
   val tt   = UInt(2.W)
@@ -85,7 +85,9 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   val trtileReader = Module(new TileRegisterRead(
                        matWidth, 
                        exe_units.withFilter(_.readsTrTile).map(_.supportedFuncUnits),
-                       exe_units.numTrTileReadPorts, vLen))
+                       exe_units.numTrTileReadPorts,
+                       exe_units.withFilter(_.readsTrTile).map(_ => 2),
+                       vLen))
   issue_unit.suggestName("mat_issue_unit")
 
   //*************************************************************
@@ -149,15 +151,15 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   trtileReader.io.kill     := io.flush_pipeline
 
   // Only one port for vector load write back.
-  for(i <- 0 until numTrTileReadPorts) {
+  for(i <- 0 until exe_units.numTrTileReadPorts) {
     trtileReg.io.readPorts(i) := trtileReader.io.tileReadPorts(i)
   }
   // TODO: wrap vlsuReadReq with uops
   val vlsuReadPort = WireInit(new TrTileRegReadPortIO())
   vlsuReadPort.msew   := 0.U
-  vlsuReadPort.tt     := io.vlsuReadReq.tt
-  vlsuReadPort.addr   := io.vlsuReadReq.ridx
-  vlsuReadPort.index  := io.vlsuReadReq.sidx
+  vlsuReadPort.tt     := io.vlsuReadReq.bits.tt
+  vlsuReadPort.addr   := io.vlsuReadReq.bits.ridx
+  vlsuReadPort.index  := io.vlsuReadReq.bits.sidx
   trtileReg.io.readPorts.last := vlsuReadPort
 
   io.vlsuReadResp.valid := RegNext(io.vlsuReadReq.valid)
@@ -188,9 +190,9 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   // TODO: wrap vlsu write with uops for tr_tile write control
   trtileReg.io.writePorts(0).valid          := io.vlsuWritePort.valid
   trtileReg.io.writePorts(0).bits.msew      := 0.U
-  trtileReg.io.writePorts(0).bits.tt        := io.vlsuWritePort.tt
-  trtileReg.io.writePorts(0).bits.addr      := io.vlsuWritePort.ridx
-  trtileReg.io.writePorts(0).bits.index     := io.vlsuWritePort.sidx
+  trtileReg.io.writePorts(0).bits.tt        := io.vlsuWritePort.bits.tt
+  trtileReg.io.writePorts(0).bits.addr      := io.vlsuWritePort.bits.ridx
+  trtileReg.io.writePorts(0).bits.index     := io.vlsuWritePort.bits.sidx
   trtileReg.io.writePorts(0).bits.data      := MaskExploder(io.vlsuWritePort.bits.byteMask, vLen)
   //-------------------------------------------------------------
   //-------------------------------------------------------------
@@ -202,23 +204,23 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   //io.wakeups(0).bits := ll_wbarb.io.out.bits
   //ll_wbarb.io.out.ready := true.B
 
-  w_cnt = 0
+  var w_cnt = 0
   //vld write back clears busy table in rename but not busy bit in rob entry.
   io.wakeups(w_cnt) <> DontCare
   io.wakeups(w_cnt).valid              := io.vlsuLoadWakeUp.valid
   io.wakeups(w_cnt).bits.data          := 0.U
   io.wakeups(w_cnt).bits.uop.is_rvm    := true.B
   io.wakeups(w_cnt).bits.uop.uses_ldq  := true.B
-  io.wakeups(w_cnt).bits.uop.dst_rtype := Mux(io.vlsuLoadWakeUp.tt(1), RT_TR, RT_ACC)
-  io.wakeups(w_cnt).bits.uop.pdst      := io.vlsuLoadWakeUp.ridx
-  io.wakeups(w_cnt).bits.uop.m_sidx    := io.vlsuLoadWakeUp.sidx
-  io.wakeups(w_cnt).bits.uop.isHSlice  := !io.vlsuLoadWakeUp.tt(0)
+  io.wakeups(w_cnt).bits.uop.dst_rtype := Mux(io.vlsuLoadWakeUp.bits.tt(1), RT_TR, RT_ACC)
+  io.wakeups(w_cnt).bits.uop.pdst      := io.vlsuLoadWakeUp.bits.ridx
+  io.wakeups(w_cnt).bits.uop.m_sidx    := io.vlsuLoadWakeUp.bits.sidx
+  io.wakeups(w_cnt).bits.uop.isHSlice  := !io.vlsuLoadWakeUp.bits.tt(0)
   // from MatExeUnit
   w_cnt = 1
   for(eu <- exe_units) {
-    io.wakeups(wk_cnt)   := eu.io.mclrResp
-    io.wakeuop(wk_cnt+1) := eu.io.mopaResp
-    wk_cnt += 2
+    io.wakeups(w_cnt)   := eu.io.mclrResp
+    io.wakeups(w_cnt+1) := eu.io.mopaResp
+    w_cnt += 2
   }
 
   for ((wdata, wakeup) <- io.debug_wb_wdata zip io.wakeups) {

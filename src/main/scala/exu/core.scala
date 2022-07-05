@@ -1300,7 +1300,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
                       || brupdate.b2.mispredict
                       || io.ifu.redirect_flush
                       || vlsuIO.toDis.vLdQFull(w) && disUops(w).uses_ldq && (disUops(w).is_rvv || disUops(w).is_rvm)
-                      || vlsuIO.toDis.vStQFull(w) && disUops(w).uses_stq && (disUops(w).is_rvv || disUops(w).is_rvm))
+                      || vlsuIO.toDis.vStQFull(w) && disUops(w).uses_stq && (disUops(w).is_rvv || disUops(w).is_rvm)))
 
 
   io.lsu.fence_dmem := (disValids zip wait_for_empty_pipeline).map {case (v,w) => v && w} .reduce(_||_)
@@ -1640,13 +1640,13 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     v_pipeline.io.vlsuReadReq.bits      := vlsuIO.toVrf.readReq.bits.addr
     // m_pipeline
     m_pipeline.io.intupdate             := iregister_read.io.intupdate
-    m_pipeline.io.vlsuReadReq.valid     := vlsuIO.toTile.readReq.valid
-    m_pipeline.io.vlsuReadReq.bits.ridx := vlsuIO.toTile.readReq.bits.ridx
-    m_pipeline.io.vlsuReadReq.bits.sidx := vlsuIO.toTile.readReq.bits.sidx
-    m_pipeline.io.vlsuReadReq.bits.tt   := vlsuIO.toTile.readReq.bits.tt
+    m_pipeline.io.vlsuReadReq.valid     := vlsuIO.toVrf.readReq.valid
+    m_pipeline.io.vlsuReadReq.bits.ridx := vlsuIO.toVrf.readReq.bits.addr
+    m_pipeline.io.vlsuReadReq.bits.sidx := vlsuIO.toVrf.readReq.bits.sidx
+    m_pipeline.io.vlsuReadReq.bits.tt   := vlsuIO.toVrf.readReq.bits.tt
     // supposed vector regs and tile regs have same access latency
     vlsuIO.fromVrf.readResp.valid       := v_pipeline.io.vlsuReadResp.valid || m_pipeline.io.vlsuReadResp.valid
-    vlsuIO.fromVrf.readResp.bits.data   := Mux(v_pipeline.io.vlsuReadResp.valid, v_pipeline.io.vlsuReadResp.bits
+    vlsuIO.fromVrf.readResp.bits.data   := Mux(v_pipeline.io.vlsuReadResp.valid, v_pipeline.io.vlsuReadResp.bits,
                                                                                  m_pipeline.io.vlsuReadResp.bits)
   } else if(usingVector) {
     v_pipeline.io.intupdate           := iregister_read.io.intupdate
@@ -1723,7 +1723,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     val cmt_valids = (0 until coreParams.retireWidth).map(i =>
       rob.io.commit.valids(i) && (!rob.io.commit.uops(i).is_rvv || !rob.io.commit.uops(i).is_rvm ||
       (rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).v_split_last) ||
-      (rob.io.commit.uops(i).is_rvm && rob.io.commit.uops(i).m_split_last) )
+      (rob.io.commit.uops(i).is_rvm && rob.io.commit.uops(i).m_split_last) ))
       //rob.io.commit.arch_valids(i) && (!rob.io.commit.uops(i).is_rvv || rob.io.commit.uops(i).v_split_last))
     csr.io.retire  := RegNext(PopCount(cmt_valids))
     when(cmt_valids.orR) {
@@ -1833,9 +1833,45 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   }
 
   if (usingMatrix) {
-    val csr_vld  = csr_exe_unit.io.iresp.valid
-    val csr_uop  = csr_exe_unit.io.iresp.bits.uop
-    val msettype = csr_uop.uopc === uopMSETTYPE
+    // rvv related
+    val csr_vld = csr_exe_unit.io.iresp.valid
+    val csr_uop = csr_exe_unit.io.iresp.bits.uop
+    val vsetvl = csr_uop.uopc === uopVSETVL
+    val cmt_rvv = (0 until coreParams.retireWidth).map{i =>
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv
+    }.reduce(_ || _)
+    val cmt_archlast_rvv = (0 until coreParams.retireWidth).map{i =>
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv &&
+        rob.io.commit.uops(i).v_split_last // architectural last split
+        //&& !rob.io.commit.uops(i).is_red_vadd && // excluding inserted VADD
+        //!rob.io.commit.uops(i).is_perm_vadd
+    }.reduce(_ || _)
+    val cmt_sat = (0 until coreParams.retireWidth).map{i =>
+      rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat
+    }.reduce(_ || _)
+    val vleffSetVL = rob.io.setVL
+    val vcq_setVL = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq.io.empty
+    assert(!(vsetvl && csr_vld && vleffSetVL.valid), "vsetvl and vleff setvl should not happen at same time!")
+    csr.io.vector.get.set_vs_dirty := cmt_rvv
+    csr.io.vector.get.set_vconfig.valid := csr_vld && vsetvl || vleffSetVL.valid || vcq_setVL
+    csr.io.vector.get.set_vconfig.bits := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
+    csr.io.vector.get.set_vconfig.bits.vl := Mux(csr_vld && vsetvl, csr_uop.vconfig.vl,
+                                              Mux(vleffSetVL.valid, vleffSetVL.bits,
+                                              Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig.vl,
+                                                              csr.io.vector.get.vconfig.vl)))
+    csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
+    csr.io.vector.get.set_vstart.valid := cmt_archlast_rvv || rob.io.com_xcpt.bits.vls_xcpt.valid
+    csr.io.vector.get.set_vstart.bits := Mux(cmt_archlast_rvv, 0.U, rob.io.com_xcpt.bits.vls_xcpt.bits)
+    csr.io.vector.get.set_vxsat := cmt_sat
+    v_pipeline.io.fcsr_rm := csr.io.fcsr_rm
+    v_pipeline.io.vxrm := csr.io.vector.get.vxrm
+    csr_exe_unit.io.vconfig := csr.io.vector.get.vconfig
+
+    // rvm related
+    val msettype  = csr_uop.uopc === uopMSETTYPE
+    val msettilem = csr_uop.uopc === uopMSETTILEM
+    val msettilen = csr_uop.uopc === uopMSETTILEN
+    val msettilek = csr_uop.uopc === uopMSETTILEK
     val cmt_rvm = (0 until coreParams.retireWidth).map{i =>
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvm}.reduce(_ || _)
     val cmt_archlast_rvm = (0 until coreParams.retireWidth).map{i =>
@@ -1850,6 +1886,40 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     csr.io.matrix.get.set_tilem.valid   := csr_vld && msettilem
     csr.io.matrix.get.set_tilen.valid   := csr_vld && msettilen
     csr.io.matrix.get.set_tilek.valid   := csr_vld && msettilek
+  } else if (usingVector) {
+    val csr_vld = csr_exe_unit.io.iresp.valid
+    val csr_uop = csr_exe_unit.io.iresp.bits.uop
+    val vsetvl = csr_uop.uopc === uopVSETVL
+    val cmt_rvv = (0 until coreParams.retireWidth).map{i =>
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv
+    }.reduce(_ || _)
+    val cmt_archlast_rvv = (0 until coreParams.retireWidth).map{i =>
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv &&
+        rob.io.commit.uops(i).v_split_last // architectural last split
+        //&& !rob.io.commit.uops(i).is_red_vadd && // excluding inserted VADD
+        //!rob.io.commit.uops(i).is_perm_vadd
+    }.reduce(_ || _)
+    val cmt_sat = (0 until coreParams.retireWidth).map{i =>
+      rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat
+    }.reduce(_ || _)
+    val vleffSetVL = rob.io.setVL
+    val vcq_setVL = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq.io.empty
+    assert(!(vsetvl && csr_vld && vleffSetVL.valid), "vsetvl and vleff setvl should not happen at same time!")
+    csr.io.vector.get.set_vs_dirty := cmt_rvv
+    csr.io.vector.get.set_vconfig.valid := csr_vld && vsetvl || vleffSetVL.valid || vcq_setVL
+    csr.io.vector.get.set_vconfig.bits := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
+    csr.io.vector.get.set_vconfig.bits.vl := Mux(csr_vld && vsetvl, csr_uop.vconfig.vl,
+                                              Mux(vleffSetVL.valid, vleffSetVL.bits,
+                                              Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig.vl,
+                                                              csr.io.vector.get.vconfig.vl)))
+    csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
+    csr.io.vector.get.set_vstart.valid := cmt_archlast_rvv || rob.io.com_xcpt.bits.vls_xcpt.valid
+    csr.io.vector.get.set_vstart.bits := Mux(cmt_archlast_rvv, 0.U, rob.io.com_xcpt.bits.vls_xcpt.bits)
+    csr.io.vector.get.set_vxsat := cmt_sat
+    v_pipeline.io.fcsr_rm := csr.io.fcsr_rm
+    v_pipeline.io.vxrm := csr.io.vector.get.vxrm
+
+    csr_exe_unit.io.vconfig := csr.io.vector.get.vconfig
   }
 
 // TODO can we add this back in, but handle reset properly and save us
@@ -2029,21 +2099,21 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       ll_wbarb.io.in(attachBase + i) <> v_pipeline.io.to_int(i)
     }
     v_pipeline.io.fromMat <> m_pipeline.io.toVec
-    v_pipeline.io.vlsuWritePort.valid         := vlsuIO.toVrf.write.valid && !vlsuIO.toVrf.write.bits.is_rvm
+    v_pipeline.io.vlsuWritePort.valid         := vlsuIO.toVrf.write.valid && !vlsuIO.toVrf.write.bits.isTile
     v_pipeline.io.vlsuWritePort.bits.data     := vlsuIO.toVrf.write.bits.data
     v_pipeline.io.vlsuWritePort.bits.addr     := vlsuIO.toVrf.write.bits.addr
     v_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
-    v_pipeline.io.vlsuLoadWakeUp.valid        := vlsuIO.wakeUpVReg.valid && !vlsuIO.wakeUpVReg.bits.is_rvm
+    v_pipeline.io.vlsuLoadWakeUp.valid        := vlsuIO.wakeUpVReg.valid && !vlsuIO.wakeUpVReg.bits.isTile
     v_pipeline.io.vlsuLoadWakeUp.bits         := vlsuIO.wakeUpVReg.bits.addr
     //
-    m_pipeline.io.vlsuWritePort.valid         := vlsuIO.toVrf.write.valid && vlsuIO.toVrf.write.bits.is_rvm
+    m_pipeline.io.vlsuWritePort.valid         := vlsuIO.toVrf.write.valid && vlsuIO.toVrf.write.bits.isTile
     m_pipeline.io.vlsuWritePort.bits.data     := vlsuIO.toVrf.write.bits.data
-    m_pipeline.io.vlsuWritePort.bits.ridx     := vlsuIO.toVrf.write.bits.ridx
+    m_pipeline.io.vlsuWritePort.bits.ridx     := vlsuIO.toVrf.write.bits.addr
     m_pipeline.io.vlsuWritePort.bits.sidx     := vlsuIO.toVrf.write.bits.sidx
     m_pipeline.io.vlsuWritePort.bits.tt       := vlsuIO.toVrf.write.bits.tt
     m_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
-    m_pipeline.io.vlsuLoadWakeUp.valid        := vlsuIO.wakeUpVReg.valid && vlsuIO.wakeUpVReg.bits.is_rvm
-    m_pipeline.io.vlsuLoadWakeUp.bits.ridx    := vlsuIO.wakeUpVReg.bits.ridx
+    m_pipeline.io.vlsuLoadWakeUp.valid        := vlsuIO.wakeUpVReg.valid && vlsuIO.wakeUpVReg.bits.isTile
+    m_pipeline.io.vlsuLoadWakeUp.bits.ridx    := vlsuIO.wakeUpVReg.bits.addr
     m_pipeline.io.vlsuLoadWakeUp.bits.sidx    := vlsuIO.wakeUpVReg.bits.sidx
     m_pipeline.io.vlsuLoadWakeUp.bits.tt      := vlsuIO.wakeUpVReg.bits.tt
   } else if (usingVector) {
@@ -2287,13 +2357,13 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
               rob.io.commit.uops(w).v_eidx,
               rob.io.commit.debug_wdata(w))
           }
-        } .elsewhen (rob.io.commit.uops(w).rt(RD, isMatrix)) {{
+        } .elsewhen (rob.io.commit.uops(w).rt(RD, isMatrix)) {
           if (usingMatrix) {
             printf(" v%d[%d] 0x%x\n",
               rob.io.commit.uops(w).ldst,
               rob.io.commit.debug_wdata(w))
           }
-        }.otherwise {
+        } .otherwise {
           printf("\n")
         }
       }
@@ -2486,22 +2556,22 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     vuop.vpdst := Mux(uop.uses_ldq, VecInit(uop.pvd.map(_.bits)), VecInit(uop.stale_pvd.map(_.bits)))
     vuop.staleRegIdxes := VecInit(uop.stale_pvd.map(_.bits))
     vuop.brMask := uop.br_mask
-    vuop.ridx := 0.U
-    vuop.sidx := 0.U
-    vuop.tt   := 0.U
+    vuop.ridx   := 0.U
+    vuop.sidx   := 0.U
+    vuop.tt     := 0.U
+    vuop.isTile := false.B
     if (usingMatrix) {
-      vuop.ridx := Mux(uop.is_rvv, 8.U, uop.pdst)    // ridx(3) indicates rvv or rvm
-      vuop.sidx := uop.m_sidx
-      vuop.tt   := Cat(Mux(uop.rt(RD, RT_TR), 1.U(1.W), 0.U(1.W)), 
-                       Mux(uop.isHSlice,      0.U(1.W), 1.U(1.W)))
+      vuop.isTile := uop.is_rvm
+      vuop.ridx   := uop.pdst
+      vuop.sidx   := uop.m_sidx
+      vuop.tt     := Cat(Mux(uop.rt(RD, isTrTile), 1.U(1.W), 0.U(1.W)), 
+                       Mux(uop.isHSlice,         0.U(1.W), 1.U(1.W)))
       vuop.uCtrlSig.accessStyle.isUnitStride := uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopMLE, uopMSE)
-      uop.uCtrlSig.accessStyle.dataEew := Mux(uop.is_rvv, uop.vd_eew, uop.td_eew)
-      vuop.uCtrlSig.accessStyle.vStart := Mux(uop.is_rvv, uop.vstart, 0.U)
-      vuop.uCtrlSig.accessStyle.vl     := Mux(uop.is_rvv, uop.vconfig.vl, uop.)
-      vuop.uCtrlSig.accessStyle.vlmul  := Mux(uop.is_rvv, uop.vd_emul, 0.U)
+      vuop.uCtrlSig.accessStyle.dataEew      := Mux(uop.is_rvv, uop.vd_eew, uop.td_eew)
+      vuop.uCtrlSig.accessStyle.vStart       := Mux(uop.is_rvv, uop.vstart, 0.U)
+      vuop.uCtrlSig.accessStyle.vl           := Mux(uop.is_rvv, uop.vconfig.vl, vLen.asUInt)
+      vuop.uCtrlSig.accessStyle.vlmul        := Mux(uop.is_rvv, uop.vd_emul, 0.U)
     }
-
-    def is_rvm() = if(usingMatrix) vuop.ridx(3) else false.B
 
     vuop
   }

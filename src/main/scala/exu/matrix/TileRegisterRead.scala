@@ -93,12 +93,12 @@ class TileRegisterRead(
     // port 0
     io.tileReadPorts(idx+0).msew      := io.iss_uops(w).ts1_eew
     io.tileReadPorts(idx+0).tt        := Mux(io.iss_uops(w).uopc.isOneOf(uopMMV_V) && io.iss_uops(w).isHSlice, 2.U, 3.U)
-    io.tileReadPorts(idx+0).addr      := io.iss_uops(w).pts1
+    io.tileReadPorts(idx+0).addr      := io.iss_uops(w).prs1
     io.tileReadPorts(idx+0).index     := io.iss_uops(w).m_sidx
     // port 1
     io.tileReadPorts(idx+1).msew      := io.iss_uops(w).ts2_eew
     io.tileReadPorts(idx+1).tt        := 2.U                          // tr_r, used in mopa instructions only
-    io.tileReadPorts(idx+1).addr      := io.iss_uops(w).pts2
+    io.tileReadPorts(idx+1).addr      := io.iss_uops(w).prs2
     io.tileReadPorts(idx+1).index     := io.iss_uops(w).m_sidx
 
     rrd_ts1_data(w) := io.tileReadPorts(idx+0).data

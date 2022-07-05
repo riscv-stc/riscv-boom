@@ -94,6 +94,7 @@ class LoadStoreQueueEntryBundleBase(ap: VLSUArchitecturalParams) extends VLSUBun
   val ridx: UInt = UInt(ap.vpregSz.W)
   val sidx: UInt = UInt(ap.vLenSz.W)
   val tt:   UInt = UInt(2.W)
+  val isTile = Bool()
 }
 
 
@@ -113,8 +114,9 @@ class VLSMicroOP(ap: VLSUArchitecturalParams) extends VLSUBundle(ap) {
   val brMask: UInt = UInt(ap.maxBrCount.W)
   // appended for mle
   val ridx: UInt = UInt(ap.vpregSz.W)
-  val sidx: UInt = UInt(ap.vLenSz.W.W)
+  val sidx: UInt = UInt(ap.vLenSz.W)
   val tt:   UInt = UInt(2.W)
+  val isTile = Bool()
 }
 
 class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
@@ -152,6 +154,7 @@ class VecRequest(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val ridx: UInt = UInt(ap.vpregSz.W)
   val sidx: UInt = UInt(ap.vLenSz.W)
   val tt:   UInt = UInt(2.W)
+  val isTile = Bool()
 
   def UnitStrideSnippetsCalculator(offset: UInt): (UInt, UInt, UInt) = {
     val offsetLeft = ap.cacheLineByteSize.U - offset
@@ -440,7 +443,8 @@ class VLSUTopBundle(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   /** VLSU to ROB IO. */
   val ldToRob: VLSUROBIO = new VLSUROBIO(ap)
   val stToRob: VLSUROBIO = new VLSUROBIO(ap)
-  val wakeUpVReg = ValidIO(UInt(ap.vpregSz.W))
+  // val wakeUpVReg = ValidIO(UInt(ap.vpregSz.W))
+  val wakeUpVReg = ValidIO(new WakeUpInfo(ap))
   val fromRob = new ROBVLSUIO(ap)
   val vrfBusyStatus = Input(UInt(ap.nVRegs.W))
 }
@@ -457,6 +461,7 @@ class VLSUReadVRFReq(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   // appended for mle
   val sidx: UInt = UInt(ap.vLenSz.W)
   val tt  : UInt = UInt(2.W)
+  val isTile = Bool()
 }
 class VLSUReadVRFResp(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val data: UInt = UInt(ap.vLen.W)
@@ -468,6 +473,7 @@ class VLSUWriteVRFReq(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   // appended for mle
   val sidx: UInt = UInt(ap.vLenSz.W)
   val tt  : UInt = UInt(2.W)
+  val isTile = Bool()
 }
 class VLSUVRFIO(ap: VLSUArchitecturalParams) extends VLSUBundle(ap){
   val write = ValidIO(new VLSUWriteVRFReq(ap))

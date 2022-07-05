@@ -4,13 +4,13 @@ import chisel3._
 import chisel3.util._
 import boom.util.{AgePriorityEncoder, IsOlder, WrapInc, maskMatch}
 
-class WakeUpInfo extends Bundle {
+class WakeUpInfo(ap: VLSUArchitecturalParams) extends VLSUBundle(ap) {
   // for wakeup vector register
-  val addr = UInt(ap.vpregSz.W)
+  val addr   = UInt(ap.vpregSz.W)
   // for wakeup tile register
-  val ridx = UInt(vpregSz.W)
-  val sidx = UInt(vLenSz.W)
-  val tt   = UInt(2.W)
+  val sidx   = UInt(ap.vLenSz.W)
+  val tt     = UInt(2.W)
+  val isTile = Bool()
 }
 
 /** vuop should be kept in order from dispatch, they might be flushed after a entry. */
@@ -35,7 +35,7 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
     val fromRob = new ROBVLSUIO(ap)
 
     // val wakeUp = ValidIO(UInt(ap.vpregSz.W))
-    val wakeup = ValidIO(new WakeUpInfo())         // appended mle infos
+    val wakeUp = ValidIO(new WakeUpInfo(ap))         // appended mle infos
 
     /** For untouched load, we need to copy original data and write back to new reg. */
     val vrfReadReq = Decoupled(new VLSUReadVRFReq(ap))
@@ -73,7 +73,7 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val toRobVec = WireInit(0.U.asTypeOf(Vec(nEntries, Decoupled(UInt(ap.robAddrSz.W)))))
   val finishVec = WireInit(0.U.asTypeOf(Vec(nEntries, Bool())))
   // val wakeUpVec = WireInit(0.U.asTypeOf(Vec(nEntries, Decoupled(UInt(ap.vpregSz.W)))))
-  val wakeUpVec = WireInit(0.U.asTypeOf(Vec(nEntries, Decoupled(new WakeUpInfo()))))
+  val wakeUpVec = WireInit(0.U.asTypeOf(Vec(nEntries, Decoupled(new WakeUpInfo(ap)))))
   val vrfReadArb = Module(new Arbiter(new VLSUReadVRFReq(ap), ap.nVLdQEntries))
   val vrfWriteArb = Module(new Arbiter(new VLSUWriteVRFReq(ap), ap.nVLdQEntries))
   val entries: Seq[VLdQEntry] = Seq.tabulate(nEntries){ i =>
@@ -150,7 +150,8 @@ class VLdQueueHandler(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   }
   //__________________________________________________________________________________//
   //----------------------------Wake up on partial finish-----------------------------//
-  val wakeUpArbiter = Module(new Arbiter(UInt(ap.vpregSz.W), nEntries))
+  // val wakeUpArbiter = Module(new Arbiter(UInt(ap.vpregSz.W), nEntries))
+  val wakeUpArbiter = Module(new Arbiter(new WakeUpInfo(ap), nEntries))
   io.wakeUp.valid := wakeUpArbiter.io.out.valid
   io.wakeUp.bits := wakeUpArbiter.io.out.bits
   wakeUpArbiter.io.out.ready := true.B
@@ -200,7 +201,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     val nonUnitStrideOHs = Input(UInt(ap.nVLdQEntries.W))
     /** Wake up core pipe line when single register is all done. */
     // val wakeUp = DecoupledIO(UInt(ap.vpregSz.W))
-    val wakeUp = DecoupledIO(new WakeUpInfo())
+    val wakeUp = DecoupledIO(new WakeUpInfo(ap))
 
     val vrfReadReq = Decoupled(new VLSUReadVRFReq(ap))
     val vrfReadResp = Flipped(Valid(new VLSUReadVRFResp(ap)))
@@ -213,7 +214,7 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
   io.robAck.valid := false.B
   io.robAck.bits := 0.U
   io.wakeUp.valid := false.B
-  io.wakeUp.bits := 0.U
+  io.wakeUp.bits := 0.U.asTypeOf(new WakeUpInfo(ap))
   io.vrfReadReq.valid := false.B
   io.vrfReadReq.bits := 0.U.asTypeOf(new VLSUReadVRFReq(ap))
   io.vrfWriteReq.valid := false.B
@@ -276,9 +277,10 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       //reg.bits.totalSegments := snippetInitializer.io.totalSegment
       reg.bits.brMask := GetNewBranchMask(io.brUpdate, io.vuopDis.bits.brMask)
       // appended for mle and mse
-      reg.bits.ridx := io.vuopDis.ridx
-      reg.bits.sidx := io.vuopDis.sidx
-      reg.bits.tt   := io.vuopDis.tt
+      reg.bits.ridx   := io.vuopDis.bits.ridx
+      reg.bits.sidx   := io.vuopDis.bits.sidx
+      reg.bits.tt     := io.vuopDis.bits.tt
+      reg.bits.isTile := io.vuopDis.bits.isTile
       state         := sWaitRs
     }
   }.elsewhen(state === sWaitRs){// Data is ready, start split
@@ -394,10 +396,10 @@ class VLdQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
     when(needWakeUp){
       io.wakeUp.valid := true.B
       // io.wakeUp.bits := wakeUpRegIdx
-      io.wakeup.bits.addr := wakeUpRegIdx
-      io.wakeup.bits.ridx := reg.bits.ridx
-      io.wakeup.bits.sidx := reg.bits.sidx
-      io.wakeup.bits.tt   := reg.bits.tt
+      io.wakeUp.bits.addr   := Mux(reg.bits.isTile, reg.bits.ridx, wakeUpRegIdx)
+      io.wakeUp.bits.sidx   := reg.bits.sidx
+      io.wakeUp.bits.tt     := reg.bits.tt
+      io.wakeUp.bits.isTile := reg.bits.isTile
       when(io.wakeUp.fire()){
         reg.bits.wakeUpVec(wakeUpGroupIdx) := false.B
       }

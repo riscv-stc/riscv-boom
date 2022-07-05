@@ -73,7 +73,7 @@ class IssueUnitIO(
   val numWakeupPorts: Int,
   val dispatchWidth: Int,
   val vector: Boolean = false,
-  val matirx: Boolean = false)
+  val matrix: Boolean = false)
 (implicit p: Parameters) extends BoomBundle {
   val dis_uops         = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
 
@@ -206,7 +206,7 @@ abstract class IssueUnit(
       } .elsewhen (dis_uops(w).uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)) {
         dis_uops(w).prs1_busy   := 0.U
       }
-    } else if (iqType == IQT.MAT.litValue) {
+    } else if (iqType == IQT_MAT.litValue) {
       when(dis_uops(w).uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA, uopMFOPA, uopMFWOPA)) {
         dis_uops(w).prs1_busy := false.B
         dis_uops(w).prs2_busy := false.B

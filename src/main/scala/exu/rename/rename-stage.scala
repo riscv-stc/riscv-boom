@@ -742,13 +742,26 @@ class MatRenameStage(
                    numWbPorts: Int)(implicit p: Parameters)
   extends AbstractRenameStage(
     plWidth,
-    numTrPhysRegs,
-    numAccPhysRegs,
+    numTrPhysRegs.max(numAccPhysRegs),
     numWbPorts)(p)
 {
   val trpregSz = log2Ceil(numTrPhysRegs)
   val accpregSz = log2Ceil(numTrPhysRegs)
   val rtype: UInt => Bool = isMatrix
+
+  //-------------------------------------------------------------
+  // Helper Functions
+
+  def BypassAllocations(uop: MicroOp, older_uops: Seq[MicroOp], alloc_reqs: Seq[Bool]): MicroOp = {
+    require(older_uops.length == alloc_reqs.length)
+    val bypassed_uop = Wire(new MicroOp)
+    val bypLogic = Module(new RenameBypass(older_uops.length, false))
+    bypLogic.io.i_uop := uop
+    bypLogic.io.older_uops := older_uops
+    bypLogic.io.alloc_reqs := alloc_reqs
+    bypassed_uop := bypLogic.io.o_uop
+    bypassed_uop
+  }
 
   //-------------------------------------------------------------
   // Rename Structures

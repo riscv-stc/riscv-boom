@@ -1357,14 +1357,14 @@ class VecExeUTConfig extends Config(new WithVecExeUT)
 /**
  * MAT execution unit that can have a MXU unit
  */
-import import AccTileConstants._
+import AccTileConstants._
 
 class MatExeUnit() (implicit p: Parameters)
   extends ExecutionUnit(
     readsTrTile      = true,
     writesAccTile    = true,
     writesLlVrf      = true,
-    hasFPU           = true,        // for fcsr
+    hasFpu           = true,        // for fcsr
     numBypassStages  = 1,
     dataWidth        = p(tile.TileKey).core.vLen
 ) with freechips.rocketchip.rocket.constants.MemoryOpConstants
@@ -1382,12 +1382,12 @@ class MatExeUnit() (implicit p: Parameters)
   // -------------------------------MXU Unit -------------------------------
   val mxu = Module(new MXU(mxuMeshRows, mxuMeshCols, mxuTileRows, mxuTileCols, dataWidth=vLen))
 
-  hSliceBusy := !mxu.io.rowSliceReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE) && io.req.bits.uop.vd_emul > 0)
-  vSliceBusy := !mxu.io.colSliceReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE) && io.req.bits.uop.vd_emul > 0)
+  hSliceBusy := !mxu.io.rowSliceReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE) && io.req.bits.uop.vd_emul > 0.U)
+  vSliceBusy := !mxu.io.colSliceReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE) && io.req.bits.uop.vd_emul > 0.U)
 
   // matrix multiplication related
   // TODO: confirm latency
-  val macRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM), io.req.bits.uop, meshRows+meshCols).bits
+  val macRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM), io.req.bits.uop, mxuMeshRows+mxuMeshCols).bits
   mxu.io.macReq.valid           := io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM)
   mxu.io.macReq.bits.srcRidx    := io.req.bits.uop.prs3
   mxu.io.macReq.bits.dstRidx    := io.req.bits.uop.pdst
@@ -1397,7 +1397,7 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.macReqSrcA             := io.req.bits.rs1_data
   mxu.io.macReqSrcB             := io.req.bits.rs2_data
   // read or write row slices
-  val rowSliceRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE), io.req.bits.uop, meshRows).bits
+  val rowSliceRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE), io.req.bits.uop, mxuMeshRows).bits
   mxu.io.rowSliceReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE)
   mxu.io.rowSliceReq.bits.cmd   := Mux(io.req.bits.uop.uopc.isOneOf(uopMCLRACC), SLICE_CLEAR, 
                                    Mux(io.req.bits.uop.rt(RD, isAccTile),        SLICE_WRITE, SLICE_READ))
@@ -1407,7 +1407,7 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.rowSliceWdata          := io.req.bits.rs1_data
   mxu.io.rowSliceRdata.ready    := io.ll_vresp.ready
   // read or write col slices
-  val colSliceRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE), io.req.bits.uop, meshCols).bits
+  val colSliceRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE), io.req.bits.uop, mxuMeshCols).bits
   mxu.io.colSliceReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE)
   mxu.io.colSliceReq.bits.cmd   := Mux(io.req.bits.uop.rt(RD, isAccTile), SLICE_WRITE, SLICE_READ)
   mxu.io.colSliceReq.bits.ridx  := io.req.bits.uop.prs1
@@ -1449,7 +1449,7 @@ class MatExeUnit() (implicit p: Parameters)
       fr7    = hasFdiv,
       vmx    = hasVMX,
       vector = false,
-      matirx = true
+      matrix = true
     )
   }
 }

@@ -213,6 +213,11 @@ class VStQEntry(ap: VLSUArchitecturalParams, id: Int) extends VLSUModules(ap){
       reg.bits.segmentCount := Mux(io.vuopDis.bits.uCtrlSig.accessStyle.isIndexed, io.vuopDis.bits.uCtrlSig.accessStyle.fieldIdx, 0.U)
       //reg.bits.totalSegments := snippetInitializer.io.totalSegment
       reg.bits.brMask := GetNewBranchMask(io.brUpdate, io.vuopDis.bits.brMask)
+      // appended for mle and mse
+      reg.bits.ridx   := io.vuopDis.bits.ridx
+      reg.bits.sidx   := io.vuopDis.bits.sidx
+      reg.bits.tt     := io.vuopDis.bits.tt
+      reg.bits.isTile := io.vuopDis.bits.isTile
       state := sWaitRs
     }
   }.elsewhen(state === sWaitRs){

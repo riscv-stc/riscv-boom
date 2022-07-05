@@ -10,7 +10,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.rocket.RVCExpander
-import freechips.rocketchip.rocket._
+import freechips.rocketchip.rocket.{CSR, Causes, VConfig, VType, MConfig, MType}
 import freechips.rocketchip.util.{UIntIsOneOf, rightOR, uintToBitPat}
 import FUConstants._
 import boom.common._

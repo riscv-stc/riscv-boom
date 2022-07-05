@@ -235,7 +235,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val vecWidth = if (usingVector) vecIssueParam.issueWidth else 0
   /** Width of VLSU accessing VRF at same cycle. Affecting VRF read/write port. */
   val vecMemWidth = if (usingVector) vecMemIssueParam.issueWidth else 0
-  val matWidth = if(usingMatrix) matIssueParam.issueWidth
+  val matWidth = if(usingMatrix) matIssueParam.issueWidth else 0
 
   issueParams.map(x => require(x.dispatchWidth <= coreWidth && x.dispatchWidth > 0))
 
