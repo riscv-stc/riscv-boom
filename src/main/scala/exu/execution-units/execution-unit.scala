@@ -929,6 +929,8 @@ class VecExeUnit(
       (f.io.resp.valid, f.io.resp.bits.uop)))
     io.vresp.bits.data := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.data)))
+    io.vresp.bits.vmask := PriorityMux(vec_fu_units.map(f =>
+      (f.io.resp.valid, f.io.resp.bits.vmask)))
     io.vresp.bits.predicated := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.predicated)))
   }

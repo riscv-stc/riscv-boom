@@ -84,7 +84,8 @@ object WritePort
       //  require(dataWidth == vLen)
       //  wport.bits.data := v_filled
       //}
-      wport.bits.mask := enq.bits.vmask
+      wport.bits.data := enq.bits.data
+      wport.bits.mask := FillInterleaved(8, enq.bits.vmask)
     }
     enq.ready := true.B
     wport

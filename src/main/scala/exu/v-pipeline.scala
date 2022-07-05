@@ -256,7 +256,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   var w_cnt = 1
   for (i <- 1 until memWidth) {
-    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports, vpregSz, vLen, isVector, true, true))
+    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports, vpregSz, vLen, isVector, true))
     w_cnt += 1
   }
   for (eu <- exe_units) {
