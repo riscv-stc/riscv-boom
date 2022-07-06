@@ -171,7 +171,7 @@ object TruthTable {
 
   /** Convert a table and default output into a [[TruthTable]]. */
   def apply(table: Iterable[(BitPat, BitPat)], default: BitPat): TruthTable = {
-    require(table.map(_._1.getWidth).toSet.size == 1, "input width not equal.")
+    require(table.map(_._1.getWidth).toSet.size == 1, s"input width not equal. ${table.map(_._1.getWidth).toSet.size}\n, ${table}")
     val t2wset = table.map(_._2.getWidth).toSet
     require(t2wset.size == 1, s"output width not equal.")
     val outputWidth = table.map(_._2.getWidth).head

@@ -339,11 +339,13 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   }
 
   if(usingVector){
-    val vlsuReqVld = mem_units(0).io.vlsuReqRr.valid && mem_units(0).io.vlsuReqRr.bits.uop.is_rvv &&
-      (mem_units(0).io.vlsuReqRr.bits.uop.uses_ldq || mem_units(0).io.vlsuReqRr.bits.uop.uses_stq)
+    val vlsuReqVld = WireInit(false.B)
     if(usingMatrix) {
       vlsuReqVld := mem_units(0).io.vlsuReqRr.valid && 
         (mem_units(0).io.vlsuReqRr.bits.uop.is_rvv || mem_units(0).io.vlsuReqRr.bits.uop.is_rvv) &&
+        (mem_units(0).io.vlsuReqRr.bits.uop.uses_ldq || mem_units(0).io.vlsuReqRr.bits.uop.uses_stq)
+    } else {
+      vlsuReqVld := mem_units(0).io.vlsuReqRr.valid && mem_units(0).io.vlsuReqRr.bits.uop.is_rvv &&
         (mem_units(0).io.vlsuReqRr.bits.uop.uses_ldq || mem_units(0).io.vlsuReqRr.bits.uop.uses_stq)
     }
     /* For unmasked/unindexed vector load store that doesn't need to read vrf. */
@@ -674,7 +676,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     ("retirement bubbles",                () => ~uopsRetired_valids(w))
   )))
 
-  val topDownIssVec = (0 until issueParams.map(_.issueWidth).sum).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
+  val topDownIssVec = (0 until issueParams.map(_.issueWidth).sum - matWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("issued uops sum",            () => uopsIssued_valids(w)),
     ("exe active sum",             () => uopsExeActive_valids(w))
     )))
@@ -2220,6 +2222,16 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       assert (!(wakeup.valid && !wakeup.bits.uop.is_rvv),
         "[core] VEC wakeup does not involve an VEC instruction.")
     }
+    if (usingMatrix) {
+      for ((wdata, wakeup) <- m_pipeline.io.debug_wb_wdata zip m_pipeline.io.wakeups) {
+        rob.io.wb_resps(cnt).valid := wakeup.valid && !(wakeup.bits.uop.is_rvm && wakeup.bits.uop.uses_ldq)
+        rob.io.wb_resps(cnt).bits := wakeup.bits
+
+        rob.io.debug_wb_valids(cnt) := wakeup.valid && !(wakeup.bits.uop.is_rvm && wakeup.bits.uop.uses_ldq)
+        rob.io.debug_wb_wdata(cnt) := wdata
+        cnt += 1
+      }
+    }
   }
 
   require (cnt == rob.numWakeupPorts, s"rob wb port mismatch: ${cnt}, ${rob.numWakeupPorts}")
@@ -2359,9 +2371,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
           }
         } .elsewhen (rob.io.commit.uops(w).rt(RD, isMatrix)) {
           if (usingMatrix) {
-            printf(" v%d[%d] 0x%x\n",
-              rob.io.commit.uops(w).ldst,
-              rob.io.commit.debug_wdata(w))
+            printf("\n")
           }
         } .otherwise {
           printf("\n")

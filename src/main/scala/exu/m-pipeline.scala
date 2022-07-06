@@ -68,7 +68,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     // vector pipeline related
     val toVec            = Vec(matWidth, Decoupled(new ExeUnitResp(vLen)))
     // scalar pipeline related
-    val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
+    val intupdate        = Input(Vec(intWidth + memWidth, Valid(new ExeUnitResp(eLen))))
     // mset_wakeup, vsetvl related wakeup
     // val mset_wakeup        = Input(Valid(new MlWakeupResp()))  // TODO: msettype/msettile speculation optimization
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units
@@ -152,15 +152,14 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 
   // Only one port for vector load write back.
   for(i <- 0 until exe_units.numTrTileReadPorts) {
-    trtileReg.io.readPorts(i) := trtileReader.io.tileReadPorts(i)
+    trtileReader.io.tileReadPorts(i) <> trtileReg.io.readPorts(i)
   }
-  // TODO: wrap vlsuReadReq with uops
-  val vlsuReadPort = WireInit(new TrTileRegReadPortIO())
+  val vlsuReadPort = Wire(new TrTileRegReadPortIO())
   vlsuReadPort.msew   := 0.U
   vlsuReadPort.tt     := io.vlsuReadReq.bits.tt
   vlsuReadPort.addr   := io.vlsuReadReq.bits.ridx
   vlsuReadPort.index  := io.vlsuReadReq.bits.sidx
-  trtileReg.io.readPorts.last := vlsuReadPort
+  vlsuReadPort <> trtileReg.io.readPorts.last 
 
   io.vlsuReadResp.valid := RegNext(io.vlsuReadReq.valid)
   io.vlsuReadResp.bits  := trtileReg.io.readPorts.last.data

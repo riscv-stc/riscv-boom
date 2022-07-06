@@ -56,10 +56,11 @@ trait IssueUnitConstants
 class IqWakeup(
   val pregSz: Int,
   val vector: Boolean = false,
+  val matrix: Boolean = false
 )(implicit p: Parameters) extends BoomBundle {
   val pdst = UInt(width=pregSz.W)
   val poisoned = Bool()
-  val uop = if (vector) new MicroOp() else null
+  val uop = if (vector || matrix) new MicroOp() else null
 }
 
 /**
@@ -79,7 +80,7 @@ class IssueUnitIO(
 
   val iss_valids       = Output(Vec(issueWidth, Bool()))
   val iss_uops         = Output(Vec(issueWidth, new MicroOp()))
-  val wakeup_ports     = Flipped(Vec(numWakeupPorts, Valid(new IqWakeup(maxPregSz, vector))))
+  val wakeup_ports     = Flipped(Vec(numWakeupPorts, Valid(new IqWakeup(maxPregSz, vector, matrix))))
   val pred_wakeup_port = Flipped(Valid(UInt(log2Ceil(ftqSz).W)))
   val vl_wakeup_port   = Flipped(Valid(new VlWakeupResp()))
 

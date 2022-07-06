@@ -190,12 +190,12 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val 
     + exeUnitsStr.toString)
 
   require (exe_units.length != 0)
-  if (!fpu && !vector) {
+  if (!fpu && !vector & !matrix) {
     // if this is for FPU units, we don't need a memory unit (or other integer units).
     require (exe_units.map(_.hasMem).reduce(_|_), "Datapath is missing a memory unit.")
     require (exe_units.map(_.hasMul).reduce(_|_), "Datapath is missing a multiplier.")
     require (exe_units.map(_.hasDiv).reduce(_|_), "Datapath is missing a divider.")
-  } else if (fpu && !vector) {
+  } else if (fpu && !vector & !matrix) {
     require (exe_units.map(_.hasFpu).reduce(_|_),
       "Datapath is missing a fpu (or has an fpu and shouldnt).")
   }

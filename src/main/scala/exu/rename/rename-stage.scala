@@ -48,18 +48,21 @@ class RenameStageIO(
 /**
  * IO bundle to debug the rename stage
  */
-class DebugRenameStageIO(val numPhysRegs: Int, val vector: Boolean = false)(implicit p: Parameters) extends BoomBundle
+class DebugRenameStageIO(val numPhysRegs: Int, val vector: Boolean = false, val matrix: Boolean = false)(implicit p: Parameters) extends BoomBundle
 {
   val freelist  = Bits(numPhysRegs.W)
   val isprlist  = Bits(numPhysRegs.W)
-  val busytable = if (vector) Vec(numPhysRegs, UInt(vLenb.W)) else UInt(numPhysRegs.W)
+  val busytable = if (vector) Vec(numPhysRegs, UInt(vLenb.W)) 
+                  else if(matrix) Vec(numPhysRegs, UInt((vLenb+1).W))
+                  else UInt(numPhysRegs.W)
 }
 
 abstract class AbstractRenameStage(
   plWidth: Int,
   numPhysRegs: Int,
   numWbPorts: Int,
-  val vector: Boolean = false)
+  val vector: Boolean = false,
+  val matrix: Boolean = false)
   (implicit p: Parameters) extends BoomModule
 {
   val io = IO(new Bundle {
@@ -93,7 +96,7 @@ abstract class AbstractRenameStage(
     val vbusy_status = if (vector) Output(UInt(numPhysRegs.W)) else Output(UInt(0.W))
 
     val debug_rob_empty = Input(Bool())
-    val debug = Output(new DebugRenameStageIO(numPhysRegs, vector))
+    val debug = Output(new DebugRenameStageIO(numPhysRegs, vector, matrix))
   })
 
   def BypassAllocations(uop: MicroOp, older_uops: Seq[MicroOp], alloc_reqs: Seq[Bool]): MicroOp
@@ -743,7 +746,7 @@ class MatRenameStage(
   extends AbstractRenameStage(
     plWidth,
     numTrPhysRegs.max(numAccPhysRegs),
-    numWbPorts)(p)
+    numWbPorts, false, true)(p)
 {
   val trpregSz = log2Ceil(numTrPhysRegs)
   val accpregSz = log2Ceil(numTrPhysRegs)
@@ -789,7 +792,7 @@ class MatRenameStage(
   val accfreelist = Module(new MatRenameFreeList(
     plWidth,
     numAccPhysRegs,
-    8))
+    2))
   val accbusytable = Module(new MatRenameBusyTable(
     plWidth,
     numAccPhysRegs,
@@ -889,12 +892,12 @@ class MatRenameStage(
     accbusytable.io.rebusy_reqs(w) := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_ACC
   }
   trbusytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
-  trbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_TR).reduce(_||_)
+  trbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_TR)
   trbusytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
   trbusytable.io.wb_bits  := io.wakeups.map(w => UIntToOH(w.bits.uop.m_sidx))
 
   accbusytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
-  accbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_ACC).reduce(_||_)
+  accbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_ACC)
   accbusytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
   accbusytable.io.wb_bits  := io.wakeups.map(w => UIntToOH(w.bits.uop.m_sidx))
 

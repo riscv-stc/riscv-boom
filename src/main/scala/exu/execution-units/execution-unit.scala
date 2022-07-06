@@ -1442,12 +1442,12 @@ class MatExeUnit() (implicit p: Parameters)
       jmp    = hasJmpUnit,
       mem    = hasMem,
       muld   = hasMul || hasDiv,
-      fpu    = hasFpu,
+      fpu    = false,
       csr    = hasCSR,
       fdiv   = hasFdiv,
       ifpu   = hasIfpu,
       fr7    = hasFdiv,
-      vmx    = hasVMX,
+      vmx    = false,
       vector = false,
       matrix = true
     )
