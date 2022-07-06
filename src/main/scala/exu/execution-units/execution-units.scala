@@ -170,6 +170,9 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val 
       val mat_exe_unit = Module(new MatExeUnit())
       mat_exe_unit.suggestName("mat_exe_unit")
       exe_units += mat_exe_unit
+      //FIX ME
+      mat_exe_unit.io.mclrResp.ready := DontCare
+      mat_exe_unit.io.mopaResp.ready := DontCare
     }
   }
 

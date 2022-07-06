@@ -263,6 +263,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     vregfile.io.write_ports(0) := WritePort(ll_wbarb.io.out, vpregSz, vLen, isVector, true)
     // vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vElenSz, eLen, isVector, true))
   }
+  ll_wbarb.io.out.ready := true.B
 
   var w_cnt = 1
   //for (i <- 1 until vecMemWidth + 1) {//dedicated for vlsu

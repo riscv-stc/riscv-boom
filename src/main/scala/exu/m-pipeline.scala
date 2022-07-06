@@ -27,7 +27,7 @@ class TileAccessInfo(implicit p: Parameters) extends BoomBundle {
   val ridx = UInt(vpregSz.W)
   val sidx = UInt(vLenSz.W)
   val tt   = UInt(2.W)
-} 
+}
 
 class VLSUWriteTileBack(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
 {
@@ -83,7 +83,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   val exe_units    = new boom.exu.ExecutionUnits(matrix=true)
   val trtileReg    = Module(new TrTileReg(exe_units.numTrTileReadPorts+1, 1))
   val trtileReader = Module(new TileRegisterRead(
-                       matWidth, 
+                       matWidth,
                        exe_units.withFilter(_.readsTrTile).map(_.supportedFuncUnits),
                        exe_units.numTrTileReadPorts,
                        exe_units.withFilter(_.readsTrTile).map(_ => 2),
@@ -138,6 +138,8 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   }
   issue_unit.io.pred_wakeup_port.valid := false.B
   issue_unit.io.pred_wakeup_port.bits  := DontCare
+  issue_unit.io.vl_wakeup_port.valid := false.B
+  issue_unit.io.vl_wakeup_port.bits := DontCare
 
   //-------------------------------------------------------------
   // **** Register Read Stage ****
@@ -159,7 +161,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   vlsuReadPort.tt     := io.vlsuReadReq.bits.tt
   vlsuReadPort.addr   := io.vlsuReadReq.bits.ridx
   vlsuReadPort.index  := io.vlsuReadReq.bits.sidx
-  vlsuReadPort <> trtileReg.io.readPorts.last 
+  vlsuReadPort <> trtileReg.io.readPorts.last
 
   io.vlsuReadResp.valid := RegNext(io.vlsuReadReq.valid)
   io.vlsuReadResp.bits  := trtileReg.io.readPorts.last.data

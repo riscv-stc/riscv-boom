@@ -106,6 +106,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   if (usingMatrix) {
     require(usingVector)
     m_pipeline = Module(new MatPipeline)
+    m_pipeline.io.debug_tsc_reg := DontCare
   }
 
   val numIrfWritePorts        = exe_units.numIrfWritePorts + memWidth
@@ -1888,6 +1889,10 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     csr.io.matrix.get.set_tilem.valid   := csr_vld && msettilem
     csr.io.matrix.get.set_tilen.valid   := csr_vld && msettilen
     csr.io.matrix.get.set_tilek.valid   := csr_vld && msettilek
+    csr.io.matrix.get.set_tilem.bits    := csr_exe_unit.io.iresp.bits.data
+    csr.io.matrix.get.set_tilen.bits    := csr_exe_unit.io.iresp.bits.data
+    csr.io.matrix.get.set_tilek.bits    := csr_exe_unit.io.iresp.bits.data
+
   } else if (usingVector) {
     val csr_vld = csr_exe_unit.io.iresp.valid
     val csr_uop = csr_exe_unit.io.iresp.bits.uop
@@ -2250,6 +2255,11 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   if (usingVector) {
     v_pipeline.io.status := csr.io.status
   }
+
+  if (usingMatrix) {
+    m_pipeline.io.status := csr.io.status
+  }
+
 
   // Connect breakpoint info to memaddrcalcunit
   for (i <- 0 until memWidth) {

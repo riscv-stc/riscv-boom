@@ -73,6 +73,10 @@ class UnitStrideDataStretcher(ap: VLSUArchitecturalParams) extends VLSUModules(a
   val bodyData: UInt = ((rawData >> (bodyChunks * ap.cacheLineBits)) >> offsetBits).asUInt()
   val tailData: UInt = Mux(alignedAddr, bodyData, (rawData >> offsetBits)(ap.vLen - 1, 0))
   io.vrfWriteReq.data := Mux(isHead, headData, Mux(isTail, tailData, bodyData))
+
+  io.vrfWriteReq.sidx := DontCare
+  io.vrfWriteReq.tt := DontCare
+  io.vrfWriteReq.isTile := DontCare
 }
 
 /** dedicated arbitrator for split vector access requests. Winner from last arb always wins. */
@@ -255,6 +259,10 @@ class ElementDataStretcher(ap: VLSUArchitecturalParams) extends VLSUModules(ap){
   val data: UInt = ((elementData ## 0.U(ap.vLen.W)) >> ((ap.vLenb.U - vStartIdx) << 3.U).asUInt()).asUInt()
   io.vrfWriteReq.data := data
   io.vrfWriteReq.addr := io.reqWB.regAccessCS.regIdx
+  //FIXME
+  io.vrfWriteReq.sidx := DontCare
+  io.vrfWriteReq.tt := DontCare
+  io.vrfWriteReq.isTile := DontCare
 
 }
 

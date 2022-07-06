@@ -118,7 +118,7 @@ abstract class ExecutionUnit(
     val req      = Flipped(new DecoupledIO(new FuncUnitReq(dataWidth)))
 
     val iresp    = if (writesIrf)    new DecoupledIO(new ExeUnitResp(xLen)) else null
-    val fresp    = if (hasVector && writesFrf) new DecoupledIO(new ExeUnitResp(xLen)) 
+    val fresp    = if (hasVector && writesFrf) new DecoupledIO(new ExeUnitResp(xLen))
                    else if(writesFrf)          new DecoupledIO(new ExeUnitResp(xLen+1)) else null
     val vresp    = if (writesVrf)     new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val mclrResp = if (writesAccTile) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
@@ -1399,7 +1399,7 @@ class MatExeUnit() (implicit p: Parameters)
   // read or write row slices
   val rowSliceRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE), io.req.bits.uop, mxuMeshRows).bits
   mxu.io.rowSliceReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE)
-  mxu.io.rowSliceReq.bits.cmd   := Mux(io.req.bits.uop.uopc.isOneOf(uopMCLRACC), SLICE_CLEAR, 
+  mxu.io.rowSliceReq.bits.cmd   := Mux(io.req.bits.uop.uopc.isOneOf(uopMCLRACC), SLICE_CLEAR,
                                    Mux(io.req.bits.uop.rt(RD, isAccTile),        SLICE_WRITE, SLICE_READ))
   mxu.io.rowSliceReq.bits.ridx  := io.req.bits.uop.prs1
   mxu.io.rowSliceReq.bits.sidx  := io.req.bits.uop.m_sidx
@@ -1429,8 +1429,8 @@ class MatExeUnit() (implicit p: Parameters)
   }
 
   if (writesLlVrf) {
-    io.ll_vresp.valid     := (mxu.io.rowSliceRdata.valid && rowSliceRespUop.rt(RD, isVector)) || 
-                             (mxu.io.colSliceRdata.valid && colSliceRespUop.rt(RD, isVector)) 
+    io.ll_vresp.valid     := (mxu.io.rowSliceRdata.valid && rowSliceRespUop.rt(RD, isVector)) ||
+                             (mxu.io.colSliceRdata.valid && colSliceRespUop.rt(RD, isVector))
     io.ll_vresp.bits.uop  := Mux(mxu.io.rowSliceRdata.valid, rowSliceRespUop, colSliceRespUop)
     io.ll_vresp.bits.data := Mux(mxu.io.rowSliceRdata.valid, mxu.io.rowSliceRdata.bits, mxu.io.colSliceRdata.bits)
     io.ll_vresp.bits.predicated := false.B

@@ -875,6 +875,14 @@ class MatRenameStage(
   trfreelist.io.brupdate := io.brupdate
   trfreelist.io.debug.pipeline_empty := io.debug_rob_empty
 
+  accfreelist.io.dealloc_pregs zip com_valids zip rbk_valids map
+    {case ((d,c),r) => d.valid := c || r}
+  accfreelist.io.dealloc_pregs zip io.com_uops map
+    {case (d,c) => d.bits := Mux(io.rollback, c.pdst, c.stale_pdst)}
+  accfreelist.io.ren_br_tags := ren2_br_tags
+  accfreelist.io.brupdate := io.brupdate
+  accfreelist.io.debug.pipeline_empty := io.debug_rob_empty
+
   //val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(plWidth, UInt(maxPregSz.W)))
   // Freelist outputs.
   for ((uop, w) <- ren2_uops.zipWithIndex) {
