@@ -55,7 +55,7 @@ import freechips.rocketchip.diplomacy._
 
 import boom.common._
 import boom.common.MicroOpcodes._
-import boom.exu.{BrUpdateInfo, Exception, FuncUnitReq, FuncUnitResp, CommitSignals, ExeUnitResp, RegisterFileReadPortIO}
+import boom.exu.{BrUpdateInfo, Exception, FuncUnitReq, FuncUnitResp, CommitSignals, ExeUnitResp, RegisterFileReadPortIO, TileAccessCtrls}
 import boom.util._
 
 class LSUExeIO(implicit p: Parameters) extends BoomBundle()(p)
@@ -180,7 +180,7 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
   val fp_stdata   = if (usingFPU) Flipped(Decoupled(new ExeUnitResp(fLen))) else null
   val vrf_rport   = if (usingVector) Flipped(new RegisterFileReadPortIO(vpregSz, vLen)) else null
   val vrf_wbk     = if (usingVector) Decoupled(new ExeUnitResp(vLen)) else null
-  val tile_rpot   = if (usingMatrix) Flipped(new RegisterFileReadPortIO(vpregSz, vLen)) else null
+  val tile_rport  = if (usingMatrix) Flipped(new RegisterFileReadPortIO(vpregSz, vLen)) else null
   val tile_wbk    = if (usingMatrix) Decoupled(new ExeUnitResp(vLen)) else null
 
   val commit      = Input(new CommitSignals)
@@ -367,6 +367,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     //vstd_vrf_q = Module(new Queue(new UInt(0.W), 4))
     //vstd_dat_q = Module(new Queue(new UInt(vLen.W), 4))
     vrf_rarb = Module(new Arbiter(UInt(vpregSz.W), 3))
+  }
+
+  var tile_rarb: Arbiter[] = null
+  if (usingMatrix) {
+
   }
 
   io.ptw <> dtlb.io.ptw
@@ -581,22 +586,22 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   // Can we fire a incoming load
   val can_fire_load_incoming = widthMap(w => exe_req(w).valid && exe_req(w).bits.uop.ctrl.is_load
-                                                              && !exe_req(w).bits.uop.is_rvv)
+                                                              && !exe_req(w).bits.uop.is_vm_ext)
 
   // Can we fire an incoming store addrgen + store datagen
   val can_fire_stad_incoming = widthMap(w => exe_req(w).valid && exe_req(w).bits.uop.ctrl.is_sta
                                                               && exe_req(w).bits.uop.ctrl.is_std
-                                                              && !exe_req(w).bits.uop.is_rvv)
+                                                              && !exe_req(w).bits.uop.is_vm_ext)
 
   // Can we fire an incoming store addrgen
   val can_fire_sta_incoming  = widthMap(w => exe_req(w).valid && exe_req(w).bits.uop.ctrl.is_sta
                                                               && !exe_req(w).bits.uop.ctrl.is_std
-                                                              && !exe_req(w).bits.uop.is_rvv)
+                                                              && !exe_req(w).bits.uop.is_vm_ext)
 
   // Can we fire an incoming store datagen
   val can_fire_std_incoming  = widthMap(w => exe_req(w).valid && exe_req(w).bits.uop.ctrl.is_std
                                                               && !exe_req(w).bits.uop.ctrl.is_sta
-                                                              && !exe_req(w).bits.uop.is_rvv)
+                                                              && !exe_req(w).bits.uop.is_vm_ext)
 
   // Can we fire an incoming sfence
   val can_fire_sfence        = widthMap(w => exe_req(w).valid && exe_req(w).bits.sfence.valid)
@@ -611,7 +616,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                ( ldq_retry_e.valid                            &&
                                  ldq_retry_e.bits.addr.valid                  &&
                                  ldq_retry_e.bits.addr_is_virtual             &&
-                                !ldq_retry_e.bits.uop.is_rvv                  &&
+                                !ldq_retry_e.bits.uop.is_vm_ext               &&
                                 !p1_block_load_mask(ldq_retry_idx)            &&
                                 !p2_block_load_mask(ldq_retry_idx)            &&
                                 RegNext(dtlb.io.miss_rdy)                     &&
@@ -625,7 +630,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                ( stq_retry_e.valid                            &&
                                  stq_retry_e.bits.addr.valid                  &&
                                  stq_retry_e.bits.addr_is_virtual             &&
-                                !stq_retry_e.bits.uop.is_rvv                  &&
+                                !stq_retry_e.bits.uop.is_vm_ext               &&
                                  (w == memWidth-1).B                          &&
                                  RegNext(dtlb.io.miss_rdy)                    &&
                                  !(widthMap(i => (i != w).B               &&
@@ -635,9 +640,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   // Can we commit a store
   val can_fire_store_commit  = widthMap(w =>
                                ( stq_commit_e.valid                           &&
-                                //!stq_commit_e.bits.vmkilled                   &&
                                 !stq_commit_e.bits.uop.is_fence               &&
-                                !stq_commit_e.bits.uop.is_rvv                 &&
+                                !stq_commit_e.bits.uop.is_vm_ext              &&
                                 !mem_xcpt_valid                               &&
                                 !stq_commit_e.bits.uop.exception              &&
                                 (w == 0).B                                    &&
@@ -676,16 +680,16 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   // Can we fire a incoming rvv load
   val can_fire_vload_incoming = widthMap(w => exe_req(w).valid && exe_req(w).bits.uop.ctrl.is_load
-                                                               && exe_req(w).bits.uop.is_rvv)
+                                                               && exe_req(w).bits.uop.is_vm_ext)
 
   // Can we fire a incoming rvv store
   val can_fire_vstore_incoming = widthMap(w => exe_req(w).valid && (exe_req(w).bits.uop.ctrl.is_sta || exe_req(w).bits.uop.ctrl.is_std)
-                                                                && exe_req(w).bits.uop.is_rvv)
+                                                                && exe_req(w).bits.uop.is_vm_ext)
 
   // Can we start vload addrgen
   val ldq_vag_idx = AgePriorityEncoder((0 until numLdqEntries).map(i=> {
     val e = ldq(i)
-    e.valid && e.bits.addr.valid && !e.bits.executed && !e.bits.succeeded && !e.bits.order_fail && e.bits.uop.is_rvv
+    e.valid && e.bits.addr.valid && !e.bits.executed && !e.bits.succeeded && !e.bits.order_fail && e.bits.uop.is_vm_ext
   }), ldq_head)
   val ldq_vag_e = ldq(ldq_vag_idx)
   val can_fire_vload_addrgen   = widthMap(w =>
@@ -695,7 +699,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   ldq_vag_e.bits.addr.valid                             &&
                                   !ldq_vag_e.bits.executed                              &&
                                   !ldq_vag_e.bits.succeeded                             &&
-                                  ldq_vag_e.bits.uop.is_rvv))
+                                  ldq_vag_e.bits.uop.is_vm_ext))
 
   // Can we start vstore addrgen
   val stq_vag_idx = AgePriorityEncoder((0 until numStqEntries).map(i => {
@@ -710,7 +714,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   stq_vag_e.bits.addr.valid                             &&
                                   !stq_vag_e.bits.committed                             &&
                                   !stq_vag_e.bits.succeeded                             &&
-                                  stq_vag_e.bits.uop.is_rvv))
+                                  stq_vag_e.bits.uop.is_vm_ext))
 
   // Can we fire a vldq lookup
   val vldq_lkup_sel = AgePriorityEncoderOH((0 until numVLdqEntries).map(i => {
@@ -868,7 +872,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                    will_fire_sta_incoming(w)  ||
                                    will_fire_std_incoming(w)  ||
                                    will_fire_sfence(w)        ||
-                                   exe_req(w).bits.uop.is_rvv)))
+                                   exe_req(w).bits.uop.is_vm_ext)))
 
     when (will_fire_load_wakeup(w)) {
       block_load_mask(ldq_wakeup_idx)           := true.B
@@ -886,7 +890,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
      !will_fire_load_retry.reduce(_&&_)     &&
      !will_fire_sta_retry.reduce(_&&_)      &&
      !will_fire_store_commit.reduce(_&&_)   &&
-     //!will_fire_vmkill_commit.reduce(_&&_)  &&
      !will_fire_load_wakeup.reduce(_&&_)),
     "Some operations is proceeding down multiple pipes")
 
@@ -1187,7 +1190,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       val ldq_e = ldq(ldq_incoming_idx(w))
       ldq_e.bits.addr.valid           := true.B
       ldq_e.bits.addr.bits            := exe_req(w).bits.addr
-      ldq_e.bits.const_stride.valid   := exe_req(w).bits.uop.uopc === uopVLS
+      ldq_e.bits.const_stride.valid   := exe_req(w).bits.uop.uopc.isOneOf(uopVLS, uopMLE)
       ldq_e.bits.const_stride.bits    := exe_req(w).bits.data
       ldq_e.bits.addr_is_virtual      := true.B
       ldq_e.bits.addr_is_uncacheable  := false.B
@@ -1197,7 +1200,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       val stq_e = stq(stq_incoming_idx(w))
       stq_e.bits.addr.valid           := true.B
       stq_e.bits.addr.bits            := exe_req(w).bits.addr
-      stq_e.bits.const_stride.valid   := exe_req(w).bits.uop.uopc === uopVSSA
+      stq_e.bits.const_stride.valid   := exe_req(w).bits.uop.uopc.isOneOf(uopVSSA, uopMSE)
       stq_e.bits.const_stride.bits    := exe_req(w).bits.data
       stq_e.bits.addr_is_virtual      := true.B
     }
@@ -1228,14 +1231,15 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vmem_req.shamt := vstq_commit_e.bits.shamt
     vmem_req.vstq_idx := vstq_execute_head
     vstq_execute_head := WrapInc(vstq_execute_head, numVStqEntries)
-    when (vstq_commit_e.bits.uop.v_split_last) {
-      stq_execute_head := WrapInc(stq_execute_head, numStqEntries),
+    when ((vstq_commit_e.bits.uop.is_rvv && vstq_commit_e.bits.uop.v_split_last) ||
+          (vstq_commit_e.bits.uop.is_rvm && vstq_commit_e.bits.uop.m_split_last)) {
+      stq_execute_head := WrapInc(stq_execute_head, numStqEntries)
     }
   }
   io.vmem.req.valid     := will_fire_vldq_lookup(0) && !exe_tlb_miss(0) && !exe_tlb_uncacheable(0) ||
                            will_fire_vstq_commit(memWidth-1)
   io.vmem.req.bits      := vmem_req
-  io.vmem.s1_vdata      := io.core.vrf_rport.data
+  io.vmem.s1_vdata      := Mux(RegNext(vmem_req.uop.is_rvv), io.core.vrf_rport.data, io.core.tile_rpot.data) //FIXME: confirm latency
   io.vmem.s1_kill       := false.B // fixme
   io.vmem.brupdate      := io.core.brupdate
   io.vmem.exception     := io.core.exception
@@ -1415,7 +1419,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   io.core.clr_bsy(memWidth).bits  := stdf_clr_bsy_uop
 
   // access VRF
-  vrf_rarb.io.in(0).valid := will_fire_vstq_commit(memWidth-1)
+  vrf_rarb.io.in(0).valid := will_fire_vstq_commit(memWidth-1) && vstq_commit_e.bits.uop.is_rvv
   vrf_rarb.io.in(0).bits  := vstq_commit_e.bits.uop.stale_pdst
   when (will_fire_vstq_commit(memWidth-1)) {
     assert (vrf_rarb.io.in(0).ready)
@@ -1429,6 +1433,14 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   vrf_rarb.io.out.ready   := true.B
   io.core.vrf_rport.addr  := Mux(vrf_rarb.io.out.valid, vrf_rarb.io.out.bits, vstq_commit_e.bits.uop.stale_pdst)
+
+  // access tile register
+  if (usingMatrix) {
+    io.tile_rport.valid     := will_fire_vstq_commit(memWidth-1) && vstq_commit_e.bits.uop.is_rvm
+    io.tile_rport.bits.ridx := vstq_commit_e.bits.uop.stale_pdst
+    io.tile_rport.bits.sidx := vstq_commit_e.bits.uop.m_sidx
+    io.tile_rport.bits.tt   := Cat(vstq_commit_e.bits.uop.rt(RD, RT_TR).asUInt, !vstq_commit_e.bits.uop.isHSlice.asUInt)
+  }
 
   val vldq_resp_valid = io.vmem.resp.valid && !io.vmem.resp.bits.is_vst
   val vldq_resp_e = vldq(io.vmem.resp.bits.vldq_idx)
@@ -1485,14 +1497,16 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     }
   }
 
-  when (vldq_resp_valid && vldq_resp_e.bits.uop.v_split_last) {
+  when (vldq_resp_valid && ((vldq_resp_e.bits.uop.is_rvv && vldq_resp_e.bits.uop.v_split_last) ||
+                            (vldq_resp_e.bits.uop.is_rvm && vldq_resp_e.bits.uop.m_split_last))) {
     ldq(vldq_resp_e.bits.uop.ldq_idx).bits.succeeded := true.B
   }
 
   val vstq_done = Cat(vstq.map(x => x.valid && x.bits.committed && x.bits.succeeded).reverse)
   when (vstq_done(vstq_head)) {
     vstq_head := WrapInc(vstq_head, numVStqEntries)
-    when (vstq(vstq_head).bits.uop.v_split_last) {
+    when ((vstq(vstq_head).bits.uop.is_rvv && vstq(vstq_head).bits.uop.v_split_last) ||
+          (vstq(vstq_head).bits.uop.is_rvm && vstq(vstq_head).bits.uop.m_split_last)) {
       val stq_idx = vstq(vstq_head).bits.uop.stq_idx
       stq(stq_idx).bits.succeeded := true.B
     }
@@ -1768,10 +1782,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   // Task 4: Speculatively wakeup loads 1 cycle before they come back
   for (w <- 0 until memWidth) {
     if (usingVector) {
-      io.core.spec_ld_wakeup(w).valid := enableFastLoadUse.B          &&
-                                         fired_load_incoming(w)       &&
-                                         !mem_incoming_uop(w).fp_val  &&
-                                         !mem_incoming_uop(w).is_rvv  &&
+      io.core.spec_ld_wakeup(w).valid := enableFastLoadUse.B             &&
+                                         fired_load_incoming(w)          &&
+                                         !mem_incoming_uop(w).fp_val     &&
+                                         !mem_incoming_uop(w).is_vm_ext  &&
                                          mem_incoming_uop(w).pdst =/= 0.U
     } else {
       io.core.spec_ld_wakeup(w).valid := enableFastLoadUse.B          &&
@@ -1980,8 +1994,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   var temp_ldq_head        = ldq_head
   for (w <- 0 until coreWidth)
   {
-    val commit_store = io.core.commit.valids(w) && io.core.commit.uops(w).uses_stq && !io.core.commit.uops(w).is_rvv
-    val commit_load  = io.core.commit.valids(w) && io.core.commit.uops(w).uses_ldq && !io.core.commit.uops(w).is_rvv
+    val commit_store = io.core.commit.valids(w) && io.core.commit.uops(w).uses_stq
+    val commit_load  = io.core.commit.valids(w) && io.core.commit.uops(w).uses_ldq
     val idx = Mux(commit_store, temp_stq_commit_head, temp_ldq_head)
     when (commit_store)
     {

@@ -184,7 +184,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val vstart           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // VSTART CSR
   val vstartSrc        = if (usingVector) UInt(1.W) else false.B      // vstart source: CSR or speculative zero
   // matrix extension
-  val is_rvm           = if (usingMatrix) Bool()          else null
+  val is_rvm           = if (usingMatrix) Bool()          else false.B
   val pts1_busy        = if (usingMatrix) UInt(vLenb.W)   else null
   val pts2_busy        = if (usingMatrix) UInt(vLenb.W)   else null
   val pts3_busy        = if (usingMatrix) UInt(vLenb.W)   else null
@@ -222,6 +222,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
 
   def fu_code_is(_fu: UInt) = (fu_code & _fu) =/= 0.U
 
+  def is_vm_ext        = is_rvv || is_rvm
   def uses_scalar      = (is_rvv || is_rvm) && (iq_type & (IQT_INT | IQT_FP)) =/= 0.U
   def uses_v_simm5     = rt(RS1, isRvvSImm5)
   def uses_v_uimm5     = rt(RS1, isRvvUImm5)
