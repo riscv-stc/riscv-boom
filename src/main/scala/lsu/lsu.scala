@@ -180,6 +180,8 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
   val fp_stdata   = if (usingFPU) Flipped(Decoupled(new ExeUnitResp(fLen))) else null
   val vrf_rport   = if (usingVector) Flipped(new RegisterFileReadPortIO(vpregSz, vLen)) else null
   val vrf_wbk     = if (usingVector) Decoupled(new ExeUnitResp(vLen)) else null
+  val tile_rpot   = if (usingMatrix) Flipped(new RegisterFileReadPortIO(vpregSz, vLen)) else null
+  val tile_wbk    = if (usingMatrix) Decoupled(new ExeUnitResp(vLen)) else null
 
   val commit      = Input(new CommitSignals)
   val commit_load_at_rob_head = Input(Bool())
@@ -257,9 +259,9 @@ class LDQEntry(implicit p: Parameters) extends BoomBundle()(p)
   val youngest_stq_idx    = UInt(stqAddrSz.W) // index of the oldest store younger than us
 
   val forward_std_val     = Bool()
-  val forward_stq_idx     = UInt(stqAddrSz.W) // Which store did we get the store-load forward from?
+  val forward_stq_idx     = UInt(stqAddrSz.W)   // Which store did we get the store-load forward from?
 
-  val const_stride        = Valid(UInt(xLen.W))
+  val const_stride        = Valid(UInt(xLen.W)) // const stride in constant strided load; row strides in MLE
   val debug_wb_data       = UInt(xLen.W)
 }
 
@@ -273,7 +275,7 @@ class STQEntry(implicit p: Parameters) extends BoomBundle()(p)
   val committed           = Bool() // committed by ROB
   val succeeded           = Bool() // D$ has ack'd this, we don't need to maintain this anymore
 
-  val const_stride        = Valid(UInt(xLen.W))
+  val const_stride        = Valid(UInt(xLen.W)) // const stride in constant strided load; row strides in MLE
   val debug_wb_data       = UInt(xLen.W)
 }
 

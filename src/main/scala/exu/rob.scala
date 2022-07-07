@@ -316,7 +316,7 @@ class Rob(
     // one bank
     val rob_val       = RegInit(VecInit(Seq.fill(numRobRows){false.B}))
     val rob_bsy       = Reg(Vec(numRobRows, Bool()))
-    //val rob_ud_bsy    = if (usingVector) Reg(Vec(numRobRows, Bool())) else null
+    val rob_ud_bsy    = if (usingVector) Reg(Vec(numRobRows, Bool())) else null
     val rob_unsafe    = Reg(Vec(numRobRows, Bool()))
     val rob_uop       = Reg(Vec(numRobRows, new MicroOp()))
     val rob_exception = Reg(Vec(numRobRows, Bool()))

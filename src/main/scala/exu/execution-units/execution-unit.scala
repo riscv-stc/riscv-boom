@@ -151,10 +151,6 @@ abstract class ExecutionUnit(
     val mcontext = if (hasMem) Input(UInt(coreParams.mcontextWidth.W)) else null
     val scontext = if (hasMem) Input(UInt(coreParams.scontextWidth.W)) else null
 
-    // only used by vector lsu
-    /** for unmasked and unindexed load/store, data width should be xlen. */
-    val vlsuReqRr = if (usingVector && (hasMem || hasVMX)) ValidIO(new FuncUnitReq(dataWidth)) else null
-
     // TODO move this out of ExecutionUnit
     val com_exception = if (hasMem || hasRocc) Input(Bool()) else null
 
@@ -639,7 +635,7 @@ class VecExeUnit(
 ) (implicit p: Parameters)
   extends ExecutionUnit(
     readsVrf         = true,
-    writesVrf        = !hasVMX,
+    writesVrf        = true,
     writesIrf        = hasAlu,
     writesFrf        = hasAlu,
     writesLlVrf      = false,
@@ -1445,7 +1441,6 @@ class MatExeUnit() (implicit p: Parameters)
       fdiv   = hasFdiv,
       ifpu   = hasIfpu,
       fr7    = hasFdiv,
-      vmx    = false,
       vector = false,
       matrix = true
     )

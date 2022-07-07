@@ -25,7 +25,6 @@ import boom.exu._
 import boom.ifu._
 import boom.lsu._
 import boom.util.BoomCoreStringPrefix
-import boom.vlsu._
 import freechips.rocketchip.prci.ClockSinkParameters
 
 
@@ -159,8 +158,7 @@ class BoomTile private(
 class BoomTileModuleImp(outer: BoomTile) extends BaseTileModuleImp(outer){
 
   Annotated.params(this, outer.boomParams)
-  val vlsuparam = outer.vlsu.get.module.ap
-  val core = Module(new BoomCore(outer.boomParams.trace, Some(vlsuparam))(outer.p))
+  val core = Module(new BoomCore(outer.boomParams.trace)(outer.p))
   val lsu  = Module(new LSU()(outer.p, outer.dcache.module.edge))
 
   val ptwPorts         = ListBuffer(lsu.io.ptw, outer.frontend.module.io.ptw, core.io.ptw_tlb)
@@ -180,7 +178,6 @@ class BoomTileModuleImp(outer: BoomTile) extends BaseTileModuleImp(outer){
   // Connect the core pipeline to other intra-tile modules
   outer.frontend.module.io.cpu <> core.io.ifu
   core.io.lsu <> lsu.io.core
-  core.io.vlsu.get <> outer.vlsu.get.module.io
 
   //fpuOpt foreach { fpu => core.io.fpu <> fpu.io } RocketFpu - not needed in boom
   core.io.rocc := DontCare

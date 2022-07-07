@@ -45,7 +45,6 @@ import boom.common.MicroOpcodes._
 import boom.ifu.{GlobalHistory, HasBoomFrontendParameters}
 import boom.exu.FUConstants._
 import boom.util._
-import boom.vlsu.{VLSMicroOP, VLSUArchitecturalParams, VLSUTopBundle}
 
 import scala.collection.mutable
 
@@ -56,7 +55,7 @@ import boom.ifu._
 /**
  * Top level core object that connects the Frontend to the rest of the pipeline.
  */
-class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(implicit p: Parameters) extends BoomModule
+class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   with HasBoomFrontendParameters // TODO: Don't add this trait
 {
   val io = new freechips.rocketchip.tile.CoreBundle {
@@ -69,9 +68,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     val ptw_tlb = new freechips.rocketchip.rocket.TLBPTWIO()
     val trace = Output(Vec(coreParams.retireWidth, new ExtendedTracedInstruction))
     val fcsr_rm = UInt(freechips.rocketchip.tile.FPConstants.RM_SZ.W)
-    val vlsu: Option[VLSUTopBundle] = if(usingVector) Some(Flipped(new VLSUTopBundle(vlsuparam.get))) else None
   }
-  val vlsuIO: VLSUTopBundle = io.vlsu.get
   //**********************************
   // construct all of the modules
 
@@ -242,9 +239,9 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   val vconfig_mask_full = Wire(Vec(coreWidth, Bool()))
 
   // Rename2/Dispatch stage
-  val disValids = Wire(Vec(coreWidth, Bool()))
-  val disUops   = Wire(Vec(coreWidth, new MicroOp))
-  val disFire   = Wire(Vec(coreWidth, Bool()))
+  val dis_valids = Wire(Vec(coreWidth, Bool()))
+  val dis_uops   = Wire(Vec(coreWidth, new MicroOp))
+  val dis_fire   = Wire(Vec(coreWidth, Bool()))
   val dis_fire_fb= Wire(Vec(coreWidth, Bool())) // upstream dis_fire: ren/ifu
   val dis_ready  = Wire(Bool())
   //val dis_split       = Wire(Vec(coreWidth, Bool()))
@@ -342,40 +339,6 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   val mem_resps = mem_units.map(_.io.ll_iresp)
   for (i <- 0 until memWidth) {
     mem_units(i).io.lsu_io <> io.lsu.exe(i)
-  }
-
-  if(usingVector){
-    val vlsuReqVld = WireInit(false.B)
-    if(usingMatrix) {
-      vlsuReqVld := mem_units(0).io.vlsuReqRr.valid && 
-        (mem_units(0).io.vlsuReqRr.bits.uop.is_rvv || mem_units(0).io.vlsuReqRr.bits.uop.is_rvv) &&
-        (mem_units(0).io.vlsuReqRr.bits.uop.uses_ldq || mem_units(0).io.vlsuReqRr.bits.uop.uses_stq)
-    } else {
-      vlsuReqVld := mem_units(0).io.vlsuReqRr.valid && mem_units(0).io.vlsuReqRr.bits.uop.is_rvv &&
-        (mem_units(0).io.vlsuReqRr.bits.uop.uses_ldq || mem_units(0).io.vlsuReqRr.bits.uop.uses_stq)
-    }
-    /* For unmasked/unindexed vector load store that doesn't need to read vrf. */
-    vlsuIO.fromRr.vuop(0).valid := vlsuReqVld
-    vlsuIO.fromRr.vuop(0).bits := uopConvertToVuop(mem_units(0).io.vlsuReqRr.bits.uop, usingMatrix)
-    vlsuIO.fromRr.vuop(0).bits.rs1 := mem_units(0).io.vlsuReqRr.bits.rs1_data  // base address
-    vlsuIO.fromRr.vuop(0).bits.rs2 := mem_units(0).io.vlsuReqRr.bits.rs2_data // for unmasked constant stride in vls
-    vlsuIO.fromRr.vuop(0).bits.vm := Fill(vLen, 1.U(1.W))
-
-    /* For masked/indexed vector load store. */
-    vlsuIO.fromRr.vuop(1).valid := v_pipeline.io.toVlsuRr.valid
-    vlsuIO.fromRr.vuop(1).bits := uopConvertToVuop(v_pipeline.io.toVlsuRr.bits.uop, usingMatrix)
-    vlsuIO.fromRr.vuop(1).bits.rs1 := v_pipeline.io.toVlsuRr.bits.uop.v_scalar_data
-    vlsuIO.fromRr.vuop(1).bits.rs2 := v_pipeline.io.toVlsuRr.bits.uop.vStrideLength
-    vlsuIO.fromRr.vuop(1).bits.vs2 := v_pipeline.io.toVlsuRr.bits.rs3_data  //for indexed load/stores
-    vlsuIO.fromRr.vuop(1).bits.vm := v_pipeline.io.toVlsuRr.bits.rvmFull
-    vlsuIO.vrfBusyStatus := v_rename_stage.io.vbusy_status
-
-    vlsuIO.brUpdate.b1.resolveMask := brupdate.b1.resolve_mask
-    vlsuIO.brUpdate.b1.mispredictMask := brupdate.b1.mispredict_mask
-
-    vlsuIO.brUpdate.b2.mispredicted := brupdate.b2.mispredict && (brupdate.b2.uop.is_rvv || brupdate.b2.uop.is_rvm)
-    vlsuIO.brUpdate.b2.vStqIdx := brupdate.b2.uop.stq_idx
-    vlsuIO.brUpdate.b2.vLdqIdx := brupdate.b2.uop.ldq_idx
   }
 
   //-------------------------------------------------------------
@@ -1201,8 +1164,8 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
 
   // Outputs
-  disUops := rename_stage.io.ren2_uops
-  disValids := rename_stage.io.ren2_mask
+  dis_uops := rename_stage.io.ren2_uops
+  dis_valids := rename_stage.io.ren2_mask
   ren_stalls := rename_stage.io.ren_stalls
 
   /**
@@ -1222,46 +1185,46 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     val p_stall = if (enableSFBOpt) pred_rename_stage.io.ren_stalls(w) else false.B
 
     // lrs1 can "pass through" to prs1. Used solely to index the csr file.
-    disUops(w).prs1 := Mux(disUops(w).rt(RS1, isFloat ), f_uop.prs1,
-                        Mux(disUops(w).rt(RS1, isInt   ), i_uop.prs1, disUops(w).lrs1))
-    disUops(w).prs2 := Mux(disUops(w).rt(RS2, isFloat ), f_uop.prs2,
-                        Mux(disUops(w).rt(RS2, isInt   ), i_uop.prs2, disUops(w).lrs2))
-    disUops(w).prs3 := f_uop.prs3
-    disUops(w).ppred := p_uop.ppred
-    disUops(w).pdst := Mux(disUops(w).rt(RD, isFloat ), f_uop.pdst,
-                        Mux(disUops(w).rt(RD, isInt   ), i_uop.pdst, p_uop.pdst))
-    disUops(w).stale_pdst := Mux(disUops(w).rt(RD, isFloat ), f_uop.stale_pdst, i_uop.stale_pdst)
+    dis_uops(w).prs1 := Mux(dis_uops(w).rt(RS1, isFloat ), f_uop.prs1,
+                        Mux(dis_uops(w).rt(RS1, isInt   ), i_uop.prs1, dis_uops(w).lrs1))
+    dis_uops(w).prs2 := Mux(dis_uops(w).rt(RS2, isFloat ), f_uop.prs2,
+                        Mux(dis_uops(w).rt(RS2, isInt   ), i_uop.prs2, dis_uops(w).lrs2))
+    dis_uops(w).prs3 := f_uop.prs3
+    dis_uops(w).ppred := p_uop.ppred
+    dis_uops(w).pdst := Mux(dis_uops(w).rt(RD, isFloat ), f_uop.pdst,
+                        Mux(dis_uops(w).rt(RD, isInt   ), i_uop.pdst, p_uop.pdst))
+    dis_uops(w).stale_pdst := Mux(dis_uops(w).rt(RD, isFloat ), f_uop.stale_pdst, i_uop.stale_pdst)
 
-    disUops(w).prs3_busy   := f_uop.prs3_busy & disUops(w).frs3_en
-    disUops(w).ppred_busy  := p_uop.ppred_busy && disUops(w).is_sfb_shadow
+    dis_uops(w).prs3_busy   := f_uop.prs3_busy & dis_uops(w).frs3_en
+    dis_uops(w).ppred_busy  := p_uop.ppred_busy && dis_uops(w).is_sfb_shadow
     if (usingVector) {
-      disUops(w).prs1_busy := Mux1H(Seq((disUops(w).rt(RS1, isInt   ), i_uop.prs1_busy),
-                                         (disUops(w).rt(RS1, isFloat ), f_uop.prs1_busy)))
-      disUops(w).prs2_busy := Mux1H(Seq((disUops(w).rt(RS2, isInt   ), i_uop.prs2_busy),
-                                         (disUops(w).rt(RS2, isFloat ), f_uop.prs2_busy)))
-      disUops(w).pvd       := v_uop.pvd
-      disUops(w).stale_pvd := v_uop.stale_pvd
-      disUops(w).pvs1      := v_uop.pvs1
-      disUops(w).pvs2      := v_uop.pvs2
-      disUops(w).pvm       := v_uop.pvm
-      disUops(w).vstartSrc := v_uop.vstartSrc
-      disUops(w).vstart    := Mux(v_uop.vstartSrc === VSTART_ZERO, 0.U, csr.io.vector.get.vstart)
-      disUops(w).v_scalar_busy := disUops(w).is_rvv && disUops(w).uses_scalar
-      disUops(w).uopc      := Mux(i_uop.uopc.isOneOf(uopVLM), uopVL, i_uop.uopc)
+      dis_uops(w).prs1_busy := Mux1H(Seq((dis_uops(w).rt(RS1, isInt   ), i_uop.prs1_busy),
+                                         (dis_uops(w).rt(RS1, isFloat ), f_uop.prs1_busy)))
+      dis_uops(w).prs2_busy := Mux1H(Seq((dis_uops(w).rt(RS2, isInt   ), i_uop.prs2_busy),
+                                         (dis_uops(w).rt(RS2, isFloat ), f_uop.prs2_busy)))
+      dis_uops(w).pvd       := v_uop.pvd
+      dis_uops(w).stale_pvd := v_uop.stale_pvd
+      dis_uops(w).pvs1      := v_uop.pvs1
+      dis_uops(w).pvs2      := v_uop.pvs2
+      dis_uops(w).pvm       := v_uop.pvm
+      dis_uops(w).vstartSrc := v_uop.vstartSrc
+      dis_uops(w).vstart    := Mux(v_uop.vstartSrc === VSTART_ZERO, 0.U, csr.io.vector.get.vstart)
+      dis_uops(w).v_scalar_busy := dis_uops(w).is_rvv && dis_uops(w).uses_scalar
+      dis_uops(w).uopc      := Mux(i_uop.uopc.isOneOf(uopVLM), uopVL, i_uop.uopc)
       if (usingMatrix) {
-        disUops(w).pts1_busy := m_uop.pts1_busy
-        disUops(w).pts2_busy := m_uop.pts2_busy
-        disUops(w).pdst       := Mux(disUops(w).rt(RD, isInt), i_uop.pdst, Mux(disUops(w).rt(RD, isVector), v_uop.pdst, m_uop.pdst))
-        disUops(w).stale_pdst := Mux(disUops(w).rt(RD, isInt), i_uop.stale_pdst , Mux(disUops(w).rt(RD, isVector), v_uop.stale_pdst , m_uop.stale_pdst))
-        disUops(w).prs1      := Mux(disUops(w).rt(RS1, isInt   ), i_uop.prs1, m_uop.prs1)
-        disUops(w).prs2      := Mux(disUops(w).rt(RS2, isInt   ), i_uop.prs1, m_uop.prs2)
-        disUops(w).m_scalar_busy := disUops(w).is_rvm && disUops(w).uses_scalar
+        dis_uops(w).pts1_busy := m_uop.pts1_busy
+        dis_uops(w).pts2_busy := m_uop.pts2_busy
+        dis_uops(w).pdst       := Mux(dis_uops(w).rt(RD, isInt), i_uop.pdst, Mux(dis_uops(w).rt(RD, isVector), v_uop.pdst, m_uop.pdst))
+        dis_uops(w).stale_pdst := Mux(dis_uops(w).rt(RD, isInt), i_uop.stale_pdst , Mux(dis_uops(w).rt(RD, isVector), v_uop.stale_pdst , m_uop.stale_pdst))
+        dis_uops(w).prs1      := Mux(dis_uops(w).rt(RS1, isInt   ), i_uop.prs1, m_uop.prs1)
+        dis_uops(w).prs2      := Mux(dis_uops(w).rt(RS2, isInt   ), i_uop.prs1, m_uop.prs2)
+        dis_uops(w).m_scalar_busy := dis_uops(w).is_rvm && dis_uops(w).uses_scalar
       }
     } else {
-      disUops(w).prs1_busy := i_uop.prs1_busy & (disUops(w).rt(RS1, isInt)) |
-                               f_uop.prs1_busy & (disUops(w).rt(RS1, isFloat))
-      disUops(w).prs2_busy := i_uop.prs2_busy & (disUops(w).rt(RS2, isInt)) |
-                               f_uop.prs2_busy & (disUops(w).rt(RS2, isFloat))
+      dis_uops(w).prs1_busy := i_uop.prs1_busy & (dis_uops(w).rt(RS1, isInt)) |
+                               f_uop.prs1_busy & (dis_uops(w).rt(RS1, isFloat))
+      dis_uops(w).prs2_busy := i_uop.prs2_busy & (dis_uops(w).rt(RS2, isInt)) |
+                               f_uop.prs2_busy & (dis_uops(w).rt(RS2, isFloat))
     }
 
     ren_stalls(w) := rename_stage.io.ren_stalls(w) || f_stall || p_stall || v_stall || m_stall
@@ -1282,16 +1245,16 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
                                                            (!rob.io.empty || !io.lsu.fencei_rdy || dis_prior_slot_valid(w)))
   val rocc_shim_busy = if (usingRoCC) !exe_units.rocc_unit.io.rocc.rxq_empty else false.B
   val wait_for_rocc = (0 until coreWidth).map(w =>
-                        (disUops(w).is_fence || disUops(w).is_fencei) && (io.rocc.busy || rocc_shim_busy))
+                        (dis_uops(w).is_fence || dis_uops(w).is_fencei) && (io.rocc.busy || rocc_shim_busy))
   val rxq_full = if (usingRoCC) exe_units.rocc_unit.io.rocc.rxq_full else false.B
-  val block_rocc = (disUops zip disValids).map{case (u,v) => v && u.uopc === uopROCC}.scanLeft(rxq_full)(_||_)
-  val dis_rocc_alloc_stall = (disUops.map(_.uopc === uopROCC) zip block_rocc) map {case (p,r) =>
+  val block_rocc = (dis_uops zip dis_valids).map{case (u,v) => v && u.uopc === uopROCC}.scanLeft(rxq_full)(_||_)
+  val dis_rocc_alloc_stall = (dis_uops.map(_.uopc === uopROCC) zip block_rocc) map {case (p,r) =>
                                if (usingRoCC) p && r else false.B}
 
   //dis_prev_split_actv(0) := false.B
   //(1 until coreWidth).map(w => dis_prev_split_actv(w) := dis_split_actv.slice(0, w).reduce(_ || _))
   val dis_hazards = (0 until coreWidth).map(w =>
-                      disValids(w) &&
+                      dis_valids(w) &&
                       (  !rob.io.ready
                       || ren_stalls(w)
                       //|| dis_prev_split_actv(w)
@@ -1304,12 +1267,10 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
                       || dis_rocc_alloc_stall(w)
                       || brupdate.b1.mispredict_mask =/= 0.U
                       || brupdate.b2.mispredict
-                      || io.ifu.redirect_flush
-                      || vlsuIO.toDis.vLdQFull(w) && disUops(w).uses_ldq && (disUops(w).is_rvv || disUops(w).is_rvm)
-                      || vlsuIO.toDis.vStQFull(w) && disUops(w).uses_stq && (disUops(w).is_rvv || disUops(w).is_rvm)))
+                      || io.ifu.redirect_flush))
 
 
-  io.lsu.fence_dmem := (disValids zip wait_for_empty_pipeline).map {case (v,w) => v && w} .reduce(_||_)
+  io.lsu.fence_dmem := (dis_valids zip wait_for_empty_pipeline).map {case (v,w) => v && w} .reduce(_||_)
 
   val dis_stalls = dis_hazards.scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
   //val disLast = (0 until coreWidth).map(i => !dis_valids(i) || !dis_split_cand(i) || dis_split_last(i)).andR
@@ -1403,8 +1364,8 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
   for (w <- 0 until coreWidth) {
     // Dispatching instructions request load/store queue entries when they can proceed.
-    disUops(w).ldq_idx := Mux(disUops(w).is_rvv || disUops(w).is_rvm, vlsuIO.toDis.disVLdQIdx(w).bits.qIdx, io.lsu.dis_ldq_idx(w))
-    disUops(w).stq_idx := Mux(disUops(w).is_rvv || disUops(w).is_rvm, vlsuIO.toDis.disVStQIdx(w).bits.qIdx, io.lsu.dis_stq_idx(w))
+    dis_uops(w).ldq_idx := io.lsu.dis_ldq_idx(w)
+    dis_uops(w).stq_idx := io.lsu.dis_stq_idx(w)
   }
 
   //-------------------------------------------------------------
@@ -1424,18 +1385,18 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   // Minor hack: ecall and breaks need to increment the FTQ deq ptr earlier than commit, since
   // they write their PC into the CSR the cycle before they commit.
   // Since these are also unique, increment the FTQ ptr when they are dispatched
-  when (RegNext(disFire.reduce(_||_) && disUops(PriorityEncoder(disFire)).is_sys_pc2epc)) {
+  when (RegNext(dis_fire.reduce(_||_) && dis_uops(PriorityEncoder(dis_fire)).is_sys_pc2epc)) {
     io.ifu.commit.valid := true.B
-    io.ifu.commit.bits  := RegNext(disUops(PriorityEncoder(disValids)).ftq_idx)
+    io.ifu.commit.bits  := RegNext(dis_uops(PriorityEncoder(dis_valids)).ftq_idx)
   }
 
   for (w <- 0 until coreWidth) {
     // note: this assumes uops haven't been shifted - there's a 1:1 match between PC's LSBs and "w" here
     // (thus the LSB of the rob_idx gives part of the PC)
     if (coreWidth == 1) {
-      disUops(w).rob_idx := rob.io.rob_tail_idx
+      dis_uops(w).rob_idx := rob.io.rob_tail_idx
     } else {
-      disUops(w).rob_idx := Cat(rob.io.rob_tail_idx >> log2Ceil(coreWidth).U,
+      dis_uops(w).rob_idx := Cat(rob.io.rob_tail_idx >> log2Ceil(coreWidth).U,
                                w.U(log2Ceil(coreWidth).W))
     }
   }
@@ -1445,7 +1406,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   if (usingRoCC) {
     for (w <- 0 until coreWidth) {
       // We guarantee only decoding 1 RoCC instruction per cycle
-      disUops(w).rxq_idx := exe_units.rocc_unit.io.rocc.rxq_idx(w)
+      dis_uops(w).rxq_idx := exe_units.rocc_unit.io.rocc.rxq_idx(w)
     }
   }
 
@@ -1454,8 +1415,8 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
   // Get uops from rename2
   for (w <- 0 until coreWidth) {
-    dispatcher.io.ren_uops(w).valid := disFire(w)
-    dispatcher.io.ren_uops(w).bits  := disUops(w)
+    dispatcher.io.ren_uops(w).valid := dis_fire(w)
+    dispatcher.io.ren_uops(w).bits  := dis_uops(w)
   }
 
   var iu_idx = 0
@@ -1463,9 +1424,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   // Backpressure through dispatcher if necessary
   for (i <- 0 until issueParams.size) {
     if (issueParams(i).iqType == IQT_VEC.litValue) {
-       v_pipeline.io.vec_dis_uops <> dispatcher.io.dis_uops(i)
-    //} else if (issueParams(i).iqType == IQT_VMX.litValue) {
-       //v_pipeline.io.vmx_dis_uops <> dispatcher.io.dis_uops(i)
+      v_pipeline.io.vec_dis_uops <> dispatcher.io.dis_uops(i)
     } else if (issueParams(i).iqType == IQT_FP.litValue) {
       fp_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
     } else if(issueParams(i).iqType == IQT_MAT.litValue) {
@@ -1973,36 +1932,12 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
   // enqueue basic load/store info in Decode
   for (w <- 0 until coreWidth) {
-    io.lsu.dis_uops(w).valid := disFire(w)
-    io.lsu.dis_uops(w).bits  := disUops(w)
-    if (usingMatrix) {
-      io.lsu.dis_uops(w).valid := disFire(w) && !disUops(w).is_rvv && !disUops(w).is_rvm
-      vlsuIO.fromDis.vuopDis(w).valid := disFire(w) && (disUops(w).is_rvv || disUops(w).is_rvm) && (disUops(w).uses_ldq || disUops(w).uses_stq)
-      vlsuIO.fromDis.vuopDis(w).bits := uopConvertToVuop(disUops(w))
-    } else if (usingVector){
-      io.lsu.dis_uops(w).valid := disFire(w) && !disUops(w).is_rvv
-      vlsuIO.fromDis.vuopDis(w).valid := disFire(w) && disUops(w).is_rvv && (disUops(w).uses_ldq || disUops(w).uses_stq)
-      vlsuIO.fromDis.vuopDis(w).bits := uopConvertToVuop(disUops(w))
-    }
+    io.lsu.dis_uops(w).valid := dis_fire(w)
+    io.lsu.dis_uops(w).bits  := dis_uops(w)
   }
 
   // tell LSU about committing loads and stores to clear entries
   io.lsu.commit                  := rob.io.commit
-  if(usingMatrix) {
-    vlsuIO.fromRob.retireEntries.zipWithIndex.foreach {case (entry, i) =>
-      entry.valid := (rob.io.commit.valids(i) || rob.io.commit.arch_valids(i)) && (rob.io.commit.uops(i).is_rvv || rob.io.commit.uops(i).is_rvm)
-      entry.bits.isStore := rob.io.commit.uops(i).uses_stq
-      entry.bits.isLoad := rob.io.commit.uops(i).uses_ldq
-      entry.bits.qEntryIdx := Mux(rob.io.commit.uops(i).uses_stq, rob.io.commit.uops(i).stq_idx, rob.io.commit.uops(i).ldq_idx)
-    }
-  } else if(usingVector){
-    vlsuIO.fromRob.retireEntries.zipWithIndex.foreach {case (entry, i) =>
-      entry.valid := (rob.io.commit.valids(i) || rob.io.commit.arch_valids(i)) && rob.io.commit.uops(i).is_rvv
-      entry.bits.isStore := rob.io.commit.uops(i).uses_stq
-      entry.bits.isLoad := rob.io.commit.uops(i).uses_ldq
-      entry.bits.qEntryIdx := Mux(rob.io.commit.uops(i).uses_stq, rob.io.commit.uops(i).stq_idx, rob.io.commit.uops(i).ldq_idx)
-    }
-  }
 
   // tell LSU that it should fire a load that waits for the rob to clear
   io.lsu.commit_load_at_rob_head := rob.io.com_load_is_at_rob_head
@@ -2109,24 +2044,9 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
       val attachBase: Int = 2 + (if(usingRoCC) 1 else 0)
       ll_wbarb.io.in(attachBase + i) <> v_pipeline.io.to_int(i)
     }
-    v_pipeline.io.fromMat <> m_pipeline.io.toVec
-    v_pipeline.io.vlsuWritePort.valid         := vlsuIO.toVrf.write.valid && !vlsuIO.toVrf.write.bits.isTile
-    v_pipeline.io.vlsuWritePort.bits.data     := vlsuIO.toVrf.write.bits.data
-    v_pipeline.io.vlsuWritePort.bits.addr     := vlsuIO.toVrf.write.bits.addr
-    v_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
-    v_pipeline.io.vlsuLoadWakeUp.valid        := vlsuIO.wakeUpVReg.valid && !vlsuIO.wakeUpVReg.bits.isTile
-    v_pipeline.io.vlsuLoadWakeUp.bits         := vlsuIO.wakeUpVReg.bits.addr
-    //
-    m_pipeline.io.vlsuWritePort.valid         := vlsuIO.toVrf.write.valid && vlsuIO.toVrf.write.bits.isTile
-    m_pipeline.io.vlsuWritePort.bits.data     := vlsuIO.toVrf.write.bits.data
-    m_pipeline.io.vlsuWritePort.bits.ridx     := vlsuIO.toVrf.write.bits.addr
-    m_pipeline.io.vlsuWritePort.bits.sidx     := vlsuIO.toVrf.write.bits.sidx
-    m_pipeline.io.vlsuWritePort.bits.tt       := vlsuIO.toVrf.write.bits.tt
-    m_pipeline.io.vlsuWritePort.bits.byteMask := vlsuIO.toVrf.write.bits.byteMask
-    m_pipeline.io.vlsuLoadWakeUp.valid        := vlsuIO.wakeUpVReg.valid && vlsuIO.wakeUpVReg.bits.isTile
-    m_pipeline.io.vlsuLoadWakeUp.bits.ridx    := vlsuIO.wakeUpVReg.bits.addr
-    m_pipeline.io.vlsuLoadWakeUp.bits.sidx    := vlsuIO.wakeUpVReg.bits.sidx
-    m_pipeline.io.vlsuLoadWakeUp.bits.tt      := vlsuIO.wakeUpVReg.bits.tt
+    v_pipeline.io.fromMat   <> m_pipeline.io.toVec
+    v_pipeline.io.ll_wports <> io.lsu.vrf_wbk
+    io.lsu.vrf_rport        <> v_pipeline.io.lsu_vrf_rport
   } else if (usingVector) {
     fp_pipeline.io.fromVec <> v_pipeline.io.to_fp
     Seq.tabulate(vecWidth)(i => i).foreach { i =>
@@ -2276,19 +2196,6 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   (rob.io.lsu_clr_bsy.slice(0, memWidth + 1) zip io.lsu.clr_bsy).foreach { case (rob, lsu) => rob := lsu }
   rob.io.lsu_clr_unsafe := io.lsu.clr_unsafe
   rob.io.lxcpt          <> io.lsu.lxcpt
-
-  // VLSU store <> ROB
-  (rob.io.lsu_clr_bsy.slice(memWidth + 1, memWidth + 1 + coreWidth) zip vlsuIO.stToRob.robIdx).foreach { case (rob, vlsu) =>
-    rob.valid := vlsu.valid
-    rob.bits := vlsu.bits
-  }
-  // VLSU load <> ROB
-  (rob.io.lsu_clr_bsy.slice(memWidth + 1 + coreWidth, memWidth + 1 + 2 * coreWidth) zip vlsuIO.ldToRob.robIdx).foreach{ case (rob, vlsu) =>
-    rob.valid := vlsu.valid
-    rob.bits := vlsu.bits
-  }
-  assert (!(csr.io.singleStep), "[core] single-step is unsupported.")
-
 
   //-------------------------------------------------------------
   // **** Flush Pipeline ****
@@ -2481,7 +2388,7 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
   io.rocc.exception := csr.io.exception && csr.io.status.xs.orR
   if (usingRoCC) {
     exe_units.rocc_unit.io.rocc.rocc         <> io.rocc
-    exe_units.rocc_unit.io.rocc.dis_uops     := disUops
+    exe_units.rocc_unit.io.rocc.dis_uops     := dis_uops
     exe_units.rocc_unit.io.rocc.rob_head_idx := rob.io.rob_head_idx
     exe_units.rocc_unit.io.rocc.rob_pnr_idx  := rob.io.rob_pnr_idx
     exe_units.rocc_unit.io.com_exception     := rob.io.flush.valid
@@ -2489,9 +2396,9 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
 
     for (w <- 0 until coreWidth) {
       exe_units.rocc_unit.io.rocc.dis_rocc_vals(w) := (
-        disFire(w) &&
-        disUops(w).uopc === uopROCC &&
-        !disUops(w).exception
+        dis_fire(w) &&
+        dis_uops(w).uopc === uopROCC &&
+        !dis_uops(w).exception
       )
     }
   }
@@ -2547,53 +2454,4 @@ class BoomCore(usingTrace: Boolean, vlsuparam: Option[VLSUArchitecturalParams])(
     io.ifu.debug_ftq_idx := DontCare
   }
 
-  def uopConvertToVuop(uop: MicroOp, usingMatrix: Boolean = false): VLSMicroOP = {
-    val vuop = WireInit(0.U.asTypeOf(new VLSMicroOP(vlsuparam.get)))
-    vuop.vLdQIdx := uop.ldq_idx
-    vuop.vStQIdx := uop.stq_idx
-    vuop.robIdx  := uop.rob_idx
-    vuop.uCtrlSig.accessType.isLoad := uop.uses_ldq
-    vuop.uCtrlSig.accessType.isStore := uop.uses_stq
-    vuop.uCtrlSig.accessStyle.isUnitStride := uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA)
-    vuop.uCtrlSig.accessStyle.isConstantStride := uop.uopc.isOneOf(uopVLS, uopVSSA)
-    vuop.uCtrlSig.accessStyle.isSegment := false.B //fixme: explicit segment required in uop.
-    vuop.uCtrlSig.accessStyle.isWholeAccess := uop.uopc.isOneOf(uopVLR, uopVSR)
-    vuop.uCtrlSig.accessStyle.isIndexed := uop.uopc.isOneOf(uopVLUX, uopVLOX, uopVSOXA, uopVSUXA)
-    vuop.uCtrlSig.accessStyle.dataEew := uop.vd_eew
-    vuop.uCtrlSig.accessStyle.indexEew := uop.vs2_eew
-    vuop.uCtrlSig.accessStyle.vStart := uop.vstart
-    vuop.uCtrlSig.accessStyle.vl := uop.vconfig.vl
-    vuop.uCtrlSig.accessStyle.vlmul := uop.vd_emul
-    vuop.uCtrlSig.accessStyle.indexLmul := uop.vs2_emul
-    vuop.uCtrlSig.accessStyle.nf := uop.v_seg_nf
-    vuop.uCtrlSig.accessStyle.fieldIdx := uop.v_seg_f
-    vuop.uCtrlSig.accessStyle.vma := uop.vconfig.vtype.vma
-    vuop.uCtrlSig.accessStyle.vta := uop.vconfig.vtype.vta
-    vuop.vs1 := 0.U
-    vuop.vs2 := 0.U
-    vuop.rs1 := 0.U
-    vuop.rs2 := 0.U
-    vuop.vm  := 0.U
-    vuop.vpdst := Mux(uop.uses_ldq, VecInit(uop.pvd.map(_.bits)), VecInit(uop.stale_pvd.map(_.bits)))
-    vuop.staleRegIdxes := VecInit(uop.stale_pvd.map(_.bits))
-    vuop.brMask := uop.br_mask
-    vuop.ridx   := 0.U
-    vuop.sidx   := 0.U
-    vuop.tt     := 0.U
-    vuop.isTile := false.B
-    if (usingMatrix) {
-      vuop.isTile := uop.is_rvm
-      vuop.ridx   := uop.pdst
-      vuop.sidx   := uop.m_sidx
-      vuop.tt     := Cat(Mux(uop.rt(RD, isTrTile), 1.U(1.W), 0.U(1.W)), 
-                       Mux(uop.isHSlice,         0.U(1.W), 1.U(1.W)))
-      vuop.uCtrlSig.accessStyle.isUnitStride := uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopMLE, uopMSE)
-      vuop.uCtrlSig.accessStyle.dataEew      := Mux(uop.is_rvv, uop.vd_eew, uop.td_eew)
-      vuop.uCtrlSig.accessStyle.vStart       := Mux(uop.is_rvv, uop.vstart, 0.U)
-      vuop.uCtrlSig.accessStyle.vl           := Mux(uop.is_rvv, uop.vconfig.vl, vLen.asUInt)
-      vuop.uCtrlSig.accessStyle.vlmul        := Mux(uop.is_rvv, uop.vd_emul, 0.U)
-    }
-
-    vuop
-  }
 }

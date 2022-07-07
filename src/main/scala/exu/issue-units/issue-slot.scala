@@ -105,7 +105,6 @@ class IssueSlot(
   val ps    = if(vector || matrix) RegInit(false.B) else null
   val sdata = if(vector) RegInit(0.U(eLen.W)) else null
   val sidx  = if(matrix) RegInit(0.U(vLenb.W)) else null
-  val strideLength = if(iqType == IQT_VMX.litValue) RegInit(0.U(eLen.W)) else null
   val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
   val slot_uop = RegInit(NullMicroOp(usingVector))
@@ -218,17 +217,6 @@ class IssueSlot(
     }
     ret
   }
-  /** true means that this uop can fire to rrd. only for vls that reads both scalar and vector. */
-  val scalarCheck: Bool = {
-    val ret = Wire(Bool())
-    if (usingVector && iqType == IQT_VMX.litValue){
-      val needWaitScalar = slot_uop.is_rvv && slot_uop.v_scalar_busy
-      ret := Mux(needWaitScalar, ps, true.B)
-    } else {
-      ret := true.B
-    }
-    ret
-  }
 
   //-----------------------------------------------------------------------------
   // next slot state computation
@@ -259,7 +247,7 @@ class IssueSlot(
   when (io.kill) {
     next_state := s_invalid
   } .elsewhen ((io.grant && (state === s_valid_1)) ||
-    (io.grant && (state === s_valid_2) && rs1check() && rs2check() && ppred && vl_ready)) {
+    (io.grant && (state === s_valid_2) && rs1check && rs2check && ppred && vl_ready)) {
     if (vector || matrix) {
       when (state === s_valid_1) {
         when(last_check) {
@@ -318,9 +306,6 @@ class IssueSlot(
         //in_pm := ~io.in_uop.bits.prvm_busy
         ps    := ~io.in_uop.bits.v_scalar_busy
         sdata := io.in_uop.bits.v_scalar_data
-        if(iqType == IQT_VMX.litValue) {
-          strideLength := io.in_uop.bits.vStrideLength
-        }
       } else {
         next_p1 := !io.in_uop.bits.prs1_busy(0)
         next_p2 := !io.in_uop.bits.prs2_busy(0)
@@ -478,10 +463,6 @@ class IssueSlot(
         ps := true.B
         sdata := updatedSData
       }
-      if(iqType == IQT_VMX.litValue){
-        val strideLengthVec = io.intupdate.map(_.bits.uop.vStrideLength)
-        strideLength := Mux1H(int_sel, strideLengthVec)
-      }
       assert(PopCount(int_sel++fp_sel) <= 1.U, "Multiple drivers")
     }
 
@@ -489,11 +470,11 @@ class IssueSlot(
 
   //-------------------------------------------------------------
   // Request Logic
-  //io.request := is_valid && rs1check() && rs2check() && rs3check() && vmcheck() && ppred && !io.kill
+  //io.request := is_valid && rs1check && rs2check && rs3check && vmcheck && ppred && !io.kill
   when (state === s_valid_1) {
-    io.request := ppred && rs1check() && rs2check() && rs3check() && vmcheck() && vl_ready && !io.kill
+    io.request := ppred && rs1check && rs2check && rs3check && vmcheck && vl_ready && !io.kill
   } .elsewhen (state === s_valid_2) {
-    io.request := (rs1check() || rs2check()) && ppred && vl_ready && !io.kill
+    io.request := (rs1check || rs2check) && ppred && vl_ready && !io.kill
   } .otherwise {
     io.request := false.B
   }
@@ -509,7 +490,7 @@ class IssueSlot(
 
   // micro-op will vacate due to grant.
   val may_vacate = io.grant && ((state === s_valid_1) || (state === s_valid_2)) &&
-                   ppred && rs1check() && rs2check() && rs3check() && vmcheck() && vl_ready && last_check
+                   ppred && rs1check && rs2check && rs3check && vmcheck && vl_ready && last_check
   val squash_grant = io.ldspec_miss && (p1_poisoned || p2_poisoned)
   io.will_be_valid := is_valid && !(may_vacate && !squash_grant)
 
@@ -545,9 +526,6 @@ class IssueSlot(
       //io.out_uop.prvm_busy  := ~pm
       io.out_uop.v_scalar_busy := ~ps
       io.out_uop.v_scalar_data := sdata
-      if(iqType == IQT_VMX.litValue){
-        io.out_uop.vStrideLength := strideLength
-      }
       io.out_uop.v_perm_busy := false.B //!perm_ready || perm_ready_vrg_bsy
       io.out_uop.v_perm_wait := false.B //perm_wait || perm_wait_vrg_set
       io.out_uop.v_perm_idx  := 0.U //perm_idx
@@ -620,12 +598,12 @@ class IssueSlot(
   io.out_uop.vconfig.vl := slot_uop.vconfig.vl
 
   when (state === s_valid_2) {
-    when (rs1check() && rs2check() && ppred && vl_ready)  {
+    when (rs1check && rs2check && ppred && vl_ready)  {
       ; // send out the entire instruction as one uop
-    } .elsewhen (rs1check() && ppred && vl_ready) {
+    } .elsewhen (rs1check && ppred && vl_ready) {
       io.uop.uopc := slot_uop.uopc
       io.uop.lrs2_rtype := RT_X
-    } .elsewhen (rs2check() && ppred && vl_ready) {
+    } .elsewhen (rs2check && ppred && vl_ready) {
       io.uop.uopc := uopSTD
       io.uop.lrs1_rtype := RT_X
     }
