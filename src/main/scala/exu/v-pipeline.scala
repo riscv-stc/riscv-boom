@@ -23,13 +23,6 @@ import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
 
-
-class VLSUWriteBack(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
-{
-  val addr = UInt(vpregSz.W)
-  val data = UInt(dataWidth.W)
-  val byteMask = UInt((dataWidth/8).W)
-}
 /**
  * Top level datapath that wraps the floating point issue window, regfile, and arithmetic units.
  */
@@ -52,18 +45,11 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val vmx_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
     val vbusy_status     = Input(UInt(numVecPhysRegs.W))
 
-    /** vld ops may write one vreg multiple times but be freed when all done. */
-    val vlsuWritePort    = Flipped(ValidIO(new VLSUWriteBack(vLen)))
-    val vlsuLoadWakeUp   = Flipped(ValidIO(UInt(vpregSz.W)))
     //val to_int_iss       = Decoupled(new ExeUnitResp(eLen))
     //val to_sdq           = Decoupled(new ExeUnitResp(eLen))
     val to_int           = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
     val to_fp            = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
     val fromMat          = if (usingMatrix) Vec(matWidth, Flipped(Decoupled(new ExeUnitResp(vLen)))) else null
-    /** Send vrf data to vlsu for indexed or masked load store. */
-    val toVlsuRr: ValidIO[FuncUnitReq] = ValidIO(new FuncUnitReq(vLen))
-    val vlsuReadReq: DecoupledIO[UInt] = Flipped(Decoupled(UInt(vpregSz.W)))
-    val vlsuReadResp     = ValidIO(UInt(vLen.W))
     //val vmupdate         = Output(Vec(1, Valid(new MicroOp)))
     /** wider int update, @todo: specify update port into independent issue-unit */
     val intupdate        = Input(Vec(intWidth + memWidth, Valid(new ExeUnitResp(eLen))))
@@ -215,10 +201,6 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   vregister_read.io.kill := io.flush_pipeline
   //io.vmupdate := vregister_read.io.vmupdate
 
-  // Only one port for vector load write back.
-  vregfile.io.read_ports.last.addr := Mux(io.vlsuReadReq.valid, io.vlsuReadReq.bits, 0.U)
-  io.vlsuReadResp.valid := RegNext(io.vlsuReadReq.valid)
-  io.vlsuReadResp.bits := vregfile.io.read_ports.last.data
   //-------------------------------------------------------------
   // **** Execute Stage ****
   //-------------------------------------------------------------
@@ -254,15 +236,9 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   for(w <- 0 until matWidth) {
     ll_wbarb.io.in(w+1) <> io.fromMat(w)
   }
-  when(io.vlsuWritePort.valid) {
-    vregfile.io.write_ports(0).valid     := io.vlsuWritePort.valid
-    vregfile.io.write_ports(0).bits.addr := io.vlsuWritePort.bits.addr
-    vregfile.io.write_ports(0).bits.data := io.vlsuWritePort.bits.data
-    vregfile.io.write_ports(0).bits.mask := MaskExploder(io.vlsuWritePort.bits.byteMask, vLen)
-  } .otherwise {
-    vregfile.io.write_ports(0) := WritePort(ll_wbarb.io.out, vpregSz, vLen, isVector, true)
-    // vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vElenSz, eLen, isVector, true))
-  }
+
+  vregfile.io.write_ports(0) := WritePort(ll_wbarb.io.out, vpregSz, vLen, isVector, true)
+  // vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vElenSz, eLen, isVector, true))
   ll_wbarb.io.out.ready := true.B
 
   var w_cnt = 1
@@ -296,9 +272,6 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   //io.to_sdq.valid := vmx_resp.valid && vmx_resp_uop.is_rvv && vmx_resp_uop.ctrl.is_sta
   //io.to_sdq.bits  := vmx_resp.bits
   //io.to_sdq.bits.data := VDataSel(vmx_resp.bits.data, vmx_resp_uop.vd_eew, vmx_resp_uop.v_eidx, vLen, eLen)
-  /* vls that reads vrf goes via vmx-unit. */
-  io.toVlsuRr.valid := vlsuReqRr.valid && vlsuReqRrUop.is_rvv && (vlsuReqRrUop.v_idx_ls || !vlsuReqRrUop.v_unmasked)
-  io.toVlsuRr.bits := vlsuReqRr.bits
   //vmx_resp.ready :=  true.B
   //io.to_int.valid := false.B
   //io.to_int.bits  := DontCare

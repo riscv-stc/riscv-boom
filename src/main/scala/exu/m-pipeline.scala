@@ -29,15 +29,6 @@ class TileAccessInfo(implicit p: Parameters) extends BoomBundle {
   val tt   = UInt(2.W)
 }
 
-class VLSUWriteTileBack(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
-{
-  val ridx = UInt(vpregSz.W)
-  val sidx = UInt(vLenSz.W)
-  val tt   = UInt(2.W)
-  val data = UInt(dataWidth.W)
-  val byteMask = UInt((dataWidth/8).W)
-}
-
 /**
  * Top level datapath that wraps the floating point issue window, regfile, and arithmetic units.
  */
@@ -60,11 +51,6 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     // dispatched uops
     val dis_uops         = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
     // vlsu related
-    /** vld ops may write one vreg multiple times but be freed when all done. */
-    val vlsuWritePort    = Flipped(ValidIO(new VLSUWriteTileBack(vLen)))
-    val vlsuLoadWakeUp   = Flipped(ValidIO(new TileAccessInfo()))
-    val vlsuReadReq      = Flipped(Decoupled(new TileAccessInfo()))
-    val vlsuReadResp     = ValidIO(UInt(vLen.W))
     // vector pipeline related
     val toVec            = Vec(matWidth, Decoupled(new ExeUnitResp(vLen)))
     // scalar pipeline related
