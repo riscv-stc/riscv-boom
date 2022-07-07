@@ -106,11 +106,11 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val 
     exe_units.find(_.hasRocc).get
   }
 
-  lazy val vmx_unit = {
-    require (usingVector)
-    require (exe_units.count(_.hasVMX) == 1)
-    exe_units.find(_.hasVMX).get
-  }
+  //lazy val vmx_unit = {
+    //require (usingVector)
+    //require (exe_units.count(_.hasVMX) == 1)
+    //exe_units.find(_.hasVMX).get
+  //}
 
   if (!fpu && !vector && !matrix) {
     // scalar integer
@@ -149,7 +149,7 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val 
   } else if (vector && !matrix) { // vector
     val vec_width = issueParams.find(_.iqType == IQT_VEC.litValue).get.issueWidth
     for (w <- 0 until vec_width) {
-      val vec_exe_unit = Module(new VecExeUnit(hasVMX = false,
+      val vec_exe_unit = Module(new VecExeUnit(//hasVMX = false,
                                                hasIfpu = true,
                                                hasFpu = true,
                                                hasFdiv = usingFDivSqrt))
@@ -157,13 +157,13 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val 
       exe_units += vec_exe_unit
     }
 
-    val vmx_exe_unit = Module(new VecExeUnit(hasVMX = true,
-                                             hasAlu = false,
-                                             hasMacc = false,
-                                             hasVMaskUnit = false,
-                                             hasDiv = false))
-    vmx_exe_unit.suggestName("vmx_exe_unit")
-    exe_units += vmx_exe_unit
+    //val vmx_exe_unit = Module(new VecExeUnit(hasVMX = true,
+    //                                         hasAlu = false,
+    //                                         hasMacc = false,
+    //                                         hasVMaskUnit = false,
+    //                                         hasDiv = false))
+    //vmx_exe_unit.suggestName("vmx_exe_unit")
+    //exe_units += vmx_exe_unit
   }
   else { // matrix
     for(w <- 0 until matWidth) {
@@ -215,7 +215,7 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val 
   val numLlFrfWritePorts  = exe_units.count(_.writesLlFrf)
 
   val numVrfReaders       = exe_units.count(_.readsVrf)
-  val numVrfReadPorts     = exe_units.count(_.readsVrf) * 4 - exe_units.count(_.hasVMX) * 2
+  val numVrfReadPorts     = exe_units.count(_.readsVrf) * 4 // - exe_units.count(_.hasVMX) * 2
   val numVrfWritePorts    = exe_units.count(_.writesVrf)
   val numLlVrfWritePorts  = exe_units.count(_.writesLlVrf)
 

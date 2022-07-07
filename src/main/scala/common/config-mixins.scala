@@ -534,6 +534,7 @@ class WithSWBPD extends Config((site, here, up) => {
  * Based on LargeBoomConfig with RVV + Matrix extension
  */
 class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Config(
+  new freechips.rocketchip.subsystem.WithCacheBlockBytes(128) ++
   new WithTAGELBPD ++ // Default to TAGE-L BPD
   new Config((site, here, up) => {
     case TilesLocated(InSubsystem) => {
@@ -550,8 +551,7 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
                 IssueParams(issueWidth=1, numEntries=24, iqType=IQT_MEM.litValue, dispatchWidth=2),
                 IssueParams(issueWidth=2, numEntries=24, iqType=IQT_INT.litValue, dispatchWidth=2),
                 IssueParams(issueWidth=1, numEntries=16, iqType=IQT_FP.litValue , dispatchWidth=2),
-                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VEC.litValue, dispatchWidth=2),
-                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VMX.litValue, dispatchWidth=2)),
+                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VEC.litValue, dispatchWidth=2)),
               numIntPhysRegisters = 64,
               numFpPhysRegisters = 48,
               numLdqEntries = 16,
@@ -569,10 +569,10 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               numVecPhysRegisters = 65
             ),
             dcache = Some(
-              DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4, nTLBWays=16)
+              DCacheParams(rowBits = 128, nSets=32, nWays=8, nMSHRs=8, nTLBWays=16, blockBytes=site(CacheBlockBytes))
             ),
             icache = Some(
-              ICacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, fetchBytes=4*4)
+              ICacheParams(rowBits = 128, nSets=32, nWays=8, fetchBytes=4*4, blockBytes=site(CacheBlockBytes))
             ),
             hartId = i + idOffset
           ),
@@ -580,7 +580,8 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
         )
       } ++ prev
     }
-    case SystemBusKey => up(SystemBusKey, site).copy(beatBytes = 16)
+    case SystemBusKey => up(SystemBusKey, site).copy(beatBytes = 64)
+    //case MemoryBusKey => up(MemoryBusKey, site).copy(beatBytes = 64)
     case XLen => 64
   })
 )

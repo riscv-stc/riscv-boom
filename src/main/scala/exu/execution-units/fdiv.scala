@@ -160,7 +160,8 @@ class FDivSqrtUnit(vector: Boolean = false)(implicit p: Parameters)
     }
     fdiv_ctrl.typeTagIn := Mux(vsew === 3.U, D, Mux(vsew === 2.U, S, H))
     fdiv_ctrl.typeTagOut:= Mux(vsew === 3.U, D, Mux(vsew === 2.U, S, H))
-    when (!io_req.uop.v_active) {
+    //when (!io_req.uop.v_active) {
+    when (io_req.rvm_data(0)) {
       fdiv_ctrl.ren2 := false.B
       fdiv_ctrl.ren3 := false.B
     }
@@ -290,8 +291,9 @@ class FDivSqrtUnit(vector: Boolean = false)(implicit p: Parameters)
         box(r_out_wdata_double, D) ) )
 
   if(vector) {
-    io.resp.bits.data := Mux(r_divsqrt_uop.v_active, ieee(fdiv_out_data), r_divsqrt_fin.in3)
-    io.resp.bits.fflags.bits.flags := Mux(r_divsqrt_uop.v_active, out_flags, 0.U)
+    // FIXME
+    io.resp.bits.data := Mux(r_buffer_req.rvm_data(0), ieee(fdiv_out_data), r_divsqrt_fin.in3)
+    io.resp.bits.fflags.bits.flags := Mux(r_buffer_req.rvm_data(0), out_flags, 0.U)
   } else {
     io.resp.bits.data := fdiv_out_data
     io.resp.bits.fflags.bits.flags := out_flags
@@ -380,8 +382,8 @@ class VecFDivSqrtUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeF
       fdiv.io.req.bits.rs2_data  := rs2_data(16*e+15, 16*e)
       fdiv.io.req.bits.rs3_data  := rs3_data(16*e+15, 16*e)
     }
-    fdiv.io.req.bits.uop.v_active := !inactive(e)
-    fdiv.io.req.bits.rvm_data     := inactive(e)
+    //fdiv.io.req.bits.uop.v_active := !inactive(e)
+    fdiv.io.req.bits.rvm_data    := !inactive(e)
     // output
     fdivValid(e) := fdiv.io.resp.valid
     if (e < numELENinVLEN) {

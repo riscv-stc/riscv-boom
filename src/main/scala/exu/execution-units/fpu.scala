@@ -292,7 +292,7 @@ class FPU(vector: Boolean = false)(implicit p: Parameters) extends BoomModule wi
     val vs2_fmt = Mux(vs2_sew === 3.U, D, Mux(vs2_sew === 2.U, S, H))
     when (io.req.valid && io_req.uop.is_rvv) {
       assert(io_req.uop.fp_val, "unexpected fp_val")
-      assert(io_req.uop.v_active, "unexpected inactive split")
+      //assert(io_req.uop.v_active, "unexpected inactive split")
       assert(vsew <= 3.U, "unsupported vsew")
       assert(vd_sew >= 1.U && vd_sew <= 3.U, "unsupported vd_sew")
     }
@@ -498,14 +498,14 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
       rs2_edata := rs2_data(esel*16+15, esel*16)
       rs3_edata := rs3_data(esel*16+15, esel*16)
     } else {
-      if (esel < numELENinVLEN) {
+      if (esel < vLen/64) {
         rs1_edata := Mux(vs1_sew === 3.U, rs1_data(esel*64+63, esel*64),
                      Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32), rs1_data(esel*16+15, esel*16)))
         rs2_edata := Mux(vs2_sew === 3.U, rs2_data(esel*64+63, esel*64),
                      Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32), rs2_data(esel*16+15, esel*16)))
         rs3_edata := Mux(vd_sew === 3.U,  rs3_data(esel*64+63, esel*64),
                      Mux(vd_sew === 2.U,  rs3_data(esel*32+31, esel*32), rs3_data(esel*16+15, esel*16)))
-      } else if (esel < numELENinVLEN*2) {
+      } else if (esel < vLen/32) {
         rs1_edata := Mux(vs1_sew === 2.U, rs1_data(esel*32+31, esel*32), rs1_data(esel*16+15, esel*16))
         rs2_edata := Mux(vs2_sew === 2.U, rs2_data(esel*32+31, esel*32), rs2_data(esel*16+15, esel*16))
         rs3_edata := Mux(vd_sew === 2.U,  rs3_data(esel*32+31, esel*32), rs3_data(esel*16+15, esel*16))

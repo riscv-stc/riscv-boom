@@ -52,7 +52,7 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false, val matr
   val out_uop       = Output(new MicroOp()) // the updated slot uop; will be shifted upwards in a collasping queue.
   val uop           = Output(new MicroOp()) // the current Slot's uop. Sent down the pipeline when issued.
   //val vmupdate      = if (usingVector && !vector) Input(Vec(1, Valid(new MicroOp))) else null
-  val intupdate     = if (vector || matrix) Input(Vec(intWidth + memWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val intupdate     = if (vector || matrix) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
   val fpupdate      = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   //val vecUpdate     = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
   val vbusy_status  = if (vector) Input(UInt(numVecPhysRegs.W)) else null
@@ -259,7 +259,7 @@ class IssueSlot(
   when (io.kill) {
     next_state := s_invalid
   } .elsewhen ((io.grant && (state === s_valid_1)) ||
-    (io.grant && (state === s_valid_2) && rs1check && rs2check && ppred && vl_ready)) {
+    (io.grant && (state === s_valid_2) && rs1check() && rs2check() && ppred && vl_ready)) {
     if (vector || matrix) {
       when (state === s_valid_1) {
         when(last_check) {
@@ -428,13 +428,13 @@ class IssueSlot(
   //if (usingVector && !vector && iqType == IQT_MEM.litValue) {
     //next_pm := io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx).reduce(_||_)
     //when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx).reduce(_||_)) {
-    //  slot_uop.v_unmasked := true.B
+      //slot_uop.v_unmasked := true.B
     //}
     //when (next_uop.v_idx_ls && io.vmupdate.map(x => x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid)).reduce(_||_)) {
-    //  vxofs := Mux1H(io.vmupdate.map(x => (x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid), x.bits.v_xls_offset)))
+      //vxofs := Mux1H(io.vmupdate.map(x => (x.valid && x.bits.rob_idx === next_uop.rob_idx && (io.in_uop.valid || is_valid), x.bits.v_xls_offset)))
     //}
     //when (IsKilledByVM(io.vmupdate, slot_uop)) {
-    //  next_state := s_invalid
+      //next_state := s_invalid
     //}
   //}
 
@@ -491,9 +491,9 @@ class IssueSlot(
   // Request Logic
   //io.request := is_valid && rs1check() && rs2check() && rs3check() && vmcheck() && ppred && !io.kill
   when (state === s_valid_1) {
-    io.request := ppred && rs1check && rs2check && rs3check && vmcheck && scalarCheck && vl_ready && !io.kill
+    io.request := ppred && rs1check() && rs2check() && rs3check() && vmcheck() && vl_ready && !io.kill
   } .elsewhen (state === s_valid_2) {
-    io.request := (rs1check || rs2check) && ppred && vl_ready && !io.kill
+    io.request := (rs1check() || rs2check()) && ppred && vl_ready && !io.kill
   } .otherwise {
     io.request := false.B
   }
@@ -509,7 +509,7 @@ class IssueSlot(
 
   // micro-op will vacate due to grant.
   val may_vacate = io.grant && ((state === s_valid_1) || (state === s_valid_2)) &&
-                   ppred && rs1check && rs2check && rs3check && vmcheck && vl_ready && last_check
+                   ppred && rs1check() && rs2check() && rs3check() && vmcheck() && vl_ready && last_check
   val squash_grant = io.ldspec_miss && (p1_poisoned || p2_poisoned)
   io.will_be_valid := is_valid && !(may_vacate && !squash_grant)
 
@@ -561,7 +561,7 @@ class IssueSlot(
       when (vcompress) {
         io.uop.pvm := slot_uop.prs1
       }
-      when (io.request && io.grant && !io.uop.uopc.isOneOf(/*uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, */uopVSA, uopVSSA, uopVSUXA, uopVSOXA)) {
+           when (io.request && io.grant && !io.uop.uopc.isOneOf(/*uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, */uopVSA, uopVSSA, uopVSUXA, uopVSOXA)) {
         val vd_idx = Mux(slot_uop.rt(RD, isMaskVD), 0.U, VRegSel(slot_uop.v_eidx, slot_uop.vd_eew, eLenSelSz))
         io.uop.pdst := Mux(slot_uop.rt(RD, isVector), slot_uop.pvd(vd_idx).bits, slot_uop.pdst)
         assert(is_invalid || !slot_uop.rt(RD, isVector) || slot_uop.pvd(vd_idx).valid)
@@ -604,9 +604,9 @@ class IssueSlot(
   when (io.in_uop.valid) {
     slot_uop := io.in_uop.bits
     //if(usingVector && !vector && iqType == IQT_MEM.litValue) {
-    //  when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === io.in_uop.bits.rob_idx).reduce(_||_)) {
-    //    slot_uop.v_unmasked := true.B
-    //  }
+      //when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === io.in_uop.bits.rob_idx).reduce(_||_)) {
+        //slot_uop.v_unmasked := true.B
+      //}
     //}
     assert (is_invalid || io.clear || io.kill, "trying to overwrite a valid issue slot.")
   }
@@ -620,12 +620,12 @@ class IssueSlot(
   io.out_uop.vconfig.vl := slot_uop.vconfig.vl
 
   when (state === s_valid_2) {
-    when (rs1check && rs2check && ppred && vl_ready)  {
+    when (rs1check() && rs2check() && ppred && vl_ready)  {
       ; // send out the entire instruction as one uop
-    } .elsewhen (rs1check && ppred && vl_ready) {
+    } .elsewhen (rs1check() && ppred && vl_ready) {
       io.uop.uopc := slot_uop.uopc
       io.uop.lrs2_rtype := RT_X
-    } .elsewhen (rs2check && ppred && vl_ready) {
+    } .elsewhen (rs2check() && ppred && vl_ready) {
       io.uop.uopc := uopSTD
       io.uop.lrs1_rtype := RT_X
     }

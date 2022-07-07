@@ -29,10 +29,10 @@ import boom.util._
 class VecPipeline(implicit p: Parameters) extends BoomModule
 {
   val vecIssueParams = issueParams.find(_.iqType == IQT_VEC.litValue).get
-  val vmxIssueParams = issueParams.find(_.iqType == IQT_VMX.litValue).get
-  require(vecIssueParams.dispatchWidth == vmxIssueParams.dispatchWidth)
+  //val vmxIssueParams = issueParams.find(_.iqType == IQT_VMX.litValue).get
+  //require(vecIssueParams.dispatchWidth == vmxIssueParams.dispatchWidth)
   val dispatchWidth = vecIssueParams.dispatchWidth
-  val numWakeupPorts = vecWidth + vecMemWidth // internal wakeups
+  val numWakeupPorts = vecWidth + memWidth // internal wakeups
 
   val io = IO(new Bundle {
     val brupdate         = Input(new BrUpdateInfo())
@@ -42,18 +42,20 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val status           = Input(new MStatus())
 
     val vec_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
-    val vmx_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
+    //val vmx_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
     val vbusy_status     = Input(UInt(numVecPhysRegs.W))
 
-    //val to_int_iss       = Decoupled(new ExeUnitResp(eLen))
-    //val to_sdq           = Decoupled(new ExeUnitResp(eLen))
+    val fromMat          = if (usingMatrix) Vec(matWidth, Flipped(Decoupled(new ExeUnitResp(vLen)))) else null
+    val ll_wports        = Flipped(Decoupled(new ExeUnitResp(vLen)))
+//  val to_int_iss       = Decoupled(new ExeUnitResp(eLen))
+//  val to_sdq           = Decoupled(new ExeUnitResp(eLen))
     val to_int           = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
     val to_fp            = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
-    val fromMat          = if (usingMatrix) Vec(matWidth, Flipped(Decoupled(new ExeUnitResp(vLen)))) else null
     //val vmupdate         = Output(Vec(1, Valid(new MicroOp)))
-    /** wider int update, @todo: specify update port into independent issue-unit */
-    val intupdate        = Input(Vec(intWidth + memWidth, Valid(new ExeUnitResp(eLen))))
+    val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
     val fpupdate         = Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen))))
+    val lsu_vrf_rport    = new RegisterFileReadPortIO(vpregSz, vLen)
+    //val lsu_vrf_wbk      = Flipped(new ExeUnitResp(vLen))
 
     val vl_wakeup        = Input(Valid(new VlWakeupResp()))
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(eLen))) // wakeup issue_units for mem, int and fp
@@ -66,10 +68,10 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       val vec_req_valids      = Vec(vecIssueParams.issueWidth, Bool())
       val vec_iss_slots_empty = Bool()
       val vec_iss_slots_full  = Bool()
-      val vmx_iss_valids      = Vec(vmxIssueParams.issueWidth, Bool())
-      val vmx_req_valids      = Vec(vmxIssueParams.issueWidth, Bool())
-      val vmx_iss_slots_empty = Bool()
-      val vmx_iss_slots_full  = Bool()
+      //val vmx_iss_valids      = Vec(vmxIssueParams.issueWidth, Bool())
+      //val vmx_req_valids      = Vec(vmxIssueParams.issueWidth, Bool())
+      //val vmx_iss_slots_empty = Bool()
+      //val vmx_iss_slots_full  = Bool()
       val div_busy            = Vec(vecIssueParams.issueWidth, Bool())
       val fdiv_busy           = Vec(vecIssueParams.issueWidth, Bool())
     })
@@ -83,30 +85,29 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
                          vecIssueParams,
                          numWakeupPorts, vector = true))
   vec_issue_unit.suggestName("vec_issue_unit")
-  val vmx_issue_unit = Module(new IssueUnitCollapsing(
-                         vmxIssueParams,
-                         numWakeupPorts, vector = true))
-  vmx_issue_unit.suggestName("vmx_issue_unit")
-  val viu = Seq(vec_issue_unit, vmx_issue_unit)
+  //val vmx_issue_unit = Module(new IssueUnitCollapsing(
+  //                       vmxIssueParams,
+  //                       numWakeupPorts, vector = true))
+  //vmx_issue_unit.suggestName("vmx_issue_unit")
+  val viu = Seq(vec_issue_unit) //vmx_issue_unit
   val vregfile       = Module(new RegisterFileSynthesizable(numVecPhysRegs,
-                         exe_units.numVrfReadPorts + 1,  // plus 1 for vlsu read request for stores.
-                         exe_units.numVrfWritePorts + 1, // plus 1 for long-latency write request
+                         exe_units.numVrfReadPorts + memWidth,
+                         exe_units.numVrfWritePorts + memWidth,
                          vLen,
                          // No bypassing for any VEC units, + memWidth for ll_wb
                          Seq.fill(exe_units.numVrfWritePorts + 1){ false },
                          vector = true))
   val vregister_read = Module(new RegisterRead(
-                         vecWidth+1,
+                         vecWidth,
                          exe_units.withFilter(_.readsVrf).map(_.supportedFuncUnits),
                          exe_units.numVrfReadPorts,
-                         exe_units.withFilter(_.readsVrf).map(x => if (x.hasVMX) 2 else 4),
+                         exe_units.withFilter(_.readsVrf).map(x => 4),
                          0, // No bypass for VEC
                          0,
                          vLen, float = false, vector = true))
 
-  require (exe_units.count(_.readsVrf) == vecWidth + 1)
-  require (exe_units.numVrfWritePorts + vecMemWidth == numWakeupPorts,
-    s"${exe_units.numVrfWritePorts} + ${memWidth} + ${vecMemWidth} + ${numWakeupPorts}")
+  require (exe_units.count(_.readsVrf) == vecWidth)
+  require (exe_units.numVrfWritePorts + memWidth == numWakeupPorts)
   require (vecWidth >= memWidth)
 
   //*************************************************************
@@ -139,7 +140,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   // Input (Dispatch)
   for (w <- 0 until dispatchWidth) {
     vec_issue_unit.io.dis_uops(w) <> io.vec_dis_uops(w)
-    vmx_issue_unit.io.dis_uops(w) <> io.vmx_dis_uops(w)
+    //vmx_issue_unit.io.dis_uops(w) <> io.vmx_dis_uops(w)
   }
 
   //-------------------------------------------------------------
@@ -152,10 +153,10 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   io.perf.div_busy  := (0 until vecWidth).map(i => if(exe_units(i).hasDiv)  exe_units(i).io.perf.div_busy  else false.B)
   io.perf.fdiv_busy := (0 until vecWidth).map(i => if(exe_units(i).hasFdiv) exe_units(i).io.perf.fdiv_busy else false.B)
 
-  io.perf.vmx_iss_valids := vmx_issue_unit.io.iss_valids
-  io.perf.vmx_req_valids := (vecWidth until vecWidth+1).map(i => exe_units(i).io.req.valid)
-  io.perf.vmx_iss_slots_empty := vmx_issue_unit.io.perf.empty
-  io.perf.vmx_iss_slots_full  := vmx_issue_unit.io.perf.full
+  //io.perf.vmx_iss_valids := vmx_issue_unit.io.iss_valids
+  //io.perf.vmx_req_valids := (vecWidth until vecWidth+1).map(i => exe_units(i).io.req.valid)
+  //io.perf.vmx_iss_slots_empty := vmx_issue_unit.io.perf.empty
+  //io.perf.vmx_iss_slots_full  := vmx_issue_unit.io.perf.full
 
   // Output (Issue)
   for (i <- 0 until vecWidth) {
@@ -171,9 +172,9 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
     require (exe_units(i).readsVrf)
   }
-  iss_valids(vecWidth) := vmx_issue_unit.io.iss_valids(0)
-  iss_uops(vecWidth)   := vmx_issue_unit.io.iss_uops(0)
-  vmx_issue_unit.io.fu_types(0) := exe_units.vmx_unit.io.fu_types
+  //iss_valids(vecWidth) := vmx_issue_unit.io.iss_valids(0)
+  //iss_uops(vecWidth)   := vmx_issue_unit.io.iss_uops(0)
+  //vmx_issue_unit.io.fu_types(0) := exe_units.vmx_unit.io.fu_types
 
   // Wakeup
   viu.map(iu => {
@@ -191,7 +192,11 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
 
   // Register Read <- Issue (rrd <- iss)
-  vregister_read.io.rf_read_ports <> VecInit(vregfile.io.read_ports.init)
+  for (w <- 0 until exe_units.numVrfReadPorts) {
+    vregister_read.io.rf_read_ports(w) <> vregfile.io.read_ports(w)
+  }
+  io.lsu_vrf_rport <> vregfile.io.read_ports(exe_units.numVrfReadPorts)
+
   vregister_read.io.prf_read_ports map { port => port.data := false.B }
 
   vregister_read.io.iss_valids <> iss_valids
@@ -225,14 +230,10 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     case (to_int, vec) => to_int <> vec
   }
 
-  // FIXME: construct vlsuExeResp from vlsuWritePort
-  // arbitration between vslu and matirx pipeline
+
   val ll_wbarb = Module(new Arbiter(new ExeUnitResp(vLen), matWidth+1))
-  // Cut up critical path by delaying the write by a cycle.
-  // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
-  // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
-  ll_wbarb.io.in(0) <> DontCare
-  ll_wbarb.io.in(0).valid := io.vlsuWritePort.valid
+  ll_wbarb.io.in(0) <> io.ll_wports
+  ll_wbarb.io.in(0).bits.data := io.ll_wports.bits.data
   for(w <- 0 until matWidth) {
     ll_wbarb.io.in(w+1) <> io.fromMat(w)
   }
@@ -242,37 +243,45 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   ll_wbarb.io.out.ready := true.B
 
   var w_cnt = 1
-  //for (i <- 1 until vecMemWidth + 1) {//dedicated for vlsu
-    //vregfile.io.write_ports(w_cnt) := WritePort(io.vlsuWritePort, vpregSz, vLen, isVector, true)
-    //w_cnt += 1
-  //}
-  for (eu <- exe_units.withFilter(_.writesVrf)) {
-    // vmx does not write vrf
+  for (i <- 1 until memWidth) {
+    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports, vpregSz, vLen, isVector, true))
+    w_cnt += 1
+  }
+  for (eu <- exe_units) {
     val eu_vresp = WireInit(eu.io.vresp)
     val eu_vresp_uop = eu_vresp.bits.uop
     when (eu_vresp_uop.rt(RD, isReduceV)) {
       eu_vresp.bits.uop.v_eidx := 0.U
     }
-    eu_vresp.valid    := eu.io.vresp.valid && eu_vresp_uop.rf_wen
-    eu.io.vresp.ready := true.B
-    vregfile.io.write_ports(w_cnt) := WritePort(eu_vresp, vpregSz, vLen, isVector, true)
-    when (eu_vresp.valid && !(eu_vresp_uop.is_rvv && eu_vresp_uop.ctrl.is_sta)) {
-      //assert(eu.io.vresp.ready, "No backpressuring the Vec EUs")
-      assert(eu.io.vresp.bits.uop.rf_wen, "rf_wen must be high here")
-      assert(eu.io.vresp.bits.uop.rt(RD, isVector), "wb type must be vector")
+    if (eu.writesVrf) {
+      //if (eu.hasVMX) {
+        //eu_vresp.valid    := eu.io.vresp.valid && eu_vresp_uop.rf_wen && !eu_vresp_uop.ctrl.is_sta
+        //eu.io.vresp.ready := Mux(eu_vresp_uop.ctrl.is_sta, io.to_sdq.ready, true.B)
+        //when (eu.io.vresp.valid) { assert(eu_vresp_uop.is_rvv) }
+      //} else {
+        eu_vresp.valid    := eu.io.vresp.valid && eu_vresp_uop.rf_wen
+        eu.io.vresp.ready := true.B
+      //}
+      vregfile.io.write_ports(w_cnt) := WritePort(eu_vresp, vpregSz, vLen, isVector, true)
+      when (eu_vresp.valid && !(eu_vresp_uop.is_rvv && eu_vresp_uop.ctrl.is_sta)) {
+        //assert(eu.io.vresp.ready, "No backpressuring the Vec EUs")
+        assert(eu.io.vresp.bits.uop.rf_wen, "rf_wen must be high here")
+        assert(eu.io.vresp.bits.uop.rt(RD, isVector), "wb type must be vector")
+      }
+      w_cnt += 1
     }
     w_cnt += 1
   }
   require (w_cnt == vregfile.io.write_ports.length)
 
-  val vmx_unit = exe_units.vmx_unit
-  val vlsuReqRr: ValidIO[FuncUnitReq] = vmx_unit.io.vlsuReqRr
-  val vlsuReqRrUop = vmx_unit.io.vlsuReqRr.bits.uop
+  //val vmx_unit = exe_units.vmx_unit
+  //val vmx_resp = vmx_unit.io.vresp
+  //val vmx_resp_uop = vmx_unit.io.vresp.bits.uop
 
   //io.to_sdq.valid := vmx_resp.valid && vmx_resp_uop.is_rvv && vmx_resp_uop.ctrl.is_sta
   //io.to_sdq.bits  := vmx_resp.bits
   //io.to_sdq.bits.data := VDataSel(vmx_resp.bits.data, vmx_resp_uop.vd_eew, vmx_resp_uop.v_eidx, vLen, eLen)
-  //vmx_resp.ready :=  true.B
+  //vmx_resp.ready := Mux(io.to_sdq.valid, io.to_sdq.ready, true.B)
   //io.to_int.valid := false.B
   //io.to_int.bits  := DontCare
   //io.to_fp.valid := false.B
@@ -286,32 +295,26 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
   //-------------------------------------------------------------
 
-  //io.wakeups(0).valid := ll_wbarb.io.out.valid
-  //io.wakeups(0).bits := ll_wbarb.io.out.bits
-  //ll_wbarb.io.out.ready := true.B
+  io.wakeups(0).valid := ll_wbarb.io.out.valid
+  io.wakeups(0).bits := ll_wbarb.io.out.bits
+  ll_wbarb.io.out.ready := true.B
 
-  w_cnt = 0
-  //vld write back clears busy table in rename but not busy bit in rob entry.
-  for (i <- 0 until vecMemWidth) {// vector load write back port
-    io.wakeups(w_cnt) <> DontCare
-    io.wakeups(w_cnt).valid := io.vlsuLoadWakeUp.valid
-    io.wakeups(w_cnt).bits.data := 0.U
-    io.wakeups(w_cnt).bits.uop.is_rvv := true.B
-    io.wakeups(w_cnt).bits.uop.uses_ldq := true.B
-    io.wakeups(w_cnt).bits.uop.dst_rtype := RT_VEC
-    io.wakeups(w_cnt).bits.uop.pdst := io.vlsuLoadWakeUp.bits
-    w_cnt += 1
-  }
+  w_cnt = 1
+  //for (i <- 1 until memWidth) {
+  //io.wakeups(w_cnt) := io.ll_wports //(i)
+  //io.wakeups(w_cnt).bits.data := io.ll_wports.bits.data //(i)
+  //w_cnt += 1
+  //}
   for (eu <- exe_units) {
     if (eu.writesVrf) {
       val exe_resp = eu.io.vresp
       val wb_uop = eu.io.vresp.bits.uop
       val wport = io.wakeups(w_cnt)
-      if (eu.hasVMX) {
-        wport.valid := exe_resp.valid && wb_uop.rf_wen && !(wb_uop.is_rvv && wb_uop.ctrl.is_sta)
-      } else {
+      //if (eu.hasVMX) {
+        //wport.valid := exe_resp.valid && wb_uop.rf_wen && !(wb_uop.is_rvv && wb_uop.ctrl.is_sta)
+      //} else {
         wport.valid := exe_resp.valid && wb_uop.rf_wen
-      }
+      //}
       wport.bits := exe_resp.bits
 
       w_cnt += 1

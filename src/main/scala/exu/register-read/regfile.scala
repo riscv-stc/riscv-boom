@@ -66,24 +66,26 @@ object WritePort
     wport.bits.addr := enq_uop.pdst
     wport.bits.data := enq.bits.data
     if (vector) {
-      val vLen = p(TileKey).core.vLen
-      val eLen = p(TileKey).core.eLen
-      val vLenSz = log2Ceil(vLen)
+      //val vLen = p(TileKey).core.vLen
+      //val eLen = p(TileKey).core.eLen
+      //val vLenSz = log2Ceil(vLen)
       //val r_idx = VRegSel(enq_uop.v_eidx, enq_uop.vd_eew, log2Ceil(vLen/eLen))
       //val r_bofs = r_idx << (log2Ceil(vLen) - 3).U // >> enq_uop.vd_eew
-      val tailMask = Mux(enq_uop.rt(RD, isMaskVD), Fill(dataWidth/8, enq_uop.v_split_last) << (enq_uop.v_eidx >> 3)(log2Ceil(dataWidth/8)-1, 0),
-                                                   Fill(dataWidth/8, enq_uop.v_split_last) << (enq_uop.v_eidx << enq_uop.vd_eew)(log2Ceil(dataWidth/8)-1, 0))
-      val byteMask = Mux(enq_uop.rt(RD, isMaskVD), VRegMask(enq_uop.v_eidx >> 3, 0.U, enq_uop.v_split_ecnt >> 3, dataWidth/8),
-                                                   VRegMask(enq_uop.v_eidx, enq_uop.vd_eew, enq_uop.v_split_ecnt, dataWidth/8))
-      wport.bits.mask := Cat((0 until dataWidth/8).map(i => Fill(8, tailMask(i.U) | byteMask(i.U))).reverse)
-      wport.bits.data := Mux(enq_uop.rt(RD, isMaskVD), enq.bits.data << enq_uop.v_eidx(vLenSz-1, 0),
-                                                       enq.bits.data << (enq_uop.v_eidx << (enq_uop.vd_eew +& 3.U))(vLenSz-1, 0))
-      if (llport) {
-        val e_filled = VDataFill(enq.bits.data, enq_uop.vd_eew, eLen)
-        val v_filled = Fill(vLen/eLen, e_filled)
-        require(dataWidth == vLen)
-        wport.bits.data := v_filled
-      }
+      //val tailMask = Mux(enq_uop.rt(RD, isMaskVD), Fill(dataWidth/8, enq_uop.v_split_last) << (enq_uop.v_eidx >> 3)(log2Ceil(dataWidth/8)-1, 0),
+                                                   //Fill(dataWidth/8, enq_uop.v_split_last) << (enq_uop.v_eidx << enq_uop.vd_eew)(log2Ceil(dataWidth/8)-1, 0))
+      //val byteMask = Mux(enq_uop.rt(RD, isMaskVD), VRegMask(enq_uop.v_eidx >> 3, 0.U, enq_uop.v_split_ecnt >> 3, dataWidth/8),
+                                                   //VRegMask(enq_uop.v_eidx, enq_uop.vd_eew, enq_uop.v_split_ecnt, dataWidth/8))
+      //wport.bits.mask := Cat((0 until dataWidth/8).map(i => Fill(8, tailMask(i.U) | byteMask(i.U))).reverse)
+      //wport.bits.data := Mux(enq_uop.rt(RD, isMaskVD), enq.bits.data << enq_uop.v_eidx(vLenSz-1, 0),
+      //                                                 enq.bits.data << (enq_uop.v_eidx << (enq_uop.vd_eew +& 3.U))(vLenSz-1, 0))
+      //if (llport) {
+      //  val e_filled = VDataFill(enq.bits.data, enq_uop.vd_eew, eLen)
+      //  val v_filled = Fill(vLen/eLen, e_filled)
+      //  require(dataWidth == vLen)
+      //  wport.bits.data := v_filled
+      //}
+      wport.bits.data := enq.bits.data
+      wport.bits.mask := FillInterleaved(8, enq.bits.vmask)
     }
     enq.ready := true.B
     wport

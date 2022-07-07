@@ -82,7 +82,7 @@ abstract class AbstractRenameStage(
 
     val dis_fire  = Input(Vec(coreWidth, Bool()))
     val dis_ready = Input(Bool())
-    val dis_fire_first = if (vector) Input(Vec(coreWidth, Bool())) else null
+    //val dis_fire_first = if (vector) Input(Vec(coreWidth, Bool())) else null
 
     // wakeup ports
     val wakeups = Flipped(Vec(numWbPorts, Valid(new ExeUnitResp(xLen))))
@@ -689,7 +689,7 @@ extends AbstractRenameStage(
   busytable.io.wb_pdsts := VecInit(io.wakeups.map(_.bits.uop.pdst))
   io.vbusy_status := busytable.io.vbusy_status
   for (w <- 0 until plWidth) {
-    busytable.io.rebusy_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) && io.dis_fire_first(w)
+    busytable.io.rebusy_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) //&& io.dis_fire_first(w)
   }
   for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) {
     val wkUop   = wk.bits.uop
@@ -700,7 +700,9 @@ extends AbstractRenameStage(
     val rmask   = VRegMask(v_eidx, vsew, ecnt, vLenb)
     val tailMask = Mux(wkUop.rt(RD, isMaskVD), Fill(vLenb, wkUop.v_split_last) << (v_eidx >> 3)(log2Ceil(vLenb)-1, 0),
                                                Fill(vLenb, wkUop.v_split_last) << (v_eidx << vsew)(log2Ceil(vLenb)-1, 0))
-    bs := Mux(isVLoad, Fill(vLenb, true.B), rmask | tailMask)
+    val isUdCopy = wkUop.uopc.isOneOf(uopVL, uopVLFF) && !wkUop.uses_ldq
+    val udTailMask = Cat((0 until vLenb).map(i => (i.U + v_eidx >= wkUop.vconfig.vl)).reverse)
+    bs := Mux(isUdCopy, udTailMask, rmask | tailMask)
   }
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
@@ -1075,7 +1077,7 @@ class VecRenameUT(timeout: Int = 10000)(implicit p: Parameters)
     dis_uops(i).bits  := dut.io.ren2_uops(i)
     dut.io.com_valids(i) := com.valid && com.bits(i).valid && com.bits(i).bits.ldst_val && com.bits(i).bits.dst_rtype(4)
     dut.io.com_uops(i)   := com.bits(i).bits
-    dut.io.dis_fire_first(i) := true.B
+    //dut.io.dis_fire_first(i) := true.B
   }
 
   dut.io.kill       := false.B

@@ -5,6 +5,7 @@
 
 package boom.exu
 
+import Chisel.UInt
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
@@ -305,7 +306,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.is_fencei  := cs.is_fencei
   uop.is_sys_pc2epc   := cs.is_sys_pc2epc
   uop.is_unique  := cs.inst_unique || (cs.uopc === uopVSETVLI) && inst(19,15) === 0.U && inst(11,7)  === 0.U
-  uop.flush_on_commit := cs.flush_on_commit || (csr_en && !csr_ren && io.csr_decode.write_flush)
+  uop.flush_on_commit := cs.flush_on_commit || (csr_en && !csr_ren && io.csr_decode.write_flush) || (cs.uopc === uopVSETVLI) && inst(19,15) === 0.U && inst(11,7)  === 0.U
   uop.is_vsetivli := (cs.uopc === uopVSETIVLI)
   uop.is_vsetvli := (cs.uopc === uopVSETVLI)
   uop.vl_ready   := Mux(cs.not_use_vtype, true.B, io.enq.uop.vl_ready)
@@ -388,9 +389,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vs2_emul   = Mux(isVMVR, vmvr_emul,
                      Mux(uop.rt(RS2, isWidenV), vlmul_value + vs2_wfactor,
                      Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor, 
-                     Mux(isScalarMove || vmlogic_insn || is_viota_m || !uop.rt(RS2, isVector), 0.U,
-                     Mux(is_v_ls && is_v_ls_index, cs.v_ls_ew + vlmul_value - vsew,
-                     vlmul_value)))))
+                     Mux(isScalarMove || vmlogic_insn || is_viota_m || !uop.rt(RS2, isVector), 0.U, vlmul_value))))
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
       //assert(vsew >= vd_nfactor  && vsew + vd_wfactor  <= 3.U, "Unsupported vd_sew")

@@ -54,21 +54,19 @@ trait BOOMDebugConstants
  */
 trait IQType
 {
-  val IQT_SZ    = 6
+  val IQT_SZ    = 5
   val IQT_INT   = 0x1.U(IQT_SZ.W)
   val IQT_MEM   = 0x2.U(IQT_SZ.W)
   val IQT_FP    = 0x4.U(IQT_SZ.W)
   val IQT_VEC   = 0x8.U(IQT_SZ.W)
-  val IQT_VMX   = 0x10.U(IQT_SZ.W)
-  val IQT_MAT   = 0x20.U(IQT_SZ.W)
+  val IQT_MAT   = 0x10.U(IQT_SZ.W)
 
   val IQT_MFP   = 0x6.U(IQT_SZ.W)
   val IQT_IVEC  = 0x9.U(IQT_SZ.W)
   val IQT_FVEC  = 0xC.U(IQT_SZ.W)
-  val IQT_MVMX  = 0x12.U(IQT_SZ.W)
-  val IQT_IMAT  = 0x21.U(IQT_SZ.W)
-  val IQT_MMAT  = 0x22.U(IQT_SZ.W)
-  val IQT_IFMAT = 0x25.U(IQT_SZ.W)
+  val IQT_IMAT  = 0x11.U(IQT_SZ.W)
+  val IQT_MMAT  = 0x12.U(IQT_SZ.W)
+  val IQT_IFMAT = 0x15.U(IQT_SZ.W)
 }
 
 
@@ -234,6 +232,8 @@ trait ScalarOpConstants
     uop.fp_val     := false.B
     uop.uses_stq   := false.B
     uop.uses_ldq   := false.B
+    uop.is_fence   := false.B
+    uop.is_fencei  := false.B
     uop.pdst       := 0.U
     uop.prs1       := 0.U
     uop.prs2       := 0.U

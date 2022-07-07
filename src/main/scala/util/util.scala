@@ -383,6 +383,20 @@ object AgePriorityEncoder
   }
 }
 
+object AgePriorityEncoderOH
+{
+  def apply(in: Seq[Bool], head: UInt): UInt = {
+    val n = in.size
+    val ret = Wire(UInt(n.W))
+    val width = log2Ceil(in.size)
+    val temp_vec = (0 until n).map(i => in(i) && i.U >= head)
+    val temp_oh = PriorityEncoderOH(Cat(temp_vec.reverse))
+    val in_oh   = PriorityEncoderOH(Cat(in.reverse))
+    ret := Mux(temp_oh.orR, temp_oh, in_oh)
+    ret
+  }
+}
+
 /**
   * Object to determine whether queue
   * index i0 is older than index i1.
@@ -488,6 +502,7 @@ class BranchKillableQueue[T <: boom.common.HasBoomUOP](gen: T, entries: Int, flu
 
     val empty   = Output(Bool())
     val count   = Output(UInt(log2Ceil(entries).W))
+    val enq_ptr = Output(UInt(log2Ceil(entries).W))
   })
 
   val ram     = Mem(entries, gen)
@@ -495,6 +510,7 @@ class BranchKillableQueue[T <: boom.common.HasBoomUOP](gen: T, entries: Int, flu
   val uops    = Reg(Vec(entries, new MicroOp))
 
   val enq_ptr = Counter(entries)
+  io.enq_ptr := enq_ptr.value
   val deq_ptr = Counter(entries)
   val maybe_full = RegInit(false.B)
 
@@ -771,12 +787,12 @@ object VDataSel {
 /**
  * Object to check if MicroOp was killed due to an inactive vector mask
  */
-object IsKilledByVM
+/*object IsKilledByVM
 {
   def apply(vmop: Vec[Valid[MicroOp]], uop: MicroOp): Bool = {
     return vmop.map(u => u.valid && !u.bits.v_active && u.bits.rob_idx === uop.rob_idx).reduce(_||_)
   }
-}
+}*/
 
 object nrVecGroup
 {

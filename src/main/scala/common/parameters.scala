@@ -104,6 +104,8 @@ case class BoomCoreParams(
   override val eLen: Int = 0,
   override val vMemDataBits: Int = 0,
   numVecPhysRegisters: Int = 0,
+  numVLdqEntries: Int = 16,
+  numVStqEntries: Int = 16,
 
    /* matrix extension */
   override val useMatrix: Boolean = false,
@@ -227,14 +229,12 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val memIssueParam = issueParams.find(_.iqType == IQT_MEM.litValue).get
   val fpIssueParam  = issueParams.find(_.iqType == IQT_FP.litValue).get
   val vecIssueParam = if (usingVector) issueParams.find(_.iqType == IQT_VEC.litValue).get else null
-  val vecMemIssueParam = if (usingVector) issueParams.find(_.iqType == IQT_VMX.litValue).get else null
   val matIssueParam = if(usingMatrix) issueParams.find(_.iqType == IQT_MAT.litValue).get else null
+
   val intWidth = intIssueParam.issueWidth
   val memWidth = memIssueParam.issueWidth
   val fpWidth  = fpIssueParam.issueWidth
   val vecWidth = if (usingVector) vecIssueParam.issueWidth else 0
-  /** Width of VLSU accessing VRF at same cycle. Affecting VRF read/write port. */
-  val vecMemWidth = if (usingVector) vecMemIssueParam.issueWidth else 0
   val matWidth = if(usingMatrix) matIssueParam.issueWidth else 0
 
   issueParams.map(x => require(x.dispatchWidth <= coreWidth && x.dispatchWidth > 0))
@@ -292,6 +292,10 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   def eLenb = eLen/8
   def eLenSz = if (usingVector) log2Ceil(eLen) else 0
   //val minFLen = boomParams.minFLen
+  val numVLdqEntries  = if (usingVector) boomParams.numVLdqEntries else 0
+  val numVStqEntries  = if (usingVector) boomParams.numVStqEntries else 0
+  val vldqAddrSz      = log2Ceil(numLdqEntries)
+  val vstqAddrSz      = log2Ceil(numStqEntries)
 
   // matrix stuff
   require (issueParams.count(_.iqType == IQT_MAT.litValue) ==1 || !usingMatrix)

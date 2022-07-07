@@ -130,23 +130,20 @@ class BoomTile private(
 
   // DCache
   lazy val dcache: BoomNonBlockingDCache = LazyModule(new BoomNonBlockingDCache(staticIdForMetadataUseOnly))
-  val dCacheTap = TLIdentityNode()
-  tlMasterXbar.node := dCacheTap := dcache.node
+  //val dCacheTap = TLIdentityNode()
+  val dCacheWidget = LazyModule(new TLWidthWidget(tileParams.dcache.get.rowBits/8))
+  tlMasterXbar.node := dCacheWidget.node := dcache.node
 
-  // v-lsu
-  val bp = p(TileKey).core.asInstanceOf[BoomCoreParams]
-  val usingVector = bp.useVector
-
-  val gp = Some(VLSUGeneralParams(nCacheLineSizeBytes = p(CacheBlockBytes), bp.vLen, coreWidth = bp.decodeWidth))
-  val vlsu = Some(LazyModule(new VLSU(gp.get,bp)))
-  val vlsuWidget = Some(LazyModule(new TLWidthWidget(64)).suggestName("vlsuWidthWidget"))
-
-  if(usingVector) {tlMasterXbar.node := vlsuWidget.get.node := vlsu.get.node}
+  // VecMem
+  lazy val vecmem: VecMem = LazyModule(new VecMem)
+  val vecmemWidget = LazyModule(new TLWidthWidget(p(CacheBlockBytes)))
+  tlMasterXbar.node := vecmemWidget.node := vecmem.node
 
   // Frontend/ICache
   val frontend = LazyModule(new BoomFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
   frontend.resetVectorSinkNode := resetVectorNexusNode
-  tlMasterXbar.node := frontend.masterNode
+  val frontWidget = LazyModule(new TLWidthWidget(tileParams.icache.get.rowBits/8))
+  tlMasterXbar.node := frontWidget.node := frontend.masterNode
 
   // ROCC
   val roccs = p(BuildRoCC).map(_(p))
@@ -245,6 +242,7 @@ class BoomTileModuleImp(outer: BoomTile) extends BaseTileModuleImp(outer){
   hellaCacheArb.io.requestor <> hellaCachePorts
   lsu.io.hellacache <> hellaCacheArb.io.mem
   outer.dcache.module.io.lsu <> lsu.io.dmem
+  outer.vecmem.module.io.lsu <> lsu.io.vmem
 
   // Generate a descriptive string
   val frontendStr = outer.frontend.module.toString

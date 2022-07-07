@@ -66,7 +66,8 @@ class RegisterRead(
     // send micro-ops to the execution pipelines
     val exe_reqs = Vec(issueWidth, (new DecoupledIO(new FuncUnitReq(registerWidth))))
     //val vmupdate = if (vector) Output(Vec(1, Valid(new MicroOp))) else null
-    val intupdate = if (usingVector && !vector && !float) Output(Vec(issueWidth, Valid(new ExeUnitResp(eLen)))) else null
+    //val vecUpdate = if (vector) Output(Vec(1, Valid(new ExeUnitResp(eLen)))) else null
+    val intupdate= if (usingVector && !vector && !float) Output(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
     val fpupdate = if (usingVector && float) Output(Vec(issueWidth, Valid(new ExeUnitResp(eLen)))) else null
     require(!(float && vector))
 
@@ -396,20 +397,19 @@ class RegisterRead(
 
         //val is_perm_fdbk       = exe_reg_uops(w).uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16, uopVCOMPRESS) && exe_reg_uops(w).v_perm_busy
         //io.exe_reqs(w).valid    := exe_reg_valids(w) && !(uses_ldq && is_active) && (!is_perm_fdbk || vcompress && (!exe_reg_uops(w).v_perm_busy || exe_reg_rvm_data(w)))
-        //io.exe_reqs(w).valid    := exe_reg_valids(w) && (!is_sta || is_active)
-        io.exe_reqs(w).valid := exe_reg_valids(w)
+        io.exe_reqs(w).valid    := exe_reg_valids(w) //&& (!is_sta || is_active)
         //val vmove: Bool = VecInit(Seq(exe_reg_uops(w).uopc === uopVFMV_S_F,
           //exe_reg_uops(w).uopc === uopVFMV_F_S,
           //exe_reg_uops(w).uopc === uopVMV_X_S,
           //exe_reg_uops(w).uopc === uopVMV_S_X
         //)).asUInt().orR()
 
-        //if (w >= vecWidth) {
-        //  io.vmupdate(w-vecWidth).valid  := exe_reg_valids(w) && ((is_sta || is_load) && (is_masked || is_idx_ls))
-        //  io.vmupdate(w-vecWidth).bits   := exe_reg_uops(w)
-        //  io.vmupdate(w-vecWidth).bits.v_active        := is_active
-        //  io.vmupdate(w-vecWidth).bits.v_xls_offset    := exe_reg_rs2_data(w)
-        //}
+        if (w >= vecWidth) {
+          //io.vmupdate(w-vecWidth).valid  := exe_reg_valids(w) && ((is_sta || is_load) && (is_masked || is_idx_ls))
+          //io.vmupdate(w-vecWidth).bits   := exe_reg_uops(w)
+          //io.vmupdate(w-vecWidth).bits.v_active        := is_active
+          //io.vmupdate(w-vecWidth).bits.v_xls_offset    := exe_reg_rs2_data(w)
+        }
         //io.vecUpdate(w).valid               := false.B // FIXME: exe_reg_valids(w) && is_perm_fdbk
         //io.vecUpdate(w).bits.uop            := exe_reg_uops(w)
         //io.vecUpdate(w).bits.uop.v_active   := false.B //exe_reg_rvm_data(w) && (v_eidx < vl)
