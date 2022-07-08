@@ -286,8 +286,9 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   //require (numVecPhysRegs % 8 == 0, "Number of vector physical register must be multiple of 8")
   def numELENinVLEN = if (usingVector) vLen/eLen else 0
   //def numVecPhysElens= boomParams.numVecPhysRegisters * numELENinVLEN
-  def vLenb = vLen/8
-  def vLenSz = if (usingVector) log2Ceil(vLen) else 0
+  def vLenb   = vLen/8
+  def vLenSz  = if (usingVector) log2Ceil(vLen) else 0
+  def vLenbSz = if (usingVector) log2Ceil(vLenb) else 0
   def eLenSelSz = if (usingVector) log2Ceil(numELENinVLEN) else 0
   def eLenb = eLen/8
   def eLenSz = if (usingVector) log2Ceil(eLen) else 0

@@ -2047,6 +2047,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     v_pipeline.io.fromMat   <> m_pipeline.io.toVec
     v_pipeline.io.ll_wports <> io.lsu.vrf_wbk
     io.lsu.vrf_rport        <> v_pipeline.io.lsu_vrf_rport
+    io.lsu.tile_rport       <> m_pipeline.io.lsu_tile_rport
+    io.lsu.tile_wbk         <> m_pipeline.io.lsu_tile_wbk
   } else if (usingVector) {
     fp_pipeline.io.fromVec <> v_pipeline.io.to_fp
     Seq.tabulate(vecWidth)(i => i).foreach { i =>

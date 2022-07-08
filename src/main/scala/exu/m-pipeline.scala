@@ -23,7 +23,7 @@ import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
 
-class TileAccessInfo(implicit p: Parameters) extends BoomBundle {
+class TileAccessCtrls(implicit p: Parameters) extends BoomBundle {
   val ridx = UInt(vpregSz.W)
   val sidx = UInt(vLenSz.W)
   val tt   = UInt(2.W)
@@ -54,6 +54,8 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     val toVec            = Vec(matWidth, Decoupled(new ExeUnitResp(vLen)))
     // scalar pipeline related
     val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
+    val lsu_tile_rport   = new TrTileRegReadPortIO()
+    val lsu_tile_wbk     = Flipped(Decoupled(new ExeUnitResp(vLen)))
     // mset_wakeup, vsetvl related wakeup
     // val mset_wakeup        = Input(Valid(new MlWakeupResp()))  // TODO: msettype/msettile speculation optimization
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units
@@ -141,8 +143,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   for(i <- 0 until exe_units.numTrTileReadPorts) {
     trtileReader.io.tileReadPorts(i) <> trtileReg.io.readPorts(i)
   }
-  //FIXME:read port of vlsu
-  trtileReg.io.readPorts(exe_units.numTrTileReadPorts) := DontCare
+  trtileReader.io.tileReadPorts.last <> io.lsu_tile_rport
   //-------------------------------------------------------------
   // **** Execute Stage ****
   //-------------------------------------------------------------
@@ -167,13 +168,13 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
   // TODO: wrap vlsu write with uops for tr_tile write control
-  trtileReg.io.writePorts(0).valid          := DontCare
-  trtileReg.io.writePorts(0).bits.msew      := 0.U
-  trtileReg.io.writePorts(0).bits.tt        := 0.U
-  trtileReg.io.writePorts(0).bits.addr      := 0.U
-  trtileReg.io.writePorts(0).bits.index     := 0.U
-  trtileReg.io.writePorts(0).bits.data      := 0.U
-  trtileReg.io.writePorts(0).bits.byteMask  := 0.U
+  val lsuWbkBits = io.lsu_tile_wbk.bits
+  trtileReg.io.writePorts(0).valid          := io.lsu_tile_wbk.valid
+  trtileReg.io.writePorts(0).bits.msew      := lsuWbkBits.uop.m_ls_ew
+  trtileReg.io.writePorts(0).bits.tt        := lsuWbkBits.uop.rt(RD, RT_TR).asUInt ## !lsuWbkBits.uop.isHSlice.asUInt
+  trtileReg.io.writePorts(0).bits.addr      := lsuWbkBits.uop.pdst
+  trtileReg.io.writePorts(0).bits.index     := lsuWbkBits.uop.m_sidx
+  trtileReg.io.writePorts(0).bits.data      := lsuWbkBits.data
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Commit Stage ****

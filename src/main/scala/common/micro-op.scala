@@ -192,9 +192,10 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val m_sidx           = if (usingMatrix) UInt(vLenSz.W)  else null   // slice index
   val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null   // eew encoded in load/store instructions
   val m_is_split       = if (usingMatrix) Bool()          else null
-  val m_split_first    = if (usingMatrix) Bool()          else null
-  val m_split_last     = if (usingMatrix) Bool()          else null
-  val m_split_ecnt     = if (usingMatrix) UInt(vLenSz.W)  else null
+  val m_slice_first    = if (usingMatrix) Bool()          else null
+  val m_slice_last     = if (usingMatrix) Bool()          else null
+  val m_slice_cnt      = if (usingMatrix) UInt(vLenSz.W)  else null
+  val m_slice_len      = if (usingMatrix) UInt(vLenSz.W)  else null
   val ts1_eew          = if (usingMatrix) UInt(2.W)       else null
   val ts2_eew          = if (usingMatrix) UInt(2.W)       else null
   val td_eew           = if (usingMatrix) UInt(2.W)       else null
