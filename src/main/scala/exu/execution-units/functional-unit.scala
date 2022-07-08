@@ -1109,7 +1109,6 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
               else                         Module(new FixMulAcc(numStages, eLen >> 3))
                 
     xma.io.vxrm                := io.vxrm
-    xma.io.req.bits            := DontCare
     xma.io.req.bits.uop        := uop
     xma.io.req.valid           := io.req.valid
     xma.io.req.bits.uop.v_eidx := uop.v_eidx + e.U

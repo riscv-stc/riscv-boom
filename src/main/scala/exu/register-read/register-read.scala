@@ -177,16 +177,13 @@ class RegisterRead(
       }
       val rs1_sel = Mux(vs1_nr === 0.U, 0.U, VRegSel(iss_uop.v_eidx, iss_uop.vs1_eew, eLenSelSz))
       val rs2_sel = Mux(vs2_nr === 0.U, 0.U, VRegSel(iss_uop.v_eidx, iss_uop.vs2_eew, eLenSelSz))
-      val rs3_sel = Mux(vd_nr  === 0.U || iss_uop.rt(RD, isMaskVD), 0.U, VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
-      val isIndexedLS = iss_uop.v_idx_ls
+      val rs3_sel = Mux(vd_nr  === 0.U, 0.U, VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
 //    val rs3_sel = Mux(iss_uop.rt(RD, isMaskVD), VRegSel(iss_uop.v_eidx >> 3, 0.U, eLenSelSz),
 //                                                VRegSel(iss_uop.v_eidx, iss_uop.vd_eew, eLenSelSz))
 
-      val fieldIdx = iss_uop.v_seg_f
-      val indexPick: UInt = fieldIdx
       rs1_addr := iss_uop.pvs1(rs1_sel).bits
       rs2_addr := Mux(iss_uop.is_vmv_s2v, 0.U, iss_uop.pvs2(rs2_sel).bits)
-      rs3_addr := Mux(isIndexedLS, iss_uop.pvs2(indexPick).bits, iss_uop.stale_pvd(rs3_sel).bits)
+      rs3_addr := iss_uop.stale_pvd(rs3_sel).bits
       rvm_addr := iss_uop.pvm
     }
 

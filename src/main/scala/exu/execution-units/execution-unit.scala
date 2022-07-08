@@ -183,10 +183,10 @@ abstract class ExecutionUnit(
     io.vresp.bits.predicated := false.B
 //  assert(io.vresp.ready)
   }
-  //if (writesLlVrf) {
-  //  io.ll_vresp.bits.fflags.valid := false.B
-  //  io.ll_vresp.bits.predicated := false.B
-  //}
+  if (writesLlVrf) {
+    io.ll_vresp.bits.fflags.valid := false.B
+    io.ll_vresp.bits.predicated := false.B
+  }
 
   // TODO add "number of fflag ports", so we can properly account for FPU+Mem combinations
   def hasFFlags     : Boolean = hasFpu || hasFdiv
@@ -419,7 +419,7 @@ class ALUExeUnit(
     require(!hasAlu)
     val maddrcalc = Module(new MemAddrCalcUnit)
     maddrcalc.io.req        <> io.req
-    maddrcalc.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_MEM) && !io.req.bits.uop.is_rvv
+    maddrcalc.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_MEM)
     maddrcalc.io.brupdate     <> io.brupdate
     maddrcalc.io.status     := io.status
     maddrcalc.io.bp         := io.bp
@@ -635,7 +635,6 @@ class VecExeUnit(
     writesVrf        = true,
     writesIrf        = hasAlu,
     writesFrf        = hasAlu,
-    writesLlVrf      = false,
     numBypassStages  = if (hasMacc) 3 else 1,
     dataWidth        = p(tile.TileKey).core.vLen,
     bypassable       = false,

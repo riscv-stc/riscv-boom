@@ -531,7 +531,7 @@ class WithSWBPD extends Config((site, here, up) => {
 
 // DOC include start: StcBoomConfig
 /**
- * Based on LargeBoomConfig with RVV + Matrix extension
+ * Based on LargeBoomConfig with RVV extension
  */
 class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Config(
   new freechips.rocketchip.subsystem.WithCacheBlockBytes(128) ++

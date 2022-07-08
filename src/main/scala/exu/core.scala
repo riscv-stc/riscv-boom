@@ -50,8 +50,6 @@ import scala.collection.mutable
 
 import boom.ifu._
 
-import boom.ifu._
-
 /**
  * Top level core object that connects the Frontend to the rest of the pipeline.
  */
@@ -1687,7 +1685,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // Delay retire/exception 1 cycle
   if (usingMatrix) {
     val cmt_valids = (0 until coreParams.retireWidth).map(i =>
-      rob.io.commit.valids(i) && (!rob.io.commit.uops(i).is_rvv || !rob.io.commit.uops(i).is_rvm ||
+      rob.io.commit.valids(i) && (!rob.io.commit.uops(i).is_vm_ext
       (rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).v_split_last) ||
       (rob.io.commit.uops(i).is_rvm && rob.io.commit.uops(i).m_split_last) ))
       //rob.io.commit.arch_valids(i) && (!rob.io.commit.uops(i).is_rvv || rob.io.commit.uops(i).v_split_last))
@@ -1761,42 +1759,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   csr.io.hartid := io.hartid
   csr.io.interrupts := io.interrupts
-
-  if (usingVector) {
-    val csr_vld = csr_exe_unit.io.iresp.valid
-    val csr_uop = csr_exe_unit.io.iresp.bits.uop
-    val vsetvl = csr_uop.uopc === uopVSETVL
-    val cmt_rvv = (0 until coreParams.retireWidth).map{i =>
-        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv
-    }.reduce(_ || _)
-    val cmt_archlast_rvv = (0 until coreParams.retireWidth).map{i =>
-        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv &&
-        rob.io.commit.uops(i).v_split_last // architectural last split
-        //&& !rob.io.commit.uops(i).is_red_vadd && // excluding inserted VADD
-        //!rob.io.commit.uops(i).is_perm_vadd
-    }.reduce(_ || _)
-    val cmt_sat = (0 until coreParams.retireWidth).map{i =>
-      rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat
-    }.reduce(_ || _)
-    val vleffSetVL = rob.io.setVL
-    val vcq_setVL = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq.io.empty
-    assert(!(vsetvl && csr_vld && vleffSetVL.valid), "vsetvl and vleff setvl should not happen at same time!")
-    csr.io.vector.get.set_vs_dirty := cmt_rvv
-    csr.io.vector.get.set_vconfig.valid := csr_vld && vsetvl || vleffSetVL.valid || vcq_setVL
-    csr.io.vector.get.set_vconfig.bits := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
-    csr.io.vector.get.set_vconfig.bits.vl := Mux(csr_vld && vsetvl, csr_uop.vconfig.vl,
-                                              Mux(vleffSetVL.valid, vleffSetVL.bits,
-                                              Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig.vl,
-                                                              csr.io.vector.get.vconfig.vl)))
-    csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
-    csr.io.vector.get.set_vstart.valid := cmt_archlast_rvv || rob.io.com_xcpt.bits.vls_xcpt.valid
-    csr.io.vector.get.set_vstart.bits := Mux(cmt_archlast_rvv, 0.U, rob.io.com_xcpt.bits.vls_xcpt.bits)
-    csr.io.vector.get.set_vxsat := cmt_sat
-    v_pipeline.io.fcsr_rm := csr.io.fcsr_rm
-    v_pipeline.io.vxrm := csr.io.vector.get.vxrm
-
-    csr_exe_unit.io.vconfig := csr.io.vector.get.vconfig
-  }
 
   if (usingMatrix) {
     // rvv related
@@ -2137,10 +2099,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   if (usingVector) {
     for ((wdata, wakeup) <- v_pipeline.io.debug_wb_wdata zip v_pipeline.io.wakeups) {
-      rob.io.wb_resps(cnt).valid := wakeup.valid && !(wakeup.bits.uop.is_rvv && wakeup.bits.uop.uses_ldq)
-      rob.io.wb_resps(cnt).bits := wakeup.bits
-
-      rob.io.debug_wb_valids(cnt) := wakeup.valid && !(wakeup.bits.uop.is_rvv && wakeup.bits.uop.uses_ldq)
+      rob.io.wb_resps(cnt) <> wakeup
+      rob.io.debug_wb_valids(cnt) := wakeup.valid
       rob.io.debug_wb_wdata(cnt) := wdata
       cnt += 1
 
@@ -2152,12 +2112,16 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }
     if (usingMatrix) {
       for ((wdata, wakeup) <- m_pipeline.io.debug_wb_wdata zip m_pipeline.io.wakeups) {
-        rob.io.wb_resps(cnt).valid := wakeup.valid && !(wakeup.bits.uop.is_rvm && wakeup.bits.uop.uses_ldq)
-        rob.io.wb_resps(cnt).bits := wakeup.bits
-
-        rob.io.debug_wb_valids(cnt) := wakeup.valid && !(wakeup.bits.uop.is_rvm && wakeup.bits.uop.uses_ldq)
+        rob.io.wb_resps(cnt) <> wakeup
+        rob.io.debug_wb_valids(cnt) := wakeup.valid
         rob.io.debug_wb_wdata(cnt) := wdata
         cnt += 1
+
+        assert (!(wakeup.valid && !wakeup.bits.uop.rt(RD, isMatrix)),
+          "[core] VEC wakeup does not write back to a VEC register.")
+
+        assert (!(wakeup.valid && !wakeup.bits.uop.is_rvm),
+          "[core] VEC wakeup does not involve an VEC instruction.")
       }
     }
   }
@@ -2193,9 +2157,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   // LSU <> ROB
-  //rob.io.lsu_clr_bsy    := io.lsu.clr_bsy
-  rob.io.lsu_clr_bsy.foreach( _ := DontCare)
-  (rob.io.lsu_clr_bsy.slice(0, memWidth + 1) zip io.lsu.clr_bsy).foreach { case (rob, lsu) => rob := lsu }
+  rob.io.lsu_clr_bsy    := io.lsu.clr_bsy
   rob.io.lsu_clr_unsafe := io.lsu.clr_unsafe
   rob.io.lxcpt          <> io.lsu.lxcpt
 

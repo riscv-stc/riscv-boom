@@ -95,7 +95,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
                          exe_units.numVrfWritePorts + memWidth,
                          vLen,
                          // No bypassing for any VEC units, + memWidth for ll_wb
-                         Seq.fill(exe_units.numVrfWritePorts + 1){ false },
+                         Seq.fill(exe_units.numVrfWritePorts + memWidth){ false },
                          vector = true))
   val vregister_read = Module(new RegisterRead(
                          vecWidth,
@@ -178,14 +178,16 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   // Wakeup
   viu.map(iu => {
-    // vector issue units are not using these wake up directly, so tie them up.
-    iu.io.wakeup_ports.foreach{ wake =>
-      wake.valid := false.B
-      wake.bits := DontCare
+    for ((writeback, issue_wakeup) <- io.wakeups zip iu.io.wakeup_ports) {
+      issue_wakeup.valid          := writeback.valid
+      issue_wakeup.bits.pdst      := writeback.bits.uop.pdst
+      issue_wakeup.bits.poisoned  := false.B
+      issue_wakeup.bits.uop       := writeback.bits.uop
     }
     iu.io.pred_wakeup_port.valid  := false.B
     iu.io.pred_wakeup_port.bits   := DontCare
   })
+
 
   //-------------------------------------------------------------
   // **** Register Read Stage ****
@@ -238,9 +240,11 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     ll_wbarb.io.in(w+1) <> io.fromMat(w)
   }
 
-  vregfile.io.write_ports(0) := WritePort(ll_wbarb.io.out, vpregSz, vLen, isVector, true)
-  // vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vElenSz, eLen, isVector, true))
-  ll_wbarb.io.out.ready := true.B
+  // Cut up critical path by delaying the write by a cycle.
+  // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
+  // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
+  vregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, vpregSz, vLen, isVector, true, true))
+  assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
 
   var w_cnt = 1
   for (i <- 1 until memWidth) {
@@ -347,22 +351,4 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     + BoomCoreStringPrefix(
       "Num Wakeup Ports      : " + numWakeupPorts,
       "Num Bypass Ports      : " + exe_units.numTotalBypassPorts))
-}
-/** Convert byte mask into bit mask. */
-class MaskExploder(bitWidth: Int) extends Module {
-  val io = IO(new Bundle{
-    val byteMaskIn = Input(UInt((bitWidth/8).W))
-    val bitMaskOut = Output(UInt(bitWidth.W))
-  })
-  io.bitMaskOut := VecInit(io.byteMaskIn.asBools().map(byte => Fill(8, byte))).asUInt()
-}
-
-object MaskExploder{
-  def apply(byteMask: UInt, bitWidth: Int): UInt = {
-    val bitMask: UInt = Wire(UInt(bitWidth.W))
-    val maskExploder = Module(new MaskExploder(bitWidth))
-    maskExploder.io.byteMaskIn := byteMask
-    bitMask := maskExploder.io.bitMaskOut
-    bitMask
-  }
 }

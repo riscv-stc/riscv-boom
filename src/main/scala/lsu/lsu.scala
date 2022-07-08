@@ -1434,7 +1434,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     io.tile_rport.valid      := will_fire_vstq_commit(memWidth-1) && vstq_commit_e.bits.uop.is_rvm
     io.tile_rport.bits.addr  := vstq_commit_e.bits.uop.stale_pdst
     io.tile_rport.bits.index := vstq_commit_e.bits.uop.m_sidx
-    io.tile_rport.bits.tt    := Cat(vstq_commit_e.bits.uop.rt(RD, RT_TR).asUInt, !vstq_commit_e.bits.uop.isHSlice.asUInt)
+    io.tile_rport.bits.tt    := vstq_commit_e.bits.uop.rt(RD, isTrTile).asUInt ## !vstq_commit_e.bits.uop.isHSlice.asUInt
     io.tile_rport.bits.msew  := vstq_commit_e.bits.uop.m_ls_ew
   }
 
@@ -2338,7 +2338,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   val req = RegEnable(io.req.bits, io.req.fire)
   val clOffset = RegEnable(io.req.bits.rs1_data(clSizeLog2-1, 0), io.req.valid)
   val uop = req.uop
-  val eew = Mux(uop.is_rvv, uop.vd_eew, uop.m_ls_ew)
+  val eew = uop.vd_eew
   val vLenECnt = vLenb.U >> eew
   val emul = uop.vd_emul
   val op1  = req.rs1_data                      // base address
@@ -2361,7 +2361,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   val sliceBlockOff  = sliceBaseAddr(clSizeLog2-1, 0)
   val sliceAddrInc   = Mux(sliceLenCtr === 0.U,       clSize.U - sliceBlockOff,
                        Mux(sliceLenCtr === vcRatio.U, sliceBlockOff, clSize.U))
-  val slice
+  val sliceLenLast   = sliceLenCtr + 1.U === vcRatio.U + (sliceBlockOff =/= 0.U).asUInt
 
   when (io.req.valid) {
     assert(ioUop.is_vm_ext && (ioUop.uses_ldq || ioUop.uses_stq))
@@ -2434,7 +2434,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
       when (io.resp.fire) {
         sliceLenCtr      := sliceLenCtr + 1.U
         sliceBlockAddr   := sliceBlockAddr + sliceAddrInc
-        when (sliceLenCtr + 1.U === vcRatio.U + (sliceBlockOff =/= 0.U).asUInt) {
+        when (sliceLenLast) {
           sliceLenCtr    := 0.U
           sliceCntCtr    := sliceCntCtr + 1.U
           sliceBaseAddr  := sliceBaseAddr + op2
@@ -2485,8 +2485,8 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   io.resp.bits.uop.v_split_first:= uop.v_eidx === 0.U
   io.resp.bits.uop.v_split_last := uop.v_eidx + eidxInc === uop.vconfig.vl
   io.resp.bits.uop.m_sidx       := sliceCntCtr
-  io.resp.bits.uop.m_slice_first:= sliceCntCtr === 0.U
-  io.resp.bits.uop.m_slice_last := sliceCntCtr === uop.m_slice_cnt - 1.U
+  io.resp.bits.uop.m_split_first:= (sliceCntCtr === 0.U) && (sliceLenCtr === 0.U)
+  io.resp.bits.uop.m_split_last := (sliceCntCtr + 1.U === uop.m_slice_cnt) && sliceLenLast
   io.resp_vm                    := Mux(uop.is_rvv, VRegMask(uop.v_eidx, eew, eidxInc, vLenb),
                                                    VRegMask(sliceBlockAddr, 0.U, sliceAddrInc, vLenb))
   io.resp_shdir                 := Mux(uop.is_rvm && sliceLenCtr === 0.U, true.B,

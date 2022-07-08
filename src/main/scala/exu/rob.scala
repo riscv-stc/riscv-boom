@@ -363,22 +363,47 @@ class Rob(
       if (usingMatrix) {
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
           val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
-          val wb_rvm_load = wb_uop.is_rvm && wb_uop.uses_ldq
+          val wb_rvm_load = wb_uop.uopc.isOneOf(uopMLE)
           //val wb_rvv_sta  = wb_uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
           //rob_bsy(row_idx)      := Mux(wb_rvv_load, Mux(wb_uop.uses_ldq, false.B, rob_bsy(row_idx)),
           //                         Mux(wb_rvv_sta,  false.B, wb_uop.v_is_split && !wb_uop.v_split_last))
-          when (!wb_uop.is_rvv || !wb_uop.v_is_split ||
-                rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt >= rob_uop(row_idx).vconfig.vl) {
-            rob_bsy(row_idx) := false.B
-            rob_unsafe(row_idx)   := false.B
+          when (!wb_uop.is_vm_ext || 
+                (wb_uop.is_rvv && (!wb_uop.v_is_split || rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt >= rob_uop(row_idx).vconfig.vl)) ||
+                (wb_uop.is_rvm && wb_uop.m_split_last)) {
+            rob_bsy(row_idx)    := false.B
+            rob_unsafe(row_idx) := false.B
           }
           when (wb_rvv_load && !wb_uop.uses_ldq) {
             rob_ud_bsy(row_idx) := false.B
           } .otherwise {
             rob_uop(row_idx).v_split_ecnt := rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt
           }
-          rob_predicated(row_idx)  := wb_resp.bits.predicated
-          rob_uop(row_idx).vxsat := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
+          rob_predicated(row_idx) := wb_resp.bits.predicated
+          rob_uop(row_idx).vxsat  := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
+          if (O3PIPEVIEW_PRINTF) {
+            printf("%d; O3PipeView:complete:%d\n",
+              rob_uop(row_idx).debug_events.fetch_seq,
+              io.debug_tsc)
+          }
+        }
+      } else if (usingVector) {
+        when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
+          val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
+          //val wb_rvv_sta  = wb_uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
+          //rob_bsy(row_idx)      := Mux(wb_rvv_load, Mux(wb_uop.uses_ldq, false.B, rob_bsy(row_idx)),
+          //                         Mux(wb_rvv_sta,  false.B, wb_uop.v_is_split && !wb_uop.v_split_last))
+          when (!wb_uop.is_rvv || !wb_uop.v_is_split || 
+                rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt >= rob_uop(row_idx).vconfig.vl) {
+            rob_bsy(row_idx)    := false.B
+            rob_unsafe(row_idx) := false.B
+          }
+          when (wb_rvv_load && !wb_uop.uses_ldq) {
+            rob_ud_bsy(row_idx) := false.B
+          } .otherwise {
+            rob_uop(row_idx).v_split_ecnt := rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt
+          }
+          rob_predicated(row_idx) := wb_resp.bits.predicated
+          rob_uop(row_idx).vxsat  := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
           if (O3PIPEVIEW_PRINTF) {
             printf("%d; O3PipeView:complete:%d\n",
               rob_uop(row_idx).debug_events.fetch_seq,
@@ -412,7 +437,19 @@ class Rob(
         val cidx = GetRowIdx(clr_rob_idx)
         assert (rob_val(cidx) === true.B, "[rob] store writing back to invalid entry.")
         assert (rob_bsy(cidx) === true.B, "[rob] store writing back to a not-busy entry.")
-        if (usingVector) {
+        if (usingMatrix) {
+          rob_uop(cidx).v_split_ecnt := rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt
+          when (!lsu_clr_bsy.bits.is_vm_ext ||
+                (rob_uop(cidx).is_rvv && rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt >= rob_uop(cidx).vconfig.vl) ||
+                (rob_uop(cidx).is_rvm && lsu_clr_bsy.bits.m_split_last)) {
+            rob_bsy(cidx)    := false.B
+            rob_unsafe(cidx) := false.B
+            if (O3PIPEVIEW_PRINTF) {
+              printf("%d; O3PipeView:complete:%d\n",
+                rob_uop(GetRowIdx(clr_rob_idx)).debug_events.fetch_seq, io.debug_tsc)
+            }
+          }
+        } else if (usingVector) {
           rob_uop(cidx).v_split_ecnt := rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt
           when (!lsu_clr_bsy.bits.is_rvv ||
                 rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt >= rob_uop(cidx).vconfig.vl) {
@@ -473,11 +510,9 @@ class Rob(
 
     //-----------------------------------------------
     // Commit or Rollback
-
     // Can this instruction commit? (the check for exceptions/rob_state happens later).
-    //val ud_bsy = if (usingVector) rob_ud_bsy(rob_head) else false.B
-    //can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall && !ud_bsy
-    can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall
+    val ud_bsy = if (usingVector) rob_ud_bsy(rob_head) else false.B
+    can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall && !ud_bsy
 
 
     // use the same "com_uop" for both rollback AND commit
@@ -598,22 +633,19 @@ class Rob(
 
     for (i <- 0 until numWakeupPorts) {
       val rob_idx = io.wb_resps(i).bits.uop.rob_idx
-      val realRespsVld = io.wb_resps(i).valid && !(io.wb_resps(i).bits.uop.is_rvv && io.wb_resps(i).bits.uop.uses_ldq)
       when (io.debug_wb_valids(i) && MatchBank(GetBankIdx(rob_idx))) {
         rob_debug_wdata(GetRowIdx(rob_idx)) := io.debug_wb_wdata(i)
       }
       val temp_uop = rob_uop(GetRowIdx(rob_idx))
 
-      assert (!(realRespsVld && MatchBank(GetBankIdx(rob_idx)) &&
+      assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
                !rob_val(GetRowIdx(rob_idx))),
                "[rob] writeback (" + i + ") occurred to an invalid ROB entry.")
-      //val temp_ud_bsy = if (usingVector) rob_ud_bsy(GetRowIdx(rob_idx)) else false.B
-      //assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
-      //         !rob_bsy(GetRowIdx(rob_idx)) && !temp_ud_bsy),
-      assert (!(realRespsVld && MatchBank(GetBankIdx(rob_idx)) &&
-               !rob_bsy(GetRowIdx(rob_idx))),
+      val temp_ud_bsy = if (usingVector) rob_ud_bsy(GetRowIdx(rob_idx)) else false.B
+      assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
+               !rob_bsy(GetRowIdx(rob_idx)) && !temp_ud_bsy),
                "[rob] writeback (" + i + ") occurred to a not-busy ROB entry.")
-      assert (!(realRespsVld && MatchBank(GetBankIdx(rob_idx)) &&
+      assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
                temp_uop.ldst_val && Mux(temp_uop.rt(RD, isVector),
                  !(temp_uop.pvd.map(p => p.valid && p.bits === io.wb_resps(i).bits.uop.pdst).reduce(_ || _)), // matching pvd(x).bits
                  temp_uop.pdst =/= io.wb_resps(i).bits.uop.pdst)),

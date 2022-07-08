@@ -229,13 +229,13 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val memIssueParam = issueParams.find(_.iqType == IQT_MEM.litValue).get
   val fpIssueParam  = issueParams.find(_.iqType == IQT_FP.litValue).get
   val vecIssueParam = if (usingVector) issueParams.find(_.iqType == IQT_VEC.litValue).get else null
-  val matIssueParam = if(usingMatrix) issueParams.find(_.iqType == IQT_MAT.litValue).get else null
+  val matIssueParam = if (usingMatrix) issueParams.find(_.iqType == IQT_MAT.litValue).get else null
 
   val intWidth = intIssueParam.issueWidth
   val memWidth = memIssueParam.issueWidth
   val fpWidth  = fpIssueParam.issueWidth
   val vecWidth = if (usingVector) vecIssueParam.issueWidth else 0
-  val matWidth = if(usingMatrix) matIssueParam.issueWidth else 0
+  val matWidth = if (usingMatrix) matIssueParam.issueWidth else 0
 
   issueParams.map(x => require(x.dispatchWidth <= coreWidth && x.dispatchWidth > 0))
 
@@ -299,9 +299,9 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val vstqAddrSz      = log2Ceil(numStqEntries)
 
   // matrix stuff
-  require (issueParams.count(_.iqType == IQT_MAT.litValue) ==1 || !usingMatrix)
-  val numMatTrPhysRegs = if(usingMatrix) boomParams.numMatTrRegisters else 0
-  val numMatAccPhysRegs = if(usingMatrix) boomParams.numMatAccRegisters else 0
+  require (issueParams.count(_.iqType == IQT_MAT.litValue) == 1 || !usingMatrix)
+  val numMatTrPhysRegs  = if (usingMatrix) boomParams.numMatTrRegisters else 0
+  val numMatAccPhysRegs = if (usingMatrix) boomParams.numMatAccRegisters else 0
   def maxTrTileCols = vLenb
   def numTrTileRows = mLen/vLen
   def mxuMeshRows = mLen/(vLen*mxuTileRows)

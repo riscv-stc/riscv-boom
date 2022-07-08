@@ -171,7 +171,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   val lsuWbkBits = io.lsu_tile_wbk.bits
   trtileReg.io.writePorts(0).valid          := io.lsu_tile_wbk.valid
   trtileReg.io.writePorts(0).bits.msew      := lsuWbkBits.uop.m_ls_ew
-  trtileReg.io.writePorts(0).bits.tt        := lsuWbkBits.uop.rt(RD, RT_TR).asUInt ## !lsuWbkBits.uop.isHSlice.asUInt
+  trtileReg.io.writePorts(0).bits.tt        := lsuWbkBits.uop.rt(RD, isTrTile).asUInt ## !lsuWbkBits.uop.isHSlice.asUInt
   trtileReg.io.writePorts(0).bits.addr      := lsuWbkBits.uop.pdst
   trtileReg.io.writePorts(0).bits.index     := lsuWbkBits.uop.m_sidx
   trtileReg.io.writePorts(0).bits.data      := lsuWbkBits.data

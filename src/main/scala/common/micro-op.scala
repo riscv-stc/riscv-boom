@@ -192,8 +192,8 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val m_sidx           = if (usingMatrix) UInt(vLenSz.W)  else null   // slice index
   val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null   // eew encoded in load/store instructions
   val m_is_split       = if (usingMatrix) Bool()          else null
-  val m_slice_first    = if (usingMatrix) Bool()          else null
-  val m_slice_last     = if (usingMatrix) Bool()          else null
+  val m_split_first    = if (usingMatrix) Bool()          else null
+  val m_split_last     = if (usingMatrix) Bool()          else null
   val m_slice_cnt      = if (usingMatrix) UInt(vLenSz.W)  else null
   val m_slice_len      = if (usingMatrix) UInt(vLenSz.W)  else null
   val ts1_eew          = if (usingMatrix) UInt(2.W)       else null
@@ -269,9 +269,6 @@ class CtrlSignals(implicit p: Parameters) extends BoomBundle()
   val is_std      = Bool()
   val is_vmlogic  = if (usingVector) Bool() else null
   val is_vmscmp   = if (usingVector) Bool() else null
-  //val is_vmfscmp   = if (usingVector) Bool() else null
-  val is          = if (usingMatrix) Bool() else null
-  val isV         = if (usingMatrix) Bool() else null
 }
 
 /**

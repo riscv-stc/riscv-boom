@@ -693,7 +693,6 @@ extends AbstractRenameStage(
   }
   for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) {
     val wkUop   = wk.bits.uop
-    val isVLoad  = wkUop.is_rvv && wkUop.uses_ldq
     val v_eidx  = wkUop.v_eidx
     val vsew    = wkUop.vd_eew(1,0)
     val ecnt    = wkUop.v_split_ecnt

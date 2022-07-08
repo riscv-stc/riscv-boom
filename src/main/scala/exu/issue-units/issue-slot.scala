@@ -164,14 +164,10 @@ class IssueSlot(
     if (vector) {
       val v_eidx = Mux(uop.uopc === uopVIOTA, 0.U, uop.v_eidx)
       val eew    = Mux(uop.uses_v_ls_ew, uop.v_ls_ew, uop.vs2_eew)
-      val isIndexed = uop.v_idx_ls
-      /** Indexed is split according to vs2_emul. */
-      val fieldIdx = uop.v_seg_f
-      val indexPick: UInt = fieldIdx
-      val rsel   = Mux(isIndexed, indexPick, VRegSel(v_eidx, eew, eLenSelSz))
+      val rsel   = VRegSel(v_eidx, eew, eLenSelSz)
       val pvs2   = uop.pvs2(rsel).bits
       val reduce_busy = uop.pvs2.map(pvs2 => pvs2.valid && io.vbusy_status(pvs2.bits)).reduce(_ || _)
-      ret := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))
+      ret       := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))
     } else if(matrix) {
       ret := Mux(uop.rt(RS2, isTrTile), p2(uop.m_sidx),
              Mux(uop.rt(RS2, isInt),    ps, true.B))
@@ -201,19 +197,18 @@ class IssueSlot(
     val ret = Wire(Bool())
     val uop = slot_uop
     if (vector) {
-      //val vstart = uop.v_eidx
-      //val tail = vstart > uop.vconfig.vl
+      val vstart = uop.v_eidx
+      val tail = vstart > uop.vconfig.vl
       // FIXME consider excluding prestart
       // val prestart = vstart < io.csr.v_eidx
       val pvm = uop.pvm
-      //ret := uop.v_unmasked || tail || !io.vbusy_status(pvm) // || !perm_ready || pm(vstart >> 3.U)
-      ret := uop.v_unmasked || !io.vbusy_status(pvm) // || !perm_ready || pm(vstart >> 3.U)
+      ret := uop.v_unmasked || tail || !io.vbusy_status(pvm) // || !perm_ready || pm(vstart >> 3.U)
     } else {
-      //if (usingVector && iqType == IQT_MEM.litValue) {
-      // ret := !uop.is_rvv || (uop.v_unmasked && !uop.v_idx_ls) // || pm(0)
-      //} else {
-      ret := true.B
-      //}
+      if (usingVector && iqType == IQT_MEM.litValue) {
+        ret := !uop.is_rvv || (uop.v_unmasked && !uop.v_idx_ls) // || pm(0)
+      } else {
+        ret := true.B
+      }
     }
     ret
   }
@@ -312,7 +307,7 @@ class IssueSlot(
         next_p3 := !io.in_uop.bits.prs3_busy(0)
         if (iqType == IQT_MEM.litValue) {
           //in_pm := !io.in_uop.bits.prvm_busy(0)
-          //vxofs := io.in_uop.bits.v_xls_offset
+          vxofs := io.in_uop.bits.v_xls_offset
         }
       }
     } else {
@@ -381,6 +376,8 @@ class IssueSlot(
       next_uop.rt(RS1, isInt)) {
       if (matrix) {
         next_p1 := 0.U
+      } else if(vector) {
+        next_p1 := false.B
       } else {
         next_p1 := true.B
       }
@@ -392,6 +389,8 @@ class IssueSlot(
       next_uop.rt(RS2, isInt)) {
       if (matrix) {
         next_p2 := 0.U
+      } else if(vector) {
+        next_p2 := false.B
       } else {
         next_p2 := true.B
       }
@@ -444,8 +443,7 @@ class IssueSlot(
     // when intupdate or fpupdate, we need to tell if data is really we need.
     when (io.intupdate.map(_.valid).reduce(_||_) || io.fpupdate.map(_.valid).reduce(_||_)) {
       val int_sel  = io.intupdate.map(u => u.valid && u.bits.uop.prs1 === next_uop.prs1 && next_uop.rt(RS1, isInt))
-      val int_data = io.intupdate.map(u => Mux(u.bits.uop.uses_stq || u.bits.uop.uses_ldq, u.bits.data,
-                                           Mux(u.bits.uop.rt(RS1, isIntU), Mux1H(UIntToOH(u.bits.uop.vconfig.vtype.vsew(1,0)),
+      val int_data = io.intupdate.map(u => Mux(u.bits.uop.rt(RS1, isIntU), Mux1H(UIntToOH(u.bits.uop.vconfig.vtype.vsew(1,0)),
                                                                                  Seq(u.bits.data(7,0),
                                                                                      u.bits.data(15,0),
                                                                                      u.bits.data(31,0),
@@ -454,14 +452,12 @@ class IssueSlot(
                                                                                  Seq(u.bits.data(7,0).sextTo(eLen),
                                                                                      u.bits.data(15,0).sextTo(eLen),
                                                                                      u.bits.data(31,0).sextTo(eLen),
-                                                                                     u.bits.data)))))
+                                                                                     u.bits.data))))
       val fp_sel   = io.fpupdate.map(u => u.valid && u.bits.uop.prs1 === next_uop.prs1 && next_uop.rt(RS1, isFloat))
       val fp_data  = io.fpupdate.map(_.bits.data)
-      val needUpdatePS = VecInit(int_sel ++ fp_sel).asUInt().orR()
-      val updatedSData = Mux1H(int_sel ++ fp_sel, int_data ++ fp_data)
-      when(needUpdatePS){
-        ps := true.B
-        sdata := updatedSData
+      ps := ps || int_sel.reduce(_||_) || fp_sel.reduce(_||_)
+      when(int_sel.reduce(_||_) || fp_sel.reduce(_||_)) {
+        sdata := Mux1H(int_sel++fp_sel, int_data++fp_data)
       }
       assert(PopCount(int_sel++fp_sel) <= 1.U, "Multiple drivers")
     }
@@ -545,10 +541,10 @@ class IssueSlot(
         assert(is_invalid || !slot_uop.rt(RD, isVector) || slot_uop.pvd(vd_idx).valid)
         when (!io.uop.is_reduce) {
           val vsew = Mux(slot_uop.rt(RS2, isWidenV) || slot_uop.rt(RD, isMaskVD), slot_uop.vs2_eew, slot_uop.vd_eew)
-          val vLen_ecnt: UInt = ((vLen.U >> 3.U) >> vsew).asUInt()
-          val isVLoad: Bool = slot_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
+          val vLen_ecnt = (vLen.U >> 3.U) >> vsew
+          val isVLoad   = slot_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           val vLenEcntSz = vLenSz.asUInt - 3.U - vsew
-          val next_offset: UInt = Mux(isVLoad, (slot_uop.v_eidx >> vLenEcntSz << vLenEcntSz).asUInt() + vLen_ecnt,
+          val next_offset = Mux(isVLoad, (slot_uop.v_eidx >> vLenEcntSz << vLenEcntSz) + vLen_ecnt,
                                          slot_uop.v_eidx + vLen_ecnt)
           io.uop.v_split_ecnt := vLen_ecnt
           io.uop.v_split_first := slot_uop.v_eidx === 0.U
@@ -564,8 +560,8 @@ class IssueSlot(
       io.out_uop.prs3_busy  := ~p3
       if (iqType == IQT_MEM.litValue) {
         //io.out_uop.prvm_busy := Cat(0.U, !pm)
-        //io.out_uop.v_xls_offset := vxofs
-        //io.uop.v_xls_offset := vxofs
+        io.out_uop.v_xls_offset := vxofs
+        io.uop.v_xls_offset := vxofs
       } else {
         //io.out_uop.prvm_busy := 0.U
       }
