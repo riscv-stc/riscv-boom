@@ -561,7 +561,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     }
 
     uop.m_is_split    := cs.can_be_split
-    uop.m_split_ecnt  := total_slice
+    uop.m_slice_cnt   := total_slice
     uop.m_sidx        := mslice_idx
     uop.ts1_eew       := ts1_eew
     uop.ts2_eew       := ts2_eew

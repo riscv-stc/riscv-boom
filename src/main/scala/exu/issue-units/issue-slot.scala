@@ -504,7 +504,7 @@ class IssueSlot(
     io.out_uop.m_scalar_busy := ~ps
     when(io.request && io.grant && next_uop_mopa) {
       io.uop.m_split_first := sidx === 0.U
-      io.uop.m_split_last  := sidx === next_uop.m_split_ecnt - 1.U
+      io.uop.m_split_last  := sidx === next_uop.m_slice_cnt - 1.U
       io.out_uop.m_sidx    := sidx + 1.U
       io.out_uop.prs3      := next_uop.pdst
     }

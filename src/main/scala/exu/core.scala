@@ -2118,10 +2118,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         cnt += 1
 
         assert (!(wakeup.valid && !wakeup.bits.uop.rt(RD, isMatrix)),
-          "[core] VEC wakeup does not write back to a VEC register.")
+          "[core] Matrix wakeup does not write back to a Matrix register.")
 
         assert (!(wakeup.valid && !wakeup.bits.uop.is_rvm),
-          "[core] VEC wakeup does not involve an VEC instruction.")
+          "[core] Matrix wakeup does not involve an Matrix instruction.")
       }
     }
   }

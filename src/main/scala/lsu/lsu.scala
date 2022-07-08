@@ -1431,11 +1431,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   // access tile register
   if (usingMatrix) {
-    io.tile_rport.valid      := will_fire_vstq_commit(memWidth-1) && vstq_commit_e.bits.uop.is_rvm
-    io.tile_rport.bits.addr  := vstq_commit_e.bits.uop.stale_pdst
-    io.tile_rport.bits.index := vstq_commit_e.bits.uop.m_sidx
-    io.tile_rport.bits.tt    := vstq_commit_e.bits.uop.rt(RD, isTrTile).asUInt ## !vstq_commit_e.bits.uop.isHSlice.asUInt
-    io.tile_rport.bits.msew  := vstq_commit_e.bits.uop.m_ls_ew
+    io.core.tile_rport.addr  := vstq_commit_e.bits.uop.stale_pdst
+    io.core.tile_rport.index := vstq_commit_e.bits.uop.m_sidx
+    io.core.tile_rport.tt    := vstq_commit_e.bits.uop.rt(RD, isTrTile).asUInt ## !vstq_commit_e.bits.uop.isHSlice.asUInt
+    io.core.tile_rport.msew  := vstq_commit_e.bits.uop.m_ls_ew
   }
 
   val vldq_resp_valid    = io.vmem.resp.valid && !io.vmem.resp.bits.is_vst
@@ -2499,7 +2498,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
 
 
   io.resp.bits.addr := Mux(uop.is_rvv, Cat((op1 + op2) >> clSizeLog2.U, 0.U(clSizeLog2.W)),
-                                       (sliceBaseAddr+sliceBlockAddr) >> clSizeLog2.U) ## 0.U(clSizeLog2.W))
+                                       (sliceBaseAddr+sliceBlockAddr) >> clSizeLog2.U) ## 0.U(clSizeLog2.W)
   io.resp.bits.data := DontCare
 
   // FIXME exceptions: misaligned, breakpoints
