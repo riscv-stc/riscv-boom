@@ -310,7 +310,6 @@ class ALUExeUnit(
     alu.io.req.bits.rs2_data := io.req.bits.rs2_data
     alu.io.req.bits.rs3_data := DontCare
     alu.io.req.bits.rvm_data := DontCare
-    alu.io.req.bits.rvmFull  := DontCare
     alu.io.req.bits.pred_data := io.req.bits.pred_data
     alu.io.resp.ready := DontCare
     alu.io.brupdate := io.brupdate
@@ -519,7 +518,6 @@ class FPUExeUnit(
     fpu.io.req.bits.rs2_data := io.req.bits.rs2_data
     fpu.io.req.bits.rs3_data := io.req.bits.rs3_data
     fpu.io.req.bits.rvm_data := DontCare
-    fpu.io.req.bits.rvmFull  := DontCare
     fpu.io.req.bits.pred_data := false.B
     fpu.io.req.bits.kill     := io.req.bits.kill
     fpu.io.fcsr_rm           := io.fcsr_rm
@@ -544,7 +542,6 @@ class FPUExeUnit(
     fdivsqrt.io.req.bits.rs2_data := io.req.bits.rs2_data
     fdivsqrt.io.req.bits.rs3_data := io.req.bits.rs3_data
     fdivsqrt.io.req.bits.rvm_data := DontCare
-    fdivsqrt.io.req.bits.rvmFull  := DontCare
     fdivsqrt.io.req.bits.pred_data := false.B
     fdivsqrt.io.req.bits.kill     := io.req.bits.kill
     fdivsqrt.io.fcsr_rm           := io.fcsr_rm
@@ -694,7 +691,6 @@ class VecExeUnit(
     valu = Module(new VecALUUnit(numStages = numStages, dataWidth = vLen))
     //valu.io.req.valid := io.req.valid && (io.req.bits.uop.fu_code & FU_ALU).orR //&& 
                         //(io.req.bits.uop.uopc =/= uopVFMV_F_S) && (io.req.bits.uop.uopc =/= uopVMV_X_S)
-    valu.io.req.bits.rvmFull := DontCare
     vec_fu_units += valu
   }
 
@@ -740,7 +736,6 @@ class VecExeUnit(
   if (hasIfpu) {
     ifpu = Module(new VecIntToFPUnit(dataWidth = vLen, latency=numStages))
     ifpu.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_I2F)
-    ifpu.io.req.bits.rvmFull := DontCare
     ifpu.io.fcsr_rm    := io.fcsr_rm
     ifpu.io.resp.ready := DontCare
     vec_fu_units += ifpu
@@ -773,7 +768,6 @@ class VecExeUnit(
   if(hasFdiv) {
     fr7 = Module(new VecFR7Unit(latency=numStages, dataWidth=vLen))
     fr7.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_FR7)
-    fr7.io.req.bits.rvmFull := DontCare
     fr7.io.fcsr_rm    := io.fcsr_rm
     fr7.io.resp.ready := DontCare
 
@@ -819,7 +813,6 @@ class VecExeUnit(
   if (hasDiv) {
     vdiv = Module(new VecSRT4DivUnit(vLen))
     vdiv.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV)
-    vdiv.io.req.bits.rvmFull := DontCare
     // share write port with the pipelined units
     vdiv.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready
 
@@ -863,7 +856,6 @@ class VecExeUnit(
     fdivsqrt = Module(new VecFDivSqrtUnit(dataWidth = vLen))
     fdivsqrt.io.req.valid := io.req.valid && io.req.bits.uop.fu_code_is(FU_FDV)
     fdivsqrt.io.fcsr_rm   := io.fcsr_rm
-    fdivsqrt.io.req.bits.rvmFull := DontCare
     // share write port with the pipelined units
     fdivsqrt.io.resp.ready := !(vec_fu_units.map(_.io.resp.valid).reduce(_|_)) && io.vresp.ready  // TODO PERF will get blocked by fpiu.
 

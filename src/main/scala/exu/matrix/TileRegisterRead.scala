@@ -123,7 +123,6 @@ class TileRegisterRead(
     io.exe_reqs(w).bits.uop       := exe_reg_uops(w)
     io.exe_reqs(w).bits.rs1_data  := exe_reg_ts1_data(w)
     io.exe_reqs(w).bits.rs2_data  := exe_reg_ts2_data(w)
-    io.exe_reqs(w).bits.rvmFull   := DontCare
     io.exe_reqs(w).bits.rvm_data  := DontCare
     io.exe_reqs(w).bits.pred_data := DontCare
   }

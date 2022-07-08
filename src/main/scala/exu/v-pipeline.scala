@@ -250,27 +250,26 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   for (eu <- exe_units) {
     val eu_vresp = WireInit(eu.io.vresp)
     val eu_vresp_uop = eu_vresp.bits.uop
-    when (eu_vresp_uop.rt(RD, isReduceV)) {
+    when(eu_vresp_uop.rt(RD, isReduceV)) {
       eu_vresp.bits.uop.v_eidx := 0.U
     }
     if (eu.writesVrf) {
       //if (eu.hasVMX) {
-        //eu_vresp.valid    := eu.io.vresp.valid && eu_vresp_uop.rf_wen && !eu_vresp_uop.ctrl.is_sta
-        //eu.io.vresp.ready := Mux(eu_vresp_uop.ctrl.is_sta, io.to_sdq.ready, true.B)
-        //when (eu.io.vresp.valid) { assert(eu_vresp_uop.is_rvv) }
+      //eu_vresp.valid    := eu.io.vresp.valid && eu_vresp_uop.rf_wen && !eu_vresp_uop.ctrl.is_sta
+      //eu.io.vresp.ready := Mux(eu_vresp_uop.ctrl.is_sta, io.to_sdq.ready, true.B)
+      //when (eu.io.vresp.valid) { assert(eu_vresp_uop.is_rvv) }
       //} else {
-        eu_vresp.valid    := eu.io.vresp.valid && eu_vresp_uop.rf_wen
-        eu.io.vresp.ready := true.B
+      eu_vresp.valid := eu.io.vresp.valid && eu_vresp_uop.rf_wen
+      eu.io.vresp.ready := true.B
       //}
       vregfile.io.write_ports(w_cnt) := WritePort(eu_vresp, vpregSz, vLen, isVector, true)
-      when (eu_vresp.valid && !(eu_vresp_uop.is_rvv && eu_vresp_uop.ctrl.is_sta)) {
+      when(eu_vresp.valid && !(eu_vresp_uop.is_rvv && eu_vresp_uop.ctrl.is_sta)) {
         //assert(eu.io.vresp.ready, "No backpressuring the Vec EUs")
         assert(eu.io.vresp.bits.uop.rf_wen, "rf_wen must be high here")
         assert(eu.io.vresp.bits.uop.rt(RD, isVector), "wb type must be vector")
       }
       w_cnt += 1
     }
-    w_cnt += 1
   }
   require (w_cnt == vregfile.io.write_ports.length)
 

@@ -57,6 +57,7 @@ class TrTileRegWritePortIO(implicit p: Parameters) extends BoomBundle {
   val index: UInt = UInt(32.W) //index slice number, value is rs2
   val tt: UInt = UInt(2.W) //2: tr_r, 3: tr_c
   val msew: UInt = UInt(2.W)
+  val byteMask: UInt = UInt(log2Ceil(vLenb).W)
 }
 
 class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Parameters)  extends BoomModule {
@@ -79,6 +80,7 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
   val writedirrow = Wire(Vec(numWritePorts, Bool()))
   val writemsew = Wire(Vec(numWritePorts, UInt(2.W)))
   val writeindex = Wire(Vec(numWritePorts, UInt(32.W)))
+  val writebtyemask = Wire(Vec(numWritePorts, UInt(log2Ceil(vLenb).W)))
 
   for (i <- 0 until numReadPorts) {
     readdircol(i) := RegNext(io.readPorts(i).tt === 3.U)
@@ -92,6 +94,7 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
     writedirrow(i) := io.writePorts(i).bits.tt === 2.U
     writemsew(i) := io.writePorts(i).bits.msew
     writeindex(i) := io.writePorts(i).bits.index
+    writebtyemask(i) := io.writePorts(i).bits.byteMask
   }
 
 
@@ -124,10 +127,12 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
   //Write Tr_tile
   for (tr <- 0 until numMatTrPhysRegs) {
     for (w <- 0 until numWritePorts) {
+      val writemask = FillInterleaved(8, writebtyemask(w))
+      val writedata = writemask & io.writePorts(w).bits.data
       when(writedirrow(w) && io.writePorts(w).valid && tr.U === io.writePorts(w).bits.addr) {
         for (index <- 0 until rowlen) {
           when(writeindex(w) === index.U) {
-            trtile(io.writePorts(w).bits.addr)(index) := io.writePorts(w).bits.data
+            trtile(io.writePorts(w).bits.addr)(index) := writedata
           }
         }
       }
@@ -135,7 +140,7 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
         //val writeColMask = UIntToOH(writewidth(w), rowlen) - 1.U
         for (row <- 0 until rowlen) {
           val oldData = trtile(io.writePorts(w).bits.addr)(row) //vlen
-          val writeColData = VDataSel(io.writePorts(w).bits.data, writemsew(w), row.asUInt(), vLen, vLen)
+          val writeColData = VDataSel(writedata, writemsew(w), row.asUInt(), vLen, vLen)
           val writeColDataSel = Wire(UInt(vLen.W))
           val writeColShift = Wire(UInt(vLenSz.W))
           val writeColRowMask = Wire(UInt((vLen + 1).W))

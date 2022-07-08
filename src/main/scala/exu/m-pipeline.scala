@@ -141,6 +141,8 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   for(i <- 0 until exe_units.numTrTileReadPorts) {
     trtileReader.io.tileReadPorts(i) <> trtileReg.io.readPorts(i)
   }
+  //FIXME:read port of vlsu
+  trtileReg.io.readPorts(exe_units.numTrTileReadPorts) := DontCare
   //-------------------------------------------------------------
   // **** Execute Stage ****
   //-------------------------------------------------------------
@@ -171,6 +173,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   trtileReg.io.writePorts(0).bits.addr      := 0.U
   trtileReg.io.writePorts(0).bits.index     := 0.U
   trtileReg.io.writePorts(0).bits.data      := 0.U
+  trtileReg.io.writePorts(0).bits.byteMask  := 0.U
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Commit Stage ****
