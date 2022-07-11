@@ -52,8 +52,7 @@ class DebugRenameStageIO(val numPhysRegs: Int, val vector: Boolean = false, val 
 {
   val freelist  = Bits(numPhysRegs.W)
   val isprlist  = Bits(numPhysRegs.W)
-  val busytable = if (vector) Vec(numPhysRegs, UInt(vLenb.W)) 
-                  else if(matrix) Vec(numPhysRegs, UInt((vLenb+1).W))
+  val busytable = if (vector) Vec(numPhysRegs, UInt(vLenb.W))
                   else UInt(numPhysRegs.W)
 }
 
@@ -750,7 +749,7 @@ class MatRenameStage(
     numWbPorts, false, true)(p)
 {
   val trpregSz = log2Ceil(numTrPhysRegs)
-  val accpregSz = log2Ceil(numTrPhysRegs)
+  val accpregSz = log2Ceil(numAccPhysRegs)
   val rtype: UInt => Bool = isMatrix
 
   //-------------------------------------------------------------
@@ -779,11 +778,12 @@ class MatRenameStage(
     plWidth,
     numTrPhysRegs,
     8))
-  val trbusytable = Module(new MatRenameBusyTable(
+  val trbusytable = Module(new RenameBusyTable(
     plWidth,
     numTrPhysRegs,
+    numWbPorts,
     false,
-    numWbPorts))
+    false))
 
   val accmaptable = Module(new MatRenameMapTable(
     plWidth,
@@ -794,11 +794,12 @@ class MatRenameStage(
     plWidth,
     numAccPhysRegs,
     2))
-  val accbusytable = Module(new MatRenameBusyTable(
+  val accbusytable = Module(new RenameBusyTable(
     plWidth,
     numAccPhysRegs,
+    numWbPorts,
     false,
-    numWbPorts))
+    false))
 
   val ren2_br_tags    = Wire(Vec(plWidth, Valid(UInt(brTagSz.W))))
 
@@ -850,12 +851,13 @@ class MatRenameStage(
 
   // Maptable outputs.
   for ((uop, w) <- ren1_uops.zipWithIndex) {
-    val mappings = trmaptable.io.map_resps(w)
+    val trmappings  = trmaptable.io.map_resps(w)
+    val accmappings = accmaptable.io.map_resps(w)
 
-    uop.prs1       := mappings.prs1
-    uop.prs2       := mappings.prs2
-    uop.prs3       := mappings.prs3
-    uop.stale_pdst := mappings.stale_pdst
+    uop.prs1       := trmappings.prs1
+    uop.prs2       := trmappings.prs2
+    uop.prs3       := Mux(uop.dst_rtype === RT_TR, trmappings.prs3, accmappings.prs3)
+    uop.stale_pdst := Mux(uop.dst_rtype === RT_TR, trmappings.stale_pdst, accmappings.stale_pdst)
   }
 
   //-------------------------------------------------------------
@@ -863,9 +865,9 @@ class MatRenameStage(
 
   // Freelist inputs.
   for (w <- 0 until plWidth) {
-    trfreelist.io.reqs(w).valid := ren2_alloc_reqs(w) && ren2_uops(w).m_split_first
+    trfreelist.io.reqs(w).valid := ren2_alloc_reqs(w)
     trfreelist.io.reqs(w).bits  := ren2_uops(w)
-    accfreelist.io.reqs(w).valid := ren2_alloc_reqs(w) && ren2_uops(w).m_split_first
+    accfreelist.io.reqs(w).valid := ren2_alloc_reqs(w)
     accfreelist.io.reqs(w).bits  := ren2_uops(w)
   }
   trfreelist.io.dealloc_pregs zip com_valids zip rbk_valids map
@@ -887,11 +889,7 @@ class MatRenameStage(
   //val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(plWidth, UInt(maxPregSz.W)))
   // Freelist outputs.
   for ((uop, w) <- ren2_uops.zipWithIndex) {
-    when(uop.m_split_first) {
-      uop.pdst := Mux(uop.dst_rtype === RT_TR, trfreelist.io.alloc_pregs(w).bits, accfreelist.io.alloc_pregs(w).bits)
-    }.otherwise {
-      uop.pdst := uop.stale_pdst  //one cycle after maptable?
-    }
+    uop.pdst := Mux(uop.dst_rtype === RT_TR, trfreelist.io.alloc_pregs(w).bits, accfreelist.io.alloc_pregs(w).bits)
   }
 
   //-------------------------------------------------------------
@@ -903,12 +901,10 @@ class MatRenameStage(
   trbusytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
   trbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_TR)
   trbusytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
-  trbusytable.io.wb_bits  := io.wakeups.map(w => UIntToOH(w.bits.uop.m_sidx))
 
   accbusytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
   accbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_ACC)
   accbusytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
-  accbusytable.io.wb_bits  := io.wakeups.map(w => UIntToOH(w.bits.uop.m_sidx))
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
     "[rename] Wakeup has wrong rtype.")
@@ -917,31 +913,9 @@ class MatRenameStage(
   for ((uop, w) <- ren2_uops.zipWithIndex) {
     val trbusy = trbusytable.io.busy_resps(w)
     val accbusy = accbusytable.io.busy_resps(w)
-    when(uop.isHSlice =/= trbusy.prs1_busy(vLenb) && trbusy.prs1_busy(vLenb-1, 0).orR()) {
-      uop.pts1_busy := Fill(vLenb, 1.U(1.W))
-    }.otherwise {
-      uop.pts1_busy := trbusy.prs1_busy
-    }
-    when(uop.isHSlice =/= trbusy.prs2_busy(vLenb) && trbusy.prs2_busy(vLenb-1, 0).orR()) {
-      uop.pts2_busy := Fill(vLenb, 1.U(1.W))
-    }.otherwise {
-      uop.pts2_busy := trbusy.prs2_busy
-    }
-    when(uop.dst_rtype === RT_TR) {
-      when(uop.isHSlice =/= trbusy.prs3_busy(vLenb) && trbusy.prs3_busy(vLenb-1, 0).orR()) {
-        uop.pts3_busy := Fill(vLenb, 1.U(1.W))
-      }.otherwise {
-        uop.pts3_busy := trbusy.prs3_busy
-      }
-    }
-    when(uop.dst_rtype === RT_ACC) {
-      when(accbusy.prs3_busy(vLenb) && accbusy.prs3_busy(vLenb-1, 0).orR()) {
-        uop.pts3_busy := Fill(vLenb, 1.U(1.W))
-      }.otherwise {
-        uop.pts3_busy := accbusy.prs3_busy
-      }
-    }
-
+    uop.pts1_busy := uop.rt(RS1, rtype) && trbusy.prs1_busy
+    uop.pts2_busy := uop.rt(RS2, rtype) && trbusy.prs2_busy
+    uop.pts3_busy := Mux(uop.dst_rtype === RT_TR, uop.rt(RS3, rtype) && trbusy.prs3_busy, uop.rt(RS3, rtype) && accbusy.prs3_busy)
     val valid = ren2_valids(w)
   }
 
@@ -952,7 +926,7 @@ class MatRenameStage(
     val can_allocate = trfreelist.io.alloc_pregs(w).valid || accfreelist.io.alloc_pregs(w).valid
 
     // Push back against Decode stage if Rename1 can't proceed.
-    io.ren_stalls(w) := (ren2_uops(w).rt(RD, rtype)) && !can_allocate
+    io.ren_stalls(w) := ren2_uops(w).rt(RD, rtype) && !can_allocate
 
     val bypassed_uop = Wire(new MicroOp)
     if (w > 0) bypassed_uop := BypassAllocations(ren2_uops(w), ren2_uops.slice(0,w), ren2_alloc_reqs.slice(0,w))

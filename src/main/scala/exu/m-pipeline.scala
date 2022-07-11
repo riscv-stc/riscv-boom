@@ -143,7 +143,8 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   for(i <- 0 until exe_units.numTrTileReadPorts) {
     trtileReader.io.tileReadPorts(i) <> trtileReg.io.readPorts(i)
   }
-  trtileReader.io.tileReadPorts.last <> io.lsu_tile_rport
+  io.lsu_tile_rport <> trtileReg.io.readPorts(exe_units.numTrTileReadPorts)
+
   //-------------------------------------------------------------
   // **** Execute Stage ****
   //-------------------------------------------------------------
@@ -175,6 +176,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   trtileReg.io.writePorts(0).bits.addr      := lsuWbkBits.uop.pdst
   trtileReg.io.writePorts(0).bits.index     := lsuWbkBits.uop.m_sidx
   trtileReg.io.writePorts(0).bits.data      := lsuWbkBits.data
+  trtileReg.io.writePorts(0).bits.byteMask  := DontCare   //FIXME
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Commit Stage ****

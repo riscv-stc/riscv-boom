@@ -490,8 +490,8 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
   if (supportedUnits.fpu) dec_table ++= FpuRRdDecode.table
   if (supportedUnits.fdiv) dec_table ++= FDivRRdDecode.table
   if (supportedUnits.ifpu) dec_table ++= IfmvRRdDecode.table
-  if (supportedUnits.vector) dec_table = VecRRdDecode.table
-  if (supportedUnits.matrix) dec_table = MatRRdDecode.table
+  if (supportedUnits.vector) dec_table ++= VecRRdDecode.table
+  if (supportedUnits.matrix) dec_table ++= MatRRdDecode.table
   val rrd_cs = Wire(new RRdCtrlSigs()).decode(io.rrd_uop.uopc, dec_table)
 
   // rrd_use_alupipe is unused

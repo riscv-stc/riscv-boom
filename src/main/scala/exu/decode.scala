@@ -550,15 +550,15 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val total_slice = Mux(is_mls, sel_slice, 1.U)
     val slice_last = mslice_idx >= total_slice
 
-    when (io.kill) {
-      mslice_idx := 0.U
-    }.elsewhen(!is_mls | slice_last & io.deq_fire) {
-      mslice_idx := 0.U
-    }.elsewhen(is_mls & !slice_last & io.deq_fire) {
-      mslice_idx := mslice_idx + 1.U
-    }.otherwise {
-      mslice_idx := 0.U
-    }
+  //  when (io.kill) {
+  //    mslice_idx := 0.U
+  //  }.elsewhen(!is_mls | slice_last & io.deq_fire) {
+  //    mslice_idx := 0.U
+  //  }.elsewhen(is_mls & !slice_last & io.deq_fire) {
+  //    mslice_idx := mslice_idx + 1.U
+  //  }.otherwise {
+  //    mslice_idx := 0.U
+  //  }
 
     uop.m_is_split    := cs.can_be_split
     uop.m_slice_cnt   := total_slice

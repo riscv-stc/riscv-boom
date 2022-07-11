@@ -1438,9 +1438,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   }
 
   val vldq_resp_valid    = io.vmem.resp.valid && !io.vmem.resp.bits.is_vst
+  val vldq_resp_e        = vldq(io.vmem.resp.bits.vldq_idx)
   val vle_wbk_valid      = vldq_resp_valid && vldq_resp_e.bits.uop.is_rvv
   val mle_wbk_valid      = vldq_resp_valid && vldq_resp_e.bits.uop.is_rvm
-  val vldq_resp_e        = vldq(io.vmem.resp.bits.vldq_idx)
   val vldq_resp_data_shl = Wire(UInt(vLen.W))
   val vldq_resp_data_shr = Wire(UInt(vLen.W))
   vldq_resp_data_shr    := io.vmem.resp.bits.cdata >> (vldq_resp_e.bits.shamt << 3.U)
