@@ -53,6 +53,7 @@ class DebugRenameStageIO(val numPhysRegs: Int, val vector: Boolean = false, val 
   val freelist  = Bits(numPhysRegs.W)
   val isprlist  = Bits(numPhysRegs.W)
   val busytable = if (vector) Vec(numPhysRegs, UInt(vLenb.W))
+                  else if(matrix) Vec(numPhysRegs, UInt((vLenb+1).W))
                   else UInt(numPhysRegs.W)
 }
 
@@ -778,12 +779,11 @@ class MatRenameStage(
     plWidth,
     numTrPhysRegs,
     8))
-  val trbusytable = Module(new RenameBusyTable(
+  val trbusytable = Module(new MatRenameBusyTable(
     plWidth,
     numTrPhysRegs,
-    numWbPorts,
     false,
-    false))
+    numWbPorts))
 
   val accmaptable = Module(new MatRenameMapTable(
     plWidth,
@@ -794,12 +794,11 @@ class MatRenameStage(
     plWidth,
     numAccPhysRegs,
     2))
-  val accbusytable = Module(new RenameBusyTable(
+  val accbusytable = Module(new MatRenameBusyTable(
     plWidth,
     numAccPhysRegs,
-    numWbPorts,
     false,
-    false))
+    numWbPorts))
 
   val ren2_br_tags    = Wire(Vec(plWidth, Valid(UInt(brTagSz.W))))
 
@@ -901,10 +900,12 @@ class MatRenameStage(
   trbusytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
   trbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_TR)
   trbusytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
+  trbusytable.io.wb_bits  := io.wakeups.map(w => UIntToOH(w.bits.uop.m_sidx))
 
   accbusytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
   accbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_ACC)
   accbusytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
+  accbusytable.io.wb_bits  := io.wakeups.map(w => UIntToOH(w.bits.uop.m_sidx))
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
     "[rename] Wakeup has wrong rtype.")
@@ -913,9 +914,31 @@ class MatRenameStage(
   for ((uop, w) <- ren2_uops.zipWithIndex) {
     val trbusy = trbusytable.io.busy_resps(w)
     val accbusy = accbusytable.io.busy_resps(w)
-    uop.pts1_busy := uop.rt(RS1, rtype) && trbusy.prs1_busy
-    uop.pts2_busy := uop.rt(RS2, rtype) && trbusy.prs2_busy
-    uop.pts3_busy := Mux(uop.dst_rtype === RT_TR, uop.rt(RS3, rtype) && trbusy.prs3_busy, uop.rt(RS3, rtype) && accbusy.prs3_busy)
+    when(uop.isHSlice =/= trbusy.prs1_busy(vLenb) && trbusy.prs1_busy(vLenb-1, 0).orR()) {
+      uop.pts1_busy := Fill(vLenb, 1.U(1.W))
+    }.otherwise {
+      uop.pts1_busy := trbusy.prs1_busy
+    }
+    when(uop.isHSlice =/= trbusy.prs2_busy(vLenb) && trbusy.prs2_busy(vLenb-1, 0).orR()) {
+      uop.pts2_busy := Fill(vLenb, 1.U(1.W))
+    }.otherwise {
+      uop.pts2_busy := trbusy.prs2_busy
+    }
+    when(uop.dst_rtype === RT_TR) {
+      when(uop.isHSlice =/= trbusy.prs3_busy(vLenb) && trbusy.prs3_busy(vLenb-1, 0).orR()) {
+        uop.pts3_busy := Fill(vLenb, 1.U(1.W))
+      }.otherwise {
+        uop.pts3_busy := trbusy.prs3_busy
+      }
+    }
+    when(uop.dst_rtype === RT_ACC) {
+      when(accbusy.prs3_busy(vLenb) && accbusy.prs3_busy(vLenb-1, 0).orR()) {
+        uop.pts3_busy := Fill(vLenb, 1.U(1.W))
+      }.otherwise {
+        uop.pts3_busy := accbusy.prs3_busy
+      }
+    }
+
     val valid = ren2_valids(w)
   }
 

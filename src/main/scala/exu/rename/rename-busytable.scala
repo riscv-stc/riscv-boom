@@ -158,7 +158,7 @@ class MatRenameBusyTable(
       .map { case ((pdst, valid), bits) => bits & Fill(vLenb, (r.U === pdst && valid).asUInt()) }.reduce(_ | _)
     // Rebusy newly allocated registers.
     busy_table_next(r) := busy_table_wb(r) | (io.ren_uops zip io.rebusy_reqs)
-      .map { case (uop, req) => Cat(Mux((r.U === uop.pdst) && req && uop.m_split_first, uop.isHSlice, busy_table(r)(vLenb)) ,
+      .map { case (uop, req) => Cat(Mux((r.U === uop.pdst) && req, uop.isHSlice, busy_table(r)(vLenb)) ,
         Fill(vLenb, ((r.U === uop.pdst) && req).asUInt()) & UIntToOH(uop.m_sidx)) }.reduce(_ | _)
 
     // Read the busy table.
