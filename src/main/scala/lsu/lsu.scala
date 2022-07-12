@@ -2574,7 +2574,6 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   val sliceBlockAddr = RegInit(0.U(xLen.W))
   val sliceBlockOff  = sliceBaseAddr(clSizeLog2-1, 0)
   val sliceAddrInc   = WireInit(0.U((clSizeLog2+1).W))
-  val sliceAddrInc   = WireInit()
   val sliceLenLast   = WireInit(false.B)
   if (vLenb > clSize) {
     sliceAddrInc := Mux(sliceLenCtr === 0.U,       clSize.U - sliceBlockOff,

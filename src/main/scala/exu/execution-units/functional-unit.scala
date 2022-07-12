@@ -1632,12 +1632,12 @@ class VecALUUnit(
   val shiftMask   = Fill(eLen, !isShift) | Mux1H(UIntToOH(uop.vs2_eew), Seq("h7".U, "hf".U, "h1f".U, "h3f".U))
   val bitPreStart = Cat((0 until vLenb).map(i => Fill(8, prestart(i.U))).reverse)
   val bitTail     = Cat((0 until vLenb).map(i => Fill(8, tail(i.U))).reverse)
-  val bitPreMask  = Mux1H(UIntToOH(uop.vstart(2, 0)), 
+  val bitPreMask  = Mux1H(UIntToOH(uop.vstart(2, 0)),
                           Seq(0.U(8.W), 1.U, 3.U, 7.U, "hf".U, "h1f".U, "h3f".U, "h7f".U))
-  val bitTailMask = Cat(Fill(vLen-8, 1.U(1.W)), 
+  val bitTailMask = Cat(Fill(vLen-8, 1.U(1.W)),
                         Mux1H(UIntToOH(uop.vconfig.vl(2, 0)), 
                               Seq("hff".U, "hfe".U, "hfc".U, "hf8".U, "hf0".U, "he0".U, "hc0".U, "h80".U)))
-  val bitInactive = bitPreStart | bitPreMask << Cat(uop.vstart(vLenSz-1, 3), 0.U(3.W)) | 
+  val bitInactive = bitPreStart | bitPreMask << Cat(uop.vstart(vLenSz-1, 3), 0.U(3.W)) |
                     bitTail & (bitTailMask << Cat(uop.vconfig.vl(vLenSz-1, 3), 0.U(3.W)))(vLen-1, 0)
 
   // operand 1 select
@@ -2324,9 +2324,9 @@ class VecMaskUnit(
   val vmaskOutSpc  = Mux(uop.uopc === uopVMSOF, vmaskOutTail, rs3_data | activeBits)
 
   // stage1
-  val vpopcSt1 = Reg(Vec(numELENinVLEN/4, UInt(vLenSz.W)))
-  for(e <- 0 until numELENinVLEN/4) {
-    vpopcSt1(e) := (0 until 4).map(j => indexOut(e*4+j)).reduce(_ + _)
+  val vpopcSt1 = Reg(Vec(numELENinVLEN/2, UInt(vLenSz.W)))
+  for(e <- 0 until numELENinVLEN/2) {
+    vpopcSt1(e) := (0 until 2).map(j => indexOut(e*2+j)).reduce(_ + _)
   }
   val indexOutSt1  = RegNext(indexOut)
   val indexValSt1  = RegNext(indexVal)

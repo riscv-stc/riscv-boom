@@ -675,12 +675,12 @@ class WithNStcMatBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends
                 nPerfCounters = 29,
                 fpu = Some(freechips.rocketchip.tile.FPUParams(minFLen=16, fLen=64, sfmaLatency=4, dfmaLatency=4, divSqrt=true)),
                 useVector = true,
-                vLen = 512,
+                vLen = 128,
                 eLen = 64,
                 vMemDataBits = 64,
                 numVecPhysRegisters = 65,
                 useMatrix = true,
-                mLen = 16384,  //vLen * 32
+                mLen = 1024, //vLen * 8
                 numMatTrRegisters = 8,
                 numMatAccRegisters = 2,
                 mxuTileRows = 4,
