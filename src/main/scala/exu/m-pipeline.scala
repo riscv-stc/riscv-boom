@@ -23,12 +23,6 @@ import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
 
-class TileAccessCtrls(implicit p: Parameters) extends BoomBundle {
-  val ridx = UInt(vpregSz.W)
-  val sidx = UInt(vLenSz.W)
-  val tt   = UInt(2.W)
-}
-
 /**
  * Top level datapath that wraps the floating point issue window, regfile, and arithmetic units.
  */
@@ -176,7 +170,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   trtileReg.io.writePorts(0).bits.addr      := lsuWbkBits.uop.pdst
   trtileReg.io.writePorts(0).bits.index     := lsuWbkBits.uop.m_sidx
   trtileReg.io.writePorts(0).bits.data      := lsuWbkBits.data
-  trtileReg.io.writePorts(0).bits.byteMask  := DontCare   //FIXME
+  trtileReg.io.writePorts(0).bits.byteMask  := lsuWbkBits.vmask
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Commit Stage ****
@@ -190,6 +184,8 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   var w_cnt = 0
   //vld write back clears busy table in rename but not busy bit in rob entry.
   io.wakeups(w_cnt) <> DontCare
+  io.wakeups(w_cnt).valid := io.lsu_tile_wbk.valid
+  io.wakeups(w_cnt).bits  := io.lsu_tile_wbk.bits
   // from MatExeUnit
   w_cnt = 1
   for(eu <- exe_units) {

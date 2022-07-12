@@ -447,11 +447,11 @@ object MatRRdDecode extends RRdDecodeConstants
                                     // |     |  |  use mem pipe         |         |          |     rf wen |
                                     // |     |  |  |  alu fcn   wd/word?|         |          |     |      |
                                     // |     |  |  |  |         |       |         |          |     |      |
-         BitPat(uopMOPA)       -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_VS1,   IS_X, REN_1, CSR.N)
-        ,BitPat(uopMWOPA)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_VS1,   IS_X, REN_1, CSR.N)
-        ,BitPat(uopMQOPA)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_VS1,   IS_X, REN_1, CSR.N)
-        ,BitPat(uopMFOPA)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_VS1,   IS_X, REN_1, CSR.N)
-        ,BitPat(uopMFWOPA)     -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_VS1,   IS_X, REN_1, CSR.N)
+         BitPat(uopMOPA)       -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_TS2,   IS_X, REN_1, CSR.N)
+        ,BitPat(uopMWOPA)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_TS2,   IS_X, REN_1, CSR.N)
+        ,BitPat(uopMQOPA)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_TS2,   IS_X, REN_1, CSR.N)
+        ,BitPat(uopMFOPA)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_TS2,   IS_X, REN_1, CSR.N)
+        ,BitPat(uopMFWOPA)     -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_TS1,  OP2_TS2,   IS_X, REN_1, CSR.N)
         ,BitPat(uopMMUL)       -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_ACC,  OP2_ZERO,  IS_X, REN_1, CSR.N)
         ,BitPat(uopMWMUL)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_ACC,  OP2_ZERO,  IS_X, REN_1, CSR.N)
         ,BitPat(uopMQMUL)      -> List(BR_N, Y, N, N, FN_ADD,  DW_XPR,  OP1_ACC,  OP2_ZERO,  IS_X, REN_1, CSR.N)
@@ -490,7 +490,7 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
   if (supportedUnits.fpu) dec_table ++= FpuRRdDecode.table
   if (supportedUnits.fdiv) dec_table ++= FDivRRdDecode.table
   if (supportedUnits.ifpu) dec_table ++= IfmvRRdDecode.table
-  if (supportedUnits.vector) dec_table ++= VecRRdDecode.table
+  if (supportedUnits.vector) dec_table = VecRRdDecode.table
   if (supportedUnits.matrix) dec_table ++= MatRRdDecode.table
   val rrd_cs = Wire(new RRdCtrlSigs()).decode(io.rrd_uop.uopc, dec_table)
 

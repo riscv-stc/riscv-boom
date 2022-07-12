@@ -139,7 +139,7 @@ trait ScalarOpConstants
   val OP2_VL  = 5.U(3.W) // for vset{i}vl{i}
   val OP2_VS1 = 6.U(3.W) // for vector
   val OP2_INV_VS1 = 7.U(3.W) // for vector mask insn
-  // val OP2_TS2 = 6.U(3.W) // for matrix
+  val OP2_TS2 = 6.U(3.W) // for matrix
   val OP2_X   = BitPat("b???")
 
   // Register File Write Enable Signal
