@@ -551,7 +551,8 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
                 IssueParams(issueWidth=1, numEntries=24, iqType=IQT_MEM.litValue, dispatchWidth=2),
                 IssueParams(issueWidth=2, numEntries=24, iqType=IQT_INT.litValue, dispatchWidth=2),
                 IssueParams(issueWidth=1, numEntries=16, iqType=IQT_FP.litValue , dispatchWidth=2),
-                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VEC.litValue, dispatchWidth=2)),
+                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VEC.litValue, dispatchWidth=2),
+                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_MAT.litValue, dispatchWidth=2)),
               numIntPhysRegisters = 64,
               numFpPhysRegisters = 48,
               numLdqEntries = 16,
@@ -563,10 +564,16 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               nPerfCounters = 29,
               fpu = Some(freechips.rocketchip.tile.FPUParams(minFLen=16, fLen=64, sfmaLatency=4, dfmaLatency=4, divSqrt=true)),
               useVector = true,
-              vLen = 1024,
+              vLen = 128,
               eLen = 64,
               vMemDataBits = 64,
-              numVecPhysRegisters = 65
+              numVecPhysRegisters = 65,
+              useMatrix = true,
+              mLen = 1024, //vLen * 8
+              numMatTrRegisters = 8,
+              numMatAccRegisters = 2,
+              mxuTileRows = 4,
+              mxuTileCols = 4
             ),
             dcache = Some(
               DCacheParams(rowBits = 128, nSets=32, nWays=8, nMSHRs=8, nTLBWays=16, blockBytes=site(CacheBlockBytes))
@@ -586,7 +593,7 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
   })
 )
 // DOC include end: StcBoomConfig
-
+/*
 /**
  * Based on LargeBoomConfig with RVV extension, vlen=512
  */
@@ -646,6 +653,7 @@ class WithNStcRVVBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends
  * Based on LargeBoomConfig with Matrix + RVV extension
  */
 class WithNStcMatBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Config(
+  new freechips.rocketchip.subsystem.WithCacheBlockBytes(128) ++
   new WithTAGELBPD ++ // Default to TAGE-L BPD
     new Config((site, here, up) => {
       case TilesLocated(InSubsystem) => {
@@ -687,10 +695,10 @@ class WithNStcMatBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends
                 mxuTileCols = 4
               ),
               dcache = Some(
-                DCacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, nMSHRs=4, nTLBWays=16)
+                DCacheParams(rowBits = 128, nSets=32, nWays=8, nMSHRs=8, nTLBWays=16, blockBytes=site(CacheBlockBytes))
               ),
               icache = Some(
-                ICacheParams(rowBits = site(SystemBusKey).beatBits, nSets=64, nWays=8, fetchBytes=4*4)
+                ICacheParams(rowBits = 128, nSets=32, nWays=8, fetchBytes=4*4, blockBytes=site(CacheBlockBytes))
               ),
               hartId = i + idOffset
             ),
@@ -698,9 +706,10 @@ class WithNStcMatBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends
           )
         } ++ prev
       }
-      case SystemBusKey => up(SystemBusKey, site).copy(beatBytes = 16)
+      case SystemBusKey => up(SystemBusKey, site).copy(beatBytes = 64)
       case XLen => 64
     })
 )
 // DOC include end: StcMatBoomConfig
 
+*/
