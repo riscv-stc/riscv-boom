@@ -271,7 +271,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.lrs2       := instRS2
   uop.lrs3       := instRS3
 
-  uop.ldst_val   := isSomeReg(cs.dst_type) && !(uop.ldst === 0.U && uop.rt(RD, isInt)) && Mux(cs.is_rvv, !cs.uses_stq, true.B)
+  uop.ldst_val   := isSomeReg(cs.dst_type) && !(uop.ldst === 0.U && uop.rt(RD, isInt)) && Mux(cs.is_rvv || cs.is_rvm, !cs.uses_stq, true.B)
   uop.dst_rtype  := cs.dst_type
   uop.lrs1_rtype := cs.rs1_type
   uop.lrs2_rtype := cs.rs2_type

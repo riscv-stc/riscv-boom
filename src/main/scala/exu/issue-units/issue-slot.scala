@@ -104,7 +104,7 @@ class IssueSlot(
   //val pm    = if(vector) RegInit(0.U(vLenb.W)) else if (usingVector && iqType == IQT_MEM.litValue) RegInit(false.B) else null
   val ps    = if(vector || matrix) RegInit(false.B) else null
   val sdata = if(vector) RegInit(0.U(eLen.W)) else null
-  val sidx  = if(matrix) RegInit(0.U(vLenb.W)) else null
+  val sidx  = if(matrix) RegInit(0.U(vLenSz.W)) else null
   val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
   val slot_uop = RegInit(NullMicroOp(usingVector))
