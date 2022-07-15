@@ -367,15 +367,14 @@ class Rob(
           //val wb_rvv_sta  = wb_uop.uopc.isOneOf(uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
           //rob_bsy(row_idx)      := Mux(wb_rvv_load, Mux(wb_uop.uses_ldq, false.B, rob_bsy(row_idx)),
           //                         Mux(wb_rvv_sta,  false.B, wb_uop.v_is_split && !wb_uop.v_split_last))
-          when (!wb_uop.is_vm_ext || 
+          when (wb_rvv_load && !wb_uop.uses_ldq) {
+            rob_ud_bsy(row_idx) := !wb_uop.v_split_last
+          } .elsewhen(!wb_uop.is_vm_ext || 
                 (wb_uop.is_rvv && (!wb_uop.v_is_split || rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt >= rob_uop(row_idx).vconfig.vl)) ||
                 (wb_uop.is_rvm && wb_uop.m_split_last)) {
             rob_bsy(row_idx)    := false.B
             rob_unsafe(row_idx) := false.B
-          }
-          when (wb_rvv_load && !wb_uop.uses_ldq) {
-            rob_ud_bsy(row_idx) := false.B
-          } .otherwise {
+          }.otherwise {
             rob_uop(row_idx).v_split_ecnt := rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt
           }
           rob_predicated(row_idx) := wb_resp.bits.predicated
@@ -393,7 +392,7 @@ class Rob(
           //rob_bsy(row_idx)      := Mux(wb_rvv_load, Mux(wb_uop.uses_ldq, false.B, rob_bsy(row_idx)),
           //                         Mux(wb_rvv_sta,  false.B, wb_uop.v_is_split && !wb_uop.v_split_last))
           when (!wb_uop.is_rvv || !wb_uop.v_is_split || 
-                rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt >= rob_uop(row_idx).vconfig.vl) {
+                rob_uop(row_idx).v_split_ecnt +& wb_uop.v_split_ecnt >= rob_uop(row_idx).vconfig.vl) {
             rob_bsy(row_idx)    := false.B
             rob_unsafe(row_idx) := false.B
           }
@@ -440,7 +439,7 @@ class Rob(
         if (usingMatrix) {
           rob_uop(cidx).v_split_ecnt := rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt
           when (!lsu_clr_bsy.bits.is_vm_ext ||
-                (rob_uop(cidx).is_rvv && rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt >= rob_uop(cidx).vconfig.vl) ||
+                (rob_uop(cidx).is_rvv && rob_uop(cidx).v_split_ecnt +& lsu_clr_bsy.bits.v_split_ecnt >= rob_uop(cidx).vconfig.vl) ||
                 (rob_uop(cidx).is_rvm && lsu_clr_bsy.bits.m_split_last)) {
             rob_bsy(cidx)    := false.B
             rob_unsafe(cidx) := false.B
@@ -452,7 +451,7 @@ class Rob(
         } else if (usingVector) {
           rob_uop(cidx).v_split_ecnt := rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt
           when (!lsu_clr_bsy.bits.is_rvv ||
-                rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt >= rob_uop(cidx).vconfig.vl) {
+                rob_uop(cidx).v_split_ecnt +& lsu_clr_bsy.bits.v_split_ecnt >= rob_uop(cidx).vconfig.vl) {
             rob_bsy(cidx)    := false.B
             rob_unsafe(cidx) := false.B
             if (O3PIPEVIEW_PRINTF) {

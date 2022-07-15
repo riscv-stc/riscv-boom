@@ -45,7 +45,7 @@ class TrTileMmvReadReq(implicit p: Parameters) extends BoomBundle {
 
 class TrTileRegReadPortIO(implicit p: Parameters) extends BoomBundle {
   val addr: UInt = Input(UInt(log2Ceil(numMatTrPhysRegs).W)) // value of td num
-  val data: UInt = Output(UInt(mLen.W))
+  val data: UInt = Output(UInt(vLen.W))
   val index: UInt = Input(UInt(32.W)) //index slice number, value is rs2
   val tt: UInt = Input(UInt(2.W)) //2: tr_r, 3: tr_c
   val msew: UInt = Input(UInt(2.W))
@@ -53,7 +53,7 @@ class TrTileRegReadPortIO(implicit p: Parameters) extends BoomBundle {
 
 class TrTileRegWritePortIO(implicit p: Parameters) extends BoomBundle {
   val addr: UInt = UInt(log2Ceil(numMatTrPhysRegs).W) // value of td num
-  val data: UInt = UInt(mLen.W)
+  val data: UInt = UInt(vLen.W)
   val index: UInt = UInt(32.W) //index slice number, value is rs2
   val tt: UInt = UInt(2.W) //2: tr_r, 3: tr_c
   val msew: UInt = UInt(2.W)

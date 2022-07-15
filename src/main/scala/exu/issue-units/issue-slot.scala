@@ -204,11 +204,11 @@ class IssueSlot(
       val pvm = uop.pvm
       ret := uop.v_unmasked || tail || !io.vbusy_status(pvm) // || !perm_ready || pm(vstart >> 3.U)
     } else {
-      if (usingVector && iqType == IQT_MEM.litValue) {
-        ret := !uop.is_rvv || (uop.v_unmasked && !uop.v_idx_ls) // || pm(0)
-      } else {
+      // if (usingVector && iqType == IQT_MEM.litValue) {
+      //   ret := !uop.is_rvv || (uop.v_unmasked && !uop.v_idx_ls) // || pm(0)
+      // } else {
         ret := true.B
-      }
+      // }
     }
     ret
   }

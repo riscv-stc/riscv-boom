@@ -1904,6 +1904,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     io.lsu.dis_uops(w).valid := dis_fire(w)
     io.lsu.dis_uops(w).bits  := dis_uops(w)
   }
+  io.lsu.vbusy_status := v_rename_stage.io.vbusy_status
 
   // tell LSU about committing loads and stores to clear entries
   io.lsu.commit                  := rob.io.commit
