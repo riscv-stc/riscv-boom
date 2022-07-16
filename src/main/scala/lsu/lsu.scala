@@ -55,7 +55,7 @@ import freechips.rocketchip.diplomacy._
 
 import boom.common._
 import boom.common.MicroOpcodes._
-import boom.exu.{BrUpdateInfo, Exception, FuncUnitReq, FuncUnitResp, CommitSignals, ExeUnitResp, RegisterFileReadPortIO, TrTileRegReadPortIO}
+import boom.exu.{BrUpdateInfo, Exception, FuncUnitReq, FuncUnitResp, CommitSignals, ExeUnitResp, VlWakeupResp, RegisterFileReadPortIO, TrTileRegReadPortIO}
 import boom.util._
 
 class LSUExeIO(implicit p: Parameters) extends BoomBundle()(p)
@@ -201,6 +201,9 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
   val spec_ld_wakeup = Output(Vec(memWidth, Valid(UInt(maxPregSz.W))))
   // Tell the IQs that the load we speculated last cycle was misspeculated
   val ld_miss      = Output(Bool())
+
+  // speculative vconfig wakeup
+  val vl_wakeup    = Input(Valid(new VlWakeupResp()))
 
   val brupdate       = Input(new BrUpdateInfo)
   //val vmupdate       = if (usingVector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
@@ -484,6 +487,24 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
 
   io.core.perf.stq_full := io.core.stq_full.reduce(_||_)
+
+  // vl_wakeup, speculative vconfig wakeup
+  for (i <- 0 until numLdqEntries)
+  {
+    when (io.core.vl_wakeup.valid && (io.core.vl_wakeup.bits.vconfig_tag+1.U) === ldq(i).bits.uop.vconfig_tag)
+    {
+      ldq(i).bits.uop.vconfig.vl := io.core.vl_wakeup.bits.vl
+      ldq(i).bits.uop.vl_ready   := true.B
+    }
+  }
+
+  for (i <- 0 until numStqEntries) 
+  {
+    when (io.core.vl_wakeup.valid && (io.core.vl_wakeup.bits.vconfig_tag+1.U) === stq(i).bits.uop.vconfig_tag) {
+      stq(i).bits.uop.vconfig.vl := io.core.vl_wakeup.bits.vl
+      stq(i).bits.uop.vl_ready   := true.B
+    }
+  }
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // Execute stage (access TLB, send requests to Memory)
@@ -699,6 +720,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   ~io.core.vbusy_status(ldq_vag_uop.stale_pvd(0).bits)        &&
                                   (ldq_vag_uop.v_unmasked || ~io.core.vbusy_status(ldq_vag_uop.pvm)) &&
                                   (~ldq_vag_uop.v_idx_ls  || ~io.core.vbusy_status(ldq_vag_uop.pvs2(0).bits)) &&
+                                  ldq_vag_uop.vl_ready                                        &&
                                   ldq_vag_e.bits.uop.is_vm_ext))
 
   // Can we start vstore addrgen
@@ -717,6 +739,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   !stq_vag_e.bits.succeeded                             &&
                                   (stq_vag_uop.v_unmasked || ~io.core.vbusy_status(stq_vag_uop.pvm)) &&
                                   (~stq_vag_uop.v_idx_ls  || ~io.core.vbusy_status(stq_vag_uop.pvs2(0).bits)) &&
+                                  stq_vag_uop.vl_ready                                  &&
                                   stq_vag_e.bits.uop.is_vm_ext))
 
   // Can we fire a vldq lookup
@@ -2343,7 +2366,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
 
   val emulCtr  = RegInit(0.U(4.W))
   val vmask    = Reg(UInt(vLen.W))
-  val vmaskSel = WireInit(vmask)
+  val vmaskSel = WireInit(0.U(vLenb.W))
   val eindex   = Reg(Vec(8, UInt(vLen.W)))
   // val rdata    = if(vLenb <= clSize) Reg(Vec(8, UInt(vLen.W))) else null
   val ioUop    = io.req.bits.uop
@@ -2355,11 +2378,13 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   val op1      = req.rs1_data                      // base address
   val op2      = Mux(uop.is_rvm, req.rs2_data,     // row strides in mle and mse
                  Mux(uop.v_idx_ls, VDataSel(Cat(eindex.reverse), uop.vs2_eew, uop.v_eidx, vLen*8, eLen), 0.U))
-  val clOffset = op1(clSizeLog2-1, 0)
+  val clOffset = if(vLenb > clSize) RegEnable(io.req.bits.rs1_data(clSizeLog2-1, 0), io.req.valid) 
+                 else               op1(clSizeLog2-1, 0)
   val isUnitStride = uop.uopc.isOneOf(uopVL, uopVLR, uopVLFF, uopVSA)
   val usSplitCtr = RegInit(0.U((vcRatioSz+1).W))
   val addrInc    = WireInit(0.U(xLen.W))
   val eidxInc    = WireInit(0.U(vLenSz.W))
+  val usSplitLeftCnt = RegInit(0.U(vLenSz.W))
   if (vLenb > clSize) {
     addrInc := Mux(uop.v_idx_ls, 0.U,
                Mux(uop.uopc.isOneOf(uopVLS, uopVSSA), req.rs2_data,
@@ -2371,13 +2396,12 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   } else {
     addrInc := Mux(uop.v_idx_ls, 0.U,
                Mux(uop.uopc.isOneOf(uopVLS, uopVSSA), req.rs2_data,
-               Mux(usSplitCtr === 1.U, clOffset +& vLenb.U - clSize.U,
+               Mux(usSplitCtr === 1.U, usSplitLeftCnt,
                                        vLenb.U.min(clSize.U - clOffset))))
     eidxInc := Mux(!isUnitStride, 1.U,
-               Mux(usSplitCtr === 1.U, (clOffset +& vLenb.U - clSize.U) >> eew,
+               Mux(usSplitCtr === 1.U, usSplitLeftCnt >> eew,
                                        vLenb.U.min(clSize.U - clOffset) >> eew))
   }
-  val bodyMask = Cat((0 until vLenb).map(i => uop.v_eidx +& i.U >= uop.vstart && uop.v_eidx +& i.U < uop.vconfig.vl).reverse)
   // appended for mle and mse control
   val sliceCntCtr    = RegInit(0.U(vLenbSz.W))
   val sliceLenCtr    = RegInit(0.U((vcRatioSz+1).W))
@@ -2531,7 +2555,8 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
             usSplitCtr := 0.U
             emulCtr    := emulCtr + 1.U
           } .elsewhen (isUnitStride) {
-            usSplitCtr := usSplitCtr + 1.U
+            usSplitCtr     := usSplitCtr + 1.U
+            usSplitLeftCnt := clOffset +& vLenb.U - clSize.U
           } .otherwise {
             when (uop.v_eidx +& 1.U === vLenECnt) {
               emulCtr := emulCtr + 1.U
@@ -2562,14 +2587,27 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
     }
   }
 
-  when (IsKilledByBranch(io.brupdate, uop)) {
+  val branchKill = Mux(io.req.fire, IsKilledByBranch(io.brupdate, ioUop), IsKilledByBranch(io.brupdate, uop))
+  when (branchKill) {
     state := s_idle
   }
 
   when (RegNext(state === s_vmask && io.vrf_raddr.fire)) {
     vmask := io.vrf_rdata
   }
-  vmaskSel := Mux(RegNext(state === s_vmask && io.vrf_raddr.fire), io.vrf_rdata, vmask)
+  val uopVeidx = uop.v_eidx >> (vLenbSz.U - uop.vd_eew) << (vLenbSz.U - uop.vd_eew)
+  vmaskSel := Mux(RegNext(state === s_vmask && io.vrf_raddr.fire), io.vrf_rdata, vmask) >> uopVeidx
+  val vmByteMask   = Mux1H(UIntToOH(uop.vd_eew),
+                           Seq(vmaskSel,
+                               Cat((0 until vLenb/2).map(i => Fill(2, vmaskSel(i))).reverse),
+                               Cat((0 until vLenb/4).map(i => Fill(4, vmaskSel(i))).reverse),
+                               Cat((0 until vLenb/8).map(i => Fill(8, vmaskSel(i))).reverse)))
+  val bodyMask     = Cat((0 until vLenb).map(i => uopVeidx +& i.U >= uop.vstart && uopVeidx +& i.U < uop.vconfig.vl).reverse)
+  val bodyByteMask = Mux1H(UIntToOH(uop.vd_eew),
+                           Seq(bodyMask,
+                               Cat((0 until vLenb/2).map(i => Fill(2, bodyMask(i))).reverse),
+                               Cat((0 until vLenb/4).map(i => Fill(4, bodyMask(i))).reverse),
+                               Cat((0 until vLenb/8).map(i => Fill(8, bodyMask(i))).reverse)))
 
   when (RegNext(state === s_index && io.vrf_raddr.fire)) {
     eindex(RegNext(emulCtr)) := io.vrf_rdata
@@ -2605,15 +2643,17 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   io.resp.bits.uop.m_sidx       := sliceCntCtr
   io.resp.bits.uop.m_split_first:= (sliceCntCtr === 0.U) && (sliceLenCtr === 0.U)
   io.resp.bits.uop.m_split_last := (sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast
-  io.resp_vm                    := Mux(uop.is_rvv, VRegMask(uop.v_eidx, eew, eidxInc, vLenb) & Mux(uop.v_unmasked, Fill(vLenb, 1.U(1.W)), (vmaskSel >> uop.v_eidx)(vLenb, 0)) & bodyMask,
+  io.resp_vm                    := Mux(uop.is_rvv, VRegMask(uop.v_eidx, eew, eidxInc, vLenb) & Mux(uop.v_unmasked, Fill(vLenb, 1.U(1.W)), vmByteMask) & bodyByteMask,
                                                    VRegMask(sliceBlockAddr, 0.U, sliceAddrInc, vLenb))
   io.resp_shdir                 := Mux(uop.is_rvm && sliceLenCtr === 0.U, true.B,
                                    Mux(uop.is_rvv && !isUnitStride, false.B,
                                    Mux(uop.is_rvv && usSplitCtr === 0.U, true.B, false.B)))
+  val shamt = if(vLenb > clSize) (usSplitCtr << clSizeLog2.U) - clOffset
+              else               vLenb.U - usSplitLeftCnt
   io.resp_shamt                 := Mux(uop.is_rvm && sliceLenCtr === 0.U, sliceBlockOff,
                                    Mux(uop.is_rvm, (sliceLenCtr << clSizeLog2.U) - sliceBlockOff,
                                    Mux(!isUnitStride, 0.U, // FIXME
-                                   Mux(usSplitCtr === 0.U, clOffset, (usSplitCtr << clSizeLog2.U) - clOffset))))
+                                   Mux(usSplitCtr === 0.U, clOffset, shamt))))
 
   io.resp.bits.addr := Mux(uop.is_rvv, Cat((op1 + op2) >> clSizeLog2.U, 0.U(clSizeLog2.W)),
                                        (sliceBaseAddr+sliceBlockAddr) >> clSizeLog2.U ## 0.U(clSizeLog2.W))

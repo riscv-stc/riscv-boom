@@ -1915,6 +1915,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //com_xcpt.valid comes too early, will fight against a branch that resolves same cycle as an exception
   io.lsu.exception := RegNext(rob.io.flush.valid)
 
+  io.lsu.vl_wakeup :=  vl_wakeup
+
   // Handle Branch Mispeculations
   io.lsu.brupdate := brupdate
   //if (usingVector) {
