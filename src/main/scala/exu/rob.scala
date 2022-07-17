@@ -371,6 +371,7 @@ class Rob(
                (wb_uop.is_rvm && wb_uop.m_split_last)) {
             rob_bsy(row_idx)    := false.B
             rob_unsafe(row_idx) := false.B
+            rob_uop(row_idx).v_split_last := true.B
           }
           // clear ud_bsy
           when (wb_rvv_load && !wb_uop.uses_ldq && wb_uop.v_split_last) {
@@ -397,6 +398,7 @@ class Rob(
                (!wb_rvv_load && (!wb_uop.v_is_split || wb_uop.v_split_last))) {
             rob_bsy(row_idx)    := false.B
             rob_unsafe(row_idx) := false.B
+            rob_uop(row_idx).v_split_last := true.B
           }
           // clear ud_bsy
           when (wb_rvv_load && !wb_uop.uses_ldq && wb_uop.v_split_last) {
@@ -448,6 +450,7 @@ class Rob(
                 (rob_uop(cidx).is_rvm && lsu_clr_bsy.bits.m_split_last)) {
             rob_bsy(cidx)    := false.B
             rob_unsafe(cidx) := false.B
+            rob_uop(cidx).v_split_last := true.B
             if (O3PIPEVIEW_PRINTF) {
               printf("%d; O3PipeView:complete:%d\n",
                 rob_uop(GetRowIdx(clr_rob_idx)).debug_events.fetch_seq, io.debug_tsc)
@@ -458,6 +461,7 @@ class Rob(
           when (!lsu_clr_bsy.bits.is_rvv || rob_uop(cidx).v_split_ecnt +& lsu_clr_bsy.bits.v_split_ecnt >= lsu_clr_bsy.bits.vconfig.vl) {
             rob_bsy(cidx)    := false.B
             rob_unsafe(cidx) := false.B
+            rob_uop(cidx).v_split_last := true.B
             if (O3PIPEVIEW_PRINTF) {
               printf("%d; O3PipeView:complete:%d\n",
                 rob_uop(GetRowIdx(clr_rob_idx)).debug_events.fetch_seq, io.debug_tsc)

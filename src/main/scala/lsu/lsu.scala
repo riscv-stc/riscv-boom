@@ -358,7 +358,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   var vlagu:VecLSAddrGenUnit = null
   var vsagu:VecLSAddrGenUnit = null
-  var vlud_vrf_q:BranchKillableQueue[BKQUInt] = null
+  // var vlud_vrf_q:BranchKillableQueue[BKQUInt] = null
   var vlud_dat_q:BranchKillableQueue[BKQUInt] = null
   //var vstd_vrf_q:Queue[UInt] = null
   //var vstd_dat_q:Queue[UInt] = null
@@ -366,7 +366,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   if (usingVector) {
     vlagu = Module(new VecLSAddrGenUnit())
     vsagu = Module(new VecLSAddrGenUnit())
-    vlud_vrf_q = Module(new BranchKillableQueue(new BKQUInt(0), 4, flow = false))
+    // vlud_vrf_q = Module(new BranchKillableQueue(new BKQUInt(0), 4, flow = false))
     vlud_dat_q = Module(new BranchKillableQueue(new BKQUInt(vLen), 4, flow = false))
     //vstd_vrf_q = Module(new Queue(new UInt(0.W), 4))
     //vstd_dat_q = Module(new Queue(new UInt(vLen.W), 4))
@@ -491,18 +491,18 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   // vl_wakeup, speculative vconfig wakeup
   for (i <- 0 until numLdqEntries)
   {
-    when (io.core.vl_wakeup.valid && (io.core.vl_wakeup.bits.vconfig_tag+1.U) === ldq(i).bits.uop.vconfig_tag)
-    {
-      ldq(i).bits.uop.vconfig.vl := io.core.vl_wakeup.bits.vl
+    when (io.core.vl_wakeup.valid && (io.core.vl_wakeup.bits.vconfig_tag+1.U) === ldq(i).bits.uop.vconfig_tag && !ldq(i).bits.uop.vl_ready)
+    { 
       ldq(i).bits.uop.vl_ready   := true.B
+      ldq(i).bits.uop.vconfig.vl := io.core.vl_wakeup.bits.vl
     }
   }
 
   for (i <- 0 until numStqEntries) 
   {
-    when (io.core.vl_wakeup.valid && (io.core.vl_wakeup.bits.vconfig_tag+1.U) === stq(i).bits.uop.vconfig_tag) {
-      stq(i).bits.uop.vconfig.vl := io.core.vl_wakeup.bits.vl
+    when (io.core.vl_wakeup.valid && (io.core.vl_wakeup.bits.vconfig_tag+1.U) === stq(i).bits.uop.vconfig_tag && !stq(i).bits.uop.vl_ready) {
       stq(i).bits.uop.vl_ready   := true.B
+      stq(i).bits.uop.vconfig.vl := io.core.vl_wakeup.bits.vl
     }
   }
   //-------------------------------------------------------------
@@ -1478,20 +1478,23 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   vldq_resp_data_shr    := io.vmem.resp.bits.cdata >> (vldq_resp_e.bits.shamt << 3.U)
   vldq_resp_data_shl    := io.vmem.resp.bits.cdata << (vldq_resp_e.bits.shamt << 3.U)
 
-  vlud_vrf_q.io.brupdate        := io.core.brupdate
-  vlud_vrf_q.io.flush           := false.B // FIXME
-  vlud_vrf_q.io.enq.valid       := vlagu.io.vrf_raddr.valid && vlagu.io.vrf_rtag === 1.U
-  vlud_vrf_q.io.enq.bits.uop    := vlagu.io.resp.bits.uop
-  vlud_vrf_q.io.enq.bits.uop.pdst := vlagu.io.resp.bits.uop.pvd(vlagu.io.vrf_emul).bits
-  vlud_vrf_q.io.enq.bits.data   := 0.U
-  vlud_vrf_q.io.deq.ready       := vlud_vrf_q.io.deq.valid && vlud_dat_q.io.enq.ready && !vldq_resp_valid
+  // vlud_vrf_q.io.brupdate        := io.core.brupdate
+  // vlud_vrf_q.io.flush           := false.B // FIXME
+  // vlud_vrf_q.io.enq.valid       := vlagu.io.vrf_raddr.valid && vlagu.io.vrf_rtag === 1.U
+  // vlud_vrf_q.io.enq.bits.uop    := vlagu.io.resp.bits.uop
+  // vlud_vrf_q.io.enq.bits.uop.pdst := vlagu.io.resp.bits.uop.pvd(vlagu.io.vrf_emul).bits
+  // vlud_vrf_q.io.enq.bits.data   := 0.U
+  // vlud_vrf_q.io.deq.ready       := vlud_vrf_q.io.deq.valid && vlud_dat_q.io.enq.ready && !vldq_resp_valid
 
-  vlud_dat_q.io.brupdate        := io.core.brupdate
-  vlud_dat_q.io.flush           := false.B // FIXME
-  vlud_dat_q.io.enq.valid       := vlud_vrf_q.io.deq.valid && vlud_dat_q.io.enq.ready && !vldq_resp_valid
-  vlud_dat_q.io.enq.bits.uop    := vlud_vrf_q.io.deq.bits.uop
-  vlud_dat_q.io.enq.bits.data   := io.core.vrf_rport.data
-  vlud_dat_q.io.deq.ready       := vlud_dat_q.io.deq.valid && !vldq_resp_valid
+  vlud_dat_q.io.brupdate          := io.core.brupdate
+  vlud_dat_q.io.flush             := false.B // FIXME
+  // vlud_dat_q.io.enq.valid       := vlud_vrf_q.io.deq.valid && vlud_dat_q.io.enq.ready && !vldq_resp_valid
+  // vlud_dat_q.io.enq.bits.uop    := vlud_vrf_q.io.deq.bits.uop
+  vlud_dat_q.io.enq.valid         := RegNext(vlagu.io.vrf_raddr.fire && vlagu.io.vrf_rtag === 1.U)
+  vlud_dat_q.io.enq.bits.uop      := RegNext(vlagu.io.resp.bits.uop)
+  vlud_dat_q.io.enq.bits.uop.pdst := RegNext(vlagu.io.resp.bits.uop.pvd(vlagu.io.vrf_emul).bits)
+  vlud_dat_q.io.enq.bits.data     := io.core.vrf_rport.data
+  vlud_dat_q.io.deq.ready         := vlud_dat_q.io.deq.valid && !vldq_resp_valid
 
   // VRF write back
   io.core.vrf_wbk               := DontCare
@@ -1560,8 +1563,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   vlagu.io.req.bits.rs1_data  := ldq_vag_e.bits.addr.bits
   vlagu.io.req.bits.rs2_data  := ldq_vag_e.bits.const_stride.bits
   vlagu.io.brupdate           := io.core.brupdate
-  vlagu.io.vrf_raddr.ready    := Mux(vlagu.io.vrf_rtag === 1.U, vlud_vrf_q.io.enq.ready, true.B) &&
-                                 vrf_rarb.io.in(1).ready
+  // vlagu.io.vrf_raddr.ready    := Mux(vlagu.io.vrf_rtag === 1.U, vlud_vrf_q.io.enq.ready, true.B) &&
+  //                                vrf_rarb.io.in(1).ready
+  vlagu.io.vrf_raddr.ready    := vrf_rarb.io.in(1).ready
   vlagu.io.vrf_rdata          := io.core.vrf_rport.data
   vlagu.io.vbusy_status       := io.core.vbusy_status
 
@@ -2380,7 +2384,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
                  Mux(uop.v_idx_ls, VDataSel(Cat(eindex.reverse), uop.vs2_eew, uop.v_eidx, vLen*8, eLen), 0.U))
   val clOffset = if(vLenb > clSize) RegEnable(io.req.bits.rs1_data(clSizeLog2-1, 0), io.req.valid) 
                  else               op1(clSizeLog2-1, 0)
-  val isUnitStride = uop.uopc.isOneOf(uopVL, uopVLR, uopVLFF, uopVSA)
+  val isUnitStride = uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA)
   val usSplitCtr = RegInit(0.U((vcRatioSz+1).W))
   val addrInc    = WireInit(0.U(xLen.W))
   val eidxInc    = WireInit(0.U(vLenSz.W))
