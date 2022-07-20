@@ -365,7 +365,7 @@ class Rob(
           val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           val wb_rvm_load = wb_uop.uopc.isOneOf(uopMLE)
           // clear busy and unsafe; vconfig.vl in rob may be incorrect under speculatively vsetvl execution
-          when(!wb_uop.is_vm_ext || 
+          when(!wb_uop.is_vm_ext ||
                (wb_rvv_load && wb_uop.uses_ldq && rob_uop(row_idx).v_split_ecnt +& wb_uop.v_split_ecnt >= wb_uop.vconfig.vl) ||
                (wb_uop.is_rvv && !wb_rvv_load && (!wb_uop.v_is_split || wb_uop.v_split_last)) ||
                (wb_uop.is_rvm && wb_uop.m_split_last)) {

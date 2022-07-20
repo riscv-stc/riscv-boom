@@ -546,9 +546,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       assert(msew <= 3.U, "Unsupported msew")
     }
 
-    val mslice_idx = RegInit(0.U((vLenSz+1).W))
-    val total_slice = Mux(is_mls, sel_slice, 1.U)
-    val slice_last = mslice_idx >= total_slice
+    //val mslice_idx = RegInit(0.U((vLenSz+1).W))
+    //val total_slice = Mux(is_mls, sel_slice, 1.U)
+    //val slice_last = mslice_idx >= total_slice
 
   //  when (io.kill) {
   //    mslice_idx := 0.U
@@ -561,8 +561,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   //  }
 
     uop.m_is_split    := cs.can_be_split
-    uop.m_slice_cnt   := total_slice
-    uop.m_sidx        := mslice_idx
+    uop.m_slice_cnt   := Mux(is_mls, sel_slice, 1.U)
+    uop.m_sidx        := 0.U
     uop.ts1_eew       := ts1_eew
     uop.ts2_eew       := ts2_eew
     uop.td_eew        := td_eew
@@ -570,8 +570,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.m_ls_ew       := cs.v_ls_ew
     uop.mconfig       := io.csr_mconfig
 
-    uop.m_split_first := mslice_idx === 0.U
-    uop.m_split_last  := slice_last
+    uop.m_split_first := true.B    //remove split after dispatch
+    uop.m_split_last  := true.B
     uop.isHSlice      := !mslice_tt0
     uop.mslice_dim    := mslice_dim
 
