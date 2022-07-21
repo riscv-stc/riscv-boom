@@ -218,8 +218,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
   // Exception Handling
   val vsetvl = cs.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
-  io.csr_decode.csr := Mux(vsetvl, 0.U, inst(31,20))
-  val csr_en = cs.csr_cmd.isOneOf(CSR.S, CSR.C, CSR.W) && !vsetvl
+  val mconfig = uop.is_rvm && cs.inst_unique
+  io.csr_decode.csr := Mux(vsetvl | mconfig, 0.U, inst(31,20))
+  val csr_en = cs.csr_cmd.isOneOf(CSR.S, CSR.C, CSR.W) && !vsetvl && !mconfig
   val csr_ren = cs.csr_cmd.isOneOf(CSR.S, CSR.C) && uop.lrs1 === 0.U
   val system_insn = cs.csr_cmd === CSR.I
   val sfence = cs.uopc === uopSFENCE
