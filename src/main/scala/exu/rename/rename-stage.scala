@@ -820,7 +820,8 @@ class MatRenameStage(
 
   // Maptable inputs.
   val map_reqs   = Wire(Vec(plWidth, new MapReq(lregSz)))
-  val remap_reqs = Wire(Vec(plWidth, new RemapReq(lregSz, trpregSz)))   //trpregSz > accpredSz, use the same remap_reqs
+  val trremap_reqs = Wire(Vec(plWidth, new RemapReq(lregSz, trpregSz)))
+  val accremap_reqs = Wire(Vec(plWidth, new RemapReq(lregSz, accpregSz)))
 
   // Generate maptable requests.
   for ((((ren1,ren2),com),w) <- ren1_uops zip ren2_uops zip io.com_uops.reverse zipWithIndex) {
@@ -829,21 +830,28 @@ class MatRenameStage(
     map_reqs(w).lrs3 := ren1.lrs3
     map_reqs(w).ldst := ren1.ldst
 
-    remap_reqs(w).ldst := Mux(io.rollback, com.ldst      , ren2.ldst)
-    remap_reqs(w).pdst := Mux(io.rollback, com.stale_pdst, ren2.pdst)
+    trremap_reqs(w).ldst := Mux(io.rollback, com.ldst      , ren2.ldst)
+    trremap_reqs(w).pdst := Mux(io.rollback, com.stale_pdst, ren2.pdst)
+    accremap_reqs(w).ldst := Mux(io.rollback, com.ldst      , ren2.ldst)
+    accremap_reqs(w).pdst := Mux(io.rollback, com.stale_pdst, ren2.pdst)
   }
-  ren2_alloc_reqs zip rbk_valids.reverse zip remap_reqs map {
-    case ((a,r),rr) => rr.valid := a || r}
+
+  for (w <- 0 until plWidth) {
+    trremap_reqs(w).valid := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_TR || rbk_valids(w) && io.com_uops(w).dst_rtype === RT_TR
+    accremap_reqs(w).valid := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_ACC  || rbk_valids(w) && io.com_uops(w).dst_rtype === RT_ACC
+  }
+  //ren2_alloc_reqs zip rbk_valids.reverse zip trremap_reqs map {
+   // case ((a,r),rr) => rr.valid := a || r}
 
   // Hook up inputs.
   trmaptable.io.map_reqs    := map_reqs
-  trmaptable.io.remap_reqs  := remap_reqs
+  trmaptable.io.remap_reqs  := trremap_reqs
   trmaptable.io.ren_br_tags := ren2_br_tags
   trmaptable.io.brupdate    := io.brupdate
   trmaptable.io.rollback    := io.rollback
 
   accmaptable.io.map_reqs    := map_reqs
-  accmaptable.io.remap_reqs  := remap_reqs
+  accmaptable.io.remap_reqs  := accremap_reqs
   accmaptable.io.ren_br_tags := ren2_br_tags
   accmaptable.io.brupdate    := io.brupdate
   accmaptable.io.rollback    := io.rollback
