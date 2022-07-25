@@ -445,10 +445,16 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
     val dis_ld_val = io.core.dis_uops(w).valid && io.core.dis_uops(w).bits.uses_ldq && !io.core.dis_uops(w).bits.exception
     val dis_st_val = io.core.dis_uops(w).valid && io.core.dis_uops(w).bits.uses_stq && !io.core.dis_uops(w).bits.exception
+
+    val dis_vl_wakeup = io.core.vl_wakeup.valid && (io.core.vl_wakeup.bits.vconfig_tag+1.U) === io.core.dis_uops(w).bits.vconfig_tag && !io.core.dis_uops(w).bits.vl_ready
     when (dis_ld_val)
     {
       ldq(ld_enq_idx).valid                := true.B
       ldq(ld_enq_idx).bits.uop             := io.core.dis_uops(w).bits
+      when(dis_vl_wakeup) {
+        ldq(ld_enq_idx).bits.uop.vl_ready   := true.B
+        ldq(ld_enq_idx).bits.uop.vconfig.vl := io.core.vl_wakeup.bits.vl
+      }
       ldq(ld_enq_idx).bits.youngest_stq_idx  := st_enq_idx
       ldq(ld_enq_idx).bits.st_dep_mask     := next_live_store_mask
 
@@ -466,6 +472,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     {
       stq(st_enq_idx).valid           := true.B
       stq(st_enq_idx).bits.uop        := io.core.dis_uops(w).bits
+      when(dis_vl_wakeup) {
+        stq(st_enq_idx).bits.uop.vl_ready   := true.B
+        stq(st_enq_idx).bits.uop.vconfig.vl := io.core.vl_wakeup.bits.vl
+      }
       stq(st_enq_idx).bits.addr.valid := false.B
       stq(st_enq_idx).bits.data.valid := false.B
       stq(st_enq_idx).bits.committed  := false.B
