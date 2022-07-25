@@ -1212,6 +1212,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       if (usingMatrix) {
         dis_uops(w).pts1_busy := m_uop.pts1_busy
         dis_uops(w).pts2_busy := m_uop.pts2_busy
+        dis_uops(w).pts3_busy := m_uop.pts3_busy
         dis_uops(w).pdst := Mux(dis_uops(w).rt(RD, isFloat ), f_uop.pdst,
                             Mux(dis_uops(w).rt(RD, isInt   ), i_uop.pdst, 
                             Mux(dis_uops(w).rt(RD, isMatrix), m_uop.pdst, p_uop.pdst)))
@@ -2172,7 +2173,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // LSU <> ROB
   rob.io.lsu_clr_bsy    := io.lsu.clr_bsy
   rob.io.lsu_clr_unsafe := io.lsu.clr_unsafe
-  rob.io.lsu_update_mle := io.lsu.update_mle
+  rob.io.lsu_update_mls := io.lsu.update_mls
   rob.io.lxcpt          <> io.lsu.lxcpt
 
   //-------------------------------------------------------------

@@ -33,7 +33,7 @@ import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
 import freechips.rocketchip.rocket.VConfig
-import boom.lsu.{MLESplitCnt}
+import boom.lsu.{MLSSplitCnt}
 
 /**
  * IO bundle to interact with the ROB
@@ -76,7 +76,7 @@ class RobIo(
   // Port for unmarking loads/stores as speculation hazards..
   val lsu_clr_unsafe   = Input(Vec(memWidth, Valid(new MicroOp)))
 
-  val lsu_update_mle   = if (usingMatrix) Input(Valid(new MLESplitCnt())) else null
+  val lsu_update_mls   = if (usingMatrix) Input(Vec(2, Valid(new MLSSplitCnt()))) else null
 
   // Track side-effects for debug purposes.
   // Also need to know when loads write back, whereas we don't need loads to unbusy.
@@ -319,8 +319,8 @@ class Rob(
     val rob_val       = RegInit(VecInit(Seq.fill(numRobRows){false.B}))
     val rob_bsy       = Reg(Vec(numRobRows, Bool()))
     val rob_ud_bsy    = if (usingVector) Reg(Vec(numRobRows, Bool())) else null
-    val rob_mle_cnt   = if (usingMatrix) Reg(Vec(numRobRows, UInt(vLenSz.W))) else null  // FIXME: correct datawith, vlenSz too large
-    val rob_mle_wbs   = if (usingMatrix) Reg(Vec(numRobRows, UInt(vLenSz.W))) else null  // FIXME: correct datawith, vlenSz too large
+    val rob_mls_cnt   = if (usingMatrix) Reg(Vec(numRobRows, UInt(vLenSz.W))) else null  // FIXME: correct datawith, vlenSz too large
+    val rob_mls_wbs   = if (usingMatrix) Reg(Vec(numRobRows, UInt(vLenSz.W))) else null  // FIXME: correct datawith, vlenSz too large
     val rob_unsafe    = Reg(Vec(numRobRows, Bool()))
     val rob_uop       = Reg(Vec(numRobRows, new MicroOp()))
     val rob_exception = Reg(Vec(numRobRows, Bool()))
@@ -351,8 +351,8 @@ class Rob(
         rob_ud_bsy(rob_tail)  := io.enq_uops(w).is_rvv && io.enq_uops(w).uses_ldq
       }
       if (usingMatrix) {
-        rob_mle_cnt(rob_tail) := 0.U
-        rob_mle_wbs(rob_tail) := 0.U
+        rob_mls_cnt(rob_tail) := 0.U
+        rob_mls_wbs(rob_tail) := 0.U
       }
 
       assert (rob_val(rob_tail) === false.B, "[rob] overwriting a valid entry.")
@@ -362,11 +362,13 @@ class Rob(
     }
 
     //-----------------------------------------------
-    // update mle cnt by lsu
+    // update mls cnt by lsu
     if (usingMatrix) {
-      when (io.lsu_update_mle.valid && MatchBank(GetBankIdx(io.lsu_update_mle.bits.rob_idx))) {
-        val cidx = GetRowIdx(io.lsu_update_mle.bits.rob_idx)
-        rob_mle_cnt(cidx) := io.lsu_update_mle.bits.mle_cnt
+      for(inc <- io.lsu_update_mls) {
+        when (inc.valid && MatchBank(GetBankIdx(inc.bits.rob_idx))) {
+          val cidx = GetRowIdx(inc.bits.rob_idx)
+          rob_mls_cnt(cidx) := inc.bits.mls_cnt
+        }
       }
     }
 
@@ -385,7 +387,7 @@ class Rob(
           when(!wb_uop.is_vm_ext ||
                (wb_rvv_load && wb_uop.uses_ldq && rob_uop(row_idx).v_split_ecnt +& wb_uop.v_split_ecnt >= wb_uop.vconfig.vl) ||
                (wb_uop.is_rvv && !wb_rvv_load && (!wb_uop.v_is_split || wb_uop.v_split_last)) ||
-               (wb_rvm_load && rob_mle_wbs(row_idx) +& 1.U >= rob_mle_cnt(row_idx)) ||
+               (wb_rvm_load && rob_mls_wbs(row_idx) +& 1.U >= rob_mls_cnt(row_idx)) ||
                (wb_uop.is_rvm && !wb_rvm_load && wb_uop.m_split_last)) {
             rob_bsy(row_idx)    := false.B
             rob_unsafe(row_idx) := false.B
@@ -400,7 +402,7 @@ class Rob(
             rob_uop(row_idx).v_split_ecnt := rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt
           }
           when (wb_rvm_load) {
-            rob_mle_wbs(row_idx) := rob_mle_wbs(row_idx) + 1.U
+            rob_mls_wbs(row_idx) := rob_mls_wbs(row_idx) + 1.U
           }
           rob_predicated(row_idx) := wb_resp.bits.predicated
           rob_uop(row_idx).vxsat  := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
@@ -465,10 +467,15 @@ class Rob(
         assert (rob_val(cidx) === true.B, "[rob] store writing back to invalid entry.")
         assert (rob_bsy(cidx) === true.B, "[rob] store writing back to a not-busy entry.")
         if (usingMatrix) {
-          rob_uop(cidx).v_split_ecnt := rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt
+          when (rob_uop(cidx).is_rvm) {
+            rob_mls_wbs(cidx) := rob_mls_wbs(cidx) + 1.U
+          }
+          when (rob_uop(cidx).is_rvv) {
+            rob_uop(cidx).v_split_ecnt := rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt
+          }
           when (!lsu_clr_bsy.bits.is_vm_ext ||
                 (rob_uop(cidx).is_rvv && rob_uop(cidx).v_split_ecnt +& lsu_clr_bsy.bits.v_split_ecnt >= lsu_clr_bsy.bits.vconfig.vl) ||
-                (rob_uop(cidx).is_rvm && lsu_clr_bsy.bits.m_split_last)) {
+                (rob_uop(cidx).is_rvm && rob_mls_wbs(cidx) +& 1.U >= rob_mls_cnt(cidx))) {
             rob_bsy(cidx)    := false.B
             rob_unsafe(cidx) := false.B
             rob_uop(cidx).v_split_last := true.B
