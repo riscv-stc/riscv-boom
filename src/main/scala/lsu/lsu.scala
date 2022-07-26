@@ -807,7 +807,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   //---------------------------------------------------------
   // vldq/vstq enqueue logic
-  val vldq_full = (WrapInc(vldq_tail, numVLdqEntries) === vldq_head)
+  // val vldq_full = (WrapInc(vldq_tail, numVLdqEntries) === vldq_head)
+  val vldq_full = (vldq_tail === vldq_head) && vldq(vldq_tail).valid
   vlagu.io.resp.ready := !vldq_full
   when (vlagu.io.resp.fire) {
     vldq(vldq_tail).valid                 := true.B
@@ -2460,7 +2461,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   val sliceBlockOff  = sliceBaseAddr(clSizeLog2-1, 0)
   val sliceAddrInc   = WireInit(0.U((clSizeLog2+1).W))
   val sliceLenLast   = WireInit(false.B)
-  val sliceBytes     = Mux(io.req.fire, ioUop.m_slice_len << ioUop.m_ls_ew, uop.m_slice_len << uop.m_ls_ew).min(vLenb.U)      // FIXME: remove min(vLenb.U) after fix mconfig instructions
+  val sliceBytes     = Mux(io.req.fire, ioUop.m_slice_len << ioUop.m_ls_ew, uop.m_slice_len << uop.m_ls_ew)
   if (vLenb > clSize) {
     sliceAddrInc := Mux(sliceLenCtr === 0.U,       clSize.U - sliceBlockOff,
                     Mux(sliceLenCtr === vcRatio.U, sliceBlockOff, clSize.U))
