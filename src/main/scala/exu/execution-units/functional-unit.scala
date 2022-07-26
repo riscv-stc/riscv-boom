@@ -27,7 +27,7 @@ import freechips.rocketchip.tile.FPConstants._
 import freechips.rocketchip.tile.{FPUCtrlSigs, HasFPUParameters}
 import freechips.rocketchip.tile
 import freechips.rocketchip.rocket
-import freechips.rocketchip.rocket.{DecodeLogic,PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR,VConfig,VType}
+import freechips.rocketchip.rocket.{DecodeLogic,PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR,VConfig,VType,MConfig}
 
 //import FUConstants._
 import boom.common._
@@ -230,6 +230,7 @@ abstract class FunctionalUnit(
     // only used by the fpu unit
     val fcsr_rm = if (needsFcsr) Input(UInt(tile.FPConstants.RM_SZ.W)) else null
     val vconfig = if (usingVector & isCsrUnit) Input(new VConfig) else null
+    val mconfig = if (usingMatrix & isCsrUnit) Input(new MConfig) else null
 
     // only used by the Fixed unit
     val vxrm    = if (needsVxrm) Input(UInt(2.W)) else null
@@ -376,6 +377,13 @@ class ALUUnit(
 
     op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data,
                Mux(uop.ctrl.op1_sel.asUInt === OP1_PC  , Sext(uop_pc, xLen), 0.U))
+  } else if(usingMatrix && isCsrUnit) {
+    val msetr      = uop.uopc.isOneOf(uopMSETTYPE, uopMSETTILEM, uopMSETTILEK, uopMSETTILEN, uopMSETTSIDXI)
+    val mseti      = uop.uopc.isOneOf(uopMSETTYPEI, uopMSETTILEMI, uopMSETTILEKI, uopMSETTILENI, uopMSETTSIDXI)
+    val mset       = msetr | mseti
+    val msetdata   = Mux(mseti, imm_xprlen(27,15), io.req.bits.rs1_data)
+    op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data,
+               Mux(mset, msetdata, 0.U))
   } else {
     op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data, 0.U)
   }
@@ -913,7 +921,7 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
     earliestBypassStage = 0,
     dataWidth = dataWidth,
     isFixMulAcc = true,
-    needsVxrm = true) with ShouldBeRetimed 
+    needsVxrm = true) with ShouldBeRetimed
 {
   val e8 = (dataWidth == 8)
   val e16= (dataWidth == 16)
@@ -1107,7 +1115,7 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
               else if(e < numELENinVLEN*2) Module(new FixMulAcc(numStages, eLen >> 1))
               else if(e < numELENinVLEN*4) Module(new FixMulAcc(numStages, eLen >> 2))
               else                         Module(new FixMulAcc(numStages, eLen >> 3))
-                
+
     xma.io.vxrm                := io.vxrm
     xma.io.req.bits.uop        := uop
     xma.io.req.valid           := io.req.valid
@@ -1190,7 +1198,7 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   }
 
   io.resp.bits.uop.vxsat := vxsatOut.orR
-  io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew), 
+  io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
                              Seq(e8Out.asUInt, e16Out.asUInt, e32Out.asUInt, e64Out.asUInt))
   io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
 }
@@ -1204,7 +1212,7 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
  * @param dataWidth width of the data out of the functional unit
  */
 
-class FR7Unit(latency: Int)(implicit p: Parameters) 
+class FR7Unit(latency: Int)(implicit p: Parameters)
   extends PipelinedFunctionalUnit(
   numStages = latency,
   numBypassStages = 0,
@@ -1567,7 +1575,7 @@ class SRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFunct
                                                io.req.bits.rs1_data(15, 0).sextTo(eLen),
                                                io.req.bits.rs1_data(31, 0).sextTo(eLen),
                                                io.req.bits.rs1_data(63, 0))),
-                                     Mux1H(UIntToOH(io.req.bits.uop.vd_eew), 
+                                     Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
                                            Seq(io.req.bits.rs1_data(7, 0), io.req.bits.rs1_data(15, 0), io.req.bits.rs1_data(31, 0), io.req.bits.rs1_data(63, 0))))
     }
   }
@@ -1635,7 +1643,7 @@ class VecALUUnit(
   val bitPreMask  = Mux1H(UIntToOH(uop.vstart(2, 0)),
                           Seq(0.U(8.W), 1.U, 3.U, 7.U, "hf".U, "h1f".U, "h3f".U, "h7f".U))
   val bitTailMask = Cat(Fill(vLen-8, 1.U(1.W)),
-                        Mux1H(UIntToOH(uop.vconfig.vl(2, 0)), 
+                        Mux1H(UIntToOH(uop.vconfig.vl(2, 0)),
                               Seq("hff".U, "hfe".U, "hfc".U, "hf8".U, "hf0".U, "he0".U, "hc0".U, "h80".U)))
   val bitInactive = bitPreStart | bitPreMask << Cat(uop.vstart(vLenSz-1, 3), 0.U(3.W)) |
                     bitTail & (bitTailMask << Cat(uop.vconfig.vl(vLenSz-1, 3), 0.U(3.W)))(vLen-1, 0)
@@ -1685,7 +1693,7 @@ class VecALUUnit(
     if (e < numELENinVLEN) {
       // e64 ALU
       alu.io.in1 := Mux(isMerge,  0.U,
-                    Mux(op1Signed, Mux1H(UIntToOH(op1_eew), 
+                    Mux(op1Signed, Mux1H(UIntToOH(op1_eew),
                                          Seq(op1_data( 8*e+7,   8*e).sextTo(eLen),
                                              op1_data(16*e+15, 16*e).sextTo(eLen),
                                              op1_data(32*e+31, 32*e).sextTo(eLen),
@@ -1698,21 +1706,21 @@ class VecALUUnit(
                                              op1_data(16*e+15, 16*e) & Fill(16, !rvm_data(e)) | op2_data(16*e+15, 16*e) & Fill(16, rvm_data(e)),
                                              op1_data(32*e+31, 32*e) & Fill(32, !rvm_data(e)) | op2_data(32*e+31, 32*e) & Fill(32, rvm_data(e)),
                                              op1_data(64*e+63, 64*e) & Fill(64, !rvm_data(e)) | op2_data(64*e+63, 64*e) & Fill(64, rvm_data(e)))),
-                    Mux(op2Signed, Mux1H(UIntToOH(op2_eew), 
+                    Mux(op2Signed, Mux1H(UIntToOH(op2_eew),
                                          Seq(op2_data( 8*e+7,   8*e).sextTo(eLen),
                                              op2_data(16*e+15, 16*e).sextTo(eLen),
                                              op2_data(32*e+31, 32*e).sextTo(eLen),
                                              op2_data(64*e+63, 64*e))),
-                                   Mux1H(UIntToOH(op2_eew), 
-                                         Seq(op2_data( 8*e+ 7,  8*e) & shiftMask, 
-                                             op2_data(16*e+15, 16*e) & shiftMask, 
-                                             op2_data(32*e+31, 32*e) & shiftMask, 
+                                   Mux1H(UIntToOH(op2_eew),
+                                         Seq(op2_data( 8*e+ 7,  8*e) & shiftMask,
+                                             op2_data(16*e+15, 16*e) & shiftMask,
+                                             op2_data(32*e+31, 32*e) & shiftMask,
                                              op2_data(64*e+63, 64*e) & shiftMask))))
       alu.io.ci  := Mux(withCarry && !uop.v_unmasked, rvm_data(e), false.B) // FIXME
     } else if (e < numELENinVLEN*2) {
       // e32 ALU
       alu.io.in1 := Mux(isMerge,   0.U,
-                    Mux(op1Signed, Mux1H(UIntToOH(op1_eew), 
+                    Mux(op1Signed, Mux1H(UIntToOH(op1_eew),
                                          Seq(op1_data( 8*e+7,   8*e).sextTo(eLen >> 1),
                                              op1_data(16*e+15, 16*e).sextTo(eLen >> 1),
                                              op1_data(32*e+31, 32*e),
@@ -1725,14 +1733,14 @@ class VecALUUnit(
                                              op1_data(16*e+15, 16*e) & Fill(16, !rvm_data(e)) | op2_data(16*e+15, 16*e) & Fill(16, rvm_data(e)),
                                              op1_data(32*e+31, 32*e) & Fill(32, !rvm_data(e)) | op2_data(32*e+31, 32*e) & Fill(32, rvm_data(e)),
                                              0.U)),
-                    Mux(op2Signed, Mux1H(UIntToOH(op2_eew), 
+                    Mux(op2Signed, Mux1H(UIntToOH(op2_eew),
                                          Seq(op2_data( 8*e+7,   8*e).sextTo(eLen >> 1),
                                              op2_data(16*e+15, 16*e).sextTo(eLen >> 1),
                                              op2_data(32*e+31, 32*e),
                                              0.U)),
-                                   Mux1H(UIntToOH(op2_eew), 
-                                         Seq(op2_data( 8*e+7,   8*e) & shiftMask, 
-                                             op2_data(16*e+15, 16*e) & shiftMask, 
+                                   Mux1H(UIntToOH(op2_eew),
+                                         Seq(op2_data( 8*e+7,   8*e) & shiftMask,
+                                             op2_data(16*e+15, 16*e) & shiftMask,
                                              op2_data(32*e+31, 32*e) & shiftMask, 0.U))))
       alu.io.ci  := Mux(withCarry && !uop.v_unmasked, rvm_data(e), false.B) // FIXME
     } else if (e < numELENinVLEN*4) {
@@ -1816,7 +1824,7 @@ class VecALUUnit(
                                 Seq(e8_co.asUInt, e16_co.asUInt, e32_co.asUInt, e64_co.asUInt)),
              Mux(uop.rt(RD, isMaskVD), Mux1H(UIntToOH(uop.vd_eew),
                                 Seq(e8_cmp_out.asUInt, e16_cmp_out.asUInt, e32_cmp_out.asUInt, e64_cmp_out.asUInt)),
-                          Mux1H(UIntToOH(uop.vd_eew), 
+                          Mux1H(UIntToOH(uop.vd_eew),
                                 Seq(e8_adder_out.asUInt, e16_adder_out.asUInt, e32_adder_out.asUInt,e64_adder_out.asUInt))))
 
   r_val (0) := io.req.valid && !killed
@@ -2153,7 +2161,7 @@ class VecSRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFu
   mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)), Cat((0 until vLen/8).map(b => rvm_data(b)).reverse))
   tail     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= vl).reverse)
   inactive := prestart | body & ~mask | tail
-  
+
   val divValid = Wire(Vec(vLenb, Bool()))
   val e64Out   = Wire(Vec(numELENinVLEN, UInt(64.W)))
   val e32Out   = Wire(Vec(numELENinVLEN*2, UInt(32.W)))
@@ -2363,7 +2371,7 @@ class VecMaskUnit(
     baseIdx := baseIdx + uop.v_split_ecnt
   } .elsewhen(io.req.valid && uop.uopc === uopVIOTA) {
     baseIdx := Mux1H(UIntToOH(uop.vd_eew),
-                     Seq(e8Out(numELENinVLEN*4-1) + e8Out(vLenb-1) + (maskIn(vLenb-1) & rs2_data(vLenb-1)), 
+                     Seq(e8Out(numELENinVLEN*4-1) + e8Out(vLenb-1) + (maskIn(vLenb-1) & rs2_data(vLenb-1)),
                          e16Out(numELENinVLEN*4-1) + (maskIn(numELENinVLEN*4-1) & rs2_data(numELENinVLEN*4-1)),
                          e32Out(numELENinVLEN*2-1) + (maskIn(numELENinVLEN*2-1) & rs2_data(numELENinVLEN*2-1)),
                          e64Out(numELENinVLEN-1)   + (maskIn(numELENinVLEN-1)   & rs2_data(numELENinVLEN-1))))
@@ -2374,7 +2382,7 @@ class VecMaskUnit(
                       Module(new VIotaUnit(maskWidth = e%eLen+1, offset = e, dataWidth = eLen))
                     else if(e < numELENinVLEN*2)
                       Module(new VIotaUnit(maskWidth = e%eLen+1, offset = e, dataWidth = eLen >> 1))
-                    else if(e < numELENinVLEN*4) 
+                    else if(e < numELENinVLEN*4)
                       Module(new VIotaUnit(maskWidth = e%eLen+1, offset = e, dataWidth = eLen >> 2))
                     else
                       Module(new VIotaUnit(maskWidth = e%eLen+2, offset = e, dataWidth = eLen >> 3))
@@ -2435,7 +2443,7 @@ class VecMaskUnit(
       e8OutMux(e)  := Mux(maskInSt1(e), e8OutSt1(e),  rs3DataSt1( 8*e+7,   8*e))
     }
     else {
-      e8OutMux(e)  := Mux(maskInSt1(e), Mux(RegNext(uop.uopc === uopVID), e8OutSt1(e), e8OutSt1(e) + e8OutSt1(numELENinVLEN*4-1)), 
+      e8OutMux(e)  := Mux(maskInSt1(e), Mux(RegNext(uop.uopc === uopVID), e8OutSt1(e), e8OutSt1(e) + e8OutSt1(numELENinVLEN*4-1)),
                                         rs3DataSt1(8*e+7, 8*e))
     }
   }
@@ -2577,7 +2585,7 @@ class VecIntToFPUnit(dataWidth: Int, latency: Int)(implicit p: Parameters)
   io.resp.bits.fflags.valid      := io.resp.valid
   io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
   io.resp.bits.fflags.bits.flags := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
-                                          Seq(0.U, 
+                                          Seq(0.U,
                                               e16FlagOut.reduce(_ | _),
                                               e32FlagOut.reduce(_ | _),
                                               e64FlagOut.reduce(_ | _)))

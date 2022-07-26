@@ -33,7 +33,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
-import freechips.rocketchip.rocket.{CSR, Causes, EventSet, EventSets, PRV, SuperscalarEventSets, VConfig, VType}
+import freechips.rocketchip.rocket.{CSR, Causes, EventSet, EventSets, PRV, SuperscalarEventSets, VConfig, VType, MConfig}
 import freechips.rocketchip.rocket.{EventSet, EventSets, SuperscalarEventSets}
 import freechips.rocketchip.util.{CoreMonitorBundle, SeqBoolBitwiseOps, Str, UIntIsOneOf}
 import freechips.rocketchip.util._
@@ -1803,10 +1803,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     csr_exe_unit.io.vconfig := csr.io.vector.get.vconfig
 
     // rvm related
-    val msettype  = csr_uop.uopc === uopMSETTYPE
-    val msettilem = csr_uop.uopc === uopMSETTILEM
-    val msettilen = csr_uop.uopc === uopMSETTILEN
-    val msettilek = csr_uop.uopc === uopMSETTILEK
+    val msettype  = csr_uop.uopc === uopMSETTYPE  || csr_uop.uopc === uopMSETTYPEI
+    val msettilem = csr_uop.uopc === uopMSETTILEM || csr_uop.uopc === uopMSETTILEMI
+    val msettilen = csr_uop.uopc === uopMSETTILEN || csr_uop.uopc === uopMSETTILENI
+    val msettilek = csr_uop.uopc === uopMSETTILEK || csr_uop.uopc === uopMSETTILEKI
+    val msettsidx = csr_uop.uopc === uopMSETTSIDX || csr_uop.uopc === uopMSETTSIDXI
     val cmt_rvm = (0 until coreParams.retireWidth).map{i =>
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvm}.reduce(_ || _)
     val cmt_archlast_rvm = (0 until coreParams.retireWidth).map{i =>
@@ -1821,9 +1822,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     csr.io.matrix.get.set_tilem.valid   := csr_vld && msettilem
     csr.io.matrix.get.set_tilen.valid   := csr_vld && msettilen
     csr.io.matrix.get.set_tilek.valid   := csr_vld && msettilek
+    csr.io.matrix.get.set_tsidx.valid   := csr_vld && msettsidx
     csr.io.matrix.get.set_tilem.bits    := csr_exe_unit.io.iresp.bits.data
     csr.io.matrix.get.set_tilen.bits    := csr_exe_unit.io.iresp.bits.data
     csr.io.matrix.get.set_tilek.bits    := csr_exe_unit.io.iresp.bits.data
+    csr.io.matrix.get.set_tsidx.bits    := csr_exe_unit.io.iresp.bits.data
+
+    csr_exe_unit.io.mconfig := csr.io.matrix.get.mconfig
 
   } else if (usingVector) {
     val csr_vld = csr_exe_unit.io.iresp.valid

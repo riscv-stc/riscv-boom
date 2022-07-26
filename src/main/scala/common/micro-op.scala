@@ -1108,8 +1108,8 @@ object MicroOpcodes extends Enumeration {
   val uopMSETTILEKI       = uopMSETTILEKI_enum.id.U(UOPC_SZ.W)
   val uopMSETTILENI_enum  = Value
   val uopMSETTILENI       = uopMSETTILENI_enum.id.U(UOPC_SZ.W)
-  val uopMSETSIDXI_enum   = Value
-  val uopMSETSIDXI        = uopMSETSIDXI_enum.id.U(UOPC_SZ.W)
+  val uopMSETTSIDXI_enum   = Value
+  val uopMSETTSIDXI        = uopMSETTSIDXI_enum.id.U(UOPC_SZ.W)
 
   val uopMSETTYPE_enum    = Value
   val uopMSETTYPE         = uopMSETTYPE_enum.id.U(UOPC_SZ.W)

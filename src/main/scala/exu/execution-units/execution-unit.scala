@@ -19,7 +19,7 @@ import scala.collection.mutable.ArrayBuffer
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
-import freechips.rocketchip.rocket.{BP, VConfig}
+import freechips.rocketchip.rocket.{BP, VConfig, MConfig}
 import freechips.rocketchip.tile.{RoCCCoreIO, XLen}
 import freechips.rocketchip.tile
 import freechips.rocketchip.util.{LCG, UIntIsOneOf}
@@ -136,7 +136,7 @@ abstract class ExecutionUnit(
     val rocc = if (hasRocc) new RoCCShimCoreIO else null
 
     // only used by the branch unit
-    val brinfo     = if (hasAlu && !hasVector) Output(new BrResolutionInfo()) else null
+    val brinfo     = if (hasAlu && !hasVector ) Output(new BrResolutionInfo()) else null
     val get_ftq_pc = if (hasJmpUnit) Flipped(new GetPCFromFtqIO()) else null
     val status     = Input(new freechips.rocketchip.rocket.MStatus())
 
@@ -144,6 +144,7 @@ abstract class ExecutionUnit(
     val fcsr_rm = if (hasFcsr) Input(Bits(tile.FPConstants.RM_SZ.W)) else null
     val vxrm    = if (hasVxrm) Input(UInt(2.W)) else null
     val vconfig = if (hasVConfig) Input(new VConfig) else null
+    val mconfig = if (hasMConfig) Input(new MConfig) else null
 
     // only used by the mem unit
     val lsu_io = if (hasMem) Flipped(new boom.lsu.LSUExeIO) else null
@@ -196,6 +197,7 @@ abstract class ExecutionUnit(
   def hasFcsr = hasIfpu || hasFpu || hasFdiv
   def hasVxrm = hasMacc
   def hasVConfig = usingVector && hasCSR
+  def hasMConfig = usingMatrix && hasCSR
 
   require (bypassable || !alwaysBypassable,
     "[execute] an execution unit must be bypassable if it is always bypassable")
@@ -326,6 +328,7 @@ class ALUExeUnit(
     }
 
     if (usingVector && hasCSR) alu.io.vconfig := io.vconfig
+    if (usingMatrix && hasCSR) alu.io.mconfig := io.mconfig
   }
 
   var rocc: RoCCShim = null
