@@ -57,7 +57,7 @@ class TrTileRegWritePortIO(implicit p: Parameters) extends BoomBundle {
   val index: UInt = UInt(32.W) //index slice number, value is rs2
   val tt: UInt = UInt(2.W) //2: tr_r, 3: tr_c
   val msew: UInt = UInt(2.W)
-  val byteMask: UInt = UInt(log2Ceil(vLenb).W)
+  val byteMask: UInt = UInt(vLenb.W)
 }
 
 class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Parameters)  extends BoomModule {
@@ -80,7 +80,7 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
   val writedirrow = Wire(Vec(numWritePorts, Bool()))
   val writemsew = Wire(Vec(numWritePorts, UInt(2.W)))
   val writeindex = Wire(Vec(numWritePorts, UInt(32.W)))
-  val writebtyemask = Wire(Vec(numWritePorts, UInt(log2Ceil(vLenb).W)))
+  val writebtyemask = Wire(Vec(numWritePorts, UInt(vLenb.W)))
 
   for (i <- 0 until numReadPorts) {
     readdircol(i) := RegNext(io.readPorts(i).tt === 3.U)

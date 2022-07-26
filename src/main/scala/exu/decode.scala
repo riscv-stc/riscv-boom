@@ -533,11 +533,22 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_mls = cs.is_rvm & (cs.uses_ldq | cs.uses_stq)
     val mslice_tt0 = uop.inst(28).asBool()     //1: col,  0: row
     val mslice_dim = uop.inst(27,26)
-    val sel_tilem = (mslice_dim === 1.U) && !csr_mltr || (mslice_dim === 0.U)
-    //val sel_tilen = (mslice_dim === 2.U) && csr_mrtr
-    val sel_tilek = (mslice_dim === 1.U) && csr_mltr || (mslice_dim === 2.U) && !csr_mrtr
 
-    val sel_slice = Mux(sel_tilek, csr_tilek, Mux(sel_tilem, csr_tilem, csr_tilen))
+    val slice_cnt_tilem = (mslice_dim === 1.U &&  csr_mltr) || (mslice_dim === 0.U)
+    val slice_cnt_tilen = (mslice_dim === 2.U &&  csr_mrtr)
+    val slice_cnt_tilek = (mslice_dim === 1.U && !csr_mltr) || (mslice_dim === 2.U && !csr_mrtr)
+    val slice_len_tilem = (mslice_dim === 1.U && !csr_mltr)
+    val slice_len_tilen = (mslice_dim === 2.U && !csr_mrtr) || (mslice_dim === 0.U)
+    val slice_len_tilek = (mslice_dim === 1.U &&  csr_mltr) || (mslice_dim === 2.U && csr_mrtr)
+
+    // val sel_tilem = (mslice_dim === 1.U) && !csr_mltr || (mslice_dim === 0.U)
+    //val sel_tilen = (mslice_dim === 2.U) && csr_mrtr
+    // val sel_tilek = (mslice_dim === 1.U) && csr_mltr || (mslice_dim === 2.U) && !csr_mrtr
+
+    val sel_slice_cnt = Mux(slice_cnt_tilem, csr_tilem, 
+                        Mux(slice_cnt_tilen, csr_tilen, csr_tilek))
+    val sel_slice_len = Mux(slice_len_tilem, csr_tilem,
+                        Mux(slice_len_tilen, csr_tilen, csr_tilek))
 
     val msew = Mux(is_mls, cs.v_ls_ew, csr_msew)
     val ts1_eew = msew        //FIXME: remain to add W/Q op
@@ -545,6 +556,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val td_eew  = msew
     when (io.deq_fire && cs.is_rvm) {
       assert(msew <= 3.U, "Unsupported msew")
+    }
+
+    when (is_mls) {
+      uop.mem_size   := cs.v_ls_ew
+      uop.mem_signed := false.B
     }
 
     //val mslice_idx = RegInit(0.U((vLenSz+1).W))
@@ -562,7 +578,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   //  }
 
     uop.m_is_split    := cs.can_be_split
-    uop.m_slice_cnt   := Mux(is_mls, sel_slice, 1.U)
+    uop.m_slice_cnt   := Mux(is_mls, sel_slice_cnt, 1.U)
+    uop.m_slice_len   := Mux(is_mls, sel_slice_len, 1.U)
     uop.m_sidx        := 0.U
     uop.ts1_eew       := ts1_eew
     uop.ts2_eew       := ts2_eew

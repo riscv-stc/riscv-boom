@@ -598,7 +598,7 @@ class MemAddrCalcUnit(implicit p: Parameters)
 
   val store_data = io.req.bits.rs2_data
 
-  io.resp.bits.addr := Mux(uop.is_rvv, op1.asUInt, effective_address)
+  io.resp.bits.addr := Mux(uop.is_vm_ext, op1.asUInt, effective_address)
   io.resp.bits.data := store_data
 
   if (dataWidth > 63) {

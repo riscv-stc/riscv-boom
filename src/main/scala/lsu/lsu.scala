@@ -2460,14 +2460,15 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   val sliceBlockOff  = sliceBaseAddr(clSizeLog2-1, 0)
   val sliceAddrInc   = WireInit(0.U((clSizeLog2+1).W))
   val sliceLenLast   = WireInit(false.B)
+  val sliceBytes     = Mux(io.req.fire, ioUop.m_slice_len << ioUop.m_ls_ew, uop.m_slice_len << uop.m_ls_ew).min(vLenb.U)      // FIXME: remove min(vLenb.U) after fix mconfig instructions
   if (vLenb > clSize) {
     sliceAddrInc := Mux(sliceLenCtr === 0.U,       clSize.U - sliceBlockOff,
                     Mux(sliceLenCtr === vcRatio.U, sliceBlockOff, clSize.U))
     sliceLenLast := sliceLenCtr + 1.U === vcRatio.U + (sliceBlockOff =/= 0.U).asUInt
   } else {
-    sliceAddrInc := Mux(sliceLenCtr === 0.U, (clSize.U - sliceBlockOff).min(vLenb.U),
-                                             RegNext(sliceBlockOff) +& vLenb.U - clSize.U)
-    sliceLenLast := sliceBlockOff <= (clSize-vLenb).asUInt
+    sliceAddrInc := Mux(sliceLenCtr === 0.U, (clSize.U - sliceBlockOff).min(sliceBytes),
+                                             RegNext(sliceBlockOff) +& sliceBytes - clSize.U)
+    sliceLenLast := sliceBlockOff <= (clSize.U - sliceBytes)
   }
 
   when (io.req.valid) {
