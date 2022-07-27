@@ -27,7 +27,7 @@ import freechips.rocketchip.tile.FPConstants._
 import freechips.rocketchip.tile.{FPUCtrlSigs, HasFPUParameters}
 import freechips.rocketchip.tile
 import freechips.rocketchip.rocket
-import freechips.rocketchip.rocket.{DecodeLogic,PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR,VConfig,VType,MConfig}
+import freechips.rocketchip.rocket.{DecodeLogic,PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR,VConfig,VType,MConfig,MType}
 
 //import FUConstants._
 import boom.common._
@@ -378,12 +378,21 @@ class ALUUnit(
     op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data,
                Mux(uop.ctrl.op1_sel.asUInt === OP1_PC  , Sext(uop_pc, xLen), 0.U))
   } else if(usingMatrix && isCsrUnit) {
-    val msetr      = uop.uopc.isOneOf(uopMSETTYPE, uopMSETTILEM, uopMSETTILEK, uopMSETTILEN, uopMSETTSIDXI)
-    val mseti      = uop.uopc.isOneOf(uopMSETTYPEI, uopMSETTILEMI, uopMSETTILEKI, uopMSETTILENI, uopMSETTSIDXI)
-    val mset       = msetr | mseti
-    val msetdata   = Mux(mseti, imm_xprlen(27,15), io.req.bits.rs1_data)
-    op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data,
-               Mux(mset, msetdata, 0.U))
+    val msetr    = uop.uopc.isOneOf(uopMSETTYPE, uopMSETTILEM, uopMSETTILEK, uopMSETTILEN, uopMSETTSIDXI)
+    val mseti    = uop.uopc.isOneOf(uopMSETTYPEI, uopMSETTILEMI, uopMSETTILEKI, uopMSETTILENI, uopMSETTSIDXI)
+    val mset     = msetr | mseti
+    val msettype = uop.uopc.isOneOf(uopMSETTYPE,  uopMSETTYPEI)
+    val msetm    = uop.uopc.isOneOf(uopMSETTILEM, uopMSETTILEMI)
+    val msetn    = uop.uopc.isOneOf(uopMSETTILEN, uopMSETTILENI)
+    val msetdata = Mux(mseti, imm_xprlen(27,15), io.req.bits.rs1_data)
+    val tilemMax = numTrTileRows.U
+    val tilenMax = vLenb.U >> io.mconfig.mtype.msew
+    val tilekMax = tilemMax.min(tilenMax)
+    val msettile = Mux(msetm, tilemMax,
+                   Mux(msetn, tilenMax, tilekMax)).min(msetdata)
+    op1_data = Mux(msettype, msetdata, 
+               Mux(mset,     msettile,
+               Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data, 0.U)))
   } else {
     op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data, 0.U)
   }
