@@ -78,6 +78,11 @@ class RobIo(
 
   val lsu_update_mls   = if (usingMatrix) Input(Vec(2, Valid(new MLSSplitCnt()))) else null
 
+  // vector and matrix stores require to monitor rs3 busy status
+  val vbusy_status    = if (usingVector) Input(UInt(numVecPhysRegs.W))    else null
+  val tr_busy_status  = if (usingMatrix) Input(UInt(numMatTrPhysRegs.W))  else null
+  val acc_busy_status = if (usingMatrix) Input(UInt(numMatAccPhysRegs.W)) else null
+
   // Track side-effects for debug purposes.
   // Also need to know when loads write back, whereas we don't need loads to unbusy.
   val debug_wb_valids = Input(Vec(numWakeupPorts, Bool()))
@@ -546,9 +551,13 @@ class Rob(
     //-----------------------------------------------
     // Commit or Rollback
     // Can this instruction commit? (the check for exceptions/rob_state happens later).
+    // vector and matrix stores have seperate commit control logic
     val ud_bsy = if (usingVector) rob_ud_bsy(rob_head) else false.B
-    can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall && !ud_bsy
-
+    can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall && !ud_bsy &&
+                     Mux(!rob_uop(rob_head).is_vm_ext || !rob_uop(rob_head).uses_stq, true.B,
+                     Mux(rob_uop(rob_head).is_rvv,           ~io.vbusy_status(rob_uop(rob_head).stale_pdst), 
+                     Mux(rob_uop(rob_head).rt(RD, isTrTile), ~io.tr_busy_status(rob_uop(rob_head).stale_pdst),
+                                                             ~io.acc_busy_status(rob_uop(rob_head).stale_pdst))))
 
     // use the same "com_uop" for both rollback AND commit
     // Perform Commit

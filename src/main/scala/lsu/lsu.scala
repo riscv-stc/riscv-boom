@@ -188,7 +188,7 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
   val vrf_wbk      = if (usingVector) Decoupled(new ExeUnitResp(vLen)) else null
   val tile_rport   = if (usingMatrix) Flipped(new TrTileRegReadPortIO()) else null
   val tile_wbk     = if (usingMatrix) Decoupled(new ExeUnitResp(vLen)) else null
-  val vbusy_status = if (usingVector) Input(UInt(numVecPhysRegs.W)) else null
+  val vbusy_status = if (usingVector) Input(UInt(numVecPhysRegs.W))    else null
 
   val commit      = Input(new CommitSignals)
   val commit_load_at_rob_head = Input(Bool())
@@ -796,8 +796,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val can_fire_vstq_commit     = widthMap(w =>
                                  ((w == memWidth-1).B                                        &&
                                   vstq_commit_e.valid                                        &&
-                                  (vstq_commit_e.bits.data.valid || 
-                                  ~io.core.vbusy_status(vstq_commit_e.bits.uop.stale_pdst))  &&       // FIXME: what about mse ?
                                   vstq_commit_e.bits.committed                               &&
                                   !mem_xcpt_valid                                            &&
                                   !vstq_commit_e.bits.uop.exception                          &&
@@ -838,7 +836,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vstq(vstq_tail).bits.addr_is_virtual  := true.B
     vstq(vstq_tail).bits.addr.valid       := true.B
     vstq(vstq_tail).bits.addr.bits        := vsagu.io.resp.bits.addr
-    vstq(vstq_tail).bits.data.valid       := ~io.core.vbusy_status(vsagu.io.resp.bits.uop.stale_pdst)
+    vstq(vstq_tail).bits.data.valid       := DontCare                   // TODO: Optimization using .data.valid
     vstq(vstq_tail).bits.committed        := false.B
     vstq(vstq_tail).bits.succeeded        := false.B
     vstq(vstq_tail).bits.vmask            := vsagu.io.resp_vm
@@ -1456,7 +1454,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       clr_bsy_brmask  (w) := GetNewBrMask(io.core.brupdate, mem_stq_retry_e.bits.uop)
     } .elsewhen (fired_vstq_lookup(w)) {
       clr_bsy_valid   (w) := mem_vstq_lkup_e.valid            &&
-                             mem_vstq_lkup_e.bits.data.valid  &&
                             !mem_tlb_miss(w)                  &&
                             !IsKilledByBranch(io.core.brupdate, mem_vstq_lkup_e.bits.uop)
       clr_bsy_uop     (w) := mem_vstq_lkup_e.bits.uop

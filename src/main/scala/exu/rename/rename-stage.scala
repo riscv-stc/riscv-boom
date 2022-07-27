@@ -93,7 +93,9 @@ abstract class AbstractRenameStage(
     val com_uops = Input(Vec(plWidth, new MicroOp()))
     val rbk_valids = Input(Vec(plWidth, Bool()))
     val rollback = Input(Bool())
-    val vbusy_status = if (vector) Output(UInt(numPhysRegs.W)) else Output(UInt(0.W))
+    val vbusy_status    = if (vector) Output(UInt(numPhysRegs.W)) else Output(UInt(0.W))
+    val tr_busy_status  = if (matrix) Output(UInt(numPhysRegs.W)) else null
+    val acc_busy_status = if (matrix) Output(UInt(numPhysRegs.W)) else null
 
     val debug_rob_empty = Input(Bool())
     val debug = Output(new DebugRenameStageIO(numPhysRegs, vector, matrix))
@@ -949,6 +951,8 @@ class MatRenameStage(
 
     val valid = ren2_valids(w)
   }
+  io.tr_busy_status  := trbusytable.io.tbusy_status
+  io.acc_busy_status := accbusytable.io.tbusy_status
 
   //-------------------------------------------------------------
   // Outputs

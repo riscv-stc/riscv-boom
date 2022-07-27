@@ -1160,7 +1160,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     rename.io.vl_wakeup_port := vl_wakeup_dec
   }
 
-
   // Outputs
   dis_uops := rename_stage.io.ren2_uops
   dis_valids := rename_stage.io.ren2_mask
@@ -1387,6 +1386,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //}
   rob.io.debug_tsc := debug_tsc_reg
   rob.io.csr_stall := csr.io.csr_stall
+  
+  rob.io.vbusy_status    := v_rename_stage.io.vbusy_status
+  rob.io.tr_busy_status  := m_rename_stage.io.tr_busy_status
+  rob.io.acc_busy_status := m_rename_stage.io.acc_busy_status
 
   // Minor hack: ecall and breaks need to increment the FTQ deq ptr earlier than commit, since
   // they write their PC into the CSR the cycle before they commit.
@@ -1910,7 +1913,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     io.lsu.dis_uops(w).valid := dis_fire(w)
     io.lsu.dis_uops(w).bits  := dis_uops(w)
   }
-  io.lsu.vbusy_status := v_rename_stage.io.vbusy_status
+  io.lsu.vbusy_status    := v_rename_stage.io.vbusy_status
 
   // tell LSU about committing loads and stores to clear entries
   io.lsu.commit                  := rob.io.commit

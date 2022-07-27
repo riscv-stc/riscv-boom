@@ -138,6 +138,8 @@ class MatRenameBusyTable(
     val ren_uops = Input(Vec(plWidth, new MicroOp))
     val rebusy_reqs = Input(Vec(plWidth, Bool()))
     val busy_resps = Output(Vec(plWidth, new MatBusyResp(vLenb + 1))) //the first bit indicate slice direction
+    // whole tile register busy status
+    val tbusy_status = Output(UInt(numPregs.W))
 
     val wb_pdsts = Input(Vec(numWbPorts, UInt(pregSz.W)))
     val wb_valids = Input(Vec(numWbPorts, Bool()))
@@ -180,6 +182,8 @@ class MatRenameBusyTable(
     busy_table := busy_table_next
     io.debug.busytable := busy_table
   }
+
+  io.tbusy_status := Cat((0 until numPregs).map(p => busy_table(p)(vLenb-1, 0).orR).reverse)
 }
 
 
