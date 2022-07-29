@@ -1375,7 +1375,7 @@ class MatExeUnit() (implicit p: Parameters)
 
   // matrix multiplication related
   // TODO: confirm latency
-  val macRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM), io.req.bits.uop, mxuMeshRows+mxuMeshCols).bits
+  val macRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM), io.req.bits.uop, mxuMeshRows+mxuMeshCols-1).bits
   mxu.io.macReq.valid           := io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM)
   mxu.io.macReq.bits.srcRidx    := io.req.bits.uop.prs3
   mxu.io.macReq.bits.dstRidx    := io.req.bits.uop.pdst
