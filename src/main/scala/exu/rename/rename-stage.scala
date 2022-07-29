@@ -887,6 +887,10 @@ class MatRenameStage(
   trfreelist.io.brupdate := io.brupdate
   trfreelist.io.debug.pipeline_empty := io.debug_rob_empty
 
+  //when pdst0 apear in maptable, freelist can use it
+  accfreelist.io.mapcontains0  := accmaptable.io.mapcontains0
+  trfreelist.io.mapcontains0  := trmaptable.io.mapcontains0
+
   accfreelist.io.dealloc_pregs zip com_valids zip rbk_valids zip io.com_uops map
     {case (((d,c),r),u) => d.valid := (c || r) && u.dst_rtype === RT_ACC}
   accfreelist.io.dealloc_pregs zip io.com_uops map

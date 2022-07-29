@@ -371,6 +371,8 @@ class MatRenameMapTable(
     // Signals for restoring state following misspeculation.
     val brupdate    = Input(new BrUpdateInfo)
     val rollback    = Input(Bool())
+
+    val mapcontains0 = Output(Bool())
   })
 
   // The map table register array and its branch snapshots.
@@ -417,6 +419,8 @@ class MatRenameMapTable(
         Mux(bypass.B && io.remap_reqs(curr).valid && io.remap_reqs(curr).ldst === mreq_lrs, io.remap_reqs(curr).pdst, prev))
     }}
   }
+
+  io.mapcontains0 := map_table.contains(0.U)
 
   // These cases may occur soon after reset, as all maptable entries are initialized to 'p0'.
   io.remap_reqs map (req => (req.pdst, req.valid)) foreach {case (pd,r) =>

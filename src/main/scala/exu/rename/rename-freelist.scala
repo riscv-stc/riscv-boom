@@ -220,6 +220,7 @@ class MatRenameFreeList(
     // Pregs returned by the ROB.
     val dealloc_pregs = Input(Vec(plWidth, Valid(UInt(pregSz.W))))
 
+    val mapcontains0 = Input(Bool())
     // Branch info for starting new allocation lists.
     val ren_br_tags   = Input(Vec(plWidth, Valid(UInt(brTagSz.W))))
 
@@ -262,7 +263,7 @@ class MatRenameFreeList(
   }
 
   // Update the free list.
-  free_list := (free_list & ~sel_mask | dealloc_mask) & ~(1.U(numPregs.W))
+  free_list := (free_list & ~sel_mask | dealloc_mask) & Mux(io.mapcontains0, ~(1.U(numPregs.W)), Fill(numPregs, 1.U(1.W)))
 
   // Pipeline logic | hookup outputs.
   for (w <- 0 until plWidth) {
