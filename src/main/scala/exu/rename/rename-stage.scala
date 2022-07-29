@@ -721,7 +721,7 @@ extends AbstractRenameStage(
 
     val bypassed_uop = Wire(new MicroOp)
     if (w > 0) bypassed_uop := BypassAllocations(ren2_uops(w), ren2_uops.slice(0,w), ren2_alloc_reqs.slice(0,w))
-    else       bypassed_uop := ren2_uops(w)
+      else bypassed_uop := ren2_uops(w)
 
     io.ren2_uops(w) := GetNewUopAndBrMask(bypassed_uop, io.brupdate)
   }
@@ -865,8 +865,8 @@ class MatRenameStage(
 
     uop.prs1       := trmappings.prs1
     uop.prs2       := trmappings.prs2
-    uop.prs3       := Mux(uop.dst_rtype === RT_TR, trmappings.prs3, accmappings.prs3)
-    uop.stale_pdst := Mux(uop.dst_rtype === RT_TR, trmappings.stale_pdst, accmappings.stale_pdst)
+    uop.prs3       := Mux(uop.dst_rtype === RT_TR, trmappings.prs3, Mux(uop.dst_rtype === RT_ACC, accmappings.prs3, 0.U))
+    uop.stale_pdst := Mux(uop.dst_rtype === RT_TR, trmappings.stale_pdst, Mux(uop.dst_rtype === RT_ACC, accmappings.stale_pdst, 0.U))
   }
 
   //-------------------------------------------------------------
@@ -874,21 +874,21 @@ class MatRenameStage(
 
   // Freelist inputs.
   for (w <- 0 until plWidth) {
-    trfreelist.io.reqs(w).valid := ren2_alloc_reqs(w)
+    trfreelist.io.reqs(w).valid := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_TR
     trfreelist.io.reqs(w).bits  := ren2_uops(w)
-    accfreelist.io.reqs(w).valid := ren2_alloc_reqs(w)
+    accfreelist.io.reqs(w).valid := ren2_alloc_reqs(w)&& ren2_uops(w).dst_rtype === RT_ACC
     accfreelist.io.reqs(w).bits  := ren2_uops(w)
   }
-  trfreelist.io.dealloc_pregs zip com_valids zip rbk_valids map
-    {case ((d,c),r) => d.valid := c || r}
+  trfreelist.io.dealloc_pregs zip com_valids zip rbk_valids zip io.com_uops map
+    {case (((d,c),r),u) => d.valid := (c || r) && u.dst_rtype === RT_TR}
   trfreelist.io.dealloc_pregs zip io.com_uops map
     {case (d,c) => d.bits := Mux(io.rollback, c.pdst, c.stale_pdst)}
   trfreelist.io.ren_br_tags := ren2_br_tags
   trfreelist.io.brupdate := io.brupdate
   trfreelist.io.debug.pipeline_empty := io.debug_rob_empty
 
-  accfreelist.io.dealloc_pregs zip com_valids zip rbk_valids map
-    {case ((d,c),r) => d.valid := c || r}
+  accfreelist.io.dealloc_pregs zip com_valids zip rbk_valids zip io.com_uops map
+    {case (((d,c),r),u) => d.valid := (c || r) && u.dst_rtype === RT_ACC}
   accfreelist.io.dealloc_pregs zip io.com_uops map
     {case (d,c) => d.bits := Mux(io.rollback, c.pdst, c.stale_pdst)}
   accfreelist.io.ren_br_tags := ren2_br_tags
@@ -898,7 +898,9 @@ class MatRenameStage(
   //val prs1, prs2, prs3, stale_pdst, pdst, prvm = Reg(Vec(plWidth, UInt(maxPregSz.W)))
   // Freelist outputs.
   for ((uop, w) <- ren2_uops.zipWithIndex) {
-    uop.pdst := Mux(uop.dst_rtype === RT_TR, trfreelist.io.alloc_pregs(w).bits, accfreelist.io.alloc_pregs(w).bits)
+    val trdst = Mux(uop.dst_rtype === RT_TR && trfreelist.io.alloc_pregs(w).valid, trfreelist.io.alloc_pregs(w).bits, 0.U)
+    val accdst = Mux(uop.dst_rtype === RT_ACC && trfreelist.io.alloc_pregs(w).valid, accfreelist.io.alloc_pregs(w).bits, 0.U)
+    uop.pdst := trdst | accdst
   }
 
   //-------------------------------------------------------------
@@ -958,10 +960,10 @@ class MatRenameStage(
   // Outputs
 
   for (w <- 0 until plWidth) {
-    val can_allocate = trfreelist.io.alloc_pregs(w).valid || accfreelist.io.alloc_pregs(w).valid
 
     // Push back against Decode stage if Rename1 can't proceed.
-    io.ren_stalls(w) := ren2_uops(w).rt(RD, rtype) && !can_allocate
+    io.ren_stalls(w) := !trfreelist.io.alloc_pregs(w).valid &&  ren2_uops(w).dst_rtype === RT_TR ||
+                        !accfreelist.io.alloc_pregs(w).valid && ren2_uops(w).dst_rtype === RT_ACC
 
     val bypassed_uop = Wire(new MicroOp)
     if (w > 0) bypassed_uop := BypassAllocations(ren2_uops(w), ren2_uops.slice(0,w), ren2_alloc_reqs.slice(0,w))

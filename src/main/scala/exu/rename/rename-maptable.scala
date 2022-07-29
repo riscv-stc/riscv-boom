@@ -355,14 +355,15 @@ class MatRenameMapTable(
                     (implicit p: Parameters) extends BoomModule
 {
   val pregSz = log2Ceil(numPregs)
+  val nlregSz = log2Ceil(numLregs)
 
   val io = IO(new BoomBundle()(p) {
     // Logical sources -> physical sources.
-    val map_reqs    = Input(Vec(plWidth, new MapReq(lregSz)))
+    val map_reqs    = Input(Vec(plWidth, new MapReq(nlregSz)))
     val map_resps   = Output(Vec(plWidth, new MapResp(pregSz)))
 
     // Remapping an ldst to a newly allocated pdst?
-    val remap_reqs  = Input(Vec(plWidth, new RemapReq(lregSz, pregSz)))
+    val remap_reqs  = Input(Vec(plWidth, new RemapReq(nlregSz, pregSz)))
 
     // Dispatching branches: need to take snapshots of table state.
     val ren_br_tags = Input(Vec(plWidth, Valid(UInt(brTagSz.W))))
@@ -379,14 +380,9 @@ class MatRenameMapTable(
   // The intermediate states of the map table following modification by each pipeline slot.
   val remap_table = Wire(Vec(plWidth+1, Vec(numLregs, UInt(pregSz.W))))
 
-  def lvdBitmap(lvd: UInt, emul: UInt, nf: UInt): UInt = {
-    val ret = UIntToOH(lvd, numLregs)
-    ret
-  }
-
   // Uops requesting changes to the map table.
   val remap_pdsts = io.remap_reqs map (_.pdst)
-  val remap_ldsts_oh = io.remap_reqs map (req => lvdBitmap(req.ldst, 0.U, 1.U) & Fill(numLregs, req.valid.asUInt))
+  val remap_ldsts_oh = io.remap_reqs map (req => UIntToOH(req.ldst) & Fill(numLregs, req.valid.asUInt))
 
   // Figure out the new mappings seen by each pipeline slot.
   for (i <- 0 until numLregs) {
@@ -424,7 +420,7 @@ class MatRenameMapTable(
 
   // These cases may occur soon after reset, as all maptable entries are initialized to 'p0'.
   io.remap_reqs map (req => (req.pdst, req.valid)) foreach {case (pd,r) =>
-    assert(!r || !map_table.contains(pd.asUInt),
+    assert(!r || !map_table.contains(pd.asUInt) || pd.asUInt === 0.U && io.rollback,
       "[maptable] Trying to write a duplicate mapping.")
   }
 }
