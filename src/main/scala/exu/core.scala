@@ -1386,7 +1386,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //}
   rob.io.debug_tsc := debug_tsc_reg
   rob.io.csr_stall := csr.io.csr_stall
-  
+
   rob.io.vbusy_status    := v_rename_stage.io.vbusy_status
   rob.io.tr_busy_status  := m_rename_stage.io.tr_busy_status
   rob.io.acc_busy_status := m_rename_stage.io.acc_busy_status
@@ -2129,7 +2129,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       assert (!(wakeup.valid && !wakeup.bits.uop.rt(RD, isVector)),
         "[core] VEC wakeup does not write back to a VEC register.")
 
-      assert (!(wakeup.valid && !wakeup.bits.uop.is_rvv),
+      assert (!(wakeup.valid && !wakeup.bits.uop.is_vm_ext),
         "[core] VEC wakeup does not involve an VEC instruction.")
     }
     if (usingMatrix) {

@@ -789,7 +789,7 @@ class MatRenameStage(
 
   val accmaptable = Module(new MatRenameMapTable(
     plWidth,
-    8,
+    2,
     numAccPhysRegs,
     false))
   val accfreelist = Module(new MatRenameFreeList(

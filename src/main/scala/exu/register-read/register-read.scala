@@ -337,11 +337,18 @@ class RegisterRead(
       if (!vector && !float) {
         // avoid mem pipes (lower indexed)
         if (w >= memWidth && w < memWidth+intWidth) {
-          val is_setvl = exe_reg_uops(w).uopc.isOneOf(uopVSETVLI, uopVSETIVLI, uopVSETVL)
-          io.exe_reqs(w).valid := exe_reg_valids(w) && (is_setvl || !exe_reg_uops(w).is_rvv)
-          io.intupdate(w - memWidth).valid := exe_reg_valids(w) && exe_reg_uops(w).is_rvv && !is_setvl
+          if (usingMatrix) {
+            val is_setvl = exe_reg_uops(w).uopc.isOneOf(uopVSETVLI, uopVSETIVLI, uopVSETVL)
+            val is_mset  = exe_reg_uops(w).is_rvm && exe_reg_uops(w).rt(RD, isInt)
+            io.exe_reqs(w).valid := exe_reg_valids(w) && (is_setvl || is_mset || !exe_reg_uops(w).is_vm_ext)
+            io.intupdate(w - memWidth).valid := exe_reg_valids(w) && exe_reg_uops(w).is_vm_ext && !is_setvl && !is_mset
+          } else {
+            val is_setvl = exe_reg_uops(w).uopc.isOneOf(uopVSETVLI, uopVSETIVLI, uopVSETVL)
+            io.exe_reqs(w).valid := exe_reg_valids(w) && (is_setvl || !exe_reg_uops(w).is_rvv)
+            io.intupdate(w - memWidth).valid := exe_reg_valids(w) && exe_reg_uops(w).is_rvv && !is_setvl
+          }
           io.intupdate(w - memWidth).bits.uop := exe_reg_uops(w)
-          io.intupdate(w - memWidth).bits.data := exe_reg_rs1_data(w)
+          io.intupdate(w - memWidth).bits.data := Mux(exe_reg_uops(w).is_rvv, exe_reg_rs1_data(w), exe_reg_rs2_data(w))
         }
       } else if (float) {
         io.exe_reqs(w).valid := exe_reg_valids(w) && !exe_reg_uops(w).is_rvv

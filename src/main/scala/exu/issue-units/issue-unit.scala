@@ -150,6 +150,17 @@ abstract class IssueUnit(
           dis_uops(w).prs2_busy := 0.U
         }
       }
+      if (usingMatrix) {
+        when (dis_uops(w).is_rvm) {
+          dis_uops(w).prs3_busy := 0.U
+        }
+        if (iqType == IQT_INT.litValue) {
+          when (io.dis_uops(w).valid && dis_uops(w).is_rvm && !dis_uops(w).rt(RD, isInt)) {
+            assert(dis_uops(w).uses_scalar, "unexpected rvv in INT pipe")
+            dis_uops(w).fu_code := FU_ALU
+          }
+        }
+      }
       if (usingVector) {
         when (dis_uops(w).is_rvv && dis_uops(w).v_idx_ls) {
           dis_uops(w).prs2_busy := 0.U
