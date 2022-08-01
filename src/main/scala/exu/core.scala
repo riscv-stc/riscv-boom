@@ -1209,19 +1209,25 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dis_uops(w).v_scalar_busy := dis_uops(w).is_rvv && dis_uops(w).uses_scalar
       dis_uops(w).uopc      := Mux(i_uop.uopc.isOneOf(uopVLM, uopVLR), uopVL, i_uop.uopc)
       if (usingMatrix) {
+        dis_uops(w).prs1_busy := Mux1H(Seq((dis_uops(w).rt(RS1, isInt   ), i_uop.prs1_busy),
+                                           (dis_uops(w).rt(RS1, isFloat ), f_uop.prs1_busy),
+                                           (dis_uops(w).rt(RS1, isVector ), v_uop.prs1_busy)))
         dis_uops(w).pts1_busy := m_uop.pts1_busy
         dis_uops(w).pts2_busy := m_uop.pts2_busy
         dis_uops(w).pts3_busy := m_uop.pts3_busy
         dis_uops(w).pdst := Mux(dis_uops(w).rt(RD, isFloat ), f_uop.pdst,
-                            Mux(dis_uops(w).rt(RD, isInt   ), i_uop.pdst, 
-                            Mux(dis_uops(w).rt(RD, isMatrix), m_uop.pdst, p_uop.pdst)))
-        dis_uops(w).stale_pdst := Mux(dis_uops(w).rt(RD, isFloat ), f_uop.stale_pdst, 
-                                  Mux(dis_uops(w).rt(RD, isInt),    i_uop.stale_pdst, m_uop.stale_pdst))
+                            Mux(dis_uops(w).rt(RD, isInt   ), i_uop.pdst,
+                            Mux(dis_uops(w).rt(RD, isMatrix), m_uop.pdst,
+                            Mux(dis_uops(w).rt(RD, isVector), v_uop.pvd(0).bits, p_uop.pdst))))
+        dis_uops(w).stale_pdst := Mux(dis_uops(w).rt(RD, isFloat ), f_uop.stale_pdst,
+                                  Mux(dis_uops(w).rt(RD, isInt),    i_uop.stale_pdst,
+                                  Mux(dis_uops(w).rt(RD, isVector), v_uop.stale_pvd(0).bits, m_uop.stale_pdst)))
         dis_uops(w).prs1 := Mux(dis_uops(w).rt(RS1, isFloat ), f_uop.prs1,
-                            Mux(dis_uops(w).rt(RS1, isInt   ), i_uop.prs1, 
-                            Mux(dis_uops(w).rt(RS1, isMatrix), m_uop.prs1, dis_uops(w).lrs1)))
+                            Mux(dis_uops(w).rt(RS1, isInt   ), i_uop.prs1,
+                            Mux(dis_uops(w).rt(RS1, isMatrix), m_uop.prs1,
+                            Mux(dis_uops(w).rt(RS1, isVector), v_uop.pvs1(0).bits, dis_uops(w).lrs1))))
         dis_uops(w).prs2 := Mux(dis_uops(w).rt(RS2, isFloat ), f_uop.prs2,
-                            Mux(dis_uops(w).rt(RS2, isInt   ), i_uop.prs2, 
+                            Mux(dis_uops(w).rt(RS2, isInt   ), i_uop.prs2,
                             Mux(dis_uops(w).rt(RS2, isMatrix), m_uop.prs2, dis_uops(w).lrs2)))
         dis_uops(w).m_scalar_busy := dis_uops(w).is_rvm && dis_uops(w).uses_scalar
       }
