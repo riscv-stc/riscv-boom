@@ -1389,7 +1389,7 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.rowSliceReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE)
   mxu.io.rowSliceReq.bits.cmd   := Mux(io.req.bits.uop.uopc.isOneOf(uopMCLRACC), SLICE_CLEAR,
                                    Mux(io.req.bits.uop.rt(RD, isAccTile),        SLICE_WRITE, SLICE_READ))
-  mxu.io.rowSliceReq.bits.ridx  := io.req.bits.uop.prs1
+  mxu.io.rowSliceReq.bits.ridx  := Mux(io.req.bits.uop.rt(RD, isAccTile), io.req.bits.uop.pdst, io.req.bits.uop.prs1)
   mxu.io.rowSliceReq.bits.sidx  := io.req.bits.uop.m_sidx
   mxu.io.rowSliceReq.bits.rtype := io.req.bits.uop.td_eew
   mxu.io.rowSliceWdata          := io.req.bits.rs1_data
@@ -1398,7 +1398,7 @@ class MatExeUnit() (implicit p: Parameters)
   val colSliceRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE), io.req.bits.uop, mxuMeshCols).bits
   mxu.io.colSliceReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE)
   mxu.io.colSliceReq.bits.cmd   := Mux(io.req.bits.uop.rt(RD, isAccTile), SLICE_WRITE, SLICE_READ)
-  mxu.io.colSliceReq.bits.ridx  := io.req.bits.uop.prs1
+  mxu.io.colSliceReq.bits.ridx  := Mux(io.req.bits.uop.rt(RD, isAccTile), io.req.bits.uop.pdst, io.req.bits.uop.prs1)
   mxu.io.colSliceReq.bits.sidx  := io.req.bits.uop.m_sidx
   mxu.io.colSliceReq.bits.rtype := io.req.bits.uop.td_eew
   mxu.io.colSliceWdata          := io.req.bits.rs1_data

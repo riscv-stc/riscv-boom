@@ -83,11 +83,11 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
   val writebtyemask = Wire(Vec(numWritePorts, UInt(vLenb.W)))
 
   for (i <- 0 until numReadPorts) {
-    readdircol(i) := io.readPorts(i).tt === 3.U
-    readdirrow(i) := io.readPorts(i).tt === 2.U
-    readmsew(i)   := io.readPorts(i).msew
-    readindex(i)  := io.readPorts(i).index
-    readaddr(i)   := io.readPorts(i).addr
+    readdircol(i) := RegNext(io.readPorts(i).tt === 3.U)
+    readdirrow(i) := RegNext(io.readPorts(i).tt === 2.U)
+    readmsew(i)   := RegNext(io.readPorts(i).msew)
+    readindex(i)  := RegNext(io.readPorts(i).index)
+    readaddr(i)   := RegNext(io.readPorts(i).addr)
   }
   for (i <- 0 until numWritePorts) {
     writedircol(i)   := io.writePorts(i).bits.tt === 3.U

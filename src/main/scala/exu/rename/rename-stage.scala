@@ -734,6 +734,48 @@ extends AbstractRenameStage(
   io.debug.busytable := busytable.io.debug.busytable
 }
 
+
+class MatRenameBypass(
+  val oldWidth: Int)
+(implicit p: Parameters) extends BoomModule {
+  val io = IO(new Bundle{
+    val i_uop = Input(new MicroOp)
+    val older_uops = Input(Vec(oldWidth, new MicroOp()))
+    val alloc_reqs = Input(Vec(oldWidth, Bool()))
+    val o_uop = Output(new MicroOp)
+  })
+  val bypassed_uop = Wire(new MicroOp)
+  val older_uops = io.older_uops
+  val alloc_reqs = io.alloc_reqs
+  val uop = io.i_uop
+  bypassed_uop := uop
+
+  val bypass_hits_rs1 = (older_uops zip alloc_reqs) map { case (o,a) => a && o.ldst === uop.lrs1 && o.dst_rtype === uop.lrs1_rtype}
+  val bypass_hits_rs2 = (older_uops zip alloc_reqs) map { case (o,a) => a && o.ldst === uop.lrs2 && o.dst_rtype === uop.lrs2_rtype}
+  val bypass_hits_dst = (older_uops zip alloc_reqs) map { case (o,a) => a && o.ldst === uop.ldst && o.dst_rtype === uop.dst_rtype}
+
+  val bypass_sel_rs1 = PriorityEncoderOH(bypass_hits_rs1.reverse).reverse
+  val bypass_sel_rs2 = PriorityEncoderOH(bypass_hits_rs2.reverse).reverse
+  val bypass_sel_dst = PriorityEncoderOH(bypass_hits_dst.reverse).reverse
+
+  val do_bypass_rs1 = bypass_hits_rs1.reduce(_||_)
+  val do_bypass_rs2 = bypass_hits_rs2.reduce(_||_)
+  val do_bypass_dst = bypass_hits_dst.reduce(_||_)
+
+  val bypass_pdsts = older_uops.map(_.pdst)
+  when (do_bypass_rs1) { bypassed_uop.prs1       := Mux1H(bypass_sel_rs1, bypass_pdsts) }
+  when (do_bypass_rs2) { bypassed_uop.prs2       := Mux1H(bypass_sel_rs2, bypass_pdsts) }
+  when (do_bypass_dst) { bypassed_uop.stale_pdst := Mux1H(bypass_sel_dst, bypass_pdsts) }
+
+  bypassed_uop.pts1_busy := uop.pts1_busy | Fill(vLenb, do_bypass_rs1)
+  bypassed_uop.pts2_busy := uop.pts2_busy | Fill(vLenb, do_bypass_rs2)
+
+  bypassed_uop.prs3      := DontCare
+  bypassed_uop.pts3_busy := 0.U
+
+  io.o_uop := bypassed_uop
+}
+
 /**
  * Rename stage that connets the map table, free list, and busy table.
  * Can be used in both the FP pipeline and the normal execute pipeline.
@@ -761,7 +803,7 @@ class MatRenameStage(
   def BypassAllocations(uop: MicroOp, older_uops: Seq[MicroOp], alloc_reqs: Seq[Bool]): MicroOp = {
     require(older_uops.length == alloc_reqs.length)
     val bypassed_uop = Wire(new MicroOp)
-    val bypLogic = Module(new RenameBypass(older_uops.length, false))
+    val bypLogic = Module(new MatRenameBypass(older_uops.length))
     bypLogic.io.i_uop := uop
     bypLogic.io.older_uops := older_uops
     bypLogic.io.alloc_reqs := alloc_reqs

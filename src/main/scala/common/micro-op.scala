@@ -189,13 +189,14 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val pts2_busy        = if (usingMatrix) UInt(vLenb.W)   else null
   val pts3_busy        = if (usingMatrix) UInt(vLenb.W)   else null
   val m_scalar_busy    = if (usingMatrix) Bool()          else null
-  val m_sidx           = if (usingMatrix) UInt(vLenSz.W)  else null   // slice index
+  val m_sidx           = if (usingMatrix) UInt((vLenbSz+1).W)  else null   // slice index
   val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null   // eew encoded in load/store instructions
   val m_is_split       = if (usingMatrix) Bool()          else null
   val m_split_first    = if (usingMatrix) Bool()          else null
   val m_split_last     = if (usingMatrix) Bool()          else null
-  val m_slice_cnt      = if (usingMatrix) UInt(vLenSz.W)  else null
-  val m_slice_len      = if (usingMatrix) UInt(vLenSz.W)  else null
+  val m_slice_cnt      = if (usingMatrix) UInt((vLenbSz+1).W)  else null   // tilem in mopa instructions
+  val m_slice_len      = if (usingMatrix) UInt((vLenbSz+1).W)  else null   // tilek in mopa instructions
+  val m_tilen          = if (usingMatrix) UInt((vLenbSz+1).W)  else null   // tilen in mopa instructions
   val ts1_eew          = if (usingMatrix) UInt(2.W)       else null
   val ts2_eew          = if (usingMatrix) UInt(2.W)       else null
   val td_eew           = if (usingMatrix) UInt(2.W)       else null
@@ -239,6 +240,9 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
                                       MicroOpcodes.uopVSSA)
   def rt(rs: UInt, f: UInt => Bool): Bool = f(Mux1H(UIntToOH(rs), Seq(dst_rtype, lrs1_rtype, lrs2_rtype)))
   def is_vmv_s2v       = uopc.isOneOf(MicroOpcodes.uopVMV_V, MicroOpcodes.uopVFMV_V_F) && !rt(RS1, isVector)
+  // for convenience in matrix multiply control
+  def m_tilem  = m_slice_cnt
+  def m_tilek  = m_slice_len
 
   def match_group(prd: UInt): Bool = {
     val ret = Wire(Bool())

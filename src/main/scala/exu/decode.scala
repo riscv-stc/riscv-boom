@@ -578,8 +578,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   //  }
 
     uop.m_is_split    := cs.can_be_split
-    uop.m_slice_cnt   := Mux(is_mls, sel_slice_cnt, 1.U)
-    uop.m_slice_len   := Mux(is_mls, sel_slice_len, 1.U)
+    uop.m_slice_cnt   := Mux(is_mls, sel_slice_cnt, io.csr_tilem)
+    uop.m_slice_len   := Mux(is_mls, sel_slice_len, io.csr_tilek)
+    uop.m_tilen       := io.csr_tilen
     uop.m_sidx        := 0.U
     uop.ts1_eew       := ts1_eew
     uop.ts2_eew       := ts2_eew

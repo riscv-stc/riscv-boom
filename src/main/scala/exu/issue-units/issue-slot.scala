@@ -503,10 +503,12 @@ class IssueSlot(
     io.out_uop.m_sidx    := sidx
     io.out_uop.m_scalar_busy := ~ps
     when(io.request && io.grant && next_uop_mopa) {
-      io.uop.m_split_first := sidx === 0.U
-      io.uop.m_split_last  := sidx === next_uop.m_slice_cnt - 1.U
-      io.out_uop.m_sidx    := sidx + 1.U
-      io.out_uop.prs3      := next_uop.pdst
+      io.uop.m_split_first := slot_uop.m_sidx === 0.U
+      io.uop.m_split_last  := slot_uop.m_sidx === slot_uop.m_tilek - 1.U
+      io.out_uop.m_sidx    := slot_uop.m_sidx + 1.U
+      io.out_uop.prs3      := slot_uop.pdst
+      slot_uop.m_sidx      := slot_uop.m_sidx + 1.U
+      slot_uop.prs3        := slot_uop.pdst
     }
     next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_)
     next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_)
@@ -535,7 +537,7 @@ class IssueSlot(
       when (vcompress) {
         io.uop.pvm := slot_uop.prs1
       }
-           when (io.request && io.grant && !io.uop.uopc.isOneOf(/*uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, */uopVSA, uopVSSA, uopVSUXA, uopVSOXA)) {
+      when (io.request && io.grant && !io.uop.uopc.isOneOf(/*uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, */uopVSA, uopVSSA, uopVSUXA, uopVSOXA)) {
         val vd_idx = Mux(slot_uop.rt(RD, isMaskVD), 0.U, VRegSel(slot_uop.v_eidx, slot_uop.vd_eew, eLenSelSz))
         io.uop.pdst := Mux(slot_uop.rt(RD, isVector), slot_uop.pvd(vd_idx).bits, slot_uop.pdst)
         assert(is_invalid || !slot_uop.rt(RD, isVector) || slot_uop.pvd(vd_idx).valid)
@@ -546,7 +548,7 @@ class IssueSlot(
           val vLenEcntSz = vLenSz.asUInt - 3.U - vsew
           val next_offset = Mux(isVLoad, (slot_uop.v_eidx >> vLenEcntSz << vLenEcntSz) + vLen_ecnt,
                                          slot_uop.v_eidx + vLen_ecnt)
-          io.uop.v_split_ecnt := vLen_ecnt
+          io.uop.v_split_ecnt  := vLen_ecnt
           io.uop.v_split_first := slot_uop.v_eidx === 0.U
           io.uop.v_split_last  := next_offset >= slot_uop.v_split_ecnt
           //io.uop.pdst := Mux(slot_uop.rt(RD, isVector), slot_uop.pvd(vd_idx).bits, slot_uop.pdst)

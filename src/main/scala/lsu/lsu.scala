@@ -151,7 +151,7 @@ class BKQUInt(val wid: Int = 0)(implicit p: Parameters) extends BoomBundle()(p)
 class MLSSplitCnt(implicit p: Parameters) extends BoomBundle()(p)
 {
   val rob_idx = UInt(robAddrSz.W)
-  val mls_cnt = UInt(vLenSz.W)
+  val mls_cnt = UInt((vLenbSz+1).W)
 }
 
 class VecMemIO(implicit p: Parameters, edge: TLEdgeOut) extends BoomBundle()(p)
@@ -2511,7 +2511,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   // appended for mle and mse control
   val sliceCntCtr    = RegInit(0.U(vLenbSz.W))
   val sliceLenCtr    = RegInit(0.U((vcRatioSz+1).W))
-  val splitCnt       = RegInit(0.U(vLenSz.W))
+  val splitCnt       = RegInit(0.U((vLenbSz+1).W))
   val sliceBaseAddr  = RegInit(0.U(xLen.W))
   val sliceBlockAddr = RegInit(0.U(xLen.W))
   val sliceBlockOff  = sliceBaseAddr(clSizeLog2-1, 0)
