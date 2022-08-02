@@ -384,12 +384,13 @@ class ALUUnit(
     val msettype = uop.uopc.isOneOf(uopMSETTYPE,  uopMSETTYPEI)
     val msetm    = uop.uopc.isOneOf(uopMSETTILEM, uopMSETTILEMI)
     val msetn    = uop.uopc.isOneOf(uopMSETTILEN, uopMSETTILENI)
+    val useMax   = uop.ldst =/= 0.U && uop.lrs1 === 0.U
     val msetdata = Mux(mseti, imm_xprlen(27,15), io.req.bits.rs1_data)
     val tilemMax = numTrTileRows.U
     val tilenMax = vLenb.U >> io.mconfig.mtype.msew
     val tilekMax = tilemMax.min(tilenMax)
     val msettile = Mux(msetm, tilemMax,
-                   Mux(msetn, tilenMax, tilekMax)).min(msetdata)
+                   Mux(msetn, tilenMax, tilekMax)).min(Mux(useMax, tilemMax+tilenMax, msetdata))
     op1_data = Mux(msettype, msetdata, 
                Mux(mset,     msettile,
                Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data, 0.U)))

@@ -1827,11 +1827,12 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     m_pipeline.io.tilem  := csr.io.matrix.get.tilem
     m_pipeline.io.tilen  := csr.io.matrix.get.tilen
     m_pipeline.io.tilek  := csr.io.matrix.get.tilek
+    val useCurrentVal = csr_uop.ldst === 0.U && csr_uop.lrs1 === 0.U
     csr.io.matrix.get.set_mconfig.valid := csr_vld && msettype
     csr.io.matrix.get.set_mconfig.bits  := csr_uop.mconfig
-    csr.io.matrix.get.set_tilem.valid   := csr_vld && msettilem
-    csr.io.matrix.get.set_tilen.valid   := csr_vld && msettilen
-    csr.io.matrix.get.set_tilek.valid   := csr_vld && msettilek
+    csr.io.matrix.get.set_tilem.valid   := csr_vld && msettilem && !useCurrentVal
+    csr.io.matrix.get.set_tilen.valid   := csr_vld && msettilen && !useCurrentVal
+    csr.io.matrix.get.set_tilek.valid   := csr_vld && msettilek && !useCurrentVal
     csr.io.matrix.get.set_tsidx.valid   := csr_vld && msettsidx
     csr.io.matrix.get.set_tilem.bits    := csr_exe_unit.io.iresp.bits.data
     csr.io.matrix.get.set_tilen.bits    := csr_exe_unit.io.iresp.bits.data
