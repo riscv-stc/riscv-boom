@@ -1839,8 +1839,8 @@ class VecALUUnit(
 
   r_val (0) := io.req.valid && !killed
   r_data(0) := Mux(isVMask,              rs3_data & bitInactive | alu_out & ~bitInactive,
-               Mux(uop.rt(RD, isMaskVD), rs3_data & inactive | alu_out & ~inactive,
-                   Cat((0 until vLenb).map(b => Mux(byte_inactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse)))
+               Mux(uop.rt(RD, isMaskVD), rs3_data & inactive    | alu_out & ~inactive,             // FIXME: Cat(Fill(vLen-vLenb, 1.U(1.W)), inactive)
+                                         Cat((0 until vLenb).map(b => Mux(byte_inactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse)))
   r_pred(0) := uop.is_sfb_shadow && io.req.bits.pred_data
   for (i <- 1 until numStages) {
     r_val(i)  := r_val(i-1)
