@@ -2543,6 +2543,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
           val ioAligned = io.req.bits.rs1_data(clSizeLog2-1, 0) === 0.U && ioUop.vstart === 0.U &&
                           ((ioUop.vconfig.vl & (0x3F.U >> ioUop.vd_eew)) === 0.U)
           emulCtr        := 0.U
+          usSplitCtr     := 0.U
           sliceCntCtr    := 0.U
           sliceBaseAddr  := Mux(ioUop.is_rvm, io.req.bits.rs1_data, 0.U)
           sliceBlockAddr := 0.U
@@ -2624,6 +2625,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
           val ioAligned = io.req.bits.rs1_data(clSizeLog2-1, 0) === 0.U && ioUop.vstart === 0.U &&
                           ((ioUop.vconfig.vl & (0x3F.U >> ioUop.vd_eew)) === 0.U)
           emulCtr        := 0.U
+          usSplitCtr     := 0.U
           sliceCntCtr    := 0.U
           sliceBaseAddr  := Mux(ioUop.is_rvm, io.req.bits.rs1_data, 0.U)
           sliceBlockAddr := 0.U
