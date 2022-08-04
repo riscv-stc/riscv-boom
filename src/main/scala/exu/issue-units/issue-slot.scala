@@ -101,7 +101,6 @@ class IssueSlot(
   val p1    = if(matrix) RegInit(0.U(vLenb.W)) else RegInit(false.B)
   val p2    = if(matrix) RegInit(0.U(vLenb.W)) else RegInit(false.B)
   val p3    = if(matrix) RegInit(0.U(vLenb.W)) else RegInit(false.B)
-  //val pm    = if(vector) RegInit(0.U(vLenb.W)) else if (usingVector && iqType == IQT_MEM.litValue) RegInit(false.B) else null
   val ps    = if(vector || matrix) RegInit(false.B) else null
   val sdata = if(vector) RegInit(0.U(eLen.W)) else null
   val sidx  = if(matrix) RegInit(0.U(vLenSz.W)) else null
@@ -131,8 +130,7 @@ class IssueSlot(
   val last_check: Bool = {
     val ret = Wire(Bool())
     if (vector) {
-      ret := io.uop.v_split_last || io.uop.is_reduce ||
-             io.uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX, uopVSA, uopVSMA, uopVSSA, uopVSUXA, uopVSOXA)
+      ret := io.uop.v_split_last || io.uop.is_reduce
     } else if(matrix) {
       ret := io.uop.m_split_last
     } else {
@@ -202,13 +200,9 @@ class IssueSlot(
       // FIXME consider excluding prestart
       // val prestart = vstart < io.csr.v_eidx
       val pvm = uop.pvm
-      ret := uop.v_unmasked || tail || !io.vbusy_status(pvm) // || !perm_ready || pm(vstart >> 3.U)
+      ret := uop.v_unmasked || tail || !io.vbusy_status(pvm) // || !perm_ready
     } else {
-      // if (usingVector && iqType == IQT_MEM.litValue) {
-      //   ret := !uop.is_rvv || (uop.v_unmasked && !uop.v_idx_ls) // || pm(0)
-      // } else {
-        ret := true.B
-      // }
+      ret := true.B
     }
     ret
   }
@@ -277,7 +271,6 @@ class IssueSlot(
   val next_p1 = WireInit(p1)
   val next_p2 = WireInit(p2)
   val next_p3 = WireInit(p3)
-  //val next_pm = if (vector || usingVector && iqType == IQT_MEM.litValue) WireInit(pm) else null
   val in_p1 = if (vector || matrix) WireInit(p1) else null
   val in_p2 = if (vector || matrix) WireInit(p2) else null
   val in_p3 = if (vector || matrix) WireInit(p3) else null
@@ -517,17 +510,15 @@ class IssueSlot(
     io.uop.v_eidx := slot_uop.v_eidx
     if (vector) {
       // value to next slot should be current latched version
-      // ignore element busy masking, we keep busy status for entire v-register (i.e. p1,p2,p3,pm)
+      // ignore element busy masking, we keep busy status for entire v-register (i.e. p1,p2,p3)
       io.out_uop.prs1_busy  := ~p1 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
       io.out_uop.prs2_busy  := ~p2 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
       io.out_uop.prs3_busy  := ~p3 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
-      //io.out_uop.prvm_busy  := ~pm
       io.out_uop.v_scalar_busy := ~ps
       io.out_uop.v_scalar_data := sdata
       io.out_uop.v_perm_busy := false.B //!perm_ready || perm_ready_vrg_bsy
       io.out_uop.v_perm_wait := false.B //perm_wait || perm_wait_vrg_set
       io.out_uop.v_perm_idx  := 0.U //perm_idx
-      //io.cur_vs2_busy       := UIntToOH(slot_uop.prs2)(vpregSz-1,0) & Fill(vpregSz, !(p2.andR) && is_valid)
       // handle VOP_VI, prs1 records the value of lrpwdls
       // s1, and is used as simm5
       io.uop.v_scalar_data  := Mux(io.uop.rt(RS1, isRvvSImm5), Cat(Fill(eLen-5, io.uop.prs1(4).asUInt), io.uop.prs1(4,0)),
@@ -537,17 +528,14 @@ class IssueSlot(
       when (vcompress) {
         io.uop.pvm := slot_uop.prs1
       }
-      when (io.request && io.grant && !io.uop.uopc.isOneOf(/*uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, */uopVSA, uopVSMA, uopVSSA, uopVSUXA, uopVSOXA)) {
+      when (io.request && io.grant) {
         val vd_idx = Mux(slot_uop.rt(RD, isMaskVD), 0.U, VRegSel(slot_uop.v_eidx, slot_uop.vd_eew, eLenSelSz))
         io.uop.pdst := Mux(slot_uop.rt(RD, isVector), slot_uop.pvd(vd_idx).bits, slot_uop.pdst)
         assert(is_invalid || !slot_uop.rt(RD, isVector) || slot_uop.pvd(vd_idx).valid)
         when (!io.uop.is_reduce) {
           val vsew = Mux(slot_uop.rt(RS2, isWidenV) || slot_uop.rt(RD, isMaskVD), slot_uop.vs2_eew, slot_uop.vd_eew)
-          val vLen_ecnt = (vLen.U >> 3.U) >> vsew
-          val isVLoad   = slot_uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX)
-          val vLenEcntSz = vLenSz.asUInt - 3.U - vsew
-          val next_offset = Mux(isVLoad, (slot_uop.v_eidx >> vLenEcntSz << vLenEcntSz) + vLen_ecnt,
-                                         slot_uop.v_eidx + vLen_ecnt)
+          val vLen_ecnt   = vLenb.U >> vsew
+          val next_offset = slot_uop.v_eidx + vLen_ecnt
           io.uop.v_split_ecnt  := vLen_ecnt
           io.uop.v_split_first := slot_uop.v_eidx === 0.U
           io.uop.v_split_last  := next_offset >= slot_uop.v_split_ecnt
@@ -561,11 +549,8 @@ class IssueSlot(
       io.out_uop.prs2_busy  := ~p2
       io.out_uop.prs3_busy  := ~p3
       if (iqType == IQT_MEM.litValue) {
-        //io.out_uop.prvm_busy := Cat(0.U, !pm)
         io.out_uop.v_xls_offset := vxofs
         io.uop.v_xls_offset := vxofs
-      } else {
-        //io.out_uop.prvm_busy := 0.U
       }
     }
   } else {
@@ -579,11 +564,6 @@ class IssueSlot(
 
   when (io.in_uop.valid) {
     slot_uop := io.in_uop.bits
-    //if(usingVector && !vector && iqType == IQT_MEM.litValue) {
-      //when(io.vmupdate.map(x => x.valid && x.bits.rob_idx === io.in_uop.bits.rob_idx).reduce(_||_)) {
-        //slot_uop.v_unmasked := true.B
-      //}
-    //}
     assert (is_invalid || io.clear || io.kill, "trying to overwrite a valid issue slot.")
   }
 
@@ -611,11 +591,6 @@ class IssueSlot(
   p2 := next_p2
   p3 := next_p3
   ppred := next_ppred
-  if (vector) {
-    //pm := next_pm
-  } else if (usingVector && iqType == IQT_MEM.litValue) {
-    //pm := Mux(io.in_uop.valid, in_pm, pm) | next_pm
-  }
 
   // debug outputs
   io.debug.p1 := p1
