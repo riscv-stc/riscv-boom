@@ -450,7 +450,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.vconfig.vl := (io.csr_vconfig.vl + 7.U) >> 3.U
     }
     when (cs.is_rvv && is_v_mask_st) {
-      uop.uopc := uopVSA
+      uop.vconfig.vl := total_ecnt
     }
     when (cs.is_rvv && cs.uopc.isOneOf(uopVLR, uopVMVR)) {
       //uop.uopc := uopVL

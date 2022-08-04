@@ -623,7 +623,7 @@ class MemAddrCalcUnit(implicit p: Parameters)
           "[maddrcalc] assert we never get store data in here.")
 
   if (usingVector) {
-    assert (!(uop.is_rvv && io.req.valid && !uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)))
+    assert (!(uop.is_rvv && io.req.valid && !uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVSA, uopVSMA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)))
   }
 
   // Handle misaligned exceptions

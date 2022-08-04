@@ -132,7 +132,7 @@ class IssueSlot(
     val ret = Wire(Bool())
     if (vector) {
       ret := io.uop.v_split_last || io.uop.is_reduce ||
-             io.uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, uopVSA, uopVSSA, uopVSUXA, uopVSOXA)
+             io.uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX, uopVSA, uopVSMA, uopVSSA, uopVSUXA, uopVSOXA)
     } else if(matrix) {
       ret := io.uop.m_split_last
     } else {
@@ -537,14 +537,14 @@ class IssueSlot(
       when (vcompress) {
         io.uop.pvm := slot_uop.prs1
       }
-      when (io.request && io.grant && !io.uop.uopc.isOneOf(/*uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, */uopVSA, uopVSSA, uopVSUXA, uopVSOXA)) {
+      when (io.request && io.grant && !io.uop.uopc.isOneOf(/*uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, */uopVSA, uopVSMA, uopVSSA, uopVSUXA, uopVSOXA)) {
         val vd_idx = Mux(slot_uop.rt(RD, isMaskVD), 0.U, VRegSel(slot_uop.v_eidx, slot_uop.vd_eew, eLenSelSz))
         io.uop.pdst := Mux(slot_uop.rt(RD, isVector), slot_uop.pvd(vd_idx).bits, slot_uop.pdst)
         assert(is_invalid || !slot_uop.rt(RD, isVector) || slot_uop.pvd(vd_idx).valid)
         when (!io.uop.is_reduce) {
           val vsew = Mux(slot_uop.rt(RS2, isWidenV) || slot_uop.rt(RD, isMaskVD), slot_uop.vs2_eew, slot_uop.vd_eew)
           val vLen_ecnt = (vLen.U >> 3.U) >> vsew
-          val isVLoad   = slot_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
+          val isVLoad   = slot_uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           val vLenEcntSz = vLenSz.asUInt - 3.U - vsew
           val next_offset = Mux(isVLoad, (slot_uop.v_eidx >> vLenEcntSz << vLenEcntSz) + vLen_ecnt,
                                          slot_uop.v_eidx + vLen_ecnt)

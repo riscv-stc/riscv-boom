@@ -143,7 +143,7 @@ abstract class IssueUnit(
       when ((dis_uops(w).uopc === uopSTA && dis_uops(w).rt(RS2, isInt)) ||
              dis_uops(w).uopc === uopAMO_AG) {
         dis_uops(w).iw_state := s_valid_2
-      } .elsewhen (dis_uops(w).uopc.isOneOf(uopSTA, uopVSA) && dis_uops(w).rt(RS2, isNotInt)) {
+      } .elsewhen (dis_uops(w).uopc.isOneOf(uopSTA, uopVSA, uopVSMA) && dis_uops(w).rt(RS2, isNotInt)) {
         // For store addr gen for FP, rs2 is the FP/VEC register, and we don't wait for that here
         when (dis_uops(w).fp_val) {
           //dis_uops(w).lrs2_rtype := RT_X

@@ -453,7 +453,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       ldq(ld_enq_idx).bits.uop             := io.core.dis_uops(w).bits
       when(dis_vl_wakeup) {
         ldq(ld_enq_idx).bits.uop.vl_ready   := true.B
-        ldq(ld_enq_idx).bits.uop.vconfig.vl := io.core.vl_wakeup.bits.vl
+        ldq(ld_enq_idx).bits.uop.vconfig.vl := Mux(io.core.dis_uops(w).bits.uopc.isOneOf(uopVLM), (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
       }
       ldq(ld_enq_idx).bits.youngest_stq_idx  := st_enq_idx
       ldq(ld_enq_idx).bits.st_dep_mask     := next_live_store_mask
@@ -474,7 +474,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq(st_enq_idx).bits.uop        := io.core.dis_uops(w).bits
       when(dis_vl_wakeup) {
         stq(st_enq_idx).bits.uop.vl_ready   := true.B
-        stq(st_enq_idx).bits.uop.vconfig.vl := io.core.vl_wakeup.bits.vl
+        stq(st_enq_idx).bits.uop.vconfig.vl := Mux(io.core.dis_uops(w).bits.uopc.isOneOf(uopVSMA), (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
       }
       stq(st_enq_idx).bits.addr.valid := false.B
       stq(st_enq_idx).bits.data.valid := false.B
@@ -512,7 +512,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     when (io.core.vl_wakeup.valid && (io.core.vl_wakeup.bits.vconfig_tag+1.U) === ldq(i).bits.uop.vconfig_tag && !ldq(i).bits.uop.vl_ready)
     { 
       ldq(i).bits.uop.vl_ready   := true.B
-      ldq(i).bits.uop.vconfig.vl := io.core.vl_wakeup.bits.vl
+      ldq(i).bits.uop.vconfig.vl := Mux(ldq(i).bits.uop.uopc.isOneOf(uopVLM), (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
     }
   }
 
@@ -520,7 +520,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   {
     when (io.core.vl_wakeup.valid && (io.core.vl_wakeup.bits.vconfig_tag+1.U) === stq(i).bits.uop.vconfig_tag && !stq(i).bits.uop.vl_ready) {
       stq(i).bits.uop.vl_ready   := true.B
-      stq(i).bits.uop.vconfig.vl := io.core.vl_wakeup.bits.vl
+      stq(i).bits.uop.vconfig.vl := Mux(ldq(i).bits.uop.uopc.isOneOf(uopVSMA), (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
     }
   }
   //-------------------------------------------------------------
@@ -2485,7 +2485,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
                  Mux(uop.v_idx_ls, VDataSel(Cat(eindex.reverse), uop.vs2_eew, uop.v_eidx, vLen*8, eLen), 0.U))
   val clOffset = if(vLenb > clSize) RegEnable(io.req.bits.rs1_data(clSizeLog2-1, 0), io.req.valid) 
                  else               op1(clSizeLog2-1, 0)
-  val isUnitStride = uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA)
+  val isUnitStride = uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVSA, uopVSMA)
   val usSplitCtr = RegInit(0.U((vcRatioSz+1).W))
   val addrInc    = WireInit(0.U(xLen.W))
   val eidxInc    = WireInit(0.U(vLenSz.W))
@@ -2505,8 +2505,8 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
                Mux(usSplitCtr === 1.U, usSplitLeftCnt,
                                        vLenb.U.min(clSize.U - clOffset))))
     eidxInc := Mux(!isUnitStride, 1.U,
-               Mux(usSplitCtr === 1.U, (usSplitLeftCnt >> eew).min(uop.vconfig.vl - uop.v_eidx),
-                                       vLenb.U.min(clSize.U - clOffset) >> eew))
+               Mux(usSplitCtr === 1.U, usSplitLeftCnt >> eew,
+                                       vLenb.U.min(clSize.U - clOffset) >> eew).min(uop.vconfig.vl - uop.v_eidx))
   }
   // appended for mle and mse control
   val sliceCntCtr    = RegInit(0.U(vLenbSz.W))
