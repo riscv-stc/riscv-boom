@@ -1631,6 +1631,7 @@ class VecALUUnit(
 
   val r_val   = RegInit(VecInit(Seq.fill(numStages) { false.B }))
   val r_data  = Reg(Vec(numStages, UInt(vLen.W)))
+  val r_mask  = Reg(Vec(numStages, UInt(vLenb.W))) 
   val r_pred  = Reg(Vec(numStages, Bool()))
   val alu_out = WireInit(0.U(vLen.W))
 
@@ -1641,18 +1642,22 @@ class VecALUUnit(
                           Mux1H(UIntToOH(uop.vd_eew),
                                 Seq(e8_adder_out.asUInt, e16_adder_out.asUInt, e32_adder_out.asUInt,e64_adder_out.asUInt))))
 
+  val isNarrowOdd = uop.rt(RS2, isWidenV) && uop.v_eidx((vLenbSz-1).U-uop.vd_eew) === 1.U
   r_val (0) := io.req.valid && !killed
   r_data(0) := Mux(isVMask,              rs3_data & bitInactive | alu_out & ~bitInactive,
-               Mux(uop.rt(RD, isMaskVD), rs3_data & Cat(Fill(vLen-vLenb, 1.U(1.W)), inactive) | alu_out & ~inactive,             // FIXME: Cat(Fill(vLen-vLenb, 1.U(1.W)), inactive)
-                                         Cat((0 until vLenb).map(b => Mux(byteInactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse)))
+               Mux(uop.rt(RD, isMaskVD), rs3_data & Cat(Fill(vLen-vLenb, 1.U(1.W)), inactive) | alu_out & ~inactive,
+               Mux(isNarrowOdd,          Cat((0 until vLenb/2).map(b => Mux(byteInactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse) ## Fill(vLen/2, 0.U(1.W)),
+                                         Cat((0 until vLenb).map(b => Mux(byteInactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse))))
+  r_mask(0) := Mux(isNarrowOdd, Fill(vLenb/2, 1.U(1.W)) ## Fill(vLenb/2, 0.U(1.W)), Fill(vLenb, 1.U(1.W)))
   r_pred(0) := uop.is_sfb_shadow && io.req.bits.pred_data
   for (i <- 1 until numStages) {
     r_val(i)  := r_val(i-1)
     r_data(i) := r_data(i-1)
+    r_mask(i) := r_mask(i-1)
     r_pred(i) := r_pred(i-1)
   }
   io.resp.bits.data  := r_data(numStages-1)
-  io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
+  io.resp.bits.vmask := r_mask(numStages-1)
   io.resp.bits.predicated := r_pred(numStages-1)
   // Bypass
   // for the ALU, we can bypass same cycle as compute
