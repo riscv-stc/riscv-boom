@@ -1840,6 +1840,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     csr.io.matrix.get.set_tsidx.bits    := csr_exe_unit.io.iresp.bits.data
 
     csr_exe_unit.io.mconfig := csr.io.matrix.get.mconfig
+    csr.io.matrix.get.set_ms_dirty := cmt_rvm
 
   } else if (usingVector) {
     val csr_vld = csr_exe_unit.io.iresp.valid

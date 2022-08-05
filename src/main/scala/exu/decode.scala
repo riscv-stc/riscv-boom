@@ -150,8 +150,8 @@ class DecodeUnitIo(implicit p: Parameters) extends BoomBundle
 
   val csr_mconfig = Input(new MConfig)
   val csr_tilem = Input(UInt(xLen.W))
-  val csr_tilen = Input(UInt(xLen.W))
   val csr_tilek = Input(UInt(xLen.W))
+  val csr_tilen = Input(UInt(xLen.W))
   val csr_tsidx = Input(UInt(xLen.W))
 }
 
@@ -227,10 +227,12 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
   val cs_legal = cs.legal
 //   dontTouch(cs_legal)
-  val illegal_vector_case = Wire(Bool())
+  val illegal_vector_case = if(usingVector) Wire(Bool()) else false.B
+  val illegal_matrix_case = if(usingMatrix) Wire(Bool()) else false.B
   val id_illegal_insn = !cs_legal ||
     cs.fp_val && io.csr_decode.fp_illegal || // TODO check for illegal rm mode: (io.fpu.illegal_rm)
     cs.is_rvv && (io.csr_decode.vector_illegal || illegal_vector_case) ||
+    cs.is_rvm && (io.csr_decode.matrix_illegal || illegal_matrix_case) ||
     cs.rocc && io.csr_decode.rocc_illegal ||
     cs.is_amo && !io.status.isa('a'-'a')  ||
     (cs.fp_val && !cs.fp_single) && !io.status.isa('d'-'a') ||
@@ -389,7 +391,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                      Mux(uop.rt(RS1, isWidenV), vlmul_value + 1.U, vlmul_value)))
     val vs2_emul   = Mux(isVMVR, vmvr_emul,
                      Mux(uop.rt(RS2, isWidenV), vlmul_value + vs2_wfactor,
-                     Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor, 
+                     Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor,
                      Mux(isScalarMove || vmlogic_insn || is_viota_m || !uop.rt(RS2, isVector), 0.U, vlmul_value))))
     when (io.deq_fire && cs.is_rvv) {
       assert(vsew <= 3.U, "Unsupported vsew")
@@ -541,19 +543,22 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val slice_len_tilen = (mslice_dim === 2.U && !csr_mrtr) || (mslice_dim === 0.U)
     val slice_len_tilek = (mslice_dim === 1.U &&  csr_mltr) || (mslice_dim === 2.U && csr_mrtr)
 
-    // val sel_tilem = (mslice_dim === 1.U) && !csr_mltr || (mslice_dim === 0.U)
-    //val sel_tilen = (mslice_dim === 2.U) && csr_mrtr
-    // val sel_tilek = (mslice_dim === 1.U) && csr_mltr || (mslice_dim === 2.U) && !csr_mrtr
-
-    val sel_slice_cnt = Mux(slice_cnt_tilem, csr_tilem, 
+    val sel_slice_cnt = Mux(slice_cnt_tilem, csr_tilem,
                         Mux(slice_cnt_tilen, csr_tilen, csr_tilek))
     val sel_slice_len = Mux(slice_len_tilem, csr_tilem,
                         Mux(slice_len_tilen, csr_tilen, csr_tilek))
 
     val msew = Mux(is_mls, cs.v_ls_ew, csr_msew)
-    val ts1_eew = msew        //FIXME: remain to add W/Q op
+    val is_mmv = cs.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V)
+    val mqwiden = cs.uopc.isOneOf(uopMQMUL,uopMQOPA,uopMQMV_T,uopMQMV_V)
+    val mwwiden = cs.uopc.isOneOf(uopMWMUL,uopMWOPA,uopMFWOPA,uopMWMV_T,uopMWMV_V)
+    val td_mwfactor = Mux(mqwiden, 2.U, Mux(mwwiden, 1.U, 0.U))
+    val td_mnfactor = Mux(cs.uopc === uopMFNCVT, 1.U, 0.U)
+    val ts1_mwfactor = Mux(mqwiden && is_mmv, 2.U, Mux(mwwiden && is_mmv, 1.U, 0.U))
+
+    val ts1_eew = msew + ts1_mwfactor
     val ts2_eew = msew
-    val td_eew  = msew
+    val td_eew  = Mux(cs.uopc === uopMFNCVT, msew - td_mnfactor, msew + td_mwfactor)
     when (io.deq_fire && cs.is_rvm) {
       assert(msew <= 3.U, "Unsupported msew")
     }
@@ -563,24 +568,10 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.mem_signed := false.B
     }
 
-    //val mslice_idx = RegInit(0.U((vLenSz+1).W))
-    //val total_slice = Mux(is_mls, sel_slice, 1.U)
-    //val slice_last = mslice_idx >= total_slice
-
-  //  when (io.kill) {
-  //    mslice_idx := 0.U
-  //  }.elsewhen(!is_mls | slice_last & io.deq_fire) {
-  //    mslice_idx := 0.U
-  //  }.elsewhen(is_mls & !slice_last & io.deq_fire) {
-  //    mslice_idx := mslice_idx + 1.U
-  //  }.otherwise {
-  //    mslice_idx := 0.U
-  //  }
-
     uop.m_is_split    := cs.can_be_split
-    uop.m_slice_cnt   := Mux(is_mls, sel_slice_cnt, io.csr_tilem)
-    uop.m_slice_len   := Mux(is_mls, sel_slice_len, io.csr_tilek)
-    uop.m_tilen       := io.csr_tilen
+    uop.m_slice_cnt   := Mux(is_mls, sel_slice_cnt, csr_tilem)
+    uop.m_slice_len   := Mux(is_mls, sel_slice_len, csr_tilek)
+    uop.m_tilen       := csr_tilen
     uop.m_sidx        := 0.U
     uop.ts1_eew       := ts1_eew
     uop.ts2_eew       := ts2_eew
@@ -593,6 +584,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.m_split_last  := true.B
     uop.isHSlice      := !mslice_tt0
     uop.mslice_dim    := mslice_dim
+
+    //matrix illegal instruction handler
+
+    val illegal_msew = cs.is_rvm && !cs.inst_unique && (td_eew > 2.U || ts1_eew > 2.U || ts2_eew > 2.U)
+    illegal_matrix_case := illegal_msew
 
   } // if usingMatrix
   io.deq.uop := uop
