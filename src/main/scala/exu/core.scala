@@ -1207,7 +1207,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dis_uops(w).vstartSrc := v_uop.vstartSrc
       dis_uops(w).vstart    := Mux(v_uop.vstartSrc === VSTART_ZERO, 0.U, csr.io.vector.get.vstart)
       dis_uops(w).v_scalar_busy := dis_uops(w).is_rvv && dis_uops(w).uses_scalar
-      dis_uops(w).uopc      := Mux(i_uop.uopc.isOneOf(uopVLM, uopVLR), uopVL, i_uop.uopc)
+      dis_uops(w).uopc      := Mux(i_uop.uopc.isOneOf(uopVLR), uopVL, i_uop.uopc)
       if (usingMatrix) {
         dis_uops(w).prs1_busy := Mux1H(Seq((dis_uops(w).rt(RS1, isInt   ), i_uop.prs1_busy),
                                            (dis_uops(w).rt(RS1, isFloat ), f_uop.prs1_busy),

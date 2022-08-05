@@ -623,7 +623,7 @@ class MemAddrCalcUnit(implicit p: Parameters)
           "[maddrcalc] assert we never get store data in here.")
 
   if (usingVector) {
-    assert (!(uop.is_rvv && io.req.valid && !uop.uopc.isOneOf(uopVL, uopVLFF, uopVSA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)))
+    assert (!(uop.is_rvv && io.req.valid && !uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVSA, uopVSMA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)))
   }
 
   // Handle misaligned exceptions
@@ -1382,163 +1382,6 @@ class VecFR7Unit(latency: Int, dataWidth: Int)(implicit p: Parameters)
   io.resp.bits.predicated := DontCare
 }
 
-
-/**
-  * Pipelined vmask computing functional unit that wraps around the VMaskUnit
-  *
-  * @param numStages number of pipeline stages
-  * @param dataWidth size of the data being passed into the functional unit
-  */
-/*
-class PipelinedVMaskUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
-  extends PipelinedFunctionalUnit(
-    numStages = 0,
-    numBypassStages = 0,
-    earliestBypassStage = 0,
-    dataWidth = dataWidth)
-{
-  val uop = io.req.bits.uop
-  val vl = uop.vconfig.vl
-
-  // immediate generation
-  val rs1_data = io.req.bits.rs1_data
-  val rs2_data = io.req.bits.rs2_data
-
-  val vmaskUnit = Module(new VMaskUnit())
-
-  val byteWidth = 3.U
-  val vsew64bit = 3.U
-  val is_multiple_of_64 = vl(5,0) === 0.U
-  val vmaskInsn_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
-  val is_vmaskInsn_last_split = uop.v_eidx === (vmaskInsn_vl-1.U)
-  val vmaskInsn_mask = boom.util.MaskGen(0.U, vl(5,0), 64)
-  val vmaskInsn_rs2_data = Mux(is_vmaskInsn_last_split & (~is_multiple_of_64), (rs2_data & vmaskInsn_mask), rs2_data)
-
-  // operand 1 select
-  var op1_data: UInt = null
-  op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data,
-             Mux(uop.ctrl.op1_sel.asUInt === OP1_VS2 , vmaskInsn_rs2_data,
-                 0.U))
-
-  val init_popc = Mux(uop.v_eidx === 0.U, 0.U, RegNext(vmaskUnit.io.out))
-  val init_first_idx = Mux(uop.v_eidx === 0.U, 0.U, 64.U)
-
-  // operand 2 select
-  val op2_data = WireInit(0.U(xLen.W))
-  op2_data:= Mux(uop.ctrl.op2_sel === OP2_RS2 , rs2_data,
-             Mux(uop.uopc.isOneOf(uopVPOPC), init_popc,
-             Mux(uop.uopc.isOneOf(uopVFIRST), init_first_idx,
-             Mux(uop.ctrl.op2_sel === OP2_VS1,  rs1_data, 0.U))))
-
-  vmaskUnit.io.in := op1_data.asUInt
-  vmaskUnit.io.in_addend := op2_data.asUInt
-  vmaskUnit.io.fn  := uop.ctrl.op_fcn
-
-  val is_0_op_num = (op1_data === 0.U) || (is_vmaskInsn_last_split & ~is_multiple_of_64 & ((vmaskInsn_mask & op1_data) === 0.U))
-  val has_find_1_r = RegInit(false.B)
-  val firstIdx_r = RegInit(0.U(xLen.W))
-  when(is_vmaskInsn_last_split) {
-    has_find_1_r := false.B
-    firstIdx_r := 0.U(xLen.W)
-  }.elsewhen(~is_0_op_num & ~has_find_1_r){
-    has_find_1_r := true.B
-    firstIdx_r := vmaskUnit.io.out
-  }.elsewhen(uop.v_eidx === 0.U){
-    has_find_1_r := false.B
-    firstIdx_r := 0.U(xLen.W)
-  }
-
-  val firstIdx_result = Mux(is_vmaskInsn_last_split & is_0_op_num & ~has_find_1_r , ~0.U(xLen.W),
-    Mux(is_vmaskInsn_last_split & ~is_0_op_num & ~has_find_1_r, vmaskUnit.io.out,
-    Mux(is_vmaskInsn_last_split, firstIdx_r, 0.U(xLen.U))))
-
-  val sof_result = Mux(has_find_1_r,
-    Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data, 0.U(xLen.W)),
-    Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data | vmaskUnit.io.out, Mux(is_0_op_num, 0.U(xLen.W), vmaskUnit.io.out)))
-
-  val sbf_result = Mux(has_find_1_r,
-    Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data, 0.U(xLen.W)),
-    Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data | vmaskUnit.io.out, Mux(is_0_op_num, ~0.U(xLen.W), vmaskUnit.io.out)))
-
-  val sif_result = Mux(has_find_1_r,
-    Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data, 0.U(xLen.W)),
-    Mux(is_vmaskInsn_last_split & ~is_multiple_of_64, ~vmaskInsn_mask & op1_data | vmaskUnit.io.out, Mux(is_0_op_num, ~0.U(xLen.W), vmaskUnit.io.out)))
-
-  val is_masked  = !uop.v_unmasked
-  val v_inactive = uop.is_rvv && !uop.v_active
-
-  val is_viota_m = uop.uopc.isOneOf(uopVIOTA)
-  val is_viotaInsn_last = is_viota_m && (uop.v_eidx === vl)
-  val iota_r = RegInit(0.U(eLen.W))
-  when(is_viota_m){
-    when(is_viotaInsn_last){
-      iota_r := 0.U
-    }.elsewhen(is_masked & rs1_data(uop.v_eidx(log2Ceil(eLen)-1,0))) {
-      iota_r := iota_r + rs2_data(uop.v_eidx(log2Ceil(eLen)-1,0))
-    }.elsewhen(is_masked & (~rs1_data(uop.v_eidx(log2Ceil(eLen)-1,0)))) {
-      iota_r := iota_r
-    }.otherwise{
-      iota_r := iota_r + rs2_data(uop.v_eidx(log2Ceil(eLen)-1,0))
-    }
-  }
-
-  val iota_result = WireInit(0.U(eLen.W))
-  when(is_masked & (~rs1_data(uop.v_eidx(log2Ceil(eLen)-1,0)))) {
-    iota_result := io.req.bits.rs3_data
-  }.elsewhen(uop.v_eidx === 0.U){
-    iota_result := 0.U
-  }.elsewhen(is_masked & rs1_data(uop.v_eidx(log2Ceil(eLen)-1,0))) {
-    iota_result := iota_r
-  }.otherwise{
-    iota_result := iota_r
-  }
-
-  val vmaskUnit_out = Mux(uop.uopc.isOneOf(uopVFIRST), firstIdx_result,
-    Mux(uop.uopc.isOneOf(uopVMSOF), sof_result,
-    Mux(uop.uopc.isOneOf(uopVMSBF), Mux(is_masked, sbf_result & rs1_data, sbf_result),
-    Mux(uop.uopc.isOneOf(uopVMSIF), Mux(is_masked, sif_result & rs1_data, sif_result),
-    Mux(uop.uopc.isOneOf(uopVIOTA), Mux(v_inactive, io.req.bits.rs3_data(0), iota_result),
-    vmaskUnit.io.out)))))
-
-  // vl => last
-  io.resp.bits.data := vmaskUnit_out
-}
-*/
-/**
- * VMX functional unit with back-pressure machanism.
- *
- * @param dataWidth data to be passed into the functional unit
- */
-// implemented with BranchKillableQueue
-/*class VMXUnit(dataWidth: Int)(implicit p: Parameters) extends FunctionalUnit(
-    isPipelined = false,
-    numStages = 4,
-    numBypassStages = 0,
-    dataWidth = dataWidth)
-{
-  require (numStages > 1)
-  // buffer up results since we share write-port on integer regfile.
-  val queue = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth), entries = numStages))
-  // enque
-  io.req.ready                   := queue.io.enq.ready && (queue.io.count < (numStages-1).U)
-  queue.io.enq.valid             := io.req.valid && !IsKilledByBranch(io.brupdate, io.req.bits.uop) && !io.req.bits.kill
-  queue.io.enq.bits.uop          := io.req.bits.uop
-  queue.io.enq.bits.data         := io.req.bits.rs3_data
-  queue.io.enq.bits.predicated   := false.B
-  queue.io.enq.bits.fflags.valid := false.B
-  queue.io.enq.bits.fflags.bits  := DontCare
-  queue.io.brupdate              := io.brupdate
-  queue.io.flush                 := io.req.bits.kill
-  // deque
-  queue.io.deq.ready             := io.resp.ready
-  io.resp.valid                  := queue.io.deq.valid && !IsKilledByBranch(io.brupdate, queue.io.deq.bits.uop)
-  io.resp.bits.uop               := queue.io.deq.bits.uop
-  io.resp.bits.uop.br_mask       := GetNewBrMask(io.brupdate, queue.io.deq.bits.uop)
-  io.resp.bits.data              := queue.io.deq.bits.data
-  io.resp.bits.predicated        := queue.io.deq.bits.predicated
-  io.resp.bits.fflags            := queue.io.deq.bits.fflags
-}*/
-
 /**
  * Divide functional unit.
  *
@@ -1561,18 +1404,7 @@ class SRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFunct
   div.io.isW        := !io.req.bits.uop.ctrl.fcn_dw
   if(usingVector) {
     val isSigned = !io.req.bits.uop.rt(RS2, isUnsignedV)
-    //when(io.req.bits.uop.is_rvv && !io.req.bits.uop.v_active) {
     when(io.req.bits.uop.is_rvv) {
-      //div.io.isHi   := false.B
-      //div.io.src(0) := Mux(isSigned, Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
-                                           //Seq(io.req.bits.rs3_data( 7, 0).sextTo(eLen),
-                                               //io.req.bits.rs3_data(15, 0).sextTo(eLen),
-                                               //io.req.bits.rs3_data(31, 0).sextTo(eLen),
-                                               //io.req.bits.rs3_data(63, 0))),
-                                     //Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
-                                           //Seq(io.req.bits.rs3_data(7, 0), io.req.bits.rs3_data(15, 0), io.req.bits.rs3_data(31, 0), io.req.bits.rs3_data(63, 0))))
-      //div.io.src(1) := 1.U
-    //} .elsewhen(io.req.bits.uop.is_rvv) {
       div.io.src(0) := Mux(isSigned, Mux1H(UIntToOH(io.req.bits.uop.vd_eew),
                                            Seq(io.req.bits.rs2_data( 7, 0).sextTo(eLen),
                                                io.req.bits.rs2_data(15, 0).sextTo(eLen),
@@ -1631,31 +1463,29 @@ class VecALUUnit(
   val rs2_data = io.req.bits.rs2_data
   val rs3_data = io.req.bits.rs3_data
   val rvm_data = io.req.bits.rvm_data
+  val vl       = Mux(isVMask, uop.vconfig.vl >> 3.U, uop.vconfig.vl)
+  val vstart   = Mux(isVMask, uop.vstart >> 3.U, uop.vstart)
   val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
-  val vl = Mux(isVMask, uop.vconfig.vl >> 3.U, uop.vconfig.vl)
-  //prestart := 0.U // FIXME: Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < csr_vstart).reverse)
-  val vstart = Mux(isVMask, uop.vstart >> 3.U, uop.vstart)
-  prestart := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < vstart).reverse)
-  //body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= csr_vstart && uop.v_eidx + b.U < vl).reverse)
-  body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= uop.vstart && uop.v_eidx + b.U < vl).reverse)
+  prestart := Cat((0 until vLenb).map(b => uop.v_eidx + b.U < vstart).reverse)
+  body     := Cat((0 until vLenb).map(b => uop.v_eidx + b.U >= uop.vstart && uop.v_eidx + b.U < vl).reverse)
   mask     := Mux(uop.v_unmasked || withCarry || isMerge, ~(0.U(vLenb.W)),
-              Cat((0 until vLen/8).map(b => rvm_data(b)).reverse))
-  tail     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= vl).reverse)
-  inactive := Mux(isScalarMove, Cat(Fill(vLen/8-1, 1.U(1.W)), vstart >= vl), prestart | body & ~mask | tail)
-  val byte_inactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
-                            Seq(inactive,
-                                Cat((0 until vLenb/2).map(e => Fill(2, inactive(e))).reverse),
-                                Cat((0 until vLenb/4).map(e => Fill(4, inactive(e))).reverse),
-                                Cat((0 until vLenb/8).map(e => Fill(8, inactive(e))).reverse)))
+              Cat((0 until vLenb).map(b => rvm_data(b)).reverse))
+  tail     := Cat((0 until vLenb).map(b => uop.v_eidx + b.U >= vl).reverse)
+  inactive := Mux(isScalarMove, Cat(Fill(vLenb-1, 1.U(1.W)), vstart >= vl), prestart | body & ~mask | tail)
+  val byteInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(inactive,
+                               FillInterleaved(2, inactive(vLenb/2-1, 0)),
+                               FillInterleaved(4, inactive(vLenb/4-1, 0)),
+                               FillInterleaved(8, inactive(vLenb/8-1, 0))))
   val shiftMask   = Fill(eLen, !isShift) | Mux1H(UIntToOH(uop.vs2_eew), Seq("h7".U, "hf".U, "h1f".U, "h3f".U))
-  val bitPreStart = Cat((0 until vLenb).map(i => Fill(8, prestart(i.U))).reverse)
-  val bitTail     = Cat((0 until vLenb).map(i => Fill(8, tail(i.U))).reverse)
+  val bitPreStart = FillInterleaved(8, prestart)
+  val bitTail     = FillInterleaved(8, tail)
   val bitPreMask  = Mux1H(UIntToOH(uop.vstart(2, 0)),
                           Seq(0.U(8.W), 1.U, 3.U, 7.U, "hf".U, "h1f".U, "h3f".U, "h7f".U))
   val bitTailMask = Cat(Fill(vLen-8, 1.U(1.W)),
                         Mux1H(UIntToOH(uop.vconfig.vl(2, 0)),
                               Seq("hff".U, "hfe".U, "hfc".U, "hf8".U, "hf0".U, "he0".U, "hc0".U, "h80".U)))
-  val bitInactive = bitPreStart | bitPreMask << Cat(uop.vstart(vLenSz-1, 3), 0.U(3.W)) |
+  val bitInactive = bitPreStart | bitPreMask << Cat(vstart, 0.U(3.W)) |
                     bitTail & (bitTailMask << Cat(uop.vconfig.vl(vLenSz-1, 3), 0.U(3.W)))(vLen-1, 0)
 
   // operand 1 select
@@ -1758,7 +1588,6 @@ class VecALUUnit(
       alu.io.in1 := Mux(isMerge,   0.U,
                     Mux(op1Signed, Mux(op1_eew(0), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e).sextTo(eLen >> 2)),
                                    Mux(op1_eew(0), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e))))
-      //alu.io.in1 := Mux(op1_eew(0), op1_data(16*e+15, 16*e), op1_data(8*e+7, 8*e))
       alu.io.in2 := Mux(isMerge,   Mux(op2_eew(0), op1_data(16*e+15, 16*e) & Fill(16, !rvm_data(e)) | op2_data(16*e+15, 16*e) & Fill(16, rvm_data(e)),
                                                    op1_data( 8*e+7,   8*e) & Fill( 8, !rvm_data(e)) | op2_data( 8*e+7,   8*e) & Fill( 8, rvm_data(e))),
                     Mux(op2Signed, Mux(op2_eew(0), op2_data(16*e+15, 16*e), op2_data(8*e+7, 8*e).sextTo(eLen >> 2)),
@@ -1800,35 +1629,11 @@ class VecALUUnit(
     killed := true.B
   }
 
-  val r_val  = RegInit(VecInit(Seq.fill(numStages) { false.B }))
-  val r_data = Reg(Vec(numStages, UInt(vLen.W)))
-  val r_pred = Reg(Vec(numStages, Bool()))
+  val r_val   = RegInit(VecInit(Seq.fill(numStages) { false.B }))
+  val r_data  = Reg(Vec(numStages, UInt(vLen.W)))
+  val r_mask  = Reg(Vec(numStages, UInt(vLenb.W))) 
+  val r_pred  = Reg(Vec(numStages, Bool()))
   val alu_out = WireInit(0.U(vLen.W))
-  val v_eidx = uop.v_eidx
-
-  //val v_inactive = uop.is_rvv && !uop.v_active
-  //val v_tail = (v_eidx >= vl)
-
-  //val byteWidth = 3.U
-  //val vsew64bit = 3.U
-  //val is_multiple_of_64 = vl(5,0) === 0.U
-  //val vmlogic_vl = vl(5,0).orR +& (vl>>(byteWidth +& vsew64bit))
-  //val is_vmlogic_last_split = v_eidx === (vmlogic_vl-1.U)
-
-  //val vmlogic_insn = uop.ctrl.is_vmlogic
-  //val vmlogic_mask = boom.util.MaskGen(0.U, vl(5,0), 64)
-  //val vmlogic_alu_result = Mux(uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR), ~alu.io.out, alu.io.out)
-  //val vmlogic_last_result = (vmlogic_alu_result & vmlogic_mask) | (io.req.bits.rs3_data & (~vmlogic_mask))
-  //val vmlogic_result = Mux(is_vmlogic_last_split & (~is_multiple_of_64), vmlogic_last_result, vmlogic_alu_result)
-
-  //val vmscmp = uop.ctrl.is_vmscmp
-  //when (io.req.valid && vmscmp) { assert(uop.rt(RD, isMaskVD), "Problematic vmcompare") }
-  //val vadc   = uop.uopc === uopVADC
-  //val vsbc   = uop.uopc === uopVSBC
-  //val vmadc  = uop.uopc === uopVMADC
-  //val vmsbc  = uop.uopc === uopVMSBC
-  //when (io.req.valid && (vadc || vsbc)) { assert(!uop.v_unmasked, "Problematic vadc/vsbc") }
-  //val alu_co = Mux1H(UIntToOH(uop.vconfig.vtype.vsew(1,0)), Seq(alu.io.out(8), alu.io.out(16), alu.io.out(32), alu.io.co))
 
   alu_out := Mux(isVMADC, Mux1H(UIntToOH(uop.vd_eew),
                                 Seq(e8_co.asUInt, e16_co.asUInt, e32_co.asUInt, e64_co.asUInt)),
@@ -1837,18 +1642,22 @@ class VecALUUnit(
                           Mux1H(UIntToOH(uop.vd_eew),
                                 Seq(e8_adder_out.asUInt, e16_adder_out.asUInt, e32_adder_out.asUInt,e64_adder_out.asUInt))))
 
+  val isNarrowOdd = uop.rt(RS2, isWidenV) && uop.v_eidx((vLenbSz-1).U-uop.vd_eew) === 1.U
   r_val (0) := io.req.valid && !killed
   r_data(0) := Mux(isVMask,              rs3_data & bitInactive | alu_out & ~bitInactive,
-               Mux(uop.rt(RD, isMaskVD), rs3_data & inactive | alu_out & ~inactive,
-                   Cat((0 until vLenb).map(b => Mux(byte_inactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse)))
+               Mux(uop.rt(RD, isMaskVD), rs3_data & Cat(Fill(vLen-vLenb, 1.U(1.W)), inactive) | alu_out & ~inactive,
+               Mux(isNarrowOdd,          Cat((0 until vLenb/2).map(b => Mux(byteInactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse) ## Fill(vLen/2, 0.U(1.W)),
+                                         Cat((0 until vLenb).map(b => Mux(byteInactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse))))
+  r_mask(0) := Mux(isNarrowOdd, Fill(vLenb/2, 1.U(1.W)) ## Fill(vLenb/2, 0.U(1.W)), Fill(vLenb, 1.U(1.W)))
   r_pred(0) := uop.is_sfb_shadow && io.req.bits.pred_data
   for (i <- 1 until numStages) {
     r_val(i)  := r_val(i-1)
     r_data(i) := r_data(i-1)
+    r_mask(i) := r_mask(i-1)
     r_pred(i) := r_pred(i-1)
   }
-  io.resp.bits.data := r_data(numStages-1)
-  io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
+  io.resp.bits.data  := r_data(numStages-1)
+  io.resp.bits.vmask := r_mask(numStages-1)
   io.resp.bits.predicated := r_pred(numStages-1)
   // Bypass
   // for the ALU, we can bypass same cycle as compute

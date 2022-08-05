@@ -701,8 +701,13 @@ extends AbstractRenameStage(
     val rmask   = VRegMask(v_eidx, vsew, ecnt, vLenb)
     val tailMask = Mux(wkUop.rt(RD, isMaskVD), Fill(vLenb, wkUop.v_split_last) << (v_eidx >> 3)(log2Ceil(vLenb)-1, 0),
                                                Fill(vLenb, wkUop.v_split_last) << (v_eidx << vsew)(log2Ceil(vLenb)-1, 0))
-    val isUdCopy = wkUop.uopc.isOneOf(uopVL, uopVLFF) && !wkUop.uses_ldq
-    val udTailMask = Cat((0 until vLenb).map(i => (i.U + v_eidx >= wkUop.vconfig.vl)).reverse)
+    val isUdCopy   = wkUop.uopc.isOneOf(uopVL, uopVLM, uopVLFF) && !wkUop.uses_ldq
+    val udTail     = Cat((0 until vLenb).map(i => (i.U + v_eidx >= wkUop.vconfig.vl)).reverse)
+    val udTailMask = Mux1H(UIntToOH(vsew),
+                           Seq(udTail,
+                               FillInterleaved(2, udTail(vLenb/2-1, 0)),
+                               FillInterleaved(4, udTail(vLenb/4-1, 0)),
+                               FillInterleaved(8, udTail(vLenb/8-1, 0))))
     bs := Mux(isUdCopy, udTailMask, rmask | tailMask)
   }
 

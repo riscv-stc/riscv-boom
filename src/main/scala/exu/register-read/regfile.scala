@@ -66,7 +66,7 @@ object WritePort
     wport.bits.addr := enq_uop.pdst
     wport.bits.data := enq.bits.data
     if (vector) {
-      //val vLen = p(TileKey).core.vLen
+      val vLen = p(TileKey).core.vLen
       //val eLen = p(TileKey).core.eLen
       //val vLenSz = log2Ceil(vLen)
       //val r_idx = VRegSel(enq_uop.v_eidx, enq_uop.vd_eew, log2Ceil(vLen/eLen))
@@ -84,8 +84,8 @@ object WritePort
       //  require(dataWidth == vLen)
       //  wport.bits.data := v_filled
       //}
-      wport.bits.data := enq.bits.data
-      wport.bits.mask := FillInterleaved(8, enq.bits.vmask)
+      wport.bits.data := Mux(enq_uop.rt(RD, isMaskVD), enq.bits.data << enq_uop.v_eidx, enq.bits.data)
+      wport.bits.mask := Mux(enq_uop.rt(RD, isMaskVD), Fill(vLen, 1.U(1.W)) << enq_uop.v_eidx, FillInterleaved(8, enq.bits.vmask))
     }
     enq.ready := true.B
     wport

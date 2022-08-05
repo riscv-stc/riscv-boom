@@ -386,7 +386,7 @@ class Rob(
       val row_idx = GetRowIdx(wb_uop.rob_idx)
       if (usingMatrix) {
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
-          val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
+          val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           val wb_rvm_load = wb_uop.uopc.isOneOf(uopMLE)
           // clear busy and unsafe; vconfig.vl in rob may be incorrect under speculatively vsetvl execution
           when(!wb_uop.is_vm_ext ||
@@ -419,7 +419,7 @@ class Rob(
         }
       } else if (usingVector) {
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
-          val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
+          val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           // clear busy and unsafe
           when(!wb_uop.is_rvv || 
                (wb_rvv_load && wb_uop.uses_ldq && rob_uop(row_idx).v_split_ecnt +& wb_uop.v_split_ecnt >= wb_uop.vconfig.vl) ||

@@ -514,8 +514,8 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
   io.rrd_uop.ctrl.op_fcn  := rrd_cs.op_fcn.asUInt
   io.rrd_uop.ctrl.fcn_dw  := rrd_cs.fcn_dw.asBool
   if (usingMatrix) {
-    io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD, uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX, uopMLE)
-    io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopVSA, uopVSSA, uopVSUXA, uopVSOXA, uopAMO_AG, uopMSE)
+    io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD, uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX, uopMLE)
+    io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopVSA, uopVSMA, uopVSSA, uopVSUXA, uopVSOXA, uopAMO_AG, uopMSE)
     io.rrd_uop.ctrl.is_std  := io.rrd_uop.uopc === uopSTD || (io.rrd_uop.ctrl.is_sta && io.rrd_uop.rt(RS2, isInt) && !io.rrd_uop.is_rvv)
     io.rrd_uop.ctrl.is_vmlogic  := io.rrd_uop.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
     io.rrd_uop.ctrl.is_vmscmp   := io.rrd_uop.uopc.isOneOf(uopVMSEQ, uopVMSNE, uopVMSLTU, uopVMSLT, uopVMSLEU, uopVMSLE, uopVMSGTU, uopVMSGT)
@@ -526,8 +526,8 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
       io.rrd_uop.ctrl.op1_sel := OP1_TS1
     }
   } else if (usingVector) {
-    io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD, uopVL, uopVLFF, uopVLS, uopVLUX, uopVLOX)
-    io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopVSA, uopVSSA, uopVSUXA, uopVSOXA, uopAMO_AG)
+    io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD, uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX)
+    io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopVSA, uopVSMA, uopVSSA, uopVSUXA, uopVSOXA, uopAMO_AG)
     io.rrd_uop.ctrl.is_std  := io.rrd_uop.uopc === uopSTD || (io.rrd_uop.ctrl.is_sta && io.rrd_uop.rt(RS2, isInt) && !io.rrd_uop.is_rvv)
     io.rrd_uop.ctrl.is_vmlogic  := io.rrd_uop.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
     io.rrd_uop.ctrl.is_vmscmp   := io.rrd_uop.uopc.isOneOf(uopVMSEQ, uopVMSNE, uopVMSLTU, uopVMSLT, uopVMSLEU, uopVMSLE, uopVMSGTU, uopVMSGT)
