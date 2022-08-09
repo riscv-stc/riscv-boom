@@ -584,6 +584,10 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.m_split_last  := true.B
     uop.isHSlice      := !mslice_tt0
     uop.mslice_dim    := mslice_dim
+    when (cs.is_rvm && cs.uopc.isOneOf(uopMMV_V, uopMWMV_V, uopMQMV_V)) {
+      uop.dst_rtype := Mux(uop.inst(29).asBool(), RT_TR, RT_ACC)
+      uop.fu_code   := Mux(uop.inst(28).asBool(), FU_VSLICE, FU_HSLICE)
+    }
 
     //matrix illegal instruction handler
 

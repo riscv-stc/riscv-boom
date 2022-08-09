@@ -60,6 +60,7 @@ object FUConstants extends Enumeration
   // TODO: Function units can be grouped to save width, as one issue queue only relates to several of them, not all of them
   val FU_GEMM_ID   = Value
   val FU_MMUL_ID   = Value
+  val FU_XCLR_ID   = Value
   val FU_HSLICE_ID = Value
   val FU_VSLICE_ID = Value
   val FU_MFCVT_ID  = Value
@@ -85,6 +86,7 @@ object FUConstants extends Enumeration
   val FU_MT     = (1<<FU_MT_ID.id).U(FUC_SZ.W)
   val FU_GEMM   = (1<<FU_GEMM_ID.id).U(FUC_SZ.W)
   val FU_MMUL   = (1<<FU_MMUL_ID.id).U(FUC_SZ.W)
+  val FU_XCLR   = (1<<FU_XCLR_ID.id).U(FUC_SZ.W)
   val FU_HSLICE = (1<<FU_HSLICE_ID.id).U(FUC_SZ.W)
   val FU_VSLICE = (1<<FU_VSLICE_ID.id).U(FUC_SZ.W)
   val FU_MFCVT  = (1<<FU_MFCVT_ID.id).U(FUC_SZ.W)

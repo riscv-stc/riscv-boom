@@ -127,6 +127,8 @@ abstract class ExecutionUnit(
     val ll_iresp = if (writesLlIrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_fresp = if (writesLlFrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_vresp = if (writesLlVrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
+    val mlsuResp = if (writesAccTile) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
+    val mlsuWbk  = if (writesAccTile) Flipped(Valid(new ExeUnitResp(vLen)))   else null
 
     val bypass   = Output(Vec(numBypassStages, Valid(new ExeUnitResp(dataWidth))))
     val brupdate = Input(new BrUpdateInfo())
@@ -1365,17 +1367,16 @@ class MatExeUnit() (implicit p: Parameters)
   val hSliceBusy = WireInit(false.B)
   val vSliceBusy = WireInit(false.B)
 
-  io.fu_types := FU_GEMM | Mux(!hSliceBusy, FU_HSLICE, 0.U) | Mux(!vSliceBusy, FU_VSLICE, 0.U)
+  io.fu_types := FU_GEMM | FU_XCLR | Mux(!hSliceBusy, FU_HSLICE, 0.U) | Mux(!vSliceBusy, FU_VSLICE, 0.U)
 
   // -------------------------------MXU Unit -------------------------------
-  val mxu = Module(new MXU(mxuMeshRows, mxuMeshCols, mxuTileRows, mxuTileCols, dataWidth=vLen))
+  val mxu = Module(new MXU(mxuMeshRows, mxuMeshCols, mxuTileRows, mxuTileCols, dataWidth=vLen, numMatAccPhysRegs))
 
-  hSliceBusy := !mxu.io.rowSliceReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE) && io.req.bits.uop.vd_emul > 0.U)
-  vSliceBusy := !mxu.io.colSliceReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE) && io.req.bits.uop.vd_emul > 0.U)
+  hSliceBusy := !mxu.io.rowReadReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE) && io.req.bits.uop.vd_emul > 0.U)
+  vSliceBusy := !mxu.io.colReadReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE) && io.req.bits.uop.vd_emul > 0.U)
 
   // matrix multiplication related
   // TODO: confirm latency
-  val macRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM), io.req.bits.uop, mxuMeshRows+mxuMeshCols-1).bits
   mxu.io.macReq.valid           := io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM)
   mxu.io.macReq.bits.srcRidx    := io.req.bits.uop.prs3
   mxu.io.macReq.bits.dstRidx    := io.req.bits.uop.pdst
@@ -1384,43 +1385,61 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.macReq.bits.rm         := io.fcsr_rm
   mxu.io.macReqSrcA             := io.req.bits.rs1_data
   mxu.io.macReqSrcB             := io.req.bits.rs2_data
-  // read or write row slices
-  val rowSliceRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE), io.req.bits.uop, mxuMeshRows).bits
-  mxu.io.rowSliceReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE)
-  mxu.io.rowSliceReq.bits.cmd   := Mux(io.req.bits.uop.uopc.isOneOf(uopMCLRACC), SLICE_CLEAR,
-                                   Mux(io.req.bits.uop.rt(RD, isAccTile),        SLICE_WRITE, SLICE_READ))
-  mxu.io.rowSliceReq.bits.ridx  := Mux(io.req.bits.uop.rt(RD, isAccTile), io.req.bits.uop.pdst, io.req.bits.uop.prs1)
-  mxu.io.rowSliceReq.bits.sidx  := io.req.bits.uop.m_sidx
-  mxu.io.rowSliceReq.bits.rtype := io.req.bits.uop.td_eew
-  mxu.io.rowSliceWdata          := io.req.bits.rs1_data
-  mxu.io.rowSliceRdata.ready    := io.ll_vresp.ready
-  // read or write col slices
-  val colSliceRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE), io.req.bits.uop, mxuMeshCols).bits
-  mxu.io.colSliceReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE)
-  mxu.io.colSliceReq.bits.cmd   := Mux(io.req.bits.uop.rt(RD, isAccTile), SLICE_WRITE, SLICE_READ)
-  mxu.io.colSliceReq.bits.ridx  := Mux(io.req.bits.uop.rt(RD, isAccTile), io.req.bits.uop.pdst, io.req.bits.uop.prs1)
-  mxu.io.colSliceReq.bits.sidx  := io.req.bits.uop.m_sidx
-  mxu.io.colSliceReq.bits.rtype := io.req.bits.uop.td_eew
-  mxu.io.colSliceWdata          := io.req.bits.rs1_data
-  mxu.io.colSliceRdata.ready    := io.ll_vresp.ready && !mxu.io.rowSliceRdata.valid
+  mxu.io.macReqUop              := io.req.bits.uop
+  // clear acc tiles
+  mxu.io.clrReq.valid           := io.req.valid && io.req.bits.uop.fu_code_is(FU_XCLR)
+  mxu.io.clrReq.bits.ridx       := io.req.bits.uop.pdst
+  mxu.io.clrReqUop              := io.req.bits.uop
+  // read row slices
+  mxu.io.rowReadReq.valid       := io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE)
+  mxu.io.rowReadReq.bits.ridx   := io.req.bits.uop.prs1
+  mxu.io.rowReadReq.bits.sidx   := io.req.bits.uop.m_sidx
+  mxu.io.rowReadReq.bits.rtype  := io.req.bits.uop.td_eew
+  mxu.io.rowReadReqUop          := io.req.bits.uop
+  mxu.io.rowReadData.ready      := io.ll_vresp.ready
+  // read col slices
+  mxu.io.colReadReq.valid       := io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE)
+  mxu.io.colReadReq.bits.ridx   := io.req.bits.uop.prs1
+  mxu.io.colReadReq.bits.sidx   := io.req.bits.uop.m_sidx
+  mxu.io.colReadReq.bits.rtype  := io.req.bits.uop.td_eew
+  mxu.io.colReadReqUop          := io.req.bits.uop
+  mxu.io.colReadData.ready      := io.ll_vresp.ready && !mxu.io.rowReadData.valid
+  // write row slices
+  mxu.io.rowWriteReq.valid      := io.mlsuWbk.valid && io.mlsuWbk.bits.uop.rt(RD, isAccTile) && io.mlsuWbk.bits.uop.isHSlice
+  mxu.io.rowWriteReq.bits.ridx  := io.mlsuWbk.bits.uop.pdst
+  mxu.io.rowWriteReq.bits.sidx  := io.mlsuWbk.bits.uop.m_sidx
+  mxu.io.rowWriteReq.bits.rtype := io.mlsuWbk.bits.uop.td_eew
+  mxu.io.rowWriteReqUop         := io.mlsuWbk.bits.uop
+  mxu.io.rowWriteData           := io.mlsuWbk.bits.data
+  // write col slices
+  mxu.io.colWriteReq.valid      := io.mlsuWbk.valid && io.mlsuWbk.bits.uop.rt(RD, isAccTile) && !io.mlsuWbk.bits.uop.isHSlice
+  mxu.io.colWriteReq.bits.ridx  := io.mlsuWbk.bits.uop.pdst
+  mxu.io.colWriteReq.bits.sidx  := io.mlsuWbk.bits.uop.m_sidx
+  mxu.io.colWriteReq.bits.rtype := io.mlsuWbk.bits.uop.td_eew
+  mxu.io.colWriteReqUop         := io.mlsuWbk.bits.uop
+  mxu.io.colWriteData           := io.mlsuWbk.bits.data
 
   // Outputs (Write Port #0)  ---------------
   if (writesAccTile) {
-    io.mclrResp.valid     := mxu.io.rowSliceResp.valid && mxu.io.rowSliceResp.bits.cmd === SLICE_CLEAR
-    io.mclrResp.bits.uop  := rowSliceRespUop
+    io.mclrResp.valid     := mxu.io.clrResp.valid
+    io.mclrResp.bits.uop  := mxu.io.clrRespUop
     io.mclrResp.bits.data := 0.U
     io.mclrResp.bits.predicated := false.B
     io.mopaResp.valid     := mxu.io.macResp.valid
-    io.mopaResp.bits.uop  := macRespUop
+    io.mopaResp.bits.uop  := mxu.io.macRespUop
     io.mopaResp.bits.data := 0.U
     io.mopaResp.bits.predicated := false.B
+    io.mlsuResp.valid     := (mxu.io.rowWriteResp.valid || mxu.io.colWriteResp.valid)
+    io.mlsuResp.bits.uop  := Mux(mxu.io.rowWriteResp.valid, mxu.io.rowWriteRespUop, mxu.io.colWriteRespUop)
+    io.mlsuResp.bits.data := 0.U
+    io.mlsuResp.bits.predicated := false.B
   }
 
   if (writesLlVrf) {
-    io.ll_vresp.valid     := (mxu.io.rowSliceRdata.valid && rowSliceRespUop.rt(RD, isVector)) ||
-                             (mxu.io.colSliceRdata.valid && colSliceRespUop.rt(RD, isVector))
-    io.ll_vresp.bits.uop  := Mux(mxu.io.rowSliceRdata.valid, rowSliceRespUop, colSliceRespUop)
-    io.ll_vresp.bits.data := Mux(mxu.io.rowSliceRdata.valid, mxu.io.rowSliceRdata.bits, mxu.io.colSliceRdata.bits)
+    io.ll_vresp.valid     := (mxu.io.rowReadData.valid && mxu.io.rowReadRespUop.rt(RD, isVector)) ||
+                             (mxu.io.colReadData.valid && mxu.io.colReadRespUop.rt(RD, isVector))
+    io.ll_vresp.bits.uop  := Mux(mxu.io.rowReadData.valid, mxu.io.rowReadRespUop, mxu.io.colReadRespUop)
+    io.ll_vresp.bits.data := Mux(mxu.io.rowReadData.valid, mxu.io.rowReadData.bits, mxu.io.colReadData.bits)
     io.ll_vresp.bits.predicated := false.B
   }
 
