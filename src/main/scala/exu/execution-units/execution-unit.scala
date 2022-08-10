@@ -924,7 +924,7 @@ class VecExeUnit(
 
   // Outputs (Write Port #0)  ---------------
   if (writesVrf) {
-    io.vresp.valid     := vec_fu_units.map(f => 
+    io.vresp.valid     := vec_fu_units.map(f =>
       f.io.resp.valid && !(f.io.resp.bits.uop.fu_code & FU_VRP).orR && !f.io.resp.bits.uop.uopc.isOneOf(uopVPOPC, uopVFIRST, uopVFMV_F_S, uopVMV_X_S)).reduce(_||_)
     io.vresp.bits.uop  := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.uop)))
@@ -1372,7 +1372,7 @@ class MatExeUnit() (implicit p: Parameters)
 
   hSliceBusy := !mxu.io.rowSliceReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE) && io.req.bits.uop.vd_emul > 0.U)
   vSliceBusy := !mxu.io.colSliceReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE) && io.req.bits.uop.vd_emul > 0.U)
-
+  val ll_vresp_finished = RegInit(true.B)
   // matrix multiplication related
   // TODO: confirm latency
   val macRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM), io.req.bits.uop, mxuMeshRows+mxuMeshCols-1).bits
@@ -1393,7 +1393,7 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.rowSliceReq.bits.sidx  := io.req.bits.uop.m_sidx
   mxu.io.rowSliceReq.bits.rtype := io.req.bits.uop.td_eew
   mxu.io.rowSliceWdata          := io.req.bits.rs1_data
-  mxu.io.rowSliceRdata.ready    := io.ll_vresp.ready
+  mxu.io.rowSliceRdata.ready    := io.ll_vresp.ready && ll_vresp_finished
   // read or write col slices
   val colSliceRespUop = Pipe(io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE), io.req.bits.uop, mxuMeshCols).bits
   mxu.io.colSliceReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE)
@@ -1402,7 +1402,7 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.colSliceReq.bits.sidx  := io.req.bits.uop.m_sidx
   mxu.io.colSliceReq.bits.rtype := io.req.bits.uop.td_eew
   mxu.io.colSliceWdata          := io.req.bits.rs1_data
-  mxu.io.colSliceRdata.ready    := io.ll_vresp.ready && !mxu.io.rowSliceRdata.valid
+  mxu.io.colSliceRdata.ready    := io.ll_vresp.ready && !mxu.io.rowSliceRdata.valid && ll_vresp_finished
 
   // Outputs (Write Port #0)  ---------------
   if (writesAccTile) {
@@ -1417,10 +1417,87 @@ class MatExeUnit() (implicit p: Parameters)
   }
 
   if (writesLlVrf) {
-    io.ll_vresp.valid     := (mxu.io.rowSliceRdata.valid && rowSliceRespUop.rt(RD, isVector)) ||
-                             (mxu.io.colSliceRdata.valid && colSliceRespUop.rt(RD, isVector))
-    io.ll_vresp.bits.uop  := Mux(mxu.io.rowSliceRdata.valid, rowSliceRespUop, colSliceRespUop)
-    io.ll_vresp.bits.data := Mux(mxu.io.rowSliceRdata.valid, mxu.io.rowSliceRdata.bits, mxu.io.colSliceRdata.bits)
+    val ll_vresp_valid = (mxu.io.rowSliceRdata.valid && rowSliceRespUop.rt(RD, isVector)) ||
+                         (mxu.io.colSliceRdata.valid && colSliceRespUop.rt(RD, isVector))
+    val ll_vresp_uop =   Mux(mxu.io.rowSliceRdata.valid, rowSliceRespUop, colSliceRespUop)
+    val ll_vresp_data =  Mux(mxu.io.rowSliceRdata.valid, mxu.io.rowSliceRdata.bits, mxu.io.colSliceRdata.bits)
+
+    val ll2_vresp_valid = RegInit(false.B)
+    val ll3_vresp_valid = RegInit(false.B)
+    val ll4_vresp_valid = RegInit(false.B)
+    val ll_vresp_finished = RegInit(true.B)
+
+    val ll2_vresp_uop = Pipe(ll_vresp_valid, ll_vresp_uop,1).bits
+    val ll3_vresp_uop = Pipe(ll2_vresp_valid, ll2_vresp_uop,1).bits
+    val ll4_vresp_uop = Pipe(ll3_vresp_valid, ll3_vresp_uop,1).bits
+
+    val ll2_vresp_data = Pipe(ll_vresp_valid, ll_vresp_data,1).bits
+    val ll3_vresp_data = Pipe(ll2_vresp_valid, ll2_vresp_data,1).bits
+    val ll4_vresp_data = Pipe(ll3_vresp_valid, ll3_vresp_data,1).bits
+
+    when(io.req.valid && (io.req.bits.uop.fu_code_is(FU_HSLICE) || io.req.bits.uop.fu_code_is(FU_VSLICE))) {
+      ll2_vresp_valid := false.B
+      ll3_vresp_valid := false.B
+      ll4_vresp_valid := false.B
+      ll_vresp_finished := false.B
+
+    }.otherwise{
+      ll2_vresp_valid := ll_vresp_valid && (ll_vresp_uop.uopc === uopMQMV_V || ll_vresp_uop.uopc === uopMWMV_V)
+      ll3_vresp_valid := ll2_vresp_valid && ll2_vresp_uop.uopc === uopMQMV_V
+      ll4_vresp_valid := ll3_vresp_valid && ll3_vresp_uop.uopc === uopMQMV_V
+    }
+
+    when(ll_vresp_valid) {
+      io.ll_vresp.valid                   := ll_vresp_valid && !ll_vresp_finished
+      io.ll_vresp.bits.uop                := ll_vresp_uop
+      io.ll_vresp.bits.uop.m_is_split     := true.B
+      io.ll_vresp.bits.uop.m_split_last   := Mux(ll_vresp_uop.uopc === uopMMV_V, ll_vresp_valid, false.B)
+      io.ll_vresp.bits.uop.v_split_last   := Mux(ll_vresp_uop.uopc === uopMMV_V, ll_vresp_valid, false.B)
+      io.ll_vresp.bits.uop.pdst           := ll_vresp_uop.pvd(0).bits
+      io.ll_vresp.bits.uop.stale_pdst     := ll_vresp_uop.stale_pvd(0).bits
+      ll_vresp_finished                   := Mux(ll_vresp_uop.uopc === uopMMV_V, ll_vresp_valid, false.B)
+      //FIXME : data should be 2*SEW expanded
+      io.ll_vresp.bits.data               := Mux(ll_vresp_uop.uopc === uopMQMV_V, Cat(0.U(((vLen/4)*3).W), ll_vresp_data(((vLen/4)*1)-1, 0)),
+                                              Mux(ll_vresp_uop.uopc === uopMWMV_V, Cat(0.U((vLen/2).W), ll_vresp_data(vLen/2-1,0)), ll_vresp_data))
+    }
+    when(ll2_vresp_valid) {
+      io.ll_vresp.valid                   := ll2_vresp_valid && !ll_vresp_finished
+      io.ll_vresp.bits.uop                := ll2_vresp_uop
+      io.ll_vresp.bits.uop.m_is_split     := true.B
+      io.ll_vresp.bits.uop.m_split_last   := Mux(ll2_vresp_uop.uopc === uopMQMV_V, false.B, ll2_vresp_valid)
+      io.ll_vresp.bits.uop.v_split_last   := Mux(ll2_vresp_uop.uopc === uopMQMV_V, false.B, ll2_vresp_valid)
+      io.ll_vresp.bits.uop.pdst           := ll2_vresp_uop.pvd(1).bits
+      io.ll_vresp.bits.uop.stale_pdst     := ll2_vresp_uop.stale_pvd(1).bits
+      ll_vresp_finished                   := Mux(ll2_vresp_uop.uopc === uopMQMV_V, false.B, ll2_vresp_valid)
+      //FIXME : data should be 2*SEW expanded
+      io.ll_vresp.bits.data               := Mux(ll2_vresp_uop.uopc === uopMQMV_V, Cat(0.U(((vLen/4)*3).W), ll2_vresp_data(((vLen/4)*2)-1, (vLen/4)*1)),
+        Cat(0.U((vLen/2).W), ll2_vresp_data(vLen-1,vLen/2)))
+    }
+    when(ll3_vresp_valid) {
+      io.ll_vresp.valid                   := ll3_vresp_valid && !ll_vresp_finished
+      io.ll_vresp.bits.uop                := ll3_vresp_uop
+      io.ll_vresp.bits.uop.m_is_split     := true.B
+      io.ll_vresp.bits.uop.m_split_last   := false.B
+      io.ll_vresp.bits.uop.v_split_last   := false.B
+      io.ll_vresp.bits.uop.pdst           := ll3_vresp_uop.pvd(2).bits
+      io.ll_vresp.bits.uop.stale_pdst     := ll3_vresp_uop.stale_pvd(2).bits
+      ll_vresp_finished                   := false.B
+      //FIXME : data should be 2*SEW expanded
+      io.ll_vresp.bits.data               := Cat(0.U(((vLen/4)*3).W), ll3_vresp_data(((vLen/4)*3)-1, (vLen/4)*2))
+    }
+    when(ll4_vresp_valid) {
+      io.ll_vresp.valid                   := ll4_vresp_valid && !ll_vresp_finished
+      io.ll_vresp.bits.uop                := ll4_vresp_uop
+      io.ll_vresp.bits.uop.m_is_split     := ll4_vresp_valid
+      io.ll_vresp.bits.uop.m_split_last   := ll4_vresp_valid
+      io.ll_vresp.bits.uop.v_split_last   := ll4_vresp_valid
+      io.ll_vresp.bits.uop.pdst           := ll4_vresp_uop.pvd(3).bits
+      io.ll_vresp.bits.uop.stale_pdst     := ll4_vresp_uop.stale_pvd(3).bits
+      ll_vresp_finished                   := ll4_vresp_valid
+      //FIXME : data should be 2*SEW expanded
+      io.ll_vresp.bits.data               := Cat(0.U(((vLen/4)*3).W), ll4_vresp_data(vLen-1, (vLen/4)*3))
+    }
+
     io.ll_vresp.bits.predicated := false.B
   }
 

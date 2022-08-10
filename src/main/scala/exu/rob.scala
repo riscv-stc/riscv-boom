@@ -421,7 +421,7 @@ class Rob(
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
           val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           // clear busy and unsafe
-          when(!wb_uop.is_rvv || 
+          when(!wb_uop.is_rvv ||
                (wb_rvv_load && wb_uop.uses_ldq && rob_uop(row_idx).v_split_ecnt +& wb_uop.v_split_ecnt >= wb_uop.vconfig.vl) ||
                (!wb_rvv_load && (!wb_uop.v_is_split || wb_uop.v_split_last))) {
             rob_bsy(row_idx)    := false.B
@@ -555,7 +555,7 @@ class Rob(
     val ud_bsy = if (usingVector) rob_ud_bsy(rob_head) else false.B
     can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall && !ud_bsy &&
                      Mux(!rob_uop(rob_head).is_vm_ext || !rob_uop(rob_head).uses_stq, true.B,
-                     Mux(rob_uop(rob_head).is_rvv,           ~io.vbusy_status(rob_uop(rob_head).stale_pdst), 
+                     Mux(rob_uop(rob_head).is_rvv,           ~io.vbusy_status(rob_uop(rob_head).stale_pdst),
                      Mux(rob_uop(rob_head).rt(RD, isTrTile), ~io.tr_busy_status(rob_uop(rob_head).stale_pdst),
                                                              ~io.acc_busy_status(rob_uop(rob_head).stale_pdst))))
 
