@@ -433,9 +433,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.vs1_emul    := vs1_emul
     uop.vs2_emul    := vs2_emul
     //uop.vd_emul     := vd_emul
-  if(usingMatrix) {
-    uop.vd_emul := Mux(cs.uopc.isOneOf(uopMQMV_V), 2.U, Mux(cs.uopc.isOneOf(uopMWMV_V), 1.U, vd_emul))
-  }
+    if(usingMatrix) {
+      uop.vd_emul := Mux(cs.uopc.isOneOf(uopMQMV_V), 2.U, Mux(cs.uopc.isOneOf(uopMWMV_V), 1.U, vd_emul))
+    }
     //when (cs.is_rvv && !uop.v_unmasked) {
       //when (is_v_ls) {
         //uop.iq_type := IQT_MVEC
@@ -586,6 +586,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.m_split_last  := true.B
     uop.isHSlice      := !mslice_tt0
     uop.mslice_dim    := mslice_dim
+    when (cs.is_rvm && cs.uopc.isOneOf(uopMMV_V, uopMWMV_V, uopMQMV_V)) {
+      //uop.dst_rtype := Mux(uop.inst(29).asBool(), RT_TR, RT_ACC)
+      uop.lrs1_rtype := Mux(uop.inst(29).asBool(), RT_TR, RT_ACC)
+      uop.fu_code   := Mux(uop.inst(28).asBool(), FU_VSLICE, FU_HSLICE)
+    }
 
     //matrix illegal instruction handler
 

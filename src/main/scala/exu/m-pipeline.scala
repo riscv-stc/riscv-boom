@@ -30,7 +30,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 {
   val matIssueParams = issueParams.find(_.iqType == IQT_MAT.litValue).get
   val dispatchWidth  = matIssueParams.dispatchWidth
-  val numWakeupPorts = matWidth*2 + 1     // (MCLRACC; MOPA) + VLSU
+  val numWakeupPorts = matWidth*2 + 2     // (MCLRACC; MOPA) + (VLSU to tr tile + VLSU to acc tile)
 
   val io = IO(new Bundle {
     // pipeline ctrl signals
@@ -164,13 +164,18 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
   // TODO: wrap vlsu write with uops for tr_tile write control
   val lsuWbkBits = io.lsu_tile_wbk.bits
-  trtileReg.io.writePorts(0).valid          := io.lsu_tile_wbk.valid
+  trtileReg.io.writePorts(0).valid          := io.lsu_tile_wbk.valid && lsuWbkBits.uop.rt(RD, isTrTile)
   trtileReg.io.writePorts(0).bits.msew      := lsuWbkBits.uop.m_ls_ew
   trtileReg.io.writePorts(0).bits.tt        := lsuWbkBits.uop.rt(RD, isTrTile).asUInt ## !lsuWbkBits.uop.isHSlice.asUInt
   trtileReg.io.writePorts(0).bits.addr      := lsuWbkBits.uop.pdst
   trtileReg.io.writePorts(0).bits.index     := lsuWbkBits.uop.m_sidx
   trtileReg.io.writePorts(0).bits.data      := lsuWbkBits.data
   trtileReg.io.writePorts(0).bits.byteMask  := lsuWbkBits.vmask
+
+  exe_units.withFilter(_.writesAccTile).map(eu => {
+    eu.io.mlsuWbk.valid := io.lsu_tile_wbk.valid && lsuWbkBits.uop.rt(RD, isAccTile)
+    eu.io.mlsuWbk.bits  := io.lsu_tile_wbk.bits }
+  )
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Commit Stage ****
@@ -184,14 +189,15 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   var w_cnt = 0
   //vld write back clears busy table in rename but not busy bit in rob entry.
   io.wakeups(w_cnt) <> DontCare
-  io.wakeups(w_cnt).valid := io.lsu_tile_wbk.valid
+  io.wakeups(w_cnt).valid := io.lsu_tile_wbk.valid && lsuWbkBits.uop.rt(RD, isTrTile)
   io.wakeups(w_cnt).bits  := io.lsu_tile_wbk.bits
   // from MatExeUnit
   w_cnt = 1
   for(eu <- exe_units) {
     io.wakeups(w_cnt)   := eu.io.mclrResp
     io.wakeups(w_cnt+1) := eu.io.mopaResp
-    w_cnt += 2
+    io.wakeups(w_cnt+2) := eu.io.mlsuResp
+    w_cnt += 3
   }
 
   for ((wdata, wakeup) <- io.debug_wb_wdata zip io.wakeups) {
