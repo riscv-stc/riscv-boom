@@ -1374,6 +1374,7 @@ class MatExeUnit() (implicit p: Parameters)
 
   hSliceBusy := !mxu.io.rowReadReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE) && io.req.bits.uop.vd_emul > 0.U)
   vSliceBusy := !mxu.io.colReadReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE) && io.req.bits.uop.vd_emul > 0.U)
+
   val ll_vresp_finished = RegInit(true.B)
 
   // matrix multiplication related
@@ -1398,6 +1399,7 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.rowReadReq.bits.rtype  := io.req.bits.uop.td_eew
   mxu.io.rowReadReqUop          := io.req.bits.uop
   mxu.io.rowReadData.ready      := io.ll_vresp.ready && ll_vresp_finished
+
   // read col slices
   mxu.io.colReadReq.valid       := io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE)
   mxu.io.colReadReq.bits.ridx   := io.req.bits.uop.prs1
@@ -1405,6 +1407,7 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.colReadReq.bits.rtype  := io.req.bits.uop.td_eew
   mxu.io.colReadReqUop          := io.req.bits.uop
   mxu.io.colReadData.ready      := io.ll_vresp.ready && !mxu.io.rowReadData.valid && ll_vresp_finished
+
   // write row slices
   mxu.io.rowWriteReq.valid      := io.mlsuWbk.valid && io.mlsuWbk.bits.uop.rt(RD, isAccTile) && io.mlsuWbk.bits.uop.isHSlice
   mxu.io.rowWriteReq.bits.ridx  := io.mlsuWbk.bits.uop.pdst
@@ -1518,6 +1521,7 @@ class MatExeUnit() (implicit p: Parameters)
     when(io.req.valid && (io.req.bits.uop.uopc.isOneOf(uopMMV_V,uopMWMV_V,uopMQMV_V))) {
       ll_vresp_finished                   := false.B
     }
+
     io.ll_vresp.bits.predicated := false.B
   }
 
