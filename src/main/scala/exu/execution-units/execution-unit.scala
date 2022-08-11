@@ -828,8 +828,6 @@ class VecExeUnit(
     io.perf.div_busy := div_busy
   }
 
-
-
   // FDiv/FSqrt Unit -----------------------
   /*
   var fdivsqrt: FDivSqrtUnit = null

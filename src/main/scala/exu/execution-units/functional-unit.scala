@@ -1977,10 +1977,10 @@ class VecSRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFu
   val isSigned = !uop.rt(RS2, isUnsignedV)
   val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
   val vl = uop.vconfig.vl
-  prestart := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U < uop.vstart).reverse)
-  body     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= uop.vstart && uop.v_eidx + b.U < vl).reverse)
-  mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)), Cat((0 until vLen/8).map(b => rvm_data(b)).reverse))
-  tail     := Cat((0 until vLen/8).map(b => uop.v_eidx + b.U >= vl).reverse)
+  prestart := Cat((0 until vLenb).map(b => uop.v_eidx + b.U < uop.vstart).reverse)
+  body     := Cat((0 until vLenb).map(b => uop.v_eidx + b.U >= uop.vstart && uop.v_eidx + b.U < vl).reverse)
+  mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)), Cat((0 until vLenb).map(b => rvm_data(b)).reverse))
+  tail     := Cat((0 until vLenb).map(b => uop.v_eidx + b.U >= vl).reverse)
   inactive := prestart | body & ~mask | tail
 
   val divValid = Wire(Vec(vLenb, Bool()))
@@ -2099,6 +2099,7 @@ class VecSRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFu
   // output
   io.req.ready  := (state === s_idle)
   io.resp.valid := divValid.andR && !this.do_kill
+  io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
   io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
                              Seq(e8Out.asUInt, e16Out.asUInt, e32Out.asUInt, e64Out.asUInt))
 }

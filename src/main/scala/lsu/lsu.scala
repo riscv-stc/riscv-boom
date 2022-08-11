@@ -357,7 +357,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val hella_paddr           = Reg(UInt(paddrBits.W))
   val hella_xcpt            = Reg(new rocket.HellaCacheExceptions)
 
-
   val dtlb = Module(new NBDTLB(
     instruction = false,
     lgMaxSize = log2Ceil(coreDataBytes),
@@ -375,7 +374,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vlagu = Module(new VecLSAddrGenUnit())
     vsagu = Module(new VecLSAddrGenUnit())
     // vlud_vrf_q = Module(new BranchKillableQueue(new BKQUInt(0), 4, flow = false))
-    vlud_dat_q = Module(new BranchKillableQueue(new BKQUInt(vLen), 4, flow = false))
+    vlud_dat_q = Module(new BranchKillableQueue(new BKQUInt(vLen), 8, flow = false))
     //vstd_vrf_q = Module(new Queue(new UInt(0.W), 4))
     //vstd_dat_q = Module(new Queue(new UInt(vLen.W), 4))
     vrf_rarb = Module(new Arbiter(UInt(vpregSz.W), 3))
@@ -394,16 +393,15 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   io.core.perf.mshrs_store_reuse := io.dmem.perf.mshrs_store_reuse
   io.core.perf.iomshrs_has_busy := io.dmem.perf.iomshrs_has_busy
   io.core.perf.iomshrs_all_busy := io.dmem.perf.iomshrs_all_busy
-  io.core.perf.in_flight_load := (0 until numLdqEntries).map(i => ldq(i).valid && ldq(i).bits.executed && !ldq(i).bits.succeeded).reduce(_ || _)
+  io.core.perf.in_flight_load := (0 until numLdqEntries).map(i => ldq(i).valid && ldq(i).bits.executed &&
+                                !ldq(i).bits.succeeded).reduce(_ || _)
 
   val clear_store     = WireInit(false.B)
   val live_store_mask = RegInit(0.U(numStqEntries.W))
   var next_live_store_mask = Mux(clear_store, live_store_mask & ~(1.U << stq_head),
                                               live_store_mask)
 
-
   def widthMap[T <: Data](f: Int => T) = VecInit((0 until memWidth).map(f))
-
 
   //-------------------------------------------------------------
   //-------------------------------------------------------------
@@ -412,10 +410,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   //-------------------------------------------------------------
 
   // This is a newer store than existing loads, so clear the bit in all the store dependency masks
-  for (i <- 0 until numLdqEntries)
-  {
-    when (clear_store)
-    {
+  for (i <- 0 until numLdqEntries) {
+    when (clear_store) {
       ldq(i).bits.st_dep_mask := ldq(i).bits.st_dep_mask & ~(1.U << stq_head)
     }
   }
@@ -433,8 +429,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   var ldq_full = Bool()
   var stq_full = Bool()
 
-  for (w <- 0 until coreWidth)
-  {
+  for (w <- 0 until coreWidth) {
     ldq_full = WrapInc(ld_enq_idx, numLdqEntries) === ldq_head
     io.core.ldq_full(w)    := ldq_full
     io.core.dis_ldq_idx(w) := ld_enq_idx
@@ -443,17 +438,32 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     io.core.stq_full(w)    := stq_full
     io.core.dis_stq_idx(w) := st_enq_idx
 
-    val dis_ld_val = io.core.dis_uops(w).valid && io.core.dis_uops(w).bits.uses_ldq && !io.core.dis_uops(w).bits.exception
-    val dis_st_val = io.core.dis_uops(w).valid && io.core.dis_uops(w).bits.uses_stq && !io.core.dis_uops(w).bits.exception
+    val dis_ld_val = io.core.dis_uops(w).valid && io.core.dis_uops(w).bits.uses_ldq &&
+                    !io.core.dis_uops(w).bits.exception
+    val dis_st_val = io.core.dis_uops(w).valid && io.core.dis_uops(w).bits.uses_stq &&
+                    !io.core.dis_uops(w).bits.exception
 
-    val dis_vl_wakeup = io.core.vl_wakeup.valid && (io.core.vl_wakeup.bits.vconfig_tag+1.U) === io.core.dis_uops(w).bits.vconfig_tag && !io.core.dis_uops(w).bits.vl_ready
-    when (dis_ld_val)
-    {
+    val dis_vl_wakeup = io.core.vl_wakeup.valid &&
+      (io.core.vl_wakeup.bits.vconfig_tag + 1.U) === io.core.dis_uops(w).bits.vconfig_tag &&
+      !io.core.dis_uops(w).bits.vl_ready
+
+    when (dis_ld_val) {
       ldq(ld_enq_idx).valid                := true.B
       ldq(ld_enq_idx).bits.uop             := io.core.dis_uops(w).bits
+
+      when (io.core.dis_uops(w).bits.vl_ready &&
+        (io.core.dis_uops(w).bits.uopc.isOneOf(uopVLM) ||
+        (io.core.dis_uops(w).bits.is_rvv && io.core.dis_uops(w).bits.ldst_val &&
+        io.core.dis_uops(w).bits.ldst === 0.U))) { // v0
+        ldq(ld_enq_idx).bits.uop.vconfig.vl := (io.core.dis_uops(w).bits.vconfig.vl + 7.U) >> 3.U
+      }
+
       when(dis_vl_wakeup) {
         ldq(ld_enq_idx).bits.uop.vl_ready   := true.B
-        ldq(ld_enq_idx).bits.uop.vconfig.vl := Mux(io.core.dis_uops(w).bits.uopc.isOneOf(uopVLM), (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
+        ldq(ld_enq_idx).bits.uop.vconfig.vl := Mux(io.core.dis_uops(w).bits.uopc.isOneOf(uopVLM) ||
+          (io.core.dis_uops(w).bits.is_rvv && io.core.dis_uops(w).bits.ldst_val &&
+          io.core.dis_uops(w).bits.ldst === 0.U), // v0
+          (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
       }
       ldq(ld_enq_idx).bits.youngest_stq_idx  := st_enq_idx
       ldq(ld_enq_idx).bits.st_dep_mask     := next_live_store_mask
@@ -467,14 +477,21 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
       assert (ld_enq_idx === io.core.dis_uops(w).bits.ldq_idx, "[lsu] mismatch enq load tag.")
       assert (!ldq(ld_enq_idx).valid, "[lsu] Enqueuing uop is overwriting ldq entries")
-    }
-      .elsewhen (dis_st_val)
-    {
+    } .elsewhen (dis_st_val) {
       stq(st_enq_idx).valid           := true.B
       stq(st_enq_idx).bits.uop        := io.core.dis_uops(w).bits
+
+      when(io.core.dis_uops(w).bits.vl_ready &&
+        (io.core.dis_uops(w).bits.uopc.isOneOf(uopVSMA) ||
+        (io.core.dis_uops(w).bits.is_rvv && io.core.dis_uops(w).bits.ldst === 0.U))) { // v0
+        stq(st_enq_idx).bits.uop.vconfig.vl := (io.core.dis_uops(w).bits.vconfig.vl + 7.U) >> 3.U
+      }
+
       when(dis_vl_wakeup) {
         stq(st_enq_idx).bits.uop.vl_ready   := true.B
-        stq(st_enq_idx).bits.uop.vconfig.vl := Mux(io.core.dis_uops(w).bits.uopc.isOneOf(uopVSMA), (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
+        stq(st_enq_idx).bits.uop.vconfig.vl := Mux(io.core.dis_uops(w).bits.uopc.isOneOf(uopVSMA) ||
+          (io.core.dis_uops(w).bits.is_rvv && io.core.dis_uops(w).bits.ldst === 0.U), // v0
+          (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
       }
       stq(st_enq_idx).bits.addr.valid := false.B
       stq(st_enq_idx).bits.data.valid := false.B
@@ -486,13 +503,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       assert (!stq(st_enq_idx).valid, "[lsu] Enqueuing uop is overwriting stq entries")
     }
 
-    ld_enq_idx = Mux(dis_ld_val, WrapInc(ld_enq_idx, numLdqEntries),
-                                 ld_enq_idx)
-
-    next_live_store_mask = Mux(dis_st_val, next_live_store_mask | (1.U << st_enq_idx),
-                                           next_live_store_mask)
-    st_enq_idx = Mux(dis_st_val, WrapInc(st_enq_idx, numStqEntries),
-                                 st_enq_idx)
+    ld_enq_idx = Mux(dis_ld_val, WrapInc(ld_enq_idx, numLdqEntries), ld_enq_idx)
+    next_live_store_mask = Mux(dis_st_val, next_live_store_mask | (1.U << st_enq_idx), next_live_store_mask)
+    st_enq_idx = Mux(dis_st_val, WrapInc(st_enq_idx, numStqEntries), st_enq_idx)
 
     assert(!(dis_ld_val && dis_st_val), "A UOP is trying to go into both the LDQ and the STQ")
   }
@@ -503,26 +516,37 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   io.dmem.force_order   := io.core.fence_dmem
   io.core.fencei_rdy    := !stq_nonempty && io.dmem.ordered
 
-
   io.core.perf.stq_full := io.core.stq_full.reduce(_||_)
 
   // vl_wakeup, speculative vconfig wakeup
-  for (i <- 0 until numLdqEntries)
-  {
-    when (io.core.vl_wakeup.valid && (io.core.vl_wakeup.bits.vconfig_tag+1.U) === ldq(i).bits.uop.vconfig_tag && !ldq(i).bits.uop.vl_ready)
-    { 
-      ldq(i).bits.uop.vl_ready   := true.B
-      ldq(i).bits.uop.vconfig.vl := Mux(ldq(i).bits.uop.uopc.isOneOf(uopVLM), (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
+  for (idx <- 0 until numLdqEntries) {
+    val ld_val = ldq(idx).valid && ldq(idx).bits.uop.uses_ldq &&
+                !ldq(idx).bits.uop.vl_ready && !ldq(idx).bits.uop.exception
+    val ld_vl_wakeup = io.core.vl_wakeup.valid &&
+      (io.core.vl_wakeup.bits.vconfig_tag + 1.U) === ldq(idx).bits.uop.vconfig_tag
+
+    when(ld_val && ld_vl_wakeup) {
+      ldq(idx).bits.uop.vl_ready := true.B
+      ldq(idx).bits.uop.vconfig.vl := Mux(ldq(idx).bits.uop.uopc.isOneOf(uopVLM) ||
+        (ldq(idx).bits.uop.is_rvv && ldq(idx).bits.uop.ldst_val && ldq(idx).bits.uop.ldst === 0.U), //v0
+        (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
     }
   }
 
-  for (i <- 0 until numStqEntries) 
-  {
-    when (io.core.vl_wakeup.valid && (io.core.vl_wakeup.bits.vconfig_tag+1.U) === stq(i).bits.uop.vconfig_tag && !stq(i).bits.uop.vl_ready) {
-      stq(i).bits.uop.vl_ready   := true.B
-      stq(i).bits.uop.vconfig.vl := Mux(ldq(i).bits.uop.uopc.isOneOf(uopVSMA), (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
+  for (idx <- 0 until numStqEntries) {
+    val st_val = stq(idx).valid && stq(idx).bits.uop.uses_stq &&
+                !stq(idx).bits.uop.vl_ready && !stq(idx).bits.uop.exception
+    val st_vl_wakeup = io.core.vl_wakeup.valid &&
+      (io.core.vl_wakeup.bits.vconfig_tag + 1.U) === stq(idx).bits.uop.vconfig_tag
+
+    when(st_val && st_vl_wakeup) {
+      stq(idx).bits.uop.vl_ready := true.B
+      stq(idx).bits.uop.vconfig.vl := Mux(stq(idx).bits.uop.uopc.isOneOf(uopVSMA) ||
+        (stq(idx).bits.uop.is_rvv && stq(idx).bits.uop.ldst === 0.U),  // v0
+        (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
     }
   }
+
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // Execute stage (access TLB, send requests to Memory)
@@ -535,7 +559,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val mem_xcpt_cause  = Wire(UInt())
   val mem_xcpt_uop    = Wire(new MicroOp)
   val mem_xcpt_vaddr  = Wire(UInt())
-
 
   //---------------------------------------
   // Can-fire logic and wakeup/retry select
@@ -668,9 +691,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                 !stq_retry_e.bits.uop.is_vm_ext               &&
                                  (w == memWidth-1).B                          &&
                                  RegNext(dtlb.io.miss_rdy)                    &&
-                                 !(widthMap(i => (i != w).B               &&
-                                                 can_fire_std_incoming(i) &&
-                                                 stq_incoming_idx(i) === stq_retry_idx).reduce(_||_))
+                                 !(widthMap(i => (i != w).B                   &&
+                                  can_fire_std_incoming(i)                    &&
+                                  stq_incoming_idx(i) === stq_retry_idx).reduce(_||_))
                                ))
   // Can we commit a store
   val can_fire_store_commit  = widthMap(w =>
@@ -2753,12 +2776,14 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
     io.resp.bits.uop.v_split_ecnt := vLenECnt
   }
   io.resp.bits.uop.v_split_first:= uop.v_eidx === 0.U
-  io.resp.bits.uop.v_split_last := Mux(state === s_udcpy, emulCtr + 1.U === nrVecGroup(emul, uop.v_seg_nf), uop.v_eidx +& eidxInc >= uop.vconfig.vl)
+  io.resp.bits.uop.v_split_last := Mux(state === s_udcpy, emulCtr + 1.U === nrVecGroup(emul, uop.v_seg_nf),
+                                  uop.v_eidx +& eidxInc >= uop.vconfig.vl)
   io.resp.bits.uop.m_sidx       := sliceCntCtr
   io.resp.bits.uop.m_split_first:= (sliceCntCtr === 0.U) && (sliceLenCtr === 0.U)
   io.resp.bits.uop.m_split_last := (sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast
-  io.resp_vm                    := Mux(uop.is_rvv, VRegMask(uop.v_eidx, eew, eidxInc, vLenb) & Mux(uop.v_unmasked, Fill(vLenb, 1.U(1.W)), vmByteMask) & bodyByteMask,
-                                                   VRegMask(sliceBlockAddr, 0.U, sliceAddrInc, vLenb))
+  io.resp_vm                    := Mux(uop.is_rvv, VRegMask(uop.v_eidx, eew, eidxInc, vLenb) &
+                                  Mux(uop.v_unmasked, Fill(vLenb, 1.U(1.W)), vmByteMask) & bodyByteMask,
+                                  VRegMask(sliceBlockAddr, 0.U, sliceAddrInc, vLenb))
   io.resp_shdir                 := Mux(uop.is_rvm && sliceLenCtr === 0.U, true.B,
                                    Mux(uop.is_rvv && !isUnitStride, false.B,
                                    Mux(uop.is_rvv && usSplitCtr === 0.U, true.B, false.B)))
