@@ -2193,7 +2193,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // LSU <> ROB
   rob.io.lsu_clr_bsy    := io.lsu.clr_bsy
   rob.io.lsu_clr_unsafe := io.lsu.clr_unsafe
-  rob.io.lsu_update_mls := io.lsu.update_mls
+  rob.io.lsu_update_ls := io.lsu.update_ls
   rob.io.lxcpt          <> io.lsu.lxcpt
 
   //-------------------------------------------------------------

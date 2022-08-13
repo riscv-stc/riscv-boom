@@ -148,10 +148,10 @@ class BKQUInt(val wid: Int = 0)(implicit p: Parameters) extends BoomBundle()(p)
   val data = UInt(wid.W)
 }
 
-class MLSSplitCnt(implicit p: Parameters) extends BoomBundle()(p)
+class LSSplitCnt(implicit p: Parameters) extends BoomBundle()(p)
 {
   val rob_idx = UInt(robAddrSz.W)
-  val mls_cnt = UInt((vLenbSz+1).W)
+  val ls_cnt = UInt((vLenbSz+1).W)
 }
 
 class VecMemIO(implicit p: Parameters, edge: TLEdgeOut) extends BoomBundle()(p)
@@ -200,7 +200,7 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
   // Speculatively safe load (barring memory ordering failure)
   val clr_unsafe      = Output(Vec(memWidth, Valid(new MicroOp)))
 
-  val update_mls      = if (usingMatrix) Output(Vec(2, Valid(new MLSSplitCnt()))) else null
+  val update_ls      = if (usingMatrix || usingVector) Output(Vec(2, Valid(new LSSplitCnt()))) else null
 
   // Tell the DCache to clear prefetches/speculating misses
   val fence_dmem   = Input(Bool())
@@ -869,26 +869,31 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vstq_tail := WrapInc(vstq_tail, numVStqEntries)
   }
 
-    // update mle cnt 
-  if (usingMatrix) {
-    when (vlagu.io.resp.fire && vlagu.io.resp.bits.uop.uopc.isOneOf(uopMLE)) {
-      io.core.update_mls(0).valid        := true.B
-      io.core.update_mls(0).bits.rob_idx := vlagu.io.resp.bits.uop.rob_idx
-      io.core.update_mls(0).bits.mls_cnt := vlagu.io.resp.bits.data
+    // update mle rvv-le cnt
+  if (usingMatrix || usingVector) {
+    when ((vlagu.io.resp.fire &&
+         (vlagu.io.resp.bits.uop.uopc.isOneOf(uopMLE) ||
+         (vlagu.io.resp.bits.uop.is_rvv && vlagu.io.resp.bits.uop.uses_ldq))) ||
+         (vlagu.io.vrf_raddr.fire && vlagu.io.vrf_rtag === 1.U)) {
+      io.core.update_ls(0).valid        := true.B
+      io.core.update_ls(0).bits.rob_idx := vlagu.io.resp.bits.uop.rob_idx
+      io.core.update_ls(0).bits.ls_cnt := vlagu.io.resp.bits.data
     } .otherwise {
-      io.core.update_mls(0).valid        := false.B
-      io.core.update_mls(0).bits.rob_idx := 0.U
-      io.core.update_mls(0).bits.mls_cnt := 0.U
+      io.core.update_ls(0).valid        := false.B
+      io.core.update_ls(0).bits.rob_idx := 0.U
+      io.core.update_ls(0).bits.ls_cnt := 0.U
     }
 
-    when (vsagu.io.resp.fire && vsagu.io.resp.bits.uop.uopc.isOneOf(uopMSE)) {
-      io.core.update_mls(1).valid        := true.B
-      io.core.update_mls(1).bits.rob_idx := vsagu.io.resp.bits.uop.rob_idx
-      io.core.update_mls(1).bits.mls_cnt := vsagu.io.resp.bits.data
+    when (vsagu.io.resp.fire &&
+         (vsagu.io.resp.bits.uop.uopc.isOneOf(uopMSE) ||
+         (vsagu.io.resp.bits.uop.is_rvv && vsagu.io.resp.bits.uop.uses_stq))) {
+      io.core.update_ls(1).valid        := true.B
+      io.core.update_ls(1).bits.rob_idx := vsagu.io.resp.bits.uop.rob_idx
+      io.core.update_ls(1).bits.ls_cnt := vsagu.io.resp.bits.data
     } .otherwise {
-      io.core.update_mls(1).valid        := false.B
-      io.core.update_mls(1).bits.rob_idx := 0.U
-      io.core.update_mls(1).bits.mls_cnt := 0.U
+      io.core.update_ls(1).valid        := false.B
+      io.core.update_ls(1).bits.rob_idx := 0.U
+      io.core.update_ls(1).bits.ls_cnt := 0.U
     }
   }
 
@@ -1125,21 +1130,17 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   for (w <- 0 until memWidth) {
     assert (exe_tlb_paddr(w) === dtlb.io.resp(w).paddr || exe_req(w).bits.sfence.valid, "[lsu] paddrs should match.")
 
-    when (mem_xcpt_valids(w))
-    {
+    when (mem_xcpt_valids(w)) {
       assert(RegNext(will_fire_load_incoming(w) || will_fire_stad_incoming(w) || will_fire_sta_incoming(w) ||
         will_fire_load_retry(w) || will_fire_sta_retry(w) || will_fire_vldq_lookup(w) || will_fire_vstq_lookup(w)))
       // Technically only faulting AMOs need this
       assert(mem_xcpt_uops(w).uses_ldq ^ mem_xcpt_uops(w).uses_stq)
-      when (mem_xcpt_uops(w).uses_ldq)
-      {
+      when (mem_xcpt_uops(w).uses_ldq) {
         ldq(mem_xcpt_uops(w).ldq_idx).bits.uop.exception := true.B
         when (RegNext(will_fire_vldq_lookup(w))) {
           vldq(RegNext(vldq_lkup_idx)).bits.uop.exception := true.B
         }
-      }
-        .otherwise
-      {
+      }.otherwise {
         stq(mem_xcpt_uops(w).stq_idx).bits.uop.exception := true.B
         when (RegNext(will_fire_vstq_lookup(w))) {
           vstq(RegNext(vstq_lkup_idx)).bits.uop.exception := true.B
@@ -1945,21 +1946,15 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   for (w <- 0 until memWidth) {
     // Handle nacks
-    when (io.dmem.nack(w).valid)
-    {
+    when (io.dmem.nack(w).valid) {
       // We have to re-execute this!
-      when (io.dmem.nack(w).bits.is_hella)
-      {
+      when (io.dmem.nack(w).bits.is_hella) {
         assert(hella_state === h_wait || hella_state === h_dead)
-      }
-        .elsewhen (io.dmem.nack(w).bits.uop.uses_ldq)
-      {
+      }.elsewhen (io.dmem.nack(w).bits.uop.uses_ldq) {
         assert(ldq(io.dmem.nack(w).bits.uop.ldq_idx).bits.executed)
         ldq(io.dmem.nack(w).bits.uop.ldq_idx).bits.executed  := false.B
         nacking_loads(io.dmem.nack(w).bits.uop.ldq_idx) := true.B
-      }
-        .otherwise
-      {
+      }.otherwise {
         assert(io.dmem.nack(w).bits.uop.uses_stq)
         when (IsOlder(io.dmem.nack(w).bits.uop.stq_idx, stq_execute_head, stq_head)) {
           stq_execute_head := io.dmem.nack(w).bits.uop.stq_idx
@@ -1967,10 +1962,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       }
     }
     // Handle the response
-    when (io.dmem.resp(w).valid)
-    {
-      when (io.dmem.resp(w).bits.uop.uses_ldq)
-      {
+    when (io.dmem.resp(w).valid) {
+      when (io.dmem.resp(w).bits.uop.uses_ldq) {
         assert(!io.dmem.resp(w).bits.is_hella)
         val ldq_idx = io.dmem.resp(w).bits.uop.ldq_idx
         val send_iresp = ldq(ldq_idx).bits.uop.rt(RD, isInt)
@@ -2152,17 +2145,14 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   var temp_stq_commit_head = stq_commit_head
   var temp_ldq_head        = ldq_head
-  for (w <- 0 until coreWidth)
-  {
+  for (w <- 0 until coreWidth) {
     val commit_store = io.core.commit.valids(w) && io.core.commit.uops(w).uses_stq
     val commit_load  = io.core.commit.valids(w) && io.core.commit.uops(w).uses_ldq
     val idx = Mux(commit_store, temp_stq_commit_head, temp_ldq_head)
-    when (commit_store)
-    {
+    when (commit_store) {
       stq(idx).bits.committed := true.B
 
-      for (i <- 0 until numVStqEntries)
-      {
+      for (i <- 0 until numVStqEntries) {
         when (vstq(i).valid && vstq(i).bits.uop.stq_idx === idx) {
           vstq(i).bits.committed  := true.B
         }
@@ -2178,7 +2168,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       ldq(idx).bits.succeeded        := false.B
       ldq(idx).bits.order_fail       := false.B
       ldq(idx).bits.forward_std_val  := false.B
-
     }
 
     if (MEMTRACE_PRINTF) {
@@ -2514,6 +2503,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   val eidxInc    = WireInit(0.U(vLenSz.W))
   val usSplitLeftCnt = RegInit(0.U(vLenSz.W))      // counted in bytes
   val misaligned = WireInit(false.B)
+
   if (vLenb > clSize) {
     addrInc := Mux(uop.v_idx_ls, 0.U,
                Mux(uop.uopc.isOneOf(uopVLS, uopVSSA), req.rs2_data,
@@ -2535,6 +2525,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   val sliceCntCtr    = RegInit(0.U(vLenbSz.W))
   val sliceLenCtr    = RegInit(0.U((vcRatioSz+1).W))
   val splitCnt       = RegInit(0.U((vLenbSz+1).W))
+  val splitFinished = WireInit(false.B)
   val sliceBaseAddr  = RegInit(0.U(xLen.W))
   val sliceBlockAddr = RegInit(0.U(xLen.W))
   val sliceBlockOff  = sliceBaseAddr(clSizeLog2-1, 0)
@@ -2557,10 +2548,8 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   }
 
   // FIXME: handle segment ls
-  if (vLenb > clSize) 
-  {
-    switch(state)
-    {
+  if (vLenb > clSize) {
+    switch(state) {
       is (s_idle) {
         when (io.req.valid) {
           val ioAligned = io.req.bits.rs1_data(clSizeLog2-1, 0) === 0.U && ioUop.vstart === 0.U &&
@@ -2571,6 +2560,8 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
           sliceBaseAddr  := Mux(ioUop.is_rvm, io.req.bits.rs1_data, 0.U)
           sliceBlockAddr := 0.U
           splitCnt       := 0.U
+          splitFinished := false.B
+
           state := Mux(ioUop.is_rvm, s_slice,
                    Mux(ioUop.uses_ldq && (!ioAligned || !ioUop.v_unmasked), s_udcpy, // does aligned idx ls perform ud copy?
                    Mux(!ioUop.v_unmasked, s_vmask,
@@ -2580,6 +2571,8 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
       is (s_udcpy) {
         when (io.vrf_raddr.fire) {
           emulCtr := emulCtr + 1.U
+          splitCnt := splitCnt + 1.U
+
           when (emulCtr + 1.U === nrVecGroup(emul, uop.v_seg_nf)) {
             emulCtr := 0.U
             state := Mux(!uop.v_unmasked, s_vmask,
@@ -2595,6 +2588,8 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
       is (s_index) {
         when (io.vrf_raddr.fire) {
           emulCtr := emulCtr + 1.U
+          splitCnt := splitCnt + 1.U
+
           when (emulCtr + 1.U === (1.U << emul)) {
             emulCtr := 0.U
             state := s_split
@@ -2605,6 +2600,8 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
         when (io.resp.fire) {
           op1 := op1 + addrInc
           uop.v_eidx := uop.v_eidx + eidxInc
+          splitCnt := splitCnt + 1.U
+
           when (isUnitStride) {
             usSplitCtr := usSplitCtr + 1.U
             when (usSplitCtr + 1.U === vcRatio.U + (clOffset =/= 0.U).asUInt) {
@@ -2616,9 +2613,11 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
               emulCtr := emulCtr + 1.U
             }
           }
+
           when (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl) {
             emulCtr := 0.U
             state := s_idle
+            splitFinished := true.B
           }
         }
       }
@@ -2627,6 +2626,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
           sliceLenCtr      := sliceLenCtr + 1.U
           sliceBlockAddr   := sliceBlockAddr + sliceAddrInc
           splitCnt         := splitCnt + 1.U
+
           when (sliceLenLast) {
             sliceLenCtr    := 0.U
             sliceCntCtr    := sliceCntCtr + 1.U
@@ -2641,27 +2641,30 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
       }
     }
   } else {
-    switch(state)
-    {
+    switch(state) {
       is (s_idle) {
-        when (io.req.valid) {
-          val ioAligned = io.req.bits.rs1_data(clSizeLog2-1, 0) === 0.U && ioUop.vstart === 0.U &&
-                          ((ioUop.vconfig.vl & (0x3F.U >> ioUop.vd_eew)) === 0.U)
-          emulCtr        := 0.U
-          usSplitCtr     := 0.U
-          sliceCntCtr    := 0.U
-          sliceBaseAddr  := Mux(ioUop.is_rvm, io.req.bits.rs1_data, 0.U)
+        when(io.req.valid) {
+          val ioAligned = io.req.bits.rs1_data(clSizeLog2 - 1, 0) === 0.U && ioUop.vstart === 0.U &&
+            ((ioUop.vconfig.vl & (0x3F.U >> ioUop.vd_eew)) === 0.U)
+          emulCtr := 0.U
+          usSplitCtr := 0.U
+          sliceCntCtr := 0.U
+          sliceBaseAddr := Mux(ioUop.is_rvm, io.req.bits.rs1_data, 0.U)
           sliceBlockAddr := 0.U
-          splitCnt       := 0.U
+          splitCnt := 0.U
+          splitFinished := false.B
+
           state := Mux(ioUop.is_rvm, s_slice,
-                   Mux(ioUop.uses_ldq && (!ioAligned || !ioUop.v_unmasked), s_udcpy, // does aligned idx ls perform ud copy?
-                   Mux(!ioUop.v_unmasked, s_vmask,
-                   Mux(ioUop.v_idx_ls, s_index, s_split))))
+            Mux(ioUop.uses_ldq && (!ioAligned || !ioUop.v_unmasked), s_udcpy, // does aligned idx ls perform ud copy?
+              Mux(!ioUop.v_unmasked, s_vmask,
+                Mux(ioUop.v_idx_ls, s_index, s_split))))
         }
       }
       is (s_udcpy) {
         when (io.vrf_raddr.fire) {
           emulCtr := emulCtr + 1.U
+          splitCnt := splitCnt + 1.U
+
           when (emulCtr + 1.U === nrVecGroup(emul, uop.v_seg_nf)) {
             emulCtr := 0.U
             state := Mux(!uop.v_unmasked, s_vmask,
@@ -2677,6 +2680,8 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
       is (s_index) {
         when (io.vrf_raddr.fire) {
           emulCtr := emulCtr + 1.U
+          splitCnt := splitCnt + 1.U
+
           when (emulCtr + 1.U === (1.U << emul)) {
             emulCtr := 0.U
             state := s_split
@@ -2687,6 +2692,8 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
         when (io.resp.fire) {
           op1 := op1 + addrInc
           uop.v_eidx := uop.v_eidx + eidxInc
+          splitCnt := splitCnt + 1.U
+
           when (isUnitStride && clOffset <= (clSize-vLenb).asUInt) {
             usSplitCtr := 0.U
             emulCtr    := emulCtr + 1.U
@@ -2698,9 +2705,11 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
               emulCtr := emulCtr + 1.U
             }
           }
+
           when (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl) {
             emulCtr := 0.U
             state := s_idle
+            splitFinished := true.B
           }
         }
       }
@@ -2709,6 +2718,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
           sliceLenCtr      := sliceLenCtr + 1.U
           sliceBlockAddr   := sliceBlockAddr + sliceAddrInc
           splitCnt         := splitCnt + 1.U
+
           when (sliceLenLast) {
             sliceLenCtr    := 0.U
             sliceCntCtr    := sliceCntCtr + 1.U
@@ -2797,8 +2807,8 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
 
   io.resp.bits.addr := Mux(uop.is_rvv, Cat((op1 + op2) >> clSizeLog2.U, 0.U(clSizeLog2.W)),
                                        ((sliceBaseAddr+sliceBlockAddr) >> clSizeLog2.U) ## 0.U(clSizeLog2.W))
-  io.resp.bits.data := Mux(uop.is_rvm && (sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast, splitCnt + 1.U,
-                       Mux(uop.is_rvm, splitCnt + 2.U, 0.U))
+  io.resp.bits.data := Mux(uop.is_rvv, Mux(splitFinished, splitCnt + 1.U, splitCnt + 2.U),
+                       Mux((sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast, splitCnt + 1.U, splitCnt + 2.U))
 
   // FIXME exceptions: misaligned, breakpoints
   val effAddr = Mux(state === s_split, (op1 + op2)(2, 0),

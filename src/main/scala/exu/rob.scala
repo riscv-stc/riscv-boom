@@ -33,7 +33,7 @@ import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
 import freechips.rocketchip.rocket.VConfig
-import boom.lsu.{MLSSplitCnt}
+import boom.lsu.{LSSplitCnt}
 
 /**
  * IO bundle to interact with the ROB
@@ -76,7 +76,7 @@ class RobIo(
   // Port for unmarking loads/stores as speculation hazards..
   val lsu_clr_unsafe   = Input(Vec(memWidth, Valid(new MicroOp)))
 
-  val lsu_update_mls   = if (usingMatrix) Input(Vec(2, Valid(new MLSSplitCnt()))) else null
+  val lsu_update_ls   = if (usingMatrix || usingVector) Input(Vec(2, Valid(new LSSplitCnt()))) else null
 
   // vector and matrix stores require to monitor rs3 busy status
   val vbusy_status    = if (usingVector) Input(UInt(numVecPhysRegs.W))    else null
@@ -323,9 +323,8 @@ class Rob(
     // one bank
     val rob_val       = RegInit(VecInit(Seq.fill(numRobRows){false.B}))
     val rob_bsy       = Reg(Vec(numRobRows, Bool()))
-    val rob_ud_bsy    = if (usingVector) Reg(Vec(numRobRows, Bool())) else null
-    val rob_mls_cnt   = if (usingMatrix) Reg(Vec(numRobRows, UInt(vLenSz.W))) else null  // FIXME: correct datawith, vlenSz too large
-    val rob_mls_wbs   = if (usingMatrix) Reg(Vec(numRobRows, UInt(vLenSz.W))) else null  // FIXME: correct datawith, vlenSz too large
+    val rob_ls_cnt   = if (usingMatrix || usingVector) Reg(Vec(numRobRows, UInt(vLenSz.W))) else null  // FIXME: correct datawith, vlenSz too large
+    val rob_ls_wbs   = if (usingMatrix || usingVector) Reg(Vec(numRobRows, UInt(vLenSz.W))) else null  // FIXME: correct datawith, vlenSz too large
     val rob_unsafe    = Reg(Vec(numRobRows, Bool()))
     val rob_uop       = Reg(Vec(numRobRows, new MicroOp()))
     val rob_exception = Reg(Vec(numRobRows, Bool()))
@@ -351,13 +350,14 @@ class Rob(
       rob_predicated(rob_tail)   := false.B
       rob_vleff_exception(rob_tail) := false.B
       rob_fflags(rob_tail)    := 0.U
+
       if (usingVector) {
         rob_uop(rob_tail).v_split_ecnt := 0.U
-        rob_ud_bsy(rob_tail)  := io.enq_uops(w).is_rvv && io.enq_uops(w).uses_ldq
       }
-      if (usingMatrix) {
-        rob_mls_cnt(rob_tail) := 0.U
-        rob_mls_wbs(rob_tail) := 0.U
+
+      if (usingMatrix || usingVector) {
+        rob_ls_cnt(rob_tail) := 0.U
+        rob_ls_wbs(rob_tail) := 0.U
       }
 
       assert (rob_val(rob_tail) === false.B, "[rob] overwriting a valid entry.")
@@ -368,11 +368,11 @@ class Rob(
 
     //-----------------------------------------------
     // update mls cnt by lsu
-    if (usingMatrix) {
-      for(inc <- io.lsu_update_mls) {
+    if (usingMatrix || usingVector) {
+      for(inc <- io.lsu_update_ls) {
         when (inc.valid && MatchBank(GetBankIdx(inc.bits.rob_idx))) {
           val cidx = GetRowIdx(inc.bits.rob_idx)
-          rob_mls_cnt(cidx) := inc.bits.mls_cnt
+          rob_ls_cnt(cidx) := inc.bits.ls_cnt
         }
       }
     }
@@ -384,33 +384,34 @@ class Rob(
       val wb_resp = io.wb_resps(i)
       val wb_uop = wb_resp.bits.uop
       val row_idx = GetRowIdx(wb_uop.rob_idx)
+
       if (usingMatrix) {
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
           val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           val wb_rvm_load = wb_uop.uopc.isOneOf(uopMLE)
           // clear busy and unsafe; vconfig.vl in rob may be incorrect under speculatively vsetvl execution
           when(!wb_uop.is_vm_ext ||
-               (wb_rvv_load && wb_uop.uses_ldq && rob_uop(row_idx).v_split_ecnt +& wb_uop.v_split_ecnt >= wb_uop.vconfig.vl) ||
-               (wb_uop.is_rvv && !wb_rvv_load && (!wb_uop.v_is_split || wb_uop.v_split_last)) ||
-               (wb_rvm_load && rob_mls_wbs(row_idx) +& 1.U >= rob_mls_cnt(row_idx)) ||
+               (wb_rvv_load && (rob_ls_wbs(row_idx) +& 1.U >= rob_ls_cnt(row_idx))) ||
+               (wb_uop.is_rvv && !wb_rvv_load && (!wb_uop.v_is_split || wb_uop.v_split_last)) || // have bug
+               (wb_rvm_load && (rob_ls_wbs(row_idx) +& 1.U >= rob_ls_cnt(row_idx))) ||
                (wb_uop.is_rvm && !wb_rvm_load && wb_uop.m_split_last)) {
             rob_bsy(row_idx)    := false.B
             rob_unsafe(row_idx) := false.B
             rob_uop(row_idx).v_split_last := true.B
           }
-          // clear ud_bsy
-          when (wb_rvv_load && !wb_uop.uses_ldq && wb_uop.v_split_last) {
-            rob_ud_bsy(row_idx) := false.B
-          }
-          // increase v_split_ecnt when rvv load write back; use ecnt instead of v_split_last because splits may return out-of-order
+
+          // increase v_split_ecnt when rvv load write back;
+          // use ecnt instead of v_split_last because splits may return out-of-order
           when (wb_rvv_load && wb_uop.uses_ldq) {
             rob_uop(row_idx).v_split_ecnt := rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt
           }
-          when (wb_rvm_load) {
-            rob_mls_wbs(row_idx) := rob_mls_wbs(row_idx) + 1.U
+          when (wb_rvv_load || wb_rvm_load) {
+            rob_ls_wbs(row_idx) := rob_ls_wbs(row_idx) + 1.U
           }
+
           rob_predicated(row_idx) := wb_resp.bits.predicated
           rob_uop(row_idx).vxsat  := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
+
           if (O3PIPEVIEW_PRINTF) {
             printf("%d; O3PipeView:complete:%d\n",
               rob_uop(row_idx).debug_events.fetch_seq,
@@ -422,22 +423,26 @@ class Rob(
           val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           // clear busy and unsafe
           when(!wb_uop.is_rvv || 
-               (wb_rvv_load && wb_uop.uses_ldq && rob_uop(row_idx).v_split_ecnt +& wb_uop.v_split_ecnt >= wb_uop.vconfig.vl) ||
+               (wb_rvv_load && (rob_ls_wbs(row_idx) +& 1.U >= rob_ls_cnt(row_idx))) ||
                (!wb_rvv_load && (!wb_uop.v_is_split || wb_uop.v_split_last))) {
             rob_bsy(row_idx)    := false.B
             rob_unsafe(row_idx) := false.B
             rob_uop(row_idx).v_split_last := true.B
           }
-          // clear ud_bsy
-          when (wb_rvv_load && !wb_uop.uses_ldq && wb_uop.v_split_last) {
-            rob_ud_bsy(row_idx) := false.B
-          }
-          // increase v_split_ecnt when rvv load write back; use ecnt instead of v_split_last because splits may return out-of-order
+
+          // increase v_split_ecnt when rvv load write back;
+          // use ecnt instead of v_split_last because splits may return out-of-order
           when (wb_rvv_load && wb_uop.uses_ldq) {
             rob_uop(row_idx).v_split_ecnt := rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt
           }
+
+          when (wb_rvv_load) {
+            rob_ls_wbs(row_idx) := rob_ls_wbs(row_idx) + 1.U
+          }
+
           rob_predicated(row_idx) := wb_resp.bits.predicated
           rob_uop(row_idx).vxsat  := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
+
           if (O3PIPEVIEW_PRINTF) {
             printf("%d; O3PipeView:complete:%d\n",
               rob_uop(row_idx).debug_events.fetch_seq,
@@ -456,34 +461,38 @@ class Rob(
           }
         }
       }
+
       // TODO check that fflags aren't overwritten
       // TODO check that the wb is to a valid ROB entry, give it a time stamp
-//        assert (!(wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx)) &&
-//                  wb_uop.fp_val && !(wb_uop.is_load || wb_uop.is_store) &&
-//                  rob_exc_cause(row_idx) =/= 0.U),
-//                  "FP instruction writing back exc bits is overriding an existing exception.")
+      //        assert (!(wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx)) &&
+      //                  wb_uop.fp_val && !(wb_uop.is_load || wb_uop.is_store) &&
+      //                  rob_exc_cause(row_idx) =/= 0.U),
+      //                  "FP instruction writing back exc bits is overriding an existing exception.")
     }
 
     // Stores have a separate method to clear busy bits
     for (lsu_clr_bsy <- io.lsu_clr_bsy) {
       val clr_rob_idx = lsu_clr_bsy.bits.rob_idx
+
       when (lsu_clr_bsy.valid && MatchBank(GetBankIdx(clr_rob_idx))) {
         val cidx = GetRowIdx(clr_rob_idx)
         assert (rob_val(cidx) === true.B, "[rob] store writing back to invalid entry.")
         assert (rob_bsy(cidx) === true.B, "[rob] store writing back to a not-busy entry.")
+
         if (usingMatrix) {
-          when (rob_uop(cidx).is_rvm) {
-            rob_mls_wbs(cidx) := rob_mls_wbs(cidx) + 1.U
+          when (rob_uop(cidx).is_rvv || rob_uop(cidx).is_rvm) {
+            rob_ls_wbs(cidx) := rob_ls_wbs(cidx) + 1.U
           }
           when (rob_uop(cidx).is_rvv) {
             rob_uop(cidx).v_split_ecnt := rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt
           }
           when (!lsu_clr_bsy.bits.is_vm_ext ||
-                (rob_uop(cidx).is_rvv && rob_uop(cidx).v_split_ecnt +& lsu_clr_bsy.bits.v_split_ecnt >= lsu_clr_bsy.bits.vconfig.vl) ||
-                (rob_uop(cidx).is_rvm && rob_mls_wbs(cidx) +& 1.U >= rob_mls_cnt(cidx))) {
+                ((rob_uop(cidx).is_rvv || rob_uop(cidx).is_rvm) &&
+                (rob_ls_wbs(cidx) +& 1.U >= rob_ls_cnt(cidx)))) {
             rob_bsy(cidx)    := false.B
             rob_unsafe(cidx) := false.B
             rob_uop(cidx).v_split_last := true.B
+
             if (O3PIPEVIEW_PRINTF) {
               printf("%d; O3PipeView:complete:%d\n",
                 rob_uop(GetRowIdx(clr_rob_idx)).debug_events.fetch_seq, io.debug_tsc)
@@ -491,10 +500,15 @@ class Rob(
           }
         } else if (usingVector) {
           rob_uop(cidx).v_split_ecnt := rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt
-          when (!lsu_clr_bsy.bits.is_rvv || rob_uop(cidx).v_split_ecnt +& lsu_clr_bsy.bits.v_split_ecnt >= lsu_clr_bsy.bits.vconfig.vl) {
+          when (rob_uop(cidx).is_rvv) {
+            rob_ls_wbs(cidx) := rob_ls_wbs(cidx) + 1.U
+          }
+
+          when (!lsu_clr_bsy.bits.is_rvv || (rob_ls_wbs(cidx) +& 1.U >= rob_ls_cnt(cidx))) {
             rob_bsy(cidx)    := false.B
             rob_unsafe(cidx) := false.B
             rob_uop(cidx).v_split_last := true.B
+
             if (O3PIPEVIEW_PRINTF) {
               printf("%d; O3PipeView:complete:%d\n",
                 rob_uop(GetRowIdx(clr_rob_idx)).debug_events.fetch_seq, io.debug_tsc)
@@ -503,6 +517,7 @@ class Rob(
         } else {
           rob_bsy(cidx)    := false.B
           rob_unsafe(cidx) := false.B
+
           if (O3PIPEVIEW_PRINTF) {
             printf("%d; O3PipeView:complete:%d\n",
               rob_uop(GetRowIdx(clr_rob_idx)).debug_events.fetch_seq, io.debug_tsc)
@@ -516,7 +531,6 @@ class Rob(
         rob_unsafe(cidx) := false.B
       }
     }
-
 
     //-----------------------------------------------
     // Accruing fflags
@@ -552,8 +566,8 @@ class Rob(
     // Commit or Rollback
     // Can this instruction commit? (the check for exceptions/rob_state happens later).
     // vector and matrix stores have seperate commit control logic
-    val ud_bsy = if (usingVector) rob_ud_bsy(rob_head) else false.B
-    can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall && !ud_bsy &&
+
+    can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall &&
                      Mux(!rob_uop(rob_head).is_vm_ext || !rob_uop(rob_head).uses_stq, true.B,
                      Mux(rob_uop(rob_head).is_rvv,           ~io.vbusy_status(rob_uop(rob_head).stale_pdst), 
                      Mux(rob_uop(rob_head).rt(RD, isTrTile), ~io.tr_busy_status(rob_uop(rob_head).stale_pdst),
@@ -574,7 +588,6 @@ class Rob(
       io.commit.uops(w).debug_fsrc := BSRC_C
       io.commit.uops(w).taken      := io.brupdate.b2.taken
     }
-
 
     // Don't attempt to rollback the tail's row when the rob is full.
     val rbk_row = rob_state === s_rollback && !full
@@ -606,32 +619,14 @@ class Rob(
       val br_mask = rob_uop(i).br_mask
 
       //kill instruction if mispredict & br mask match
-      when (IsKilledByBranch(io.brupdate, br_mask))
-      {
+      when (IsKilledByBranch(io.brupdate, br_mask)) {
         rob_val(i) := false.B
         rob_uop(i.U).debug_inst := BUBBLE
       } .elsewhen (rob_val(i)) {
         // clear speculation bit even on correct speculation
         rob_uop(i).br_mask := GetNewBrMask(io.brupdate, br_mask)
       }
-
-      //if (usingVector) {
-      //  when (io.vmupdate.map(u =>
-      //      u.valid && !u.bits.v_active &&
-      //      GetRowIdx(u.bits.rob_idx) === i.U &&
-      //      MatchBank(GetBankIdx(u.bits.rob_idx))).reduce(_||_)) {
-      //    assert(rob_val(i), "Vmask Kill invalid entry")
-      //    assert(rob_uop(i).is_rvv, "Vmask Kill invalid entry")
-      //    assert(rob_uop(i).uses_ldq || rob_uop(i).uses_stq, "Vmask Kill non-lsu entry")
-      //    rob_unsafe(i) := false.B
-      //    rob_exception(i) := false.B
-      //    when (rob_uop(i).uses_stq) {
-      //      rob_bsy(i) := false.B
-      //    }
-      //  }
-      //}
     }
-
 
     // Debug signal to figure out which prediction structure
     // or core resolved a branch correctly
@@ -667,8 +662,7 @@ class Rob(
     // debugging write ports that should not be synthesized
     when (will_commit(w)) {
       rob_uop(rob_head).debug_inst := BUBBLE
-    } .elsewhen (rbk_row)
-    {
+    } .elsewhen (rbk_row) {
       rob_uop(rob_tail).debug_inst := BUBBLE
     }
 
@@ -685,10 +679,11 @@ class Rob(
       assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
                !rob_val(GetRowIdx(rob_idx))),
                "[rob] writeback (" + i + ") occurred to an invalid ROB entry.")
-      val temp_ud_bsy = if (usingVector) rob_ud_bsy(GetRowIdx(rob_idx)) else false.B
+
       assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
-               !rob_bsy(GetRowIdx(rob_idx)) && !temp_ud_bsy),
+               !rob_bsy(GetRowIdx(rob_idx))),
                "[rob] writeback (" + i + ") occurred to a not-busy ROB entry.")
+
       assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
                temp_uop.ldst_val && Mux(temp_uop.rt(RD, isVector),
                  !(temp_uop.pvd.map(p => p.valid && p.bits === io.wb_resps(i).bits.uop.pdst).reduce(_ || _)), // matching pvd(x).bits
@@ -701,7 +696,6 @@ class Rob(
       robSetVL(w).valid := will_commit(w) && rob_vleff_exception(rob_head) && rob_uop(rob_head).v_eidx < io.csrVConfig.vl
       robSetVL(w).bits  := rob_uop(rob_head).v_eidx
     }
-
   } //for (w <- 0 until coreWidth)
 
   // **************************************************************************
@@ -716,7 +710,8 @@ class Rob(
   // Finally, don't throw an exception if there are instructions in front of
   // it that want to commit (only throw exception when head of the bundle).
 
-  var block_commit = (rob_state =/= s_normal) && (rob_state =/= s_wait_till_empty) || RegNext(exception_thrown) || RegNext(RegNext(exception_thrown))
+  var block_commit = (rob_state =/= s_normal) && (rob_state =/= s_wait_till_empty) ||
+                    RegNext(exception_thrown) || RegNext(RegNext(exception_thrown))
   var will_throw_exception = false.B
   var block_xcpt   = false.B
 
@@ -751,7 +746,8 @@ class Rob(
   io.com_xcpt.bits.is_rvc    := com_xcpt_uop.is_rvc
   io.com_xcpt.bits.pc_lob    := com_xcpt_uop.pc_lob
   if(usingVector) {
-    io.com_xcpt.bits.vls_xcpt.valid := io.com_xcpt.valid && com_xcpt_uop.is_rvv && (com_xcpt_uop.uses_ldq || com_xcpt_uop.uses_stq)
+    io.com_xcpt.bits.vls_xcpt.valid := io.com_xcpt.valid && com_xcpt_uop.is_rvv &&
+                                      (com_xcpt_uop.uses_ldq || com_xcpt_uop.uses_stq)
     io.com_xcpt.bits.vls_xcpt.bits  := com_xcpt_uop.v_eidx
   }
 
@@ -815,7 +811,8 @@ class Rob(
     enq_xcpts(i) := io.enq_valids(i) && io.enq_uops(i).exception
   }
 
-  val realLxcpt = if (usingVector) {io.lxcpt.valid && !(io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.v_eidx.orR())}
+  val realLxcpt = if (usingVector) {io.lxcpt.valid &&
+                !(io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.v_eidx.orR())}
                   else             io.lxcpt.valid
   when (!(io.flush.valid || exception_thrown) && rob_state =/= s_rollback) {
     when (realLxcpt) {
@@ -834,21 +831,15 @@ class Rob(
       r_xcpt_val      := true.B
       next_xcpt_uop   := io.enq_uops(idx)
       r_xcpt_badvaddr := AlignPCToBoundary(io.xcpt_fetch_pc, icBlockBytes) | io.enq_uops(idx).pc_lob
-
     }
   }
 
   r_xcpt_uop         := next_xcpt_uop
   r_xcpt_uop.br_mask := GetNewBrMask(io.brupdate, next_xcpt_uop)
-  //if (usingVector) {
-    //when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop) || IsKilledByVM(io.vmupdate, next_xcpt_uop)) {
-      //r_xcpt_val := false.B
-    //}
-  //} else {
-    when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop)) {
-      r_xcpt_val := false.B
-    }
-  //}
+
+  when (io.flush.valid || IsKilledByBranch(io.brupdate, next_xcpt_uop)) {
+    r_xcpt_val := false.B
+  }
 
   assert (!(exception_thrown && !r_xcpt_val),
     "ROB trying to throw an exception, but it doesn't have a valid xcpt_cause")
@@ -960,7 +951,6 @@ class Rob(
   } .elsewhen (io.enq_valids.asUInt =/= 0.U && io.enq_partial_stall) {
     rob_tail_lsb := PriorityEncoder(~MaskLower(io.enq_valids.asUInt))
   }
-
 
   if (enableCommitMapTable) {
     when (RegNext(exception_thrown)) {
