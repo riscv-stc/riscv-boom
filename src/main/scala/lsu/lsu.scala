@@ -527,9 +527,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
     when(ld_val && ld_vl_wakeup) {
       ldq(idx).bits.uop.vl_ready := true.B
-      ldq(idx).bits.uop.vconfig.vl := Mux(ldq(idx).bits.uop.uopc.isOneOf(uopVLM) ||
-        (ldq(idx).bits.uop.is_rvv && ldq(idx).bits.uop.ldst_val && ldq(idx).bits.uop.ldst === 0.U), //v0
-        (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
+      ldq(idx).bits.uop.vconfig.vl := Mux(ldq(idx).bits.uop.uopc.isOneOf(uopVLM)
+										//|| (ldq(idx).bits.uop.is_rvv && ldq(idx).bits.uop.ldst_val && ldq(idx).bits.uop.ldst === 0.U) //v0
+        ,(io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
     }
   }
 
