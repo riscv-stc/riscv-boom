@@ -232,6 +232,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   def is_ureduce       = rt(RS1, isReduceV) && !rt(RD, isReduceV)
   def is_oreduce       = rt(RS1, isReduceV) && rt(RD, isReduceV)
   def is_reduce        = rt(RS1, isReduceV)
+  def is_ordered       = uopc.isOneOf(MicroOpcodes.uopVLOX, MicroOpcodes.uopVSOXA)
   def is_v_ls          = is_rvv && (uses_ldq || uses_stq)
   def uses_v_ls_ew     = uopc.isOneOf(MicroOpcodes.uopVL,
                                       MicroOpcodes.uopVLFF,
