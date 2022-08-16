@@ -146,6 +146,14 @@ abstract class AbstractRenameStage(
 
     r_uop := GetNewUopAndBrMask(BypassAllocations(next_uop, ren2_uops, ren2_alloc_reqs), io.brupdate)
 
+    for (w <- 0 until plWidth) {
+      when(io.vl_wakeup_port.valid &&
+        (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === r_uop.vconfig_tag && !r_uop.vl_ready) {
+        r_uop.vl_ready := true.B
+        r_uop.vconfig.vl := Mux(r_uop.uopc.isOneOf(uopVSMA, uopVLM),
+          (io.vl_wakeup_port.bits.vl + 7.U) >> 3.U, io.vl_wakeup_port.bits.vl)
+      }
+    }
     ren2_valids(w) := r_valid
     ren2_uops(w)   := r_uop
   }
@@ -378,14 +386,6 @@ extends AbstractRenameStage(
     io.ren2_uops(w) := GetNewUopAndBrMask(bypassed_uop, io.brupdate)
   }
 
-  for (w <- 0 until plWidth) {
-    when(io.vl_wakeup_port.valid &&
-      (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === io.ren2_uops(w).vconfig_tag) {
-      io.ren2_uops(w).vl_ready := true.B
-      io.ren2_uops(w).vconfig.vl := Mux(io.ren2_uops(w).uopc.isOneOf(uopVSMA, uopVLM),
-        (io.vl_wakeup_port.bits.vl + 7.U) >> 3.U, io.vl_wakeup_port.bits.vl)
-    }
-  }
   //-------------------------------------------------------------
   // Debug signals
 
@@ -730,13 +730,6 @@ extends AbstractRenameStage(
     if (w > 0) bypassed_uop := BypassAllocations(ren2_uops(w), ren2_uops.slice(0, w), ren2_alloc_reqs.slice(0, w))
     else bypassed_uop := ren2_uops(w)
 
-    for (w <- 0 until plWidth) {
-      when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === io.ren2_uops(w).vconfig_tag) {
-        io.ren2_uops(w).vl_ready := true.B
-        io.ren2_uops(w).vconfig.vl := Mux(io.ren2_uops(w).uopc.isOneOf(uopVSMA, uopVLM),
-          (io.vl_wakeup_port.bits.vl + 7.U) >> 3.U, io.vl_wakeup_port.bits.vl)
-      }
-    }
       io.ren2_uops(w) := GetNewUopAndBrMask(bypassed_uop, io.brupdate)
     }
   //-------------------------------------------------------------
@@ -1031,13 +1024,6 @@ class MatRenameStage(
     io.ren2_uops(w) := GetNewUopAndBrMask(bypassed_uop, io.brupdate)
   }
 
-  for (w <- 0 until plWidth) {
-    when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === io.ren2_uops(w).vconfig_tag) {
-      io.ren2_uops(w).vl_ready := true.B
-      io.ren2_uops(w).vconfig.vl := Mux(io.ren2_uops(w).uopc.isOneOf(uopVSMA, uopVLM),
-        (io.vl_wakeup_port.bits.vl + 7.U) >> 3.U, io.vl_wakeup_port.bits.vl)
-    }
-  }
   //-------------------------------------------------------------
   // Debug signals
 
