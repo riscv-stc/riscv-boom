@@ -379,9 +379,11 @@ extends AbstractRenameStage(
   }
 
   for (w <- 0 until plWidth) {
-    when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === io.ren2_uops(w).vconfig_tag) {
+    when(io.vl_wakeup_port.valid &&
+      (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === io.ren2_uops(w).vconfig_tag) {
       io.ren2_uops(w).vl_ready := true.B
-      io.ren2_uops(w).vconfig.vl := io.vl_wakeup_port.bits.vl
+      io.ren2_uops(w).vconfig.vl := Mux(io.ren2_uops(w).uopc.isOneOf(uopVSMA, uopVLM),
+        (io.vl_wakeup_port.bits.vl + 7.U) >> 3.U, io.vl_wakeup_port.bits.vl)
     }
   }
   //-------------------------------------------------------------
@@ -1026,7 +1028,8 @@ class MatRenameStage(
   for (w <- 0 until plWidth) {
     when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === io.ren2_uops(w).vconfig_tag) {
       io.ren2_uops(w).vl_ready := true.B
-      io.ren2_uops(w).vconfig.vl := io.vl_wakeup_port.bits.vl
+      io.ren2_uops(w).vconfig.vl := Mux(io.ren2_uops(w).uopc.isOneOf(uopVSMA, uopVLM),
+        (io.vl_wakeup_port.bits.vl + 7.U) >> 3.U, io.vl_wakeup_port.bits.vl)
     }
   }
   //-------------------------------------------------------------

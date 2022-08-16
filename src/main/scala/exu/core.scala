@@ -991,7 +991,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   for (w <- 0 until coreWidth) {
     when(vl_wakeup_dec.valid && (vl_wakeup_dec.bits.vconfig_tag + 1.U) === dec_uops(w).vconfig_tag) {
       dec_uops(w).vl_ready := true.B
-      dec_uops(w).vconfig.vl := vl_wakeup_dec.bits.vl
+      dec_uops(w).vconfig.vl := Mux(dec_uops(w).uopc.isOneOf(uopVSMA, uopVLM),
+        (vl_wakeup_dec.bits.vl + 7.U) >> 3.U, vl_wakeup_dec.bits.vl)
     }
   }
 

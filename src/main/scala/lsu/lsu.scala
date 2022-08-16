@@ -451,18 +451,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       ldq(ld_enq_idx).valid                := true.B
       ldq(ld_enq_idx).bits.uop             := io.core.dis_uops(w).bits
 
-      when (io.core.dis_uops(w).bits.vl_ready &&
-        (io.core.dis_uops(w).bits.uopc.isOneOf(uopVLM) ||
-        (io.core.dis_uops(w).bits.is_rvv && io.core.dis_uops(w).bits.ldst_val &&
-        io.core.dis_uops(w).bits.ldst === 0.U))) { // v0
-        ldq(ld_enq_idx).bits.uop.vconfig.vl := (io.core.dis_uops(w).bits.vconfig.vl + 7.U) >> 3.U
-      }
-
       when(dis_vl_wakeup) {
         ldq(ld_enq_idx).bits.uop.vl_ready   := true.B
-        ldq(ld_enq_idx).bits.uop.vconfig.vl := Mux(io.core.dis_uops(w).bits.uopc.isOneOf(uopVLM) ||
-          (io.core.dis_uops(w).bits.is_rvv && io.core.dis_uops(w).bits.ldst_val &&
-          io.core.dis_uops(w).bits.ldst === 0.U), // v0
+        ldq(ld_enq_idx).bits.uop.vconfig.vl := Mux(io.core.dis_uops(w).bits.uopc.isOneOf(uopVLM),
           (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
       }
       ldq(ld_enq_idx).bits.youngest_stq_idx  := st_enq_idx
@@ -481,16 +472,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq(st_enq_idx).valid           := true.B
       stq(st_enq_idx).bits.uop        := io.core.dis_uops(w).bits
 
-      when(io.core.dis_uops(w).bits.vl_ready &&
-        (io.core.dis_uops(w).bits.uopc.isOneOf(uopVSMA) ||
-        (io.core.dis_uops(w).bits.is_rvv && io.core.dis_uops(w).bits.ldst === 0.U))) { // v0
-        stq(st_enq_idx).bits.uop.vconfig.vl := (io.core.dis_uops(w).bits.vconfig.vl + 7.U) >> 3.U
-      }
-
       when(dis_vl_wakeup) {
         stq(st_enq_idx).bits.uop.vl_ready   := true.B
-        stq(st_enq_idx).bits.uop.vconfig.vl := Mux(io.core.dis_uops(w).bits.uopc.isOneOf(uopVSMA) ||
-          (io.core.dis_uops(w).bits.is_rvv && io.core.dis_uops(w).bits.ldst === 0.U), // v0
+        stq(st_enq_idx).bits.uop.vconfig.vl := Mux(io.core.dis_uops(w).bits.uopc.isOneOf(uopVSMA),
           (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
       }
       stq(st_enq_idx).bits.addr.valid := false.B
@@ -520,29 +504,25 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   // vl_wakeup, speculative vconfig wakeup
   for (idx <- 0 until numLdqEntries) {
-    val ld_val = ldq(idx).valid && ldq(idx).bits.uop.uses_ldq &&
-                !ldq(idx).bits.uop.vl_ready && !ldq(idx).bits.uop.exception
-    val ld_vl_wakeup = io.core.vl_wakeup.valid &&
+    val ld_val = ldq(idx).valid && ldq(idx).bits.uop.uses_ldq && !ldq(idx).bits.uop.exception
+    val ld_vl_wakeup = io.core.vl_wakeup.valid && !ldq(idx).bits.uop.vl_ready &&
       (io.core.vl_wakeup.bits.vconfig_tag + 1.U) === ldq(idx).bits.uop.vconfig_tag
 
     when(ld_val && ld_vl_wakeup) {
       ldq(idx).bits.uop.vl_ready := true.B
-      ldq(idx).bits.uop.vconfig.vl := Mux(ldq(idx).bits.uop.uopc.isOneOf(uopVLM)
-										//|| (ldq(idx).bits.uop.is_rvv && ldq(idx).bits.uop.ldst_val && ldq(idx).bits.uop.ldst === 0.U) //v0
-        ,(io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
+      ldq(idx).bits.uop.vconfig.vl := Mux(ldq(idx).bits.uop.uopc.isOneOf(uopVLM),
+        (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
     }
   }
 
   for (idx <- 0 until numStqEntries) {
-    val st_val = stq(idx).valid && stq(idx).bits.uop.uses_stq &&
-                !stq(idx).bits.uop.vl_ready && !stq(idx).bits.uop.exception
-    val st_vl_wakeup = io.core.vl_wakeup.valid &&
+    val st_val = stq(idx).valid && stq(idx).bits.uop.uses_stq && !stq(idx).bits.uop.exception
+    val st_vl_wakeup = io.core.vl_wakeup.valid && !stq(idx).bits.uop.vl_ready &&
       (io.core.vl_wakeup.bits.vconfig_tag + 1.U) === stq(idx).bits.uop.vconfig_tag
 
     when(st_val && st_vl_wakeup) {
       stq(idx).bits.uop.vl_ready := true.B
-      stq(idx).bits.uop.vconfig.vl := Mux(stq(idx).bits.uop.uopc.isOneOf(uopVSMA) ||
-        (stq(idx).bits.uop.is_rvv && stq(idx).bits.uop.ldst === 0.U),  // v0
+      stq(idx).bits.uop.vconfig.vl := Mux(stq(idx).bits.uop.uopc.isOneOf(uopVSMA),
         (io.core.vl_wakeup.bits.vl + 7.U) >> 3.U, io.core.vl_wakeup.bits.vl)
     }
   }
