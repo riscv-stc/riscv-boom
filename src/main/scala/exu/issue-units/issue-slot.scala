@@ -554,7 +554,7 @@ class IssueSlot(
     assert (is_invalid || io.clear || io.kill, "trying to overwrite a valid issue slot.")
   }
 
-  when(io.vl_wakeup_port.valid && !slot_uop.vl_ready && (io.vl_wakeup_port.bits.vconfig_tag +1.U) === next_uop.vconfig_tag) {
+  when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag +1.U) === next_uop.vconfig_tag) {
     slot_uop.vconfig.vl := Mux(slot_uop.uopc.isOneOf(uopVLM),
       (io.vl_wakeup_port.bits.vl + 7.U) >> 3.U, io.vl_wakeup_port.bits.vl)
     slot_uop.vl_ready := true.B

@@ -727,12 +727,18 @@ extends AbstractRenameStage(
     io.ren_stalls(w) := (ren2_uops(w).rt(RD, rtype)) && !can_allocate
 
     val bypassed_uop = Wire(new MicroOp)
-    if (w > 0) bypassed_uop := BypassAllocations(ren2_uops(w), ren2_uops.slice(0,w), ren2_alloc_reqs.slice(0,w))
-      else bypassed_uop := ren2_uops(w)
+    if (w > 0) bypassed_uop := BypassAllocations(ren2_uops(w), ren2_uops.slice(0, w), ren2_alloc_reqs.slice(0, w))
+    else bypassed_uop := ren2_uops(w)
 
-    io.ren2_uops(w) := GetNewUopAndBrMask(bypassed_uop, io.brupdate)
-  }
-
+    for (w <- 0 until plWidth) {
+      when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag + 1.U) === io.ren2_uops(w).vconfig_tag) {
+        io.ren2_uops(w).vl_ready := true.B
+        io.ren2_uops(w).vconfig.vl := Mux(io.ren2_uops(w).uopc.isOneOf(uopVSMA, uopVLM),
+          (io.vl_wakeup_port.bits.vl + 7.U) >> 3.U, io.vl_wakeup_port.bits.vl)
+      }
+    }
+      io.ren2_uops(w) := GetNewUopAndBrMask(bypassed_uop, io.brupdate)
+    }
   //-------------------------------------------------------------
   // Debug signals
 

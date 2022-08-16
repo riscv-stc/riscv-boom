@@ -459,10 +459,12 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     when (cs.is_rvv && cs.uopc.isOneOf(uopVLR, uopVMVR)) {
       //uop.uopc := uopVL
       uop.vconfig.vl := total_ecnt
+      uop.vl_ready := true.B
     }
     when (cs.is_rvv && cs.uopc === uopVSR) {
       uop.uopc := uopVSA
       uop.vconfig.vl := total_ecnt
+      uop.vl_ready := true.B
     }
 
     uop.v_xls_offset := 0.U
