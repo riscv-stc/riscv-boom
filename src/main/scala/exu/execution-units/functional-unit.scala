@@ -1705,6 +1705,7 @@ class VecFPUUnit(dataWidth: Int)(implicit p: Parameters)
   io.resp.bits.fflags.valid      := fpu.io.resp.bits.fflags.valid
   io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
   io.resp.bits.fflags.bits.flags := fpu.io.resp.bits.fflags.bits.flags // kill me now
+  io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
 }
 
 // Vector Reduction-Permutation Assist
