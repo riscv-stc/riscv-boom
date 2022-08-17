@@ -2276,32 +2276,31 @@ class VecMaskUnit(
   val e16OutSt2 = RegNext(e16OutMux)
   val e8OutSt2  = RegNext(e8OutMux)
 
-  val respUop = io.resp.bits.uop
+  val respUop = RegNext(uop) // numStages default is 2
   val viotaOut = Mux1H(UIntToOH(respUop.vd_eew),
                        Seq(e8OutSt2.asUInt, e16OutSt2.asUInt, e32OutSt2.asUInt, e64OutSt2.asUInt))
 
   // ----------------------------
   // output mux
   // ----------------------------
-  val r_data  = Reg(Vec(numStages, UInt(dataWidth.W)))
-  val r_mask  = Reg(Vec(numStages, UInt(dataWidth.W)))
+  val r_data  = Reg(Vec(numStages - 1, UInt(dataWidth.W)))
+  val r_mask  = Reg(Vec(numStages - 1, UInt(dataWidth.W)))
 
-  val out = Mux(respUop.uopc === uopVPOPC,  vpopcSt2,
+  r_data(0) := Mux(respUop.uopc === uopVPOPC,  vpopcSt2,
             Mux(respUop.uopc === uopVFIRST, vfirstIdxSt2,
             Mux(respUop.uopc.isOneOf(uopVID, uopVIOTA), viotaOut,
             Mux(respUop.uopc.isOneOf(uopVMSBF, uopVMSIF, uopVMSOF), vmaskOutSt2,
                 0.U))))
 
-  r_data(0) := out
   r_mask(0) := Fill(vLenb, 1.U(1.W))
 
-  for (i <- 1 until numStages) {
+  for (i <- 1 until (numStages - 1)) {
     r_data(i) := r_data(i - 1)
     r_mask(i) := r_mask(i - 1)
   }
 
-  io.resp.bits.data         := r_data(numStages - 1)
-  io.resp.bits.vmask        := r_mask(numStages - 1)
+  io.resp.bits.data         := r_data(numStages - 2)
+  io.resp.bits.vmask        := r_mask(numStages - 2)
   io.resp.bits.predicated   := false.B
   io.resp.bits.fflags.valid := false.B
 }
