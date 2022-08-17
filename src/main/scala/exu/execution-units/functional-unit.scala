@@ -2276,7 +2276,7 @@ class VecMaskUnit(
   val e16OutSt2 = RegNext(e16OutMux)
   val e8OutSt2  = RegNext(e8OutMux)
 
-  val respUop = RegNext(uop) // numStages default is 2
+  val respUop = Pipe(io.req.valid, io.req.bits.uop, 2).bits // numStages default is 2
   val viotaOut = Mux1H(UIntToOH(respUop.vd_eew),
                        Seq(e8OutSt2.asUInt, e16OutSt2.asUInt, e32OutSt2.asUInt, e64OutSt2.asUInt))
 
