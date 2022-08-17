@@ -720,7 +720,7 @@ class VecExeUnit(
   }*/
   var vmaskUnit: VecMaskUnit = null
   if (hasVMaskUnit) {
-    vmaskUnit = Module(new VecMaskUnit(dataWidth = vLen)).suggestName("vmaskunit")
+    vmaskUnit = Module(new VecMaskUnit(numStages = numStages, dataWidth = vLen)).suggestName("vmaskunit")
     vmaskUnit.io <> DontCare
     vmaskUnit.io.req.valid  := io.req.valid && io.req.bits.uop.fu_code_is(FU_VMASKU)
 
