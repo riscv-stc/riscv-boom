@@ -106,8 +106,8 @@ case class BoomCoreParams(
   numVecPhysRegisters: Int = 0,
   numVLdqEntries: Int = 16,
   numVStqEntries: Int = 16,
-  numVlxLdqEntries: Int = 16,
-  numVsxStqEntries: Int = 16,
+  numVLxqEntries: Int = 16,
+  numVSxqEntries: Int = 16,
 
    /* matrix extension */
   override val useMatrix: Boolean = false,
@@ -295,14 +295,14 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   def eLenb = eLen/8
   def eLenSz = if (usingVector) log2Ceil(eLen) else 0
   //val minFLen = boomParams.minFLen
-  val numVLdqEntries   = if (usingVector) boomParams.numVLdqEntries else 0
-  val numVStqEntries   = if (usingVector) boomParams.numVStqEntries else 0
-  val vldqAddrSz       = log2Ceil(numVLdqEntries)
-  val vstqAddrSz       = log2Ceil(numVStqEntries)
-  val numVlxLdqEntries = if (usingVector) boomParams.numVlxLdqEntries else 0
-  val numVsxStqEntries = if (usingVector) boomParams.numVsxStqEntries else 0
-  val vlxLdqAddrSz     = log2Ceil(numVlxLdqEntries)
-  val vsxStqAddrSz     = log2Ceil(numVsxStqEntries)
+  val numVLdqEntries = if (usingVector) boomParams.numVLdqEntries else 0
+  val numVStqEntries = if (usingVector) boomParams.numVStqEntries else 0
+  val vldqAddrSz     = log2Ceil(numVLdqEntries)
+  val vstqAddrSz     = log2Ceil(numVStqEntries)
+  val numVLxqEntries = if (usingVector) boomParams.numVLxqEntries else 0
+  val numVSxqEntries = if (usingVector) boomParams.numVSxqEntries else 0
+  val vlxqAddrSz     = log2Ceil(numVLxqEntries)
+  val vsxqAddrSz     = log2Ceil(numVSxqEntries)
 
   // matrix stuff
   require (issueParams.count(_.iqType == IQT_MAT.litValue) == 1 || !usingMatrix)
