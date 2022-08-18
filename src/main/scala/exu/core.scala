@@ -994,6 +994,15 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dec_uops(w).vconfig.vl := Mux(dec_uops(w).uopc.isOneOf(uopVSMA, uopVLM),
         (vl_wakeup_dec.bits.vl + 7.U) >> 3.U, vl_wakeup_dec.bits.vl)
     }
+    when(vl_wakeup.valid && (vl_wakeup.bits.vconfig_tag + 1.U) === dec_uops(w).vconfig_tag) {
+      dec_uops(w).vl_ready := true.B
+      dec_uops(w).vconfig.vl := Mux(dec_uops(w).uopc.isOneOf(uopVSMA, uopVLM),
+        (vl_wakeup.bits.vl + 7.U) >> 3.U, vl_wakeup.bits.vl)
+    }
+    when(decode_units(w).io.deq.uop.vl_ready) {
+      dec_uops(w).vl_ready   := true.B
+      dec_uops(w).vconfig.vl :=  decode_units(w).io.deq.uop.vconfig.vl
+    }
   }
 
   // Vconfig Mask Logic
@@ -1158,7 +1167,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     rename.io.com_uops := rob.io.commit.uops
     rename.io.rbk_valids := rob.io.commit.rbk_valids
     rename.io.rollback := rob.io.commit.rollback
-    rename.io.vl_wakeup_port := vl_wakeup_dec
+    rename.io.vl_wakeup_port := vl_wakeup
   }
 
   // Outputs
@@ -1208,7 +1217,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dis_uops(w).vstartSrc := v_uop.vstartSrc
       dis_uops(w).vstart    := Mux(v_uop.vstartSrc === VSTART_ZERO, 0.U, csr.io.vector.get.vstart)
       dis_uops(w).v_scalar_busy := dis_uops(w).is_rvv && dis_uops(w).uses_scalar
-      dis_uops(w).uopc      := Mux(i_uop.uopc.isOneOf(uopVLR), uopVL, i_uop.uopc)
       if (usingMatrix) {
         dis_uops(w).pvd       := v_uop.pvd
         dis_uops(w).stale_pvd := v_uop.stale_pvd

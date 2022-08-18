@@ -457,7 +457,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.vconfig.vl := total_ecnt
     }
     when (cs.is_rvv && cs.uopc.isOneOf(uopVLR, uopVMVR)) {
-      //uop.uopc := uopVL
+      uop.uopc := Mux(cs.uopc.isOneOf(uopVLR), uopVL, uopVMVR)
       uop.vconfig.vl := total_ecnt
       uop.vl_ready := true.B
     }
