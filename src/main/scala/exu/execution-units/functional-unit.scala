@@ -1209,10 +1209,14 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
     vxsatOut(e) := xma.io.resp.valid && xma.io.resp.bits.uop.vxsat
   }
 
+  val respUop = io.resp.bits.uop
+  val isNarrowOdd = respUop.rt(RS2, isWidenV) && (respUop.v_eidx((vLenbSz - 1).U - respUop.vd_eew) === 1.U)
+  val alu_out = Mux1H(UIntToOH(respUop.vd_eew),
+    Seq(e8Out.asUInt, e16Out.asUInt, e32Out.asUInt, e64Out.asUInt))
+
   io.resp.bits.uop.vxsat := vxsatOut.orR
-  io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
-                             Seq(e8Out.asUInt, e16Out.asUInt, e32Out.asUInt, e64Out.asUInt))
-  io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
+  io.resp.bits.data :=  Mux(isNarrowOdd, alu_out << (vLen / 2), alu_out)
+  io.resp.bits.vmask := Mux(isNarrowOdd, Fill(vLenb / 2, 1.U(1.W)) ## Fill(vLenb / 2, 0.U(1.W)), Fill(vLenb, 1.U(1.W)))
 }
 
 /**
