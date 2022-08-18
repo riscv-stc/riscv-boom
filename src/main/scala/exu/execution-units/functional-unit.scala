@@ -830,6 +830,7 @@ abstract class IterativeFunctionalUnit(dataWidth: Int, needsFcsr: Boolean = fals
 
   // assumes at least one pipeline register between request and response
   io.resp.bits.uop := r_uop
+  io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
 }
 
 /**

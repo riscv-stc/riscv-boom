@@ -910,7 +910,7 @@ class VecExeUnit(
     valu.io.req.bits.rs3_data := Mux(vrp_busy, vrp.io.fbreq.bits.rs3_data, io.req.bits.rs3_data)
     valu.io.req.bits.rvm_data := Mux(vrp_busy, vrp.io.fbreq.bits.rvm_data, io.req.bits.rvm_data)
 
-    val vfpu_exreq_valid = io.req.valid &&
+    val vfpu_exreq_valid = io.req.valid && io.req.bits.uop.fp_val &&
                             (io.req.bits.uop.fu_code_is(FU_FPU) && !io.req.bits.uop.fu_code_is(FU_VRP) ||
                              io.req.bits.uop.fu_code_is(FU_F2I))
     vfpu.io.req.valid         := Mux(vrp_busy, vrp.io.fbreq.valid && (vrp.io.fbreq.bits.uop.fu_code & FU_FPU).orR,
