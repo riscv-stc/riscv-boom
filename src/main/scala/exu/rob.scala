@@ -76,7 +76,7 @@ class RobIo(
   // Port for unmarking loads/stores as speculation hazards..
   val lsu_clr_unsafe   = Input(Vec(memWidth, Valid(new MicroOp)))
 
-  val lsu_update_ls   = if (usingMatrix || usingVector) Input(Vec(2, Valid(new LSSplitCnt()))) else null
+  val lsu_update_ls   = if (usingMatrix || usingVector) Input(Vec(4, Valid(new LSSplitCnt()))) else null
 
   // vector and matrix stores require to monitor rs3 busy status
   val vbusy_status    = if (usingVector) Input(UInt(numVecPhysRegs.W))    else null
@@ -323,8 +323,8 @@ class Rob(
     // one bank
     val rob_val       = RegInit(VecInit(Seq.fill(numRobRows){false.B}))
     val rob_bsy       = Reg(Vec(numRobRows, Bool()))
-    val rob_ls_cnt   = if (usingMatrix || usingVector) Reg(Vec(numRobRows, UInt(vLenSz.W))) else null  // FIXME: correct datawith, vlenSz too large
-    val rob_ls_wbs   = if (usingMatrix || usingVector) Reg(Vec(numRobRows, UInt(vLenSz.W))) else null  // FIXME: correct datawith, vlenSz too large
+    val rob_ls_cnt   = if (usingMatrix || usingVector) Reg(Vec(numRobRows, UInt((vLenSz+1).W))) else null  
+    val rob_ls_wbs   = if (usingMatrix || usingVector) Reg(Vec(numRobRows, UInt((vLenSz+1).W))) else null  
     val rob_unsafe    = Reg(Vec(numRobRows, Bool()))
     val rob_uop       = Reg(Vec(numRobRows, new MicroOp()))
     val rob_exception = Reg(Vec(numRobRows, Bool()))
@@ -356,7 +356,7 @@ class Rob(
       }
 
       if (usingMatrix || usingVector) {
-        rob_ls_cnt(rob_tail) := 0.U
+        rob_ls_cnt(rob_tail) := (vLen+8).asUInt     // max value: vlen + lmul_max
         rob_ls_wbs(rob_tail) := 0.U
       }
 
