@@ -1167,7 +1167,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     rename.io.com_uops := rob.io.commit.uops
     rename.io.rbk_valids := rob.io.commit.rbk_valids
     rename.io.rollback := rob.io.commit.rollback
-    rename.io.vl_wakeup_port := vl_wakeup
+    //rename.io.vl_wakeup_port := vl_wakeup
   }
 
   // Outputs
@@ -1250,7 +1250,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dis_uops(w).prs2_busy := i_uop.prs2_busy & (dis_uops(w).rt(RS2, isInt)) |
                                f_uop.prs2_busy & (dis_uops(w).rt(RS2, isFloat))
     }
-
+    when(vl_wakeup.valid && (vl_wakeup.bits.vconfig_tag + 1.U) === v_uop.vconfig_tag && !v_uop.vl_ready) {
+      dis_uops(w).vl_ready := true.B
+      dis_uops(w).vconfig.vl := Mux(v_uop.uopc.isOneOf(uopVSMA, uopVLM),
+        (vl_wakeup.bits.vl + 7.U) >> 3.U, vl_wakeup.bits.vl)
+    }.otherwise {
+      dis_uops(w).vl_ready := v_uop.vl_ready
+      dis_uops(w).vconfig.vl :=  v_uop.vconfig.vl
+    }
     ren_stalls(w) := rename_stage.io.ren_stalls(w) || f_stall || p_stall || v_stall || m_stall
   }
 
