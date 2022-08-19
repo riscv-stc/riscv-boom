@@ -160,7 +160,7 @@ abstract class IssueUnit(
         }
       }
       if (usingVector) {
-        when (dis_uops(w).is_rvv && dis_uops(w).v_idx_ls) {
+        when (dis_uops(w).is_rvv && dis_uops(w).v_index_ls) {
           dis_uops(w).prs2_busy := 0.U
           //dis_uops(w).prvm_busy := 1.U // Force waiting on vmupdate for indexed load/store
         }

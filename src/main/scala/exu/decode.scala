@@ -445,7 +445,6 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     //}
 
     uop.v_seg_nf     := Mux(is_v_ls_seg, 1.U(4.W) + vseg_nf, 1.U)
-    uop.v_idx_ls     := is_v_ls_index
     uop.v_eidx       := 0.U
 
     when (cs.is_rvv && is_v_mask_ld) {
@@ -467,7 +466,6 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.vl_ready := true.B
     }
 
-    uop.v_xls_offset := 0.U
     // vstart control
     uop.vstart    := 0.U
     uop.vstartSrc := VSTART_ZERO

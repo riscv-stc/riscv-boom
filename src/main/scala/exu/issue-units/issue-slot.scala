@@ -104,7 +104,6 @@ class IssueSlot(
   val ps    = if(vector || matrix) RegInit(false.B) else null
   val sdata = if(vector) RegInit(0.U(eLen.W)) else null
   val sidx  = if(matrix) RegInit(0.U(vLenSz.W)) else null
-  val vxofs = if(usingVector && iqType == IQT_MEM.litValue) RegInit(0.U(eLen.W)) else null
   val ppred = RegInit(false.B)
   val slot_uop = RegInit(NullMicroOp(usingVector))
   val vl_ready = WireInit(slot_uop.vl_ready)
@@ -298,10 +297,6 @@ class IssueSlot(
         next_p1 := !io.in_uop.bits.prs1_busy(0)
         next_p2 := !io.in_uop.bits.prs2_busy(0)
         next_p3 := !io.in_uop.bits.prs3_busy(0)
-        if (iqType == IQT_MEM.litValue) {
-          //in_pm := !io.in_uop.bits.prvm_busy(0)
-          vxofs := io.in_uop.bits.v_xls_offset
-        }
       }
     } else {
       next_p1 := !io.in_uop.bits.prs1_busy
@@ -535,10 +530,6 @@ class IssueSlot(
       io.out_uop.prs1_busy  := ~p1
       io.out_uop.prs2_busy  := ~p2
       io.out_uop.prs3_busy  := ~p3
-      if (iqType == IQT_MEM.litValue) {
-        io.out_uop.v_xls_offset := vxofs
-        io.uop.v_xls_offset := vxofs
-      }
     }
   } else {
     io.out_uop.prs1_busy  := !p1

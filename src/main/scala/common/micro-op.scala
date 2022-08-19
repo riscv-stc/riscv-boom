@@ -176,8 +176,6 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   //val v_seg_ls         = if (usingVector) Bool() else false.B         // segment load/store indicator
   val v_seg_f          = if (usingVector) UInt(3.W) else UInt(0.W)    // field index, for segment load/store
   val v_seg_nf         = if (usingVector) UInt(4.W) else UInt(0.W)    // number of fields
-  val v_idx_ls         = if (usingVector) Bool() else false.B         // indexed load/store indicator
-  val v_xls_offset     = if (usingVector) UInt(eLen.W) else UInt(0.W) // address offset for indexed load/store
   val v_perm_busy      = if (usingVector) Bool() else false.B         // for vrgather/vslide/vcompress
   val v_perm_wait      = if (usingVector) Bool() else false.B         // wait vecUpdate
   val v_perm_idx       = if (usingVector) UInt(eLen.W) else UInt(0.W) // maximum VLMAX is 65536
@@ -234,6 +232,9 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   def is_reduce        = rt(RS1, isReduceV)
   def is_ordered       = uopc.isOneOf(MicroOpcodes.uopVLOX, MicroOpcodes.uopVSOXA)
   def is_v_ls          = is_rvv && (uses_ldq || uses_stq)
+  def v_unit_ls        = uopc.isOneOf(MicroOpcodes.uopVL, MicroOpcodes.uopVLM, MicroOpcodes.uopVLFF, MicroOpcodes.uopVSA, MicroOpcodes.uopVSMA)
+  def v_index_ls       = uopc.isOneOf(MicroOpcodes.uopVLUX, MicroOpcodes.uopVSUXA, MicroOpcodes.uopVLOX, MicroOpcodes.uopVSOXA)
+  def v_stride_ls      = uopc.isOneOf(MicroOpcodes.uopVLS, MicroOpcodes.uopVSSA)
   def uses_v_ls_ew     = uopc.isOneOf(MicroOpcodes.uopVL,
                                       MicroOpcodes.uopVLFF,
                                       MicroOpcodes.uopVSA,
