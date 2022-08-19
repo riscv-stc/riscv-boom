@@ -1706,11 +1706,15 @@ class VecFPUUnit(dataWidth: Int)(implicit p: Parameters)
   fpu.io.req.bits.rvm_data := io.req.bits.rvm_data
   fpu.io.req.bits.fcsr_rm  := io.fcsr_rm
 
-  io.resp.bits.data              := fpu.io.resp.bits.data
+  val isNarrowOdd = io.resp.bits.uop.rt(RS2, isWidenV) && (io.resp.bits.uop.v_eidx((vLenbSz - 1).U - io.resp.bits.uop.vd_eew) === 1.U)
+
+  io.resp.bits.data              := Mux(isNarrowOdd, fpu.io.resp.bits.data << (vLen / 2),fpu.io.resp.bits.data)
   io.resp.bits.fflags.valid      := fpu.io.resp.bits.fflags.valid
   io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
-  io.resp.bits.fflags.bits.flags := fpu.io.resp.bits.fflags.bits.flags // kill me now
-  io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
+  io.resp.bits.fflags.bits.flags := fpu.io.resp.bits.fflags.bits.flags
+  io.resp.bits.vmask := Mux(isNarrowOdd, Fill(vLenb / 2, 1.U(1.W)) ## Fill(vLenb / 2, 0.U(1.W)), Fill(vLenb, 1.U(1.W)))
+
+
 }
 
 // Vector Reduction-Permutation Assist
@@ -2406,15 +2410,16 @@ class VecIntToFPUnit(dataWidth: Int, latency: Int)(implicit p: Parameters)
     e16DataOut(e) := Mux(outInactive(e), outRs3Data(16*e+15, 16*e), ieee(box(ifpu.io.out.bits.data, H)))
     e16FlagOut(e) := Mux(outInactive(e), 0.U, ifpu.io.out.bits.exc)
   }
-
-  io.resp.bits.data := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
-                             Seq(0.U, e16DataOut.asUInt, e32DataOut.asUInt, e64DataOut.asUInt))
-  io.resp.bits.vmask := Fill(vLenb, 1.U(1.W))
+  val isNarrowOdd = io.resp.bits.uop.rt(RS2, isWidenV) && (io.resp.bits.uop.v_eidx((vLenbSz - 1).U - io.resp.bits.uop.vd_eew) === 1.U)
+  val resp_data = Mux1H(UIntToOH(io.resp.bits.uop.vd_eew), Seq(0.U, e16DataOut.asUInt, e32DataOut.asUInt, e64DataOut.asUInt))
+  io.resp.bits.data :=  Mux(isNarrowOdd, resp_data << (vLen / 2), resp_data)
+  io.resp.bits.vmask :=  Mux(isNarrowOdd, Fill(vLenb / 2, 1.U(1.W)) ## Fill(vLenb / 2, 0.U(1.W)), Fill(vLenb, 1.U(1.W)))
   io.resp.bits.fflags.valid      := io.resp.valid
   io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
-  io.resp.bits.fflags.bits.flags := Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
-                                          Seq(0.U,
-                                              e16FlagOut.reduce(_ | _),
-                                              e32FlagOut.reduce(_ | _),
-                                              e64FlagOut.reduce(_ | _)))
+  val resp_flag = Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
+                            Seq(0.U,
+                                e16FlagOut.reduce(_ | _),
+                                e32FlagOut.reduce(_ | _),
+                                e64FlagOut.reduce(_ | _)))
+  io.resp.bits.fflags.bits.flags := resp_flag
 }
