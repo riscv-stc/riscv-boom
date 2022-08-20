@@ -119,8 +119,8 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   }
   issue_unit.io.pred_wakeup_port.valid := false.B
   issue_unit.io.pred_wakeup_port.bits  := DontCare
-  issue_unit.io.vl_wakeup_port.valid := false.B
-  issue_unit.io.vl_wakeup_port.bits := DontCare
+  issue_unit.io.vl_wakeup.valid        := false.B
+  issue_unit.io.vl_wakeup.bits         := DontCare
 
   //-------------------------------------------------------------
   // **** Register Read Stage ****

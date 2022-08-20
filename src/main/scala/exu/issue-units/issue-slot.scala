@@ -46,7 +46,7 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false, val matr
 
   val wakeup_ports  = Flipped(Vec(numWakeupPorts, Valid(new IqWakeup(maxPregSz, vector, matrix))))
   val pred_wakeup_port = Flipped(Valid(UInt(log2Ceil(ftqSz).W)))
-  val vl_wakeup_port = Flipped(Valid(new VlWakeupResp()))
+  val vl_wakeup = Flipped(Valid(new VlWakeupResp()))
   val spec_ld_wakeup= Flipped(Vec(memWidth, Valid(UInt(width=maxPregSz.W))))
   val in_uop        = Flipped(Valid(new MicroOp())) // if valid, this WILL overwrite an entry!
   val out_uop       = Output(new MicroOp()) // the updated slot uop; will be shifted upwards in a collasping queue.
@@ -545,14 +545,10 @@ class IssueSlot(
     assert (is_invalid || io.clear || io.kill, "trying to overwrite a valid issue slot.")
   }
 
-  when(io.vl_wakeup_port.valid && (io.vl_wakeup_port.bits.vconfig_tag +1.U) === next_uop.vconfig_tag) {
-    slot_uop.vconfig.vl := Mux(slot_uop.uopc.isOneOf(uopVLM, uopVSMA),
-      (io.vl_wakeup_port.bits.vl + 7.U) >> 3.U, io.vl_wakeup_port.bits.vl)
+  when(io.vl_wakeup.valid && !next_uop.vl_ready && (io.vl_wakeup.bits.vconfig_tag + 1.U) === next_uop.vconfig_tag) {
     slot_uop.vl_ready := true.B
+    slot_uop.vconfig.vl := Mux(next_uop.uopc.isOneOf(uopVLM, uopVSMA), (io.vl_wakeup.bits.vl + 7.U) >> 3.U, io.vl_wakeup.bits.vl)
   }
-
-  io.out_uop.vl_ready := slot_uop.vl_ready
-  io.out_uop.vconfig.vl := slot_uop.vconfig.vl
 
   when (state === s_valid_2) {
     when (rs1check && rs2check && ppred && vl_ready)  {

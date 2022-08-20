@@ -122,7 +122,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   viu.map(_.io.flush_pipeline := io.flush_pipeline)
   viu.map(_.io.intupdate := io.intupdate)
   viu.map(_.io.fpupdate  := io.fpupdate)
-  viu.map(_.io.vl_wakeup_port := io.vl_wakeup)
+  viu.map(_.io.vl_wakeup := io.vl_wakeup)
   //viu.map(_.io.vecUpdate := vregister_read.io.vecUpdate)
   // Don't support ld-hit speculation to VEC window.
   for (w <- 0 until memWidth) {

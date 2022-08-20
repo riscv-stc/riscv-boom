@@ -324,7 +324,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     v_pipeline.io.brupdate := brupdate
     v_pipeline.io.vbusy_status := v_rename_stage.io.vbusy_status
 
-    v_pipeline.io.vl_wakeup :=  vl_wakeup
+    v_pipeline.io.vl_wakeup := vl_wakeup
   }
 
   if (usingMatrix) {
@@ -1152,22 +1152,24 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   // Inputs
   for (rename <- rename_stages) {
-    rename.io.kill := io.ifu.redirect_flush
+    rename.io.kill     := io.ifu.redirect_flush
     rename.io.brupdate := brupdate
 
     rename.io.debug_rob_empty := rob.io.empty
 
-    rename.io.dec_fire := dec_fire
-    rename.io.dec_uops := dec_uops
+    rename.io.dec_fire   := dec_fire
+    rename.io.dec_uops   := dec_uops
 
-    rename.io.dis_fire := dis_fire_fb
-    rename.io.dis_ready := dis_ready
+    rename.io.dis_fire   := dis_fire_fb
+    rename.io.dis_ready  := dis_ready
 
     rename.io.com_valids := rob.io.commit.valids
-    rename.io.com_uops := rob.io.commit.uops
+    rename.io.com_uops   := rob.io.commit.uops
     rename.io.rbk_valids := rob.io.commit.rbk_valids
-    rename.io.rollback := rob.io.commit.rollback
-    //rename.io.vl_wakeup_port := vl_wakeup
+    rename.io.rollback   := rob.io.commit.rollback
+    if (usingVector) {
+      rename.io.vl_wakeup := vl_wakeup
+    }
   }
 
   // Outputs
@@ -1478,7 +1480,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   issue_units map { iu =>
     iu.io.spec_ld_wakeup := io.lsu.spec_ld_wakeup
 
-    iu.io.vl_wakeup_port := vl_wakeup
+    iu.io.vl_wakeup      := vl_wakeup
   }
 
   // Connect the predicate wakeup port
@@ -1868,8 +1870,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   //com_xcpt.valid comes too early, will fight against a branch that resolves same cycle as an exception
   io.lsu.exception := RegNext(rob.io.flush.valid)
-
-  io.lsu.vl_wakeup :=  vl_wakeup
 
   // Handle Branch Mispeculations
   io.lsu.brupdate := brupdate

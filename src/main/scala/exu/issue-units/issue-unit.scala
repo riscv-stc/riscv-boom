@@ -82,7 +82,7 @@ class IssueUnitIO(
   val iss_uops         = Output(Vec(issueWidth, new MicroOp()))
   val wakeup_ports     = Flipped(Vec(numWakeupPorts, Valid(new IqWakeup(maxPregSz, vector, matrix))))
   val pred_wakeup_port = Flipped(Valid(UInt(log2Ceil(ftqSz).W)))
-  val vl_wakeup_port   = Flipped(Valid(new VlWakeupResp()))
+  val vl_wakeup        = if (usingVector) Flipped(Valid(new VlWakeupResp())) else null
 
   val spec_ld_wakeup   = Flipped(Vec(memWidth, Valid(UInt(width=maxPregSz.W))))
 
@@ -233,7 +233,7 @@ abstract class IssueUnit(
     issue_slots(i).ldspec_miss      := io.ld_miss
     issue_slots(i).brupdate         := io.brupdate
     issue_slots(i).kill             := io.flush_pipeline
-    issue_slots(i).vl_wakeup_port   := io.vl_wakeup_port
+    issue_slots(i).vl_wakeup   := io.vl_wakeup
     if (usingMatrix && matrix) {
       issue_slots(i).intupdate      := io.intupdate
     } else if (usingVector) {

@@ -85,8 +85,8 @@ abstract class AbstractRenameStage(
     //val dis_fire_first = if (vector) Input(Vec(coreWidth, Bool())) else null
 
     // wakeup ports
-    val wakeups = Flipped(Vec(numWbPorts, Valid(new ExeUnitResp(xLen))))
-    //val vl_wakeup_port = Flipped(Valid(new VlWakeupResp()))
+    val wakeups   = Flipped(Vec(numWbPorts, Valid(new ExeUnitResp(xLen))))
+    val vl_wakeup = if (usingVector) Flipped(Valid(new VlWakeupResp())) else null
 
     // commit stage
     val com_valids = Input(Vec(plWidth, Bool()))
@@ -145,6 +145,16 @@ abstract class AbstractRenameStage(
     }
 
     r_uop := GetNewUopAndBrMask(BypassAllocations(next_uop, ren2_uops, ren2_alloc_reqs), io.brupdate)
+
+    // vl_wakeup, ren2_uops may stall
+    if (usingVector) {
+      when(io.vl_wakeup.valid && r_valid && !r_uop.vl_ready && 
+          (io.vl_wakeup.bits.vconfig_tag + 1.U) === r_uop.vconfig_tag) {
+        r_uop.vl_ready   := true.B
+        r_uop.vconfig.vl := Mux(r_uop.uopc.isOneOf(uopVSMA, uopVLM), (io.vl_wakeup.bits.vl + 7.U) >> 3.U, 
+                                                                      io.vl_wakeup.bits.vl)
+      }
+    }
 
     ren2_valids(w) := r_valid
     ren2_uops(w)   := r_uop
