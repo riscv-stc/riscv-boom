@@ -1686,10 +1686,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   vlud_vrf_q.io.brupdate          := io.core.brupdate
   vlud_vrf_q.io.flush             := false.B // FIXME
-  vlud_vrf_q.io.enq.valid         := (vlagu.io.vrf_raddr.valid  && vlagu.io.vrf_udcpy) || 
-                                     (vlxagu.io.vrf_raddr.valid && vlxagu.io.vrf_udcpy)
-  vlud_vrf_q.io.enq.bits.uop      := Mux(vlxagu.io.vrf_raddr.valid, vlxagu.io.resp.bits.uop, vlagu.io.resp.bits.uop)
-  vlud_vrf_q.io.enq.bits.uop.pdst := Mux(vlxagu.io.vrf_raddr.valid, vlxagu.io.resp.bits.uop.pvd(vlxagu.io.vrf_emul).bits,
+  vlud_vrf_q.io.enq.valid         := (vlagu.io.vrf_raddr.fire  && vlagu.io.vrf_udcpy) || 
+                                     (vlxagu.io.vrf_raddr.fire && vlxagu.io.vrf_udcpy)
+  vlud_vrf_q.io.enq.bits.uop      := Mux(vlxagu.io.vrf_raddr.fire, vlxagu.io.resp.bits.uop, vlagu.io.resp.bits.uop)
+  vlud_vrf_q.io.enq.bits.uop.pdst := Mux(vlxagu.io.vrf_raddr.fire, vlxagu.io.resp.bits.uop.pvd(vlxagu.io.vrf_emul).bits,
                                                                     vlagu.io.resp.bits.uop.pvd(vlagu.io.vrf_emul).bits)
   vlud_vrf_q.io.enq.bits.data     := 0.U
   vlud_vrf_q.io.deq.ready         := vlud_dat_q.io.enq.ready
@@ -1699,11 +1699,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   vlud_dat_q.io.enq.valid         := vlud_vrf_q.io.deq.valid
   vlud_dat_q.io.enq.bits.uop      := vlud_vrf_q.io.deq.bits.uop
   vlud_dat_q.io.enq.bits.data     := io.core.vrf_rport.data
-  vlud_dat_q.io.deq.ready         := vlud_dat_q.io.deq.valid && !vload_resp_valid
+  vlud_dat_q.io.deq.ready         := !vload_resp_valid
 
   // VRF write back
   io.core.vrf_wbk                   := DontCare
-  io.core.vrf_wbk.valid             := vle_wbk_valid || vlud_dat_q.io.deq.valid
+  io.core.vrf_wbk.valid             := vle_wbk_valid || vlud_dat_q.io.deq.fire
   io.core.vrf_wbk.bits.uop          := Mux(vle_wbk_valid, vload_resp_e.bits.uop, vlud_dat_q.io.deq.bits.uop)
   io.core.vrf_wbk.bits.data         := Mux(!vle_wbk_valid,             vlud_dat_q.io.deq.bits.data,
                                        Mux(!io.vmem.resp.bits.is_unit, idxRespData,
