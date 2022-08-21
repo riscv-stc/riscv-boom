@@ -2203,7 +2203,7 @@ class VecMaskUnit(
     baseIdx := baseIdx + uop.v_split_ecnt
   } .elsewhen(io.req.valid && uop.uopc === uopVIOTA) {
     baseIdx := Mux1H(UIntToOH(uop.vd_eew),
-                     Seq(e8Out(numELENinVLEN*4-1) + e8Out(vLenb-1) + (maskIn(vLenb-1) & rs2_data(vLenb-1)),
+                     Seq(e8Out(vLenb-1) + (maskIn(vLenb-1) & rs2_data(vLenb-1)),
                          e16Out(numELENinVLEN*4-1) + (maskIn(numELENinVLEN*4-1) & rs2_data(numELENinVLEN*4-1)),
                          e32Out(numELENinVLEN*2-1) + (maskIn(numELENinVLEN*2-1) & rs2_data(numELENinVLEN*2-1)),
                          e64Out(numELENinVLEN-1)   + (maskIn(numELENinVLEN-1)   & rs2_data(numELENinVLEN-1))))
@@ -2217,7 +2217,7 @@ class VecMaskUnit(
                     else if(e < numELENinVLEN*4)
                       Module(new VIotaUnit(maskWidth = e%eLen+1, offset = e, dataWidth = eLen >> 2))
                     else
-                      Module(new VIotaUnit(maskWidth = e%eLen+2, offset = e, dataWidth = eLen >> 3))
+                      Module(new VIotaUnit(maskWidth = e%eLen+1, offset = e, dataWidth = eLen >> 3))
     // inputs
     viotaUnit.io.fn := uop.ctrl.op_fcn
     if(e < numELENinVLEN) {
@@ -2233,9 +2233,9 @@ class VecMaskUnit(
       viotaUnit.io.mask := maskIn(e, 0)
       viotaUnit.io.base := baseIdx
     } else {
-      viotaUnit.io.in   := rs2_data(e, numELENinVLEN*4-1)
-      viotaUnit.io.mask := maskIn(e, numELENinVLEN*4-1)
-      viotaUnit.io.base := Mux(uop.uopc === uopVID, baseIdx, 0.U)
+      viotaUnit.io.in   := rs2_data(e, 0)
+      viotaUnit.io.mask := maskIn(e, 0)
+      viotaUnit.io.base := baseIdx
     }
 
     // output
@@ -2262,7 +2262,7 @@ class VecMaskUnit(
   val e64OutMux = Wire(Vec(numELENinVLEN,   UInt(64.W)))
   val e32OutMux = Wire(Vec(numELENinVLEN*2, UInt(32.W)))
   val e16OutMux = Wire(Vec(numELENinVLEN*4, UInt(16.W)))
-  val e8OutMux  = Wire(Vec(numELENinVLEN*8, UInt( 8.W)))
+  val e8OutMux  = Wire(Vec(numELENinVLEN*8, UInt(8.W)))
   for(e <- 0 until vLenb) {
     if(e < numELENinVLEN) {
       e64OutMux(e) := Mux(maskInSt1(e), e64OutSt1(e), rs3DataSt1(64*e+63, 64*e))
@@ -2275,7 +2275,7 @@ class VecMaskUnit(
       e8OutMux(e)  := Mux(maskInSt1(e), e8OutSt1(e),  rs3DataSt1( 8*e+7,   8*e))
     } else {
       e8OutMux(e)  := Mux(maskInSt1(e), Mux(RegNext(uop.uopc === uopVID), e8OutSt1(e),
-                        e8OutSt1(e) + e8OutSt1(numELENinVLEN*4-1)), rs3DataSt1(8*e+7, 8*e))
+                        e8OutSt1(e)), rs3DataSt1(8*e+7, 8*e))
     }
   }
 
@@ -2295,8 +2295,7 @@ class VecMaskUnit(
   val out = Mux(respUop.uopc === uopVPOPC,  vpopcSt2,
             Mux(respUop.uopc === uopVFIRST, vfirstIdxSt2,
             Mux(respUop.uopc.isOneOf(uopVID, uopVIOTA), viotaOut,
-            Mux(respUop.uopc.isOneOf(uopVMSBF, uopVMSIF, uopVMSOF), vmaskOutSt2,
-                0.U))))
+            Mux(respUop.uopc.isOneOf(uopVMSBF, uopVMSIF, uopVMSOF), vmaskOutSt2, 0.U))))
 
   io.resp.bits.data         := Pipe(true.B, out, numStages - 2).bits
   io.resp.bits.vmask        := Fill(vLenb, 1.U(1.W))
