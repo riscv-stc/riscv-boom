@@ -470,7 +470,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq(st_enq_idx).bits.data.valid := false.B
       stq(st_enq_idx).bits.committed  := false.B
       stq(st_enq_idx).bits.succeeded  := false.B
-      //stq(st_enq_idx).bits.vmkilled   := false.B
 
       assert (st_enq_idx === io.core.dis_uops(w).bits.stq_idx, "[lsu] mismatch enq store tag.")
       assert (!stq(st_enq_idx).valid, "[lsu] Enqueuing uop is overwriting stq entries")
@@ -1401,7 +1400,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       vsxq_execute_head := WrapInc(vsxq_execute_head, numVSxqEntries)
     }
     vsxq(vsxq_execute_head).bits.executed  := true.B
-    vsxq(vsxq_execute_head).bits.committed := true.B
     
     when (vsxq_commit_e.bits.uop.v_split_last) {
       stq_execute_head := WrapInc(stq_execute_head, numStqEntries)
@@ -1489,6 +1487,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     when (vsxq_lkup_sel(i) && will_fire_vsxq_lookup(0)) {
       when (!exe_tlb_miss(0)) {
         vsxq(i).bits.addr.bits := exe_tlb_paddr(0)
+        vsxq(i).bits.committed := true.B
       }
       vsxq(i).bits.addr_is_virtual     := exe_tlb_miss(0)
       when (vsxq(i).bits.uop.exception) {            // indicaties the vaddr is misaligned
@@ -2796,7 +2795,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
     switch(state) {
       is (s_idle) {
         when (io.req.valid) {
-          val ioAligned = ioUop.vstart === 0.U && ioUop.vconfig.vl =/= 0.U && ((ioUop.vconfig.vl & (0x3F.U >> ioUop.vd_eew)) === 0.U)
+          val ioAligned = ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> uop.vd_eew) << uop.vd_emul)
           emulCtr        := 0.U
           usSplitCtr     := 0.U
           sliceCntCtr    := 0.U
@@ -2865,7 +2864,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
     switch(state) {
       is (s_idle) {
         when(io.req.valid) {
-          val ioAligned = ioUop.vstart === 0.U && ioUop.vconfig.vl =/= 0.U && ((ioUop.vconfig.vl & (0x3F.U >> ioUop.vd_eew)) === 0.U)
+          val ioAligned = ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> uop.vd_eew) << uop.vd_emul)
           emulCtr        := 0.U
           usSplitCtr     := 0.U
           sliceCntCtr    := 0.U
@@ -3069,7 +3068,7 @@ class VecIndexLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   {
     is (s_idle) {
       when (io.req.valid) {
-        val ioAligned = ioUop.vstart === 0.U && ioUop.vconfig.vl =/= 0.U && ((ioUop.vconfig.vl & (0x3F.U >> ioUop.vd_eew)) === 0.U)
+        val ioAligned = ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> uop.vd_eew) << uop.vd_emul)
         emulCtr  := 0.U
         ecnt     := 0.U
         splitCnt := 0.U
@@ -3145,8 +3144,9 @@ class VecIndexLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   when (RegNext(state === s_vmask && io.vrf_raddr.fire)) {
     vmask := io.vrf_rdata
   }
-  val active   = (Mux(uop.v_unmasked, 1.U, vmask(uop.v_eidx)) & (uop.v_eidx >= uop.vstart && uop.v_eidx < uop.vconfig.vl))
-  val vmaskSel = Mux1H(UIntToOH(uop.vd_eew),
+  val vmaskSel = Mux(RegNext(state === s_vmask && io.vrf_raddr.fire), io.vrf_rdata, vmask)
+  val active   = (Mux(uop.v_unmasked, 1.U, vmaskSel(uop.v_eidx)) & (uop.v_eidx >= uop.vstart && uop.v_eidx < uop.vconfig.vl))
+  val byteMask = Mux1H(UIntToOH(uop.vd_eew),
                        Seq(active, Fill(2, active), Fill(4, active), Fill(8, active)))
 
   op2 := Mux(!uop.v_index_ls, 0.U, VDataSel(Cat(eindex.reverse), uop.vs2_eew, uop.v_eidx, vLen*8, eLen))
@@ -3201,12 +3201,12 @@ class VecIndexLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   }
   io.resp.bits.uop.v_split_first:= uop.v_eidx === 0.U
   io.resp.bits.uop.v_split_last := Mux(state === s_udcpy, emulCtr + 1.U === nrVecGroup(emul, uop.v_seg_nf), uop.v_eidx +& 1.U >= uop.vconfig.vl)
-  io.resp_vm                    := vmaskSel
+  io.resp_vm                    := byteMask
   io.resp_shdir                 := true.B
   io.resp_shamt                 := (op1 + op2)(clSizeLog2-1, 0)
                                                      
 
-  io.resp.bits.addr := Cat((op1 + op2) >> clSizeLog2.U, 0.U(clSizeLog2.W))
+  io.resp.bits.addr := Cat((op1 + op2) >> clSizeLog2.U, 0.U(clSizeLog2.W))       // FIXME: badVaddr
   io.resp.bits.data := Mux(uop.uses_stq, srcData, 0.U)
 
   // FIXME exceptions: misaligned, breakpoints

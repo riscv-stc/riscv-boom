@@ -192,7 +192,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val pred_wakeup = Wire(Valid(new ExeUnitResp(1)))
   pred_wakeup.bits.vmask := 0.U
 
-  val vl_wakeup_dec = RegInit(0.U.asTypeOf(Valid(new VlWakeupResp())))
   val vl_wakeup = WireInit(0.U.asTypeOf(Valid(new VlWakeupResp())))
   val update_vtype = WireInit(0.U.asTypeOf(new VType()))
   //vl-ready wake up logic, bypass from execution unit
@@ -203,15 +202,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   vl_wakeup.bits.vconfig_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_tag
 
   update_vtype := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig.vtype
-
-  when(vl_wakeup.valid) {
-    vl_wakeup_dec := vl_wakeup
-  }
-
-  when(rob.io.flush.valid) {
-    vl_wakeup_dec.valid := false.B
-    vl_wakeup_dec.bits := DontCare
-  }
 
   require(exe_units.length == issue_units.map(_.issueWidth).sum)
 
@@ -242,12 +232,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dis_fire   = Wire(Vec(coreWidth, Bool()))
   val dis_fire_fb= Wire(Vec(coreWidth, Bool())) // upstream dis_fire: ren/ifu
   val dis_ready  = Wire(Bool())
-  //val dis_split       = Wire(Vec(coreWidth, Bool()))
-  //val dis_fired       = RegInit(VecInit(0.U(coreWidth.W).asBools))
-  //val dis_split_last  = Wire(Vec(coreWidth, Bool()))
-  //val dis_split_cand  = Wire(Vec(coreWidth, Bool()))
-  //val dis_split_actv  = Wire(Vec(coreWidth, Bool()))
-  //val dis_prev_split_actv  = Wire(Vec(coreWidth, Bool()))
   val wait_for_empty_pipeline = Wire(Vec(coreWidth, Bool()))
 
   // Issue Stage/Register Read
@@ -989,19 +973,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   for (w <- 0 until coreWidth) {
-    when(vl_wakeup_dec.valid && (vl_wakeup_dec.bits.vconfig_tag + 1.U) === dec_uops(w).vconfig_tag) {
-      dec_uops(w).vl_ready := true.B
-      dec_uops(w).vconfig.vl := Mux(dec_uops(w).uopc.isOneOf(uopVSMA, uopVLM),
-        (vl_wakeup_dec.bits.vl + 7.U) >> 3.U, vl_wakeup_dec.bits.vl)
-    }
-    when(vl_wakeup.valid && (vl_wakeup.bits.vconfig_tag + 1.U) === dec_uops(w).vconfig_tag) {
+    when(vl_wakeup.valid && !decode_units(w).io.deq.uop.vl_ready &&
+        (vl_wakeup.bits.vconfig_tag + 1.U) === dec_uops(w).vconfig_tag) {
       dec_uops(w).vl_ready := true.B
       dec_uops(w).vconfig.vl := Mux(dec_uops(w).uopc.isOneOf(uopVSMA, uopVLM),
         (vl_wakeup.bits.vl + 7.U) >> 3.U, vl_wakeup.bits.vl)
-    }
-    when(decode_units(w).io.deq.uop.vl_ready) {
-      dec_uops(w).vl_ready   := true.B
-      dec_uops(w).vconfig.vl :=  decode_units(w).io.deq.uop.vconfig.vl
     }
   }
 
