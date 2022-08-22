@@ -982,8 +982,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   // Vconfig Mask Logic
-  dec_vconfigmask_logic.io.vconfig_mask_update := RegNext(Mux(rob.io.commit.valids.head & rob.io.commit.uops.head.is_vsetvli, rob.io.commit.uops.head.vconfig_mask,
-                                                          Mux(rob.io.commit.valids.last & rob.io.commit.uops.last.is_vsetvli, rob.io.commit.uops.last.vconfig_mask, 0.U)))
+  dec_vconfigmask_logic.io.vconfig_mask_update := RegNext(Mux((rob.io.commit.valids.head & rob.io.commit.uops.head.is_vsetvli) ||
+      (rob.io.commit.valids.head & rob.io.commit.uops.head.is_vsetivli), rob.io.commit.uops.head.vconfig_mask,
+    Mux((rob.io.commit.valids.last & rob.io.commit.uops.last.is_vsetvli) ||
+      (rob.io.commit.valids.last & rob.io.commit.uops.last.is_vsetivli), rob.io.commit.uops.last.vconfig_mask, 0.U)))
+
   dec_vconfigmask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
   vconfig_mask_full := dec_vconfigmask_logic.io.is_full
 
