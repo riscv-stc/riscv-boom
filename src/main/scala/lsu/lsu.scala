@@ -2795,7 +2795,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
     switch(state) {
       is (s_idle) {
         when (io.req.valid) {
-          val ioAligned = ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> uop.vd_eew) << uop.vd_emul)
+          val ioAligned = ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> ioUop.vd_eew) << (Mux(ioUop.vd_emul(2), 0.U, ioUop.vd_emul)))
           emulCtr        := 0.U
           usSplitCtr     := 0.U
           sliceCntCtr    := 0.U
@@ -2864,7 +2864,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
     switch(state) {
       is (s_idle) {
         when(io.req.valid) {
-          val ioAligned = ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> uop.vd_eew) << uop.vd_emul)
+          val ioAligned = ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> ioUop.vd_eew) << (Mux(ioUop.vd_emul(2), 0.U, ioUop.vd_emul)))
           emulCtr        := 0.U
           usSplitCtr     := 0.U
           sliceCntCtr    := 0.U
@@ -3068,7 +3068,7 @@ class VecIndexLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   {
     is (s_idle) {
       when (io.req.valid) {
-        val ioAligned = ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> uop.vd_eew) << uop.vd_emul)
+        val ioAligned = ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> ioUop.vd_eew) << (Mux(ioUop.vd_emul(2), 0.U, ioUop.vd_emul)))
         emulCtr  := 0.U
         ecnt     := 0.U
         splitCnt := 0.U
