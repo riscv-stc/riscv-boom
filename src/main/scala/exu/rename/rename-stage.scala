@@ -148,10 +148,10 @@ abstract class AbstractRenameStage(
 
     // vl_wakeup, ren2_uops may stall
     if (usingVector) {
-      when(io.vl_wakeup.valid && r_valid && !r_uop.vl_ready && 
+      when(io.vl_wakeup.valid && r_valid && !r_uop.vl_ready && !ren2_ready &&
           (io.vl_wakeup.bits.vconfig_tag + 1.U) === r_uop.vconfig_tag) {
         r_uop.vl_ready   := true.B
-        r_uop.vconfig.vl := Mux(r_uop.uopc.isOneOf(uopVSMA, uopVLM), (io.vl_wakeup.bits.vl + 7.U) >> 3.U, 
+        r_uop.vconfig.vl := Mux(r_uop.uopc.isOneOf(uopVSMA, uopVLM), (io.vl_wakeup.bits.vl + 7.U) >> 3.U,
                                                                       io.vl_wakeup.bits.vl)
       }
     }
