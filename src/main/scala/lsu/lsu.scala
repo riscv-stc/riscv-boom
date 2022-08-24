@@ -320,7 +320,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val stq_tail          = Reg(UInt(stqAddrSz.W))
   val stq_commit_head   = Reg(UInt(stqAddrSz.W)) // point to next store to commit
   val stq_execute_head  = Reg(UInt(stqAddrSz.W)) // point to next store to execute
-  val stq_succeed_head  = Reg(UInt(stqAddrSz.W)) // point to next store to succeed, used to keep store order of scalar store and vector stores
+
   // for unit-stride vector load and stores; matrix load and stores
   val vldq              = Reg(Vec(numVLdqEntries, Valid(new VLDQEntry)))
   val vstq              = Reg(Vec(numVStqEntries, Valid(new VSTQEntry)))
@@ -792,7 +792,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   !vstq_commit_e.bits.uop.exception                      &&
                                    io.vmem.req.ready                                     &&
                                    io.vmem.vsdq_ready                                    &&
-                                   vstq_commit_e.bits.uop.stq_idx === stq_succeed_head
+                                   vstq_commit_e.bits.uop.stq_idx === stq_head
                                  ))
   
   // Can we fire a vlxq lookup
@@ -853,7 +853,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   !vsxq_commit_e.bits.uop.exception                        &&
                                    io.vmem.req.ready                                       &&
                                    io.vmem.vsdq_ready                                      &&
-                                   vsxq_commit_e.bits.uop.stq_idx === stq_succeed_head     &&
+                                   vsxq_commit_e.bits.uop.stq_idx === stq_head             &&
                                   (vsxq_commit_e.bits.committed ||
                                    vsxq_commit_e.bits.uop.rob_idx === io.core.rob_head_idx)
                                  ))
@@ -1816,7 +1816,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
           (vstq(vstq_head).bits.uop.is_rvm && vstq(vstq_head).bits.uop.m_split_last)) {
       val stq_idx = vstq(vstq_head).bits.uop.stq_idx
       stq(stq_idx).bits.succeeded := true.B
-      stq_succeed_head := WrapInc(stq_succeed_head, numStqEntries)
     }
   }
 
@@ -1844,7 +1843,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     when (vsxq(vsxq_head).bits.uop.v_split_last) {
       val stq_idx = vsxq(vsxq_head).bits.uop.stq_idx
       stq(stq_idx).bits.succeeded := true.B
-      stq_succeed_head := WrapInc(stq_succeed_head, numStqEntries)
     }
   }
 
@@ -2223,7 +2221,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       {
         assert(!io.dmem.resp(w).bits.is_hella)
         stq(io.dmem.resp(w).bits.uop.stq_idx).bits.succeeded := true.B
-        stq_succeed_head := WrapInc(stq_succeed_head, numStqEntries)
 
         when (io.dmem.resp(w).bits.uop.is_amo) {
           dmem_resp_fired(w) := true.B
@@ -2485,7 +2482,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     when (stq(stq_head).bits.uop.is_fence)
     {
       stq_execute_head := WrapInc(stq_execute_head, numStqEntries)
-      stq_succeed_head := WrapInc(stq_succeed_head, numStqEntries)
     }
   }
 
@@ -2606,7 +2602,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq_tail := 0.U
       stq_commit_head  := 0.U
       stq_execute_head := 0.U
-      stq_succeed_head := 0.U
 
       for (i <- 0 until numStqEntries)
       {
@@ -3343,6 +3338,9 @@ class VecMemImp(outer: VecMem) extends LazyModuleImp(outer)
                                                 vmemq.io.deq.bits.mask >> vmemq.io.deq.bits.shamt)
     )._2
   }
+
+  assert (tl_out.d.bits.source.getWidth >= (log2Ceil(maxEntries) + 2),
+    "sourceId IdRange width mismatch.")
 
   io.lsu.resp.valid := tl_out.d.valid
   //io.lsu.resp.bits.uop := histq.io.deq.bits.uop
