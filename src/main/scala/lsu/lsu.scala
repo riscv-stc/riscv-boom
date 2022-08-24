@@ -3150,13 +3150,16 @@ class VecIndexLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   val eew      = uop.vd_eew
   val vLenECnt = vLenb.U >> eew
   val emul     = uop.vd_emul
-  val op1      = req.rs1_data                      // base address
+  val op1      = req.rs1_data                           // base address
   val op2      = WireInit(0.U(eLen.W))
   val srcData  = WireInit(0.U(eLen.W))
   val addrInc  = Mux(uop.v_index_ls, 0.U, req.rs2_data)
   val ecnt     = RegInit(0.U(vLenSz.W))
   val splitCnt = RegInit(0.U((vLenSz+1).W))
+  val active   = WireInit(false.B)                      // inactive index won't occupy a vlxq/vsxq entry unless it's the last split
+  val byteMask = WireInit(0.U(8.W))                     // byteMask, maximum 8 bytes (sew = 64)
   val misaligned = WireInit(false.B)
+  val vSplitLast = uop.v_eidx +& 1.U >= uop.vconfig.vl  // last split 
 
   when (io.req.valid) {
     assert(ioUop.is_vm_ext && (ioUop.uses_ldq || ioUop.uses_stq))
@@ -3217,16 +3220,16 @@ class VecIndexLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
       }
     }
     is (s_split) {
-      when (io.resp.fire) {
+      when (io.resp.fire || (!active && !vSplitLast)) {
         op1  := op1 + addrInc
         ecnt := ecnt + 1.U
         uop.v_eidx := uop.v_eidx + 1.U
-        splitCnt   := splitCnt + 1.U               // optimization: vm
+        splitCnt   := splitCnt + io.resp.fire.asUInt
         when (ecnt +& 1.U === vLenECnt) {
           emulCtr := emulCtr + 1.U
           ecnt    := 0.U
         }
-        when (misaligned || uop.v_eidx +& 1.U >= uop.vconfig.vl) {
+        when (misaligned || vSplitLast) {
           emulCtr := 0.U
           ecnt    := 0.U
           state   := s_idle
@@ -3244,9 +3247,8 @@ class VecIndexLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
     vmask := io.vrf_rdata
   }
   val vmaskSel = Mux(RegNext(state === s_vmask && io.vrf_raddr.fire), io.vrf_rdata, vmask)
-  val active   = (Mux(uop.v_unmasked, 1.U, vmaskSel(uop.v_eidx)) & (uop.v_eidx >= uop.vstart && uop.v_eidx < uop.vconfig.vl))
-  val byteMask = Mux1H(UIntToOH(uop.vd_eew),
-                       Seq(active, Fill(2, active), Fill(4, active), Fill(8, active)))
+  active   := (Mux(uop.v_unmasked, 1.U, vmaskSel(uop.v_eidx)) & (uop.v_eidx >= uop.vstart && uop.v_eidx < uop.vconfig.vl))
+  byteMask := Mux1H(UIntToOH(uop.vd_eew), Seq(active, Fill(2, active), Fill(4, active), Fill(8, active)))
 
   op2 := Mux(!uop.v_index_ls, 0.U, VDataSel(Cat(eindex.reverse), uop.vs2_eew, uop.v_eidx, vLen*8, eLen))
   when (RegNext(state === s_index && io.vrf_raddr.fire)) {
@@ -3285,11 +3287,11 @@ class VecIndexLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   io.vrf_emul        := emulCtr
 
   // update vls cnt in rob
-  io.update_ls.valid            := io.resp.fire && (state === s_split && (misaligned || uop.v_eidx +& 1.U >= uop.vconfig.vl))
+  io.update_ls.valid            := state === s_split && io.resp.fire && (misaligned || vSplitLast)
   io.update_ls.bits.rob_idx     := uop.rob_idx
   io.update_ls.bits.ls_cnt      := splitCnt + 1.U
 
-  io.resp.valid                 := state === s_split && !IsKilledByBranch(io.brupdate, uop)
+  io.resp.valid                 := state === s_split && (active || vSplitLast) && !IsKilledByBranch(io.brupdate, uop)
   io.resp.bits.uop              := UpdateBrMask(io.brupdate, uop)
   io.resp.bits.uop.pdst         := uop.pvd(emulCtr).bits
   io.resp.bits.uop.stale_pdst   := uop.stale_pvd(emulCtr).bits
@@ -3299,7 +3301,7 @@ class VecIndexLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
     io.resp.bits.uop.v_split_ecnt := vLenECnt
   }
   io.resp.bits.uop.v_split_first:= uop.v_eidx === 0.U
-  io.resp.bits.uop.v_split_last := Mux(state === s_udcpy, emulCtr + 1.U === nrVecGroup(emul, uop.v_seg_nf), uop.v_eidx +& 1.U >= uop.vconfig.vl)
+  io.resp.bits.uop.v_split_last := Mux(state === s_udcpy, emulCtr + 1.U === nrVecGroup(emul, uop.v_seg_nf), vSplitLast)
   io.resp_vm                    := byteMask
   io.resp_shdir                 := true.B
   io.resp_shamt                 := (op1 + op2)(clSizeLog2-1, 0)                                          
@@ -3307,8 +3309,8 @@ class VecIndexLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   io.resp.bits.addr := op1 + op2
   io.resp.bits.data := Mux(uop.uses_stq, srcData, 0.U)
 
-  // FIXME exceptions: misaligned, breakpoints
-  val effAddr = Mux(state === s_split, (op1 + op2)(2, 0), 0.U)
+  // exceptions: misaligned, breakpoints
+  val effAddr = Mux(state === s_split && active, (op1 + op2)(2, 0), 0.U)
   val effSew  = uop.vd_eew
   misaligned := (effSew === 1.U && effAddr(0)    =/= 0.U) ||
                 (effSew === 2.U && effAddr(1, 0) =/= 0.U) ||
