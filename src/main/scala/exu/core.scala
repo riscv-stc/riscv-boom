@@ -278,7 +278,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val mispredict_cnt = RegInit(0.U(64.W))
   when(mispredict_val.asBool) {
     mispredict_cnt := mispredict_cnt + 1.U
-    printf("mispredict_cnt: %d\n", mispredict_cnt.asUInt())
+    if (DEBUG_PRINTF) {
+      printf("mispredict_cnt: %d\n", mispredict_cnt.asUInt())
+    }
   }
   b2.mispredict := mispredict_val
   b2.cfi_type := oldest_mispredict.cfi_type
@@ -398,27 +400,37 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
     when(retired_branch(w).asBool) {
       branch_cnt := branch_cnt + 1.U
-      printf("branch_cnt: %d\n", branch_cnt.asUInt())
+      if (DEBUG_PRINTF) {
+        printf("branch_cnt: %d\n", branch_cnt.asUInt())
+      }
     }
 
     when(retired_load(w).asBool) {
       load_cnt := load_cnt + 1.U
-      printf("load_cnt: %d\n", load_cnt.asUInt())
+      if (DEBUG_PRINTF) {
+        printf("load_cnt: %d\n", load_cnt.asUInt())
+      }
     }
 
     when(retired_store(w).asBool) {
       store_cnt := store_cnt + 1.U
-      printf("store_cnt: %d\n", store_cnt.asUInt())
+      if (DEBUG_PRINTF) {
+        printf("store_cnt: %d\n", store_cnt.asUInt())
+      }
     }
 
     when(retired_fp_load(w).asBool) {
       load_cnt := load_cnt + 1.U
-      printf("load_cnt: %d\n", load_cnt.asUInt())
+      if (DEBUG_PRINTF) {
+        printf("load_cnt: %d\n", load_cnt.asUInt())
+      }
     }
 
     when(retired_fp_store(w).asBool) {
       store_cnt := store_cnt + 1.U
-      printf("store_cnt: %d\n", store_cnt.asUInt())
+      if (DEBUG_PRINTF) {
+        printf("store_cnt: %d\n", store_cnt.asUInt())
+      }
     }
   }
 
@@ -1627,7 +1639,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     csr.io.retire  := RegNext(PopCount(cmt_valids))
     when(cmt_valids.orR) {
       retire_cnt := retire_cnt + PopCount(cmt_valids)
-      printf("retire_cnt: %d\n", retire_cnt.asUInt())
+      if (DEBUG_PRINTF) {
+        printf("retire_cnt: %d\n", retire_cnt.asUInt())
+      }
     }
   }
   else if(usingVector) {
@@ -1637,7 +1651,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     csr.io.retire  := RegNext(PopCount(cmt_valids))
     when(cmt_valids.orR) {
       retire_cnt := retire_cnt + PopCount(cmt_valids)
-      printf("retire_cnt: %d\n", retire_cnt.asUInt())
+      if (DEBUG_PRINTF) {
+        printf("retire_cnt: %d\n", retire_cnt.asUInt())
+      }
     }
   } else {
     csr.io.retire  := RegNext(PopCount(rob.io.commit.arch_valids.asUInt))

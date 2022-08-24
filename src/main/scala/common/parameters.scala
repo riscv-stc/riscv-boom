@@ -119,8 +119,8 @@ case class BoomCoreParams(
   numMatAccRegisters: Int = 0,
 
   /* debug stuff */
-  enableCommitLogPrintf: Boolean = true,
-  enableBranchPrintf: Boolean = true,
+  enableCommitLogPrintf: Boolean = false,
+  enableBranchPrintf: Boolean = false,
   enableMemtracePrintf: Boolean = false
 
 // DOC include end: BOOM Parameters
