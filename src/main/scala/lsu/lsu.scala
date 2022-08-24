@@ -1880,9 +1880,26 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   vsxagu.io.vrf_rdata         := io.core.vrf_rport.data
   vsxagu.io.vbusy_status      := io.core.vbusy_status
 
-  // Task 2: Do LD-LD. ST-LD searches for ordering failures
-  //         Do LD-ST search for forwarding opportunities
+  // Task 2: Do LD-LD, ST-LD, VLD-LD, VST-LD searches for ordering failures (must)
+  //         Do LD-ST, VLD-ST, VLD-VST search for forwarding opportunities  (option)
+  // searcher is load
+  //    1. Do LD-LD  search for ordering failures (younger LD has been observed)
+  //    2. Do LD-VLD search for ordering failures (younger VLD has been observed, not possible under current scheduling policy)
+  //    3. Do LD-ST  search for forwarding opportunities (address matches with older ST)
+  //    4. Do LD-VST search for forwarding opportunities (address matches with older VST, optimization option)
+  // searcher is store
+  //    1. Do ST-LD  search for ordering failures (younger LD  read stale data from memory instead of store buffer)
+  //    1. Do ST-VLD search for ordering failures (younger VLD read stale data from memory instead of store buffer, not possible under current scheduling policy as long as ST-VLD forwarding implemented)
+  // searcher is vload
+  //    1. Do VLD-LD  search for ordering failures (younger LD  has been observed)
+  //    2. Do VLD-VLD search for ordering failures (younger VLD has been observed, not possible under current scheduling policy)
+  //    3. Do VLD-ST  search for forwarding opportunities (address matches with older ST)
+  //    4. Do VLD-VST search for forwarding opportunities (address matches with older VST)
+  // searcher is vstore
+  //    1. Do VST-LD  search for ordering failures (younger LD  read stale data from memory instead of vstore buffer)
+  //    2. Do VST-VLD search for ordering failures (younger VLD read stale data from memory instead of vstore buffer, not possible under current scheduling policy as long as VST-VLD forwarding implemented)
   // We have the opportunity to kill a request we sent last cycle. Use it wisely!
+
 
   // We translated a store last cycle
   val do_st_search = widthMap(w => (fired_stad_incoming(w) || fired_sta_incoming(w) || fired_sta_retry(w)) && !mem_tlb_miss(w))
@@ -1940,6 +1957,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val wb_forward_ld_addr  = RegNext(mem_forward_ld_addr)
   val wb_forward_stq_idx  = RegNext(mem_forward_stq_idx)
 
+  // search LDQ, searchers include LD and ST
   for (i <- 0 until numLdqEntries) {
     val l_valid = ldq(i).valid
     val l_bits  = ldq(i).bits
@@ -1956,7 +1974,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     val mask_match   = widthMap(w => (l_mask & lcam_mask(w)) === l_mask)
     val mask_overlap = widthMap(w => (l_mask & lcam_mask(w)).orR)
 
-    // Searcher is a store
     for (w <- 0 until memWidth) {
 
       when (do_release_search(w) &&
@@ -2010,6 +2027,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     }
   }
 
+  // search STQ
   for (i <- 0 until numStqEntries) {
     val s_addr = stq(i).bits.addr.bits
     val s_uop  = stq(i).bits.uop
@@ -2042,6 +2060,44 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       }
     }
   }
+
+  // search VSXQ
+  // for (i <- 0 until numVSxqEntries) {
+  //   val s_addr = vsxq(i).bits.addr.bits
+  //   val s_uop  = vsxq(i).bits.uop
+  //   val dword_addr_matches = widthMap(w =>
+  //                            ( vsxq(i).bits.addr.valid      &&
+  //                             !vsxq(i).bits.addr_is_virtual &&
+  //                             (s_addr(corePAddrBits-1,3) === lcam_addr(w)(corePAddrBits-1,3))))
+  //   val write_mask = GenByteMask(s_addr, s_uop.mem_size)
+  //   val stq_idx = vsxq(i).bits.uop.stq_idx
+  //   for (w <- 0 until memWidth) {
+  //     when (do_ld_search(w) && vsxq(i).valid && lcam_st_dep_mask(w)(stq_idx)) {
+  //       when (((lcam_mask(w) & write_mask) === lcam_mask(w)) && dword_addr_matches(w) && can_forward(w))
+  //       {
+  //         ldst_addr_matches(w)(stq_idx)      := true.B
+  //         ldst_forward_matches(w)(stq_idx)   := true.B
+  //         io.dmem.s1_kill(w)                 := RegNext(dmem_req_fire(w))
+  //         s1_set_execute(lcam_ldq_idx(w))    := false.B
+  //         stq(stq_idx).bits.data.bits        := vsxq(i).bits.data.bits
+  //       }
+  //         .elsewhen (((lcam_mask(w) & write_mask) =/= 0.U) && dword_addr_matches(w))
+  //       {
+  //         ldst_addr_matches(w)(stq_idx)      := true.B
+  //         io.dmem.s1_kill(w)                 := RegNext(dmem_req_fire(w))
+  //         s1_set_execute(lcam_ldq_idx(w))    := false.B
+  //         stq(stq_idx).bits.data.bits        := vsxq(i).bits.data.bits
+  //       }
+  //         .elsewhen (s_uop.is_fence || s_uop.is_amo)
+  //       {
+  //         ldst_addr_matches(w)(stq_idx)      := true.B
+  //         io.dmem.s1_kill(w)                 := RegNext(dmem_req_fire(w))
+  //         s1_set_execute(lcam_ldq_idx(w))    := false.B
+  //         stq(stq_idx).bits.data.bits        := vsxq(i).bits.data.bits
+  //       }
+  //     }
+  //   }
+  // }
 
   // Set execute bit in LDQ
   for (i <- 0 until numLdqEntries) {
