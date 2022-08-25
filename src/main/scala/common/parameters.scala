@@ -297,13 +297,15 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   //val minFLen = boomParams.minFLen
   val numVLdqEntries = if (usingVector) boomParams.numVLdqEntries else 0
   val numVStqEntries = if (usingVector) boomParams.numVStqEntries else 0
-  val maxEntries = if (numVLdqEntries > numVStqEntries) numVLdqEntries else numVStqEntries
   val vldqAddrSz     = log2Ceil(numVLdqEntries)
   val vstqAddrSz     = log2Ceil(numVStqEntries)
   val numVLxqEntries = if (usingVector) boomParams.numVLxqEntries else 0
   val numVSxqEntries = if (usingVector) boomParams.numVSxqEntries else 0
   val vlxqAddrSz     = log2Ceil(numVLxqEntries)
   val vsxqAddrSz     = log2Ceil(numVSxqEntries)
+  val maxUnitEntries = if (numVLdqEntries > numVStqEntries) numVLdqEntries else numVStqEntries
+  val maxIdxEntries = if (numVLxqEntries > numVSxqEntries) numVLxqEntries else numVSxqEntries
+  val maxEntries = if (maxUnitEntries > maxIdxEntries) maxUnitEntries else maxIdxEntries
 
   // matrix stuff
   require (issueParams.count(_.iqType == IQT_MAT.litValue) == 1 || !usingMatrix)

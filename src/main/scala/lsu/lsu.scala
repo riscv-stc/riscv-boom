@@ -131,6 +131,7 @@ class BoomVMemReq(implicit p: Parameters) extends BoomBundle()(p)
   val shamt = UInt(log2Ceil(vLenb.max(p(freechips.rocketchip.subsystem.CacheBlockBytes))).W)
   val vldq_idx = UInt(vldqAddrSz.W)
   val vstq_idx = UInt(vstqAddrSz.W)
+  val br_mask = UInt(brTagSz.W)
 }
 
 class BoomVMemResp(implicit p: Parameters) extends BoomBundle()(p)
@@ -140,6 +141,7 @@ class BoomVMemResp(implicit p: Parameters) extends BoomBundle()(p)
   val is_unit  = Bool()       // is unit load and store? including unit-stride vls and mls
   val vldq_idx = UInt(vldqAddrSz.W)
   val vstq_idx = UInt(vstqAddrSz.W)
+  val br_mask = UInt(brTagSz.W)
   val cdata = UInt((8*p(freechips.rocketchip.subsystem.CacheBlockBytes)).W)
 }
 
@@ -321,6 +323,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val stq_tail          = Reg(UInt(stqAddrSz.W))
   val stq_commit_head   = Reg(UInt(stqAddrSz.W)) // point to next store to commit
   val stq_execute_head  = Reg(UInt(stqAddrSz.W)) // point to next store to execute
+
   // for unit-stride vector load and stores; matrix load and stores
   val vldq              = Reg(Vec(numVLdqEntries, Valid(new VLDQEntry)))
   val vstq              = Reg(Vec(numVStqEntries, Valid(new VSTQEntry)))
@@ -1412,6 +1415,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   vmem_req.shamt := 0.U
   vmem_req.vldq_idx := 0.U
   vmem_req.vstq_idx := 0.U
+  vmem_req.br_mask := 0.U
 
   when (will_fire_vldq_lookup(0)) {
     vmem_req.uop      := vldq_lkup_e.bits.uop
@@ -1420,6 +1424,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vmem_req.shdir    := vldq_lkup_e.bits.shdir
     vmem_req.shamt    := vldq_lkup_e.bits.shamt
     vmem_req.vldq_idx := vldq_lkup_idx
+    vmem_req.br_mask := vldq_lkup_e.bits.uop.br_mask
   } .elsewhen (will_fire_vstq_commit(memWidth-1)) {
     vmem_req.uop      := vstq_commit_e.bits.uop
     vmem_req.addr     := vstq_commit_e.bits.addr.bits
@@ -1427,6 +1432,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vmem_req.shdir    := vstq_commit_e.bits.shdir
     vmem_req.shamt    := vstq_commit_e.bits.shamt
     vmem_req.vstq_idx := vstq_execute_head
+    vmem_req.br_mask := vstq_commit_e.bits.uop.br_mask
     vstq_execute_head := WrapInc(vstq_execute_head, numVStqEntries)
     when ((vstq_commit_e.bits.uop.is_rvv && vstq_commit_e.bits.uop.v_split_last) ||
           (vstq_commit_e.bits.uop.is_rvm && vstq_commit_e.bits.uop.m_split_last)) {
@@ -1750,8 +1756,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     io.core.tile_rport.msew  := vstq_commit_e.bits.uop.m_ls_ew
   }
 
-  val vload_resp_valid    = io.vmem.resp.valid && !io.vmem.resp.bits.is_vst
   val vload_resp_e        = Mux(io.vmem.resp.bits.is_unit, vldq(io.vmem.resp.bits.vldq_idx), vlxq(io.vmem.resp.bits.vldq_idx))
+  val vld_can_wb          = vload_resp_e.valid && (vload_resp_e.bits.uop.br_mask === io.vmem.resp.bits.br_mask)
+  val vload_resp_valid    = io.vmem.resp.valid && !io.vmem.resp.bits.is_vst && vld_can_wb
+
   val vle_wbk_valid       = vload_resp_valid && vload_resp_e.bits.uop.is_rvv
   val mle_wbk_valid       = vload_resp_valid && vload_resp_e.bits.uop.is_rvm
   val vload_resp_data_shl = Wire(UInt(vLen.W))
@@ -3370,7 +3378,7 @@ class VecMem(implicit p: Parameters) extends LazyModule
 {
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
       name = s"l1-vec-memq",
-      sourceId = IdRange(0, 64),
+      sourceId = IdRange(0, 1024),
       supportsProbe = TransferSizes.none
   )))))
   lazy val module = new VecMemImp(this)
@@ -3414,13 +3422,15 @@ class VecMemImp(outer: VecMem) extends LazyModuleImp(outer)
   tl_out.a.valid  := vmemq.io.deq.valid && (vmemq.io.deq.bits.uop.uses_ldq || vsdq.io.deq.valid)
   when (vmemq.io.deq.bits.uop.uses_ldq) {
     tl_out.a.bits   := edge.Get(
-      fromSource = Cat(0.U(1.W), (vmemq.io.deq.bits.uop.is_rvm || vmemq.io.deq.bits.uop.v_unit_ls), vmemq.io.deq.bits.vldq_idx),
+      fromSource = Cat(0.U(1.W), (vmemq.io.deq.bits.uop.is_rvm || vmemq.io.deq.bits.uop.v_unit_ls),
+                  vmemq.io.deq.bits.br_mask, vmemq.io.deq.bits.vldq_idx),
       toAddress  = (vmemq.io.deq.bits.addr >> clSizeLog2.U) ## 0.U(clSizeLog2.W),
       lgSize     = lgCacheBlockBytes.U
     )._2
   } .otherwise {
     tl_out.a.bits   := edge.Put(
-      fromSource = Cat(1.U(1.W), (vmemq.io.deq.bits.uop.is_rvm || vmemq.io.deq.bits.uop.v_unit_ls), vmemq.io.deq.bits.vstq_idx),
+      fromSource = Cat(1.U(1.W), (vmemq.io.deq.bits.uop.is_rvm || vmemq.io.deq.bits.uop.v_unit_ls),
+                  vmemq.io.deq.bits.br_mask, vmemq.io.deq.bits.vstq_idx),
       toAddress  = (vmemq.io.deq.bits.addr >> clSizeLog2.U) ## 0.U(clSizeLog2.W),
       lgSize     = lgCacheBlockBytes.U,
       data       = Mux(vmemq.io.deq.bits.shdir, vsdq.io.deq.bits << (vmemq.io.deq.bits.shamt << 3.U),
@@ -3430,13 +3440,14 @@ class VecMemImp(outer: VecMem) extends LazyModuleImp(outer)
     )._2
   }
 
-  assert (tl_out.d.bits.source.getWidth >= (log2Ceil(maxEntries) + 2),
+  assert (tl_out.d.bits.source.getWidth >= (log2Ceil(maxEntries) + brTagSz + 2),
     "sourceId IdRange width mismatch.")
 
   io.lsu.resp.valid := tl_out.d.valid
   //io.lsu.resp.bits.uop := histq.io.deq.bits.uop
   io.lsu.resp.bits.is_vst   := Reverse(tl_out.d.bits.source)(0)
   io.lsu.resp.bits.is_unit  := Reverse(tl_out.d.bits.source)(1)
+  io.lsu.resp.bits.br_mask  := (tl_out.d.bits.source >> log2Ceil(maxEntries))(brTagSz - 1, 0)
   io.lsu.resp.bits.vldq_idx := tl_out.d.bits.source //histq.io.deq.bits.vldq_idx
   io.lsu.resp.bits.vstq_idx := tl_out.d.bits.source //histq.io.deq.bits.vstq_idx
   io.lsu.resp.bits.cdata := tl_out.d.bits.data //Mux(histq.io.deq.bits.shdir, tl_data_shr, tl_data_shl)
