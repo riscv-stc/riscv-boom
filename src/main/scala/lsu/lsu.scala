@@ -274,7 +274,6 @@ class LDQEntry(implicit p: Parameters) extends BoomBundle()(p)
 
   val const_stride        = Valid(UInt(xLen.W)) // const stride in constant strided load; row strides in MLE
   val debug_wb_data       = UInt(xLen.W)
-  val br_resolved         = Bool()
 }
 
 class STQEntry(implicit p: Parameters) extends BoomBundle()(p)
@@ -762,7 +761,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                    vldq_lkup_e.valid                                     &&
                                    vldq_lkup_e.bits.addr.valid                           &&
                                    vldq_lkup_e.bits.addr_is_virtual                      &&
-                                   vldq_lkup_e.bits.br_resolved                          &&
+                                   !vldq_lkup_e.bits.uop.br_mask.orR                     &&
                                   !vldq_lkup_e.bits.executed                             &&
                                   !vldq_lkup_e.bits.order_fail                           &&
                                   !vldq_lkup_e.bits.uop.exception                        &&
@@ -823,6 +822,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                    vlxq_lkup_e.valid                                      &&
                                    vlxq_lkup_e.bits.addr.valid                            &&
                                    vlxq_lkup_e.bits.addr_is_virtual                       &&
+                                   !vlxq_lkup_e.bits.uop.br_mask.orR                      &&
                                   !vlxq_lkup_e.bits.executed                              &&
                                   !vlxq_lkup_e.bits.order_fail                            &&
                                   !vlxq_lkup_e.bits.uop.exception                         &&
@@ -893,7 +893,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vldq(vldq_tail).bits.order_fail       := false.B
     vldq(vldq_tail).bits.observed         := false.B
     vldq(vldq_tail).bits.forward_std_val  := false.B
-    vldq(vldq_tail).bits.br_resolved      := false.B
     vldq(vldq_tail).bits.vmask            := vlagu.io.resp_vm
     vldq(vldq_tail).bits.shamt            := vlagu.io.resp_shamt
     vldq(vldq_tail).bits.shdir            := vlagu.io.resp_shdir
@@ -2417,8 +2416,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       when (IsKilledByBranch(io.core.brupdate, vldq(i).bits.uop)) {
         vldq(i).valid           := false.B
         vldq(i).bits.addr.valid := false.B
-      } .otherwise {
-        vldq(i).bits.br_resolved := true.B
       }
     }
   }
@@ -2646,7 +2643,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       vldq(i).bits.addr.valid := false.B
       vldq(i).bits.executed   := false.B
       vldq(i).bits.succeeded  := false.B
-      vldq(i).bits.br_resolved  := false.B
     }
 
     vlxq_head := 0.U
