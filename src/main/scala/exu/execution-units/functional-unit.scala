@@ -1900,7 +1900,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
       Mux(progress === 1.U && ured_ph1_prgrs === 1.U, Cat(0.U((vLen/2).W),  Cat((0 until vLen/16).map(i => v2buf(0)(i*16+15, i*16+8)).reverse)),
       Mux(progress < ured_ph1_prgrs, v2buf(progress), Cat(0.U((vLen/2).W),  Cat((0 until vLen/16).map(i => io.fbrsp.bits.data(i*16+15, i*16+8)).reverse))))),
     (uop.vd_eew(1,0) === 1.U) -> {
-      val v2m = v2buf(progress >> 1.U)
+      val v2m = v2buf(progress >> 3.U)
       Mux(is_last, Cat(0.U((vLen-16).W), v1buf(15,0)),
       Mux(progress === 1.U && ured_ph1_prgrs === 1.U, Cat(0.U((vLen/2).W),  Cat((0 until vLen/32).map(i => v2buf(0)(i*32+31, i*32+16)).reverse)),
       Mux(progress < ured_ph1_prgrs, Mux(uop.rt(RD, isWidenV), Cat((0 until vLen/16).map(i => Cext(Mux(progress(0), v2m(vLen/2+i*8+7, vLen/2+i*8), v2m(i*8+7, i*8)), uop.rt(RD, isUnsignedV), 16)).reverse),
@@ -1908,7 +1908,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
                                      Cat(0.U((vLen/2).W),  Cat((0 until vLen/32).map(i => io.fbrsp.bits.data(i*32+31, i*32+16)).reverse)))))
     },
     (uop.vd_eew(1,0) === 2.U) -> {
-      val v2m = v2buf(progress >> 1.U)
+      val v2m = v2buf(progress >> 2.U)
       Mux(is_last, Cat(0.U((vLen-32).W), v1buf(31, 0)),
       Mux(progress === 1.U && ured_ph1_prgrs === 1.U, Cat(0.U((vLen/2).W),  Cat((0 until vLen/64).map(i => v2buf(0)(i*64+63, i*64+32)).reverse)),
       Mux(progress < ured_ph1_prgrs, Mux(uop.rt(RD, isWidenV), Mux(!uop.fp_val, Cat((0 until vLen/32).map(i => Cext(Mux(progress(0), v2m(vLen/2+i*16+15, vLen/2+i*16), v2m(i*16+15, i*16)), uop.rt(RD, isUnsignedV), 32)).reverse),
@@ -1961,9 +1961,9 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     (uop.vd_eew(1,0) === 3.U) -> Cat(0.U((vLen-64).W), Mux(progress === 0.U, v1buf(63, 0), io.fbrsp.bits.data(63, 0)))
   ))
   val v2oredmux = Mux1H(Seq(
-    (uop.vs2_eew(1,0) === 1.U) -> Cat(0.U((vLen-16).W), v2buf((progress>>6.U)(2,0))>>Cat(progress(5,0),0.U(4.W))),
-    (uop.vs2_eew(1,0) === 2.U) -> Cat(0.U((vLen-32).W), v2buf((progress>>5.U)(2,0))>>Cat(progress(4,0),0.U(5.W))),
-    (uop.vs2_eew(1,0) === 3.U) -> Cat(0.U((vLen-64).W), v2buf((progress>>4.U)(2,0))>>Cat(progress(3,0),0.U(6.W)))
+    (uop.vs2_eew(1,0) === 1.U) -> Cat(0.U((vLen-16).W), v2buf((progress>>3.U)(2,0))>>Cat(progress(2,0),0.U(4.W))),
+    (uop.vs2_eew(1,0) === 2.U) -> Cat(0.U((vLen-32).W), v2buf((progress>>2.U)(2,0))>>Cat(progress(1,0),0.U(5.W))),
+    (uop.vs2_eew(1,0) === 3.U) -> Cat(0.U((vLen-64).W), v2buf((progress>>1.U)(2,0))>>Cat(progress(0),0.U(6.W)))
   ))
   io.fbreq.bits.rs1_data := Mux(uop.is_ureduce, v1uredmux,
                             Mux(uop.is_oreduce, v1oredmux, v1buf))
