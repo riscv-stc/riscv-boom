@@ -959,7 +959,7 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
   when(io.update_vl.valid) {
     ram(io.update_vl_idx).vconfig.vl := io.update_vl.bits.vconfig.vl
     ram(io.update_vl_idx).vl_ready := io.update_vl.bits.vl_ready
-    ram(io.update_vl_idx).vconfig.vtype := io.update_vl.bits.vconfig.vtype
+    // ram(io.update_vl_idx).vconfig.vtype := io.update_vl.bits.vconfig.vtype
   }
   when(do_enq =/= do_deq) {
     maybe_full := do_enq
