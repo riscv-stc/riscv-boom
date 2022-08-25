@@ -3399,11 +3399,11 @@ class VecMemImp(outer: VecMem) extends LazyModuleImp(outer)
 
   vmemq.io.enq.valid := io.lsu.req.valid
   vmemq.io.enq.bits  := io.lsu.req.bits
-  vmemq.io.deq.ready := tl_out.a.ready
+  vmemq.io.deq.ready := tl_out.a.ready && (vmemq.io.deq.bits.uop.uses_ldq || vsdq.io.deq.valid)
 
   vsdq.io.enq.valid  := RegNext(io.lsu.req.valid && io.lsu.req.bits.uop.uses_stq)
   vsdq.io.enq.bits   := io.lsu.s1_vdata
-  vsdq.io.deq.ready  := tl_out.a.ready && vmemq.io.deq.bits.uop.uses_stq
+  vsdq.io.deq.ready  := tl_out.a.ready && (vmemq.io.deq.valid && vmemq.io.deq.bits.uop.uses_stq)
 
   //histq.io.brupdate  := io.lsu.brupdate
   //histq.io.flush     := false.B
@@ -3411,7 +3411,7 @@ class VecMemImp(outer: VecMem) extends LazyModuleImp(outer)
   //histq.io.enq.bits  := vmemq.io.deq.bits
   //histq.io.deq.ready := tl_out.d.fire
 
-  tl_out.a.valid  := vmemq.io.deq.valid
+  tl_out.a.valid  := vmemq.io.deq.valid && (vmemq.io.deq.bits.uop.uses_ldq || vsdq.io.deq.valid)
   when (vmemq.io.deq.bits.uop.uses_ldq) {
     tl_out.a.bits   := edge.Get(
       fromSource = Cat(0.U(1.W), (vmemq.io.deq.bits.uop.is_rvm || vmemq.io.deq.bits.uop.v_unit_ls), vmemq.io.deq.bits.vldq_idx),
