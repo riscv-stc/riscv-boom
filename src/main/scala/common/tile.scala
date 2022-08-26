@@ -136,7 +136,7 @@ class BoomTile private(
   // VecMem
   lazy val vecmem: VecMem = LazyModule(new VecMem)
   val vecmemWidget = LazyModule(new TLWidthWidget(p(CacheBlockBytes)))
-  tlMasterXbar.node := vecmemWidget.node := vecmem.node
+  vectorNode := vecmemWidget.node := vecmem.node
 
   // Frontend/ICache
   val frontend = LazyModule(new BoomFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
