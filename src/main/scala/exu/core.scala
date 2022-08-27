@@ -87,13 +87,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   var v_pipeline: VecPipeline = null
-  //val vmupdate = Wire(Vec(vecWidth, Valid(new MicroOp)))
-  //vmupdate.map(_.valid := false.B)
-  //vmupdate.map(_.bits := DontCare)
   if (usingVector) {
     v_pipeline = Module(new VecPipeline)
     v_pipeline.io.ll_wports := DontCare
-    //vmupdate := v_pipeline.io.vmupdate
     v_pipeline.io.intupdate := DontCare
     v_pipeline.io.fpupdate := DontCare
   }
@@ -388,7 +384,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     retired_fp_fpu(w) := isInsFp && rob.io.commit.uops(w).fu_code.isOneOf(FU_FPU, FU_F2I, FU_I2F)
     retired_fp_div(w) := isInsFp && rob.io.commit.uops(w).fu_code.isOneOf(FU_FDV)
     // retired vector instructions
-    retired_rvv(w) := isInsRvv && rob.io.commit.uops(w).v_split_last
+    retired_rvv(w) := isInsRvv
     retired_rvv_vset(w) := retired_rvv(w) && rob.io.commit.uops(w).uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
     retired_rvv_load(w) := retired_rvv(w) && rob.io.commit.uops(w).uses_ldq
     retired_rvv_store(w) := retired_rvv(w) && rob.io.commit.uops(w).uses_stq
@@ -1068,9 +1064,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   xcpt_pc_req.bits     := dec_uops(xcpt_idx).ftq_idx
   //rob.io.xcpt_fetch_pc := RegEnable(io.ifu.get_pc.fetch_pc, dis_ready)
   rob.io.xcpt_fetch_pc := io.ifu.get_pc(0).pc
-  if (usingVector) {
-    rob.io.csrVConfig := csr.io.vector.get.vconfig
-  }
 
   flush_pc_req.valid   := rob.io.flush.valid
   flush_pc_req.bits    := rob.io.flush.bits.ftq_idx
@@ -1161,6 +1154,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     if (usingVector) {
       rename.io.vl_wakeup := vl_wakeup
     }
+  }
+  if (usingVector) {
+    v_rename_stage.io.vl_xcpt := rob.io.commit.vl_xcpt
   }
 
   // Outputs
@@ -1631,11 +1627,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // Extra I/O
   // Delay retire/exception 1 cycle
   if (usingMatrix) {
-    val cmt_valids = (0 until coreParams.retireWidth).map(i =>
-      rob.io.commit.valids(i) && (!rob.io.commit.uops(i).is_vm_ext
-      (rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).v_split_last) ||
-      (rob.io.commit.uops(i).is_rvm && rob.io.commit.uops(i).m_split_last) ))
-      //rob.io.commit.arch_valids(i) && (!rob.io.commit.uops(i).is_rvv || rob.io.commit.uops(i).v_split_last))
+    val cmt_valids = (0 until coreParams.retireWidth).map(i => rob.io.commit.valids(i))
     csr.io.retire  := RegNext(PopCount(cmt_valids))
     when(cmt_valids.orR) {
       retire_cnt := retire_cnt + PopCount(cmt_valids)
@@ -1645,9 +1637,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }
   }
   else if(usingVector) {
-    val cmt_valids = (0 until coreParams.retireWidth).map(i =>
-      rob.io.commit.valids(i) && (!rob.io.commit.uops(i).is_rvv || rob.io.commit.uops(i).v_split_last))
-      //rob.io.commit.arch_valids(i) && (!rob.io.commit.uops(i).is_rvv || rob.io.commit.uops(i).v_split_last))
+    val cmt_valids = (0 until coreParams.retireWidth).map(i => rob.io.commit.valids(i))
     csr.io.retire  := RegNext(PopCount(cmt_valids))
     when(cmt_valids.orR) {
       retire_cnt := retire_cnt + PopCount(cmt_valids)
@@ -1717,34 +1707,30 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     val csr_uop = csr_exe_unit.io.iresp.bits.uop
     val vsetvl = csr_uop.uopc === uopVSETVL
     val cmt_rvv = (0 until coreParams.retireWidth).map{i =>
-        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv
-    }.reduce(_ || _)
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv }.reduce(_ || _)
     val cmt_archlast_rvv = (0 until coreParams.retireWidth).map{i =>
-        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv &&
-        rob.io.commit.uops(i).v_split_last // architectural last split
-        //&& !rob.io.commit.uops(i).is_red_vadd && // excluding inserted VADD
-        //!rob.io.commit.uops(i).is_perm_vadd
-    }.reduce(_ || _)
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv }.reduce(_ || _)
     val cmt_sat = (0 until coreParams.retireWidth).map{i =>
-      rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat
-    }.reduce(_ || _)
-    val vleffSetVL = rob.io.setVL
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat }.reduce(_ || _)
+    val vleffXcpt = Cat((0 until coreParams.retireWidth).map{i =>
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).uopc.isOneOf(uopVLFF) && rob.io.commit.uops(i).exception}.reverse).asUInt
+    val vleffVl   = rob.io.commit.uops(PriorityEncoder(vleffXcpt)).v_eidx
     val vcq_setVL = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq.io.empty
-    assert(!(vsetvl && csr_vld && vleffSetVL.valid), "vsetvl and vleff setvl should not happen at same time!")
-    csr.io.vector.get.set_vs_dirty := cmt_rvv
-    csr.io.vector.get.set_vconfig.valid := csr_vld && vsetvl || vleffSetVL.valid || vcq_setVL
-    csr.io.vector.get.set_vconfig.bits := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
+
+    csr.io.vector.get.set_vs_dirty        := cmt_rvv
+    csr.io.vector.get.set_vconfig.valid   := csr_vld && vsetvl || vleffXcpt.orR || vcq_setVL
+    csr.io.vector.get.set_vconfig.bits    := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
     csr.io.vector.get.set_vconfig.bits.vl := Mux(csr_vld && vsetvl, csr_uop.vconfig.vl,
-                                              Mux(vleffSetVL.valid, vleffSetVL.bits,
-                                              Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig.vl,
-                                                              csr.io.vector.get.vconfig.vl)))
+                                             Mux(vleffXcpt.orR, vleffVl,
+                                             Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig.vl,
+                                                            csr.io.vector.get.vconfig.vl)))
     csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
     csr.io.vector.get.set_vstart.valid := cmt_archlast_rvv || rob.io.com_xcpt.bits.vls_xcpt.valid
-    csr.io.vector.get.set_vstart.bits := Mux(cmt_archlast_rvv, 0.U, rob.io.com_xcpt.bits.vls_xcpt.bits)
-    csr.io.vector.get.set_vxsat := cmt_sat
-    v_pipeline.io.fcsr_rm := csr.io.fcsr_rm
-    v_pipeline.io.vxrm := csr.io.vector.get.vxrm
-    csr_exe_unit.io.vconfig := csr.io.vector.get.vconfig
+    csr.io.vector.get.set_vstart.bits  := Mux(cmt_archlast_rvv, 0.U, rob.io.com_xcpt.bits.vls_xcpt.bits)
+    csr.io.vector.get.set_vxsat        := cmt_sat
+    v_pipeline.io.fcsr_rm              := csr.io.fcsr_rm
+    v_pipeline.io.vxrm                 := csr.io.vector.get.vxrm
+    csr_exe_unit.io.vconfig            := csr.io.vector.get.vconfig
 
     // rvm related
     val msettype  = csr_uop.uopc === uopMSETTYPE  || csr_uop.uopc === uopMSETTYPEI
@@ -1781,35 +1767,30 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     val csr_uop = csr_exe_unit.io.iresp.bits.uop
     val vsetvl = csr_uop.uopc === uopVSETVL
     val cmt_rvv = (0 until coreParams.retireWidth).map{i =>
-        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv
-    }.reduce(_ || _)
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv }.reduce(_ || _)
     val cmt_archlast_rvv = (0 until coreParams.retireWidth).map{i =>
-        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv &&
-        rob.io.commit.uops(i).v_split_last // architectural last split
-        //&& !rob.io.commit.uops(i).is_red_vadd && // excluding inserted VADD
-        //!rob.io.commit.uops(i).is_perm_vadd
-    }.reduce(_ || _)
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv }.reduce(_ || _)
     val cmt_sat = (0 until coreParams.retireWidth).map{i =>
-      rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat
-    }.reduce(_ || _)
-    val vleffSetVL = rob.io.setVL
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat }.reduce(_ || _)
+    val vleffXcpt = Cat((0 until coreParams.retireWidth).map{i =>
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).uopc.isOneOf(uopVLFF) && rob.io.commit.uops(i).exception}.reverse).asUInt
+    val vleffVl   = rob.io.commit.uops(PriorityEncoder(vleffXcpt)).v_eidx
     val vcq_setVL = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq.io.empty
-    assert(!(vsetvl && csr_vld && vleffSetVL.valid), "vsetvl and vleff setvl should not happen at same time!")
-    csr.io.vector.get.set_vs_dirty := cmt_rvv
-    csr.io.vector.get.set_vconfig.valid := csr_vld && vsetvl || vleffSetVL.valid || vcq_setVL
-    csr.io.vector.get.set_vconfig.bits := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
+
+    csr.io.vector.get.set_vs_dirty        := cmt_rvv
+    csr.io.vector.get.set_vconfig.valid   := csr_vld && vsetvl || vleffXcpt.orR || vcq_setVL
+    csr.io.vector.get.set_vconfig.bits    := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
     csr.io.vector.get.set_vconfig.bits.vl := Mux(csr_vld && vsetvl, csr_uop.vconfig.vl,
-                                              Mux(vleffSetVL.valid, vleffSetVL.bits,
-                                              Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig.vl,
-                                                              csr.io.vector.get.vconfig.vl)))
+                                             Mux(vleffXcpt.orR, vleffVl,
+                                             Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig.vl,
+                                                            csr.io.vector.get.vconfig.vl)))
     csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
     csr.io.vector.get.set_vstart.valid := cmt_archlast_rvv || rob.io.com_xcpt.bits.vls_xcpt.valid
-    csr.io.vector.get.set_vstart.bits := Mux(cmt_archlast_rvv, 0.U, rob.io.com_xcpt.bits.vls_xcpt.bits)
-    csr.io.vector.get.set_vxsat := cmt_sat
-    v_pipeline.io.fcsr_rm := csr.io.fcsr_rm
-    v_pipeline.io.vxrm := csr.io.vector.get.vxrm
-
-    csr_exe_unit.io.vconfig := csr.io.vector.get.vconfig
+    csr.io.vector.get.set_vstart.bits  := Mux(cmt_archlast_rvv, 0.U, rob.io.com_xcpt.bits.vls_xcpt.bits)
+    csr.io.vector.get.set_vxsat        := cmt_sat
+    v_pipeline.io.fcsr_rm              := csr.io.fcsr_rm
+    v_pipeline.io.vxrm                 := csr.io.vector.get.vxrm
+    csr_exe_unit.io.vconfig            := csr.io.vector.get.vconfig
   }
 
 // TODO can we add this back in, but handle reset properly and save us

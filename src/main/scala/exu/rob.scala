@@ -62,7 +62,6 @@ class RobIo(
 
   // Handle Branch Misspeculations
   val brupdate = Input(new BrUpdateInfo())
-  //val vmupdate = if (usingVector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
 
   // Write-back Stage
   // (Update of ROB)
@@ -100,8 +99,6 @@ class RobIo(
 
   // Communicate exceptions to the CSRFile
   val com_xcpt = Valid(new CommitExceptionSignals())
-  val setVL = if(usingVector) Valid(UInt((log2Ceil(maxVLMax) + 1).W)) else null
-  val csrVConfig = if (usingVector) Input(new VConfig()) else null
   // Let the CSRFile stall us (e.g., wfi).
   val csr_stall = Input(Bool())
 
@@ -143,6 +140,8 @@ class CommitSignals(implicit p: Parameters) extends BoomBundle
   // Perform rollback of rename state (in conjuction with commit.uops).
   val rbk_valids = Vec(retireWidth, Bool())
   val rollback   = Bool()
+  // for vload instructions, commit mapptable and freelist even it raises an exception
+  val vl_xcpt    = if (usingVector) Vec(retireWidth, Bool()) else null
 
   val debug_wdata = Vec(retireWidth, UInt(xLen.W))
 }
@@ -160,9 +159,10 @@ class CommitExceptionSignals(implicit p: Parameters) extends BoomBundle
   val pc_lob     = UInt(log2Ceil(icBlockBytes).W)
   val cause      = UInt(xLen.W)
   val badvaddr   = UInt(xLen.W)
-// The ROB needs to tell the FTQ if there's a pipeline flush (and what type)
-// so the FTQ can drive the frontend with the correct redirected PC.
+  // The ROB needs to tell the FTQ if there's a pipeline flush (and what type)
+  // so the FTQ can drive the frontend with the correct redirected PC.
   val flush_typ  = FlushTypes()
+  // report vls exception and the element index that raises the exception
   val vls_xcpt   = if(usingVector) Valid(UInt(vLenSz.W)) else null
 }
 
@@ -267,7 +267,6 @@ class Rob(
   val rob_head_uses_ldq   = Wire(Vec(coreWidth, Bool()))
   val rob_head_fflags     = Wire(Vec(coreWidth, UInt(freechips.rocketchip.tile.FPConstants.FLAGS_SZ.W)))
 
-  val robSetVL = if(usingVector) Wire(Vec(coreWidth, Valid(UInt((log2Ceil(maxVLMax) + 1).W)))) else null
   val exception_thrown = Wire(Bool())
 
   // exception info
@@ -322,9 +321,10 @@ class Rob(
 
     // one bank
     val rob_val       = RegInit(VecInit(Seq.fill(numRobRows){false.B}))
-    val rob_bsy       = Reg(Vec(numRobRows, Bool()))
-    val rob_ls_cnt   = if (usingMatrix || usingVector) Reg(Vec(numRobRows, UInt((vLenSz+1).W))) else null  
-    val rob_ls_wbs   = if (usingMatrix || usingVector) Reg(Vec(numRobRows, UInt((vLenSz+1).W))) else null  
+    val rob_bsy       = Reg(Vec(numRobRows, Bool())) 
+    val rob_ud_bsy    = if (usingVector) Reg(Vec(numRobRows, Bool())) else null 
+    val rob_ls_cnt    = if (usingVector) Reg(Vec(numRobRows, UInt((vLenSz+1).W))) else null  
+    val rob_ls_wbs    = if (usingVector) Reg(Vec(numRobRows, UInt((vLenSz+1).W))) else null  
     val rob_unsafe    = Reg(Vec(numRobRows, Bool()))
     val rob_uop       = Reg(Vec(numRobRows, new MicroOp()))
     val rob_exception = Reg(Vec(numRobRows, Bool()))
@@ -352,11 +352,8 @@ class Rob(
       rob_fflags(rob_tail)    := 0.U
 
       if (usingVector) {
-        rob_uop(rob_tail).v_split_ecnt := 0.U
-      }
-
-      if (usingMatrix || usingVector) {
-        rob_ls_cnt(rob_tail) := (vLen+8).asUInt     // max value: vlen + lmul_max
+        rob_ud_bsy(rob_tail) := io.enq_uops(w).is_rvv && io.enq_uops(w).uses_ldq
+        rob_ls_cnt(rob_tail) := vLen.asUInt     // max value: vlen
         rob_ls_wbs(rob_tail) := 0.U
       }
 
@@ -368,11 +365,15 @@ class Rob(
 
     //-----------------------------------------------
     // update mls cnt by lsu
-    if (usingMatrix || usingVector) {
+    if (usingVector) {
       for(inc <- io.lsu_update_ls) {
         when (inc.valid && MatchBank(GetBankIdx(inc.bits.rob_idx))) {
           val cidx = GetRowIdx(inc.bits.rob_idx)
-          rob_ls_cnt(cidx) := inc.bits.ls_cnt
+          when (inc.bits.ud_copy) {
+            rob_ud_bsy(cidx) := inc.bits.ls_cnt > 0.U
+          } .otherwise {
+            rob_ls_cnt(cidx) := inc.bits.ls_cnt
+          }
         }
       }
     }
@@ -391,22 +392,21 @@ class Rob(
           val wb_rvm_load = wb_uop.uopc.isOneOf(uopMLE)
           // clear busy and unsafe; vconfig.vl in rob may be incorrect under speculatively vsetvl execution
           when(!wb_uop.is_vm_ext ||
-               (wb_rvv_load && (rob_ls_wbs(row_idx) +& 1.U >= rob_ls_cnt(row_idx))) ||
+               (wb_rvv_load && wb_uop.uses_ldq && (rob_ls_wbs(row_idx) +& 1.U >= rob_ls_cnt(row_idx))) ||
                (wb_uop.is_rvv && !wb_rvv_load && (!wb_uop.v_is_split || wb_uop.v_split_last)) || // have bug
                (wb_rvm_load && (rob_ls_wbs(row_idx) +& 1.U >= rob_ls_cnt(row_idx))) ||
                (wb_uop.is_rvm && !wb_rvm_load && wb_uop.m_split_last)) {
             rob_bsy(row_idx)    := false.B
             rob_unsafe(row_idx) := false.B
-            rob_uop(row_idx).v_split_last := true.B
           }
 
-          // increase v_split_ecnt when rvv load write back;
-          // use ecnt instead of v_split_last because splits may return out-of-order
-          when (wb_rvv_load && wb_uop.uses_ldq) {
-            rob_uop(row_idx).v_split_ecnt := rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt
-          }
-          when (wb_rvv_load || wb_rvm_load) {
+          // copy stale data returns in-order while memory acess may return out-of-order
+          // increase rob_ls_wbs when rvv or rvm load write back;
+          when ((wb_rvv_load || wb_rvm_load) && wb_uop.uses_ldq) {
             rob_ls_wbs(row_idx) := rob_ls_wbs(row_idx) + 1.U
+          }
+          when (wb_rvv_load && !wb_uop.uses_ldq && wb_uop.v_split_last) {
+            rob_ud_bsy(row_idx) := false.B
           }
 
           rob_predicated(row_idx) := wb_resp.bits.predicated
@@ -423,21 +423,19 @@ class Rob(
           val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           // clear busy and unsafe
           when(!wb_uop.is_rvv || 
-               (wb_rvv_load && (rob_ls_wbs(row_idx) +& 1.U >= rob_ls_cnt(row_idx))) ||
+               (wb_rvv_load && wb_uop.uses_ldq && (rob_ls_wbs(row_idx) +& 1.U >= rob_ls_cnt(row_idx))) ||
                (!wb_rvv_load && (!wb_uop.v_is_split || wb_uop.v_split_last))) {
             rob_bsy(row_idx)    := false.B
             rob_unsafe(row_idx) := false.B
-            rob_uop(row_idx).v_split_last := true.B
           }
 
-          // increase v_split_ecnt when rvv load write back;
-          // use ecnt instead of v_split_last because splits may return out-of-order
+          // copy stale data returns in-order while memory acess may return out-of-order
+          // increase rob_ls_wbs when rvv or rvm load write back;
           when (wb_rvv_load && wb_uop.uses_ldq) {
-            rob_uop(row_idx).v_split_ecnt := rob_uop(row_idx).v_split_ecnt + wb_uop.v_split_ecnt
-          }
-
-          when (wb_rvv_load) {
             rob_ls_wbs(row_idx) := rob_ls_wbs(row_idx) + 1.U
+          }
+          when (wb_rvv_load && !wb_uop.uses_ldq && wb_uop.v_split_last) {
+            rob_ud_bsy(row_idx) := false.B
           }
 
           rob_predicated(row_idx) := wb_resp.bits.predicated
@@ -483,15 +481,11 @@ class Rob(
           when (rob_uop(cidx).is_rvv || rob_uop(cidx).is_rvm) {
             rob_ls_wbs(cidx) := rob_ls_wbs(cidx) + 1.U
           }
-          when (rob_uop(cidx).is_rvv) {
-            rob_uop(cidx).v_split_ecnt := rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt
-          }
           when (!lsu_clr_bsy.bits.is_vm_ext ||
                 ((rob_uop(cidx).is_rvv || rob_uop(cidx).is_rvm) &&
                 (rob_ls_wbs(cidx) +& 1.U >= rob_ls_cnt(cidx)))) {
             rob_bsy(cidx)    := false.B
             rob_unsafe(cidx) := false.B
-            rob_uop(cidx).v_split_last := true.B
 
             if (O3PIPEVIEW_PRINTF) {
               printf("%d; O3PipeView:complete:%d\n",
@@ -499,7 +493,6 @@ class Rob(
             }
           }
         } else if (usingVector) {
-          rob_uop(cidx).v_split_ecnt := rob_uop(cidx).v_split_ecnt + lsu_clr_bsy.bits.v_split_ecnt
           when (rob_uop(cidx).is_rvv) {
             rob_ls_wbs(cidx) := rob_ls_wbs(cidx) + 1.U
           }
@@ -507,7 +500,6 @@ class Rob(
           when (!lsu_clr_bsy.bits.is_rvv || (rob_ls_wbs(cidx) +& 1.U >= rob_ls_cnt(cidx))) {
             rob_bsy(cidx)    := false.B
             rob_unsafe(cidx) := false.B
-            rob_uop(cidx).v_split_last := true.B
 
             if (O3PIPEVIEW_PRINTF) {
               printf("%d; O3PipeView:complete:%d\n",
@@ -547,27 +539,26 @@ class Rob(
 
     when (io.lxcpt.valid && MatchBank(GetBankIdx(io.lxcpt.bits.uop.rob_idx))) {
       // Mask false exception for vleff, decide if update vl later at commit stage.
-      val isVleFalseException = if (usingVector) {io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.v_eidx.orR()}
-                                else             false.B
-      rob_exception(GetRowIdx(io.lxcpt.bits.uop.rob_idx)) := true.B
-      when(isVleFalseException){
-        rob_vleff_exception(GetRowIdx(io.lxcpt.bits.uop.rob_idx)) := true.B
-        rob_exception(GetRowIdx(io.lxcpt.bits.uop.rob_idx)) := false.B
-      }
+      val lxcpt_idx    = GetRowIdx(io.lxcpt.bits.uop.rob_idx)
+      val isVleffFalse = if (usingVector) {io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.v_eidx > 0.U}
+                         else             false.B
+      rob_exception(lxcpt_idx)     := Mux(isVleffFalse, false.B, true.B)
+      rob_uop(lxcpt_idx).v_eidx    := io.lxcpt.bits.uop.v_eidx
+      rob_uop(lxcpt_idx).exception := isVleffFalse
       when(io.lxcpt.bits.cause =/= MINI_EXCEPTION_MEM_ORDERING) {
         // In the case of a mem-ordering failure, the failing load will have been marked safe already.
         assert(rob_unsafe(GetRowIdx(io.lxcpt.bits.uop.rob_idx)),
           "An instruction marked as safe is causing an exception")
       }
     }
-    can_throw_exception(w) := rob_val(rob_head) && rob_exception(rob_head)
+    val ud_bsy = if (usingVector) rob_ud_bsy(rob_head) else false.B
+    can_throw_exception(w) := rob_val(rob_head) && rob_exception(rob_head) && !ud_bsy
 
     //-----------------------------------------------
     // Commit or Rollback
     // Can this instruction commit? (the check for exceptions/rob_state happens later).
     // vector and matrix stores have seperate commit control logic
-
-    can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall &&
+    can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall && !ud_bsy &&
                      Mux(!rob_uop(rob_head).is_vm_ext || !rob_uop(rob_head).uses_stq, true.B,
                      Mux(rob_uop(rob_head).is_rvv,           ~io.vbusy_status(rob_uop(rob_head).stale_pdst), 
                      Mux(rob_uop(rob_head).rt(RD, isTrTile), ~io.tr_busy_status(rob_uop(rob_head).stale_pdst),
@@ -594,6 +585,10 @@ class Rob(
 
     io.commit.rbk_valids(w) := rbk_row && rob_val(com_idx) && !(enableCommitMapTable.B)
     io.commit.rollback := (rob_state === s_rollback)
+    // commit a vload instruction even it raises an exception
+    if (usingVector) {
+      io.commit.vl_xcpt(w) := rob_uop(com_idx).is_rvv && rob_uop(com_idx).uses_ldq && (rob_tail === rob_head) && (w.U === rob_head_lsb)
+    }
 
     assert (!(io.commit.valids.reduce(_||_) && io.commit.rbk_valids.reduce(_||_)),
       "com_valids and rbk_valids are mutually exclusive")
@@ -691,11 +686,6 @@ class Rob(
                "[rob] writeback (" + i + ") occurred to the wrong pdst.")
     }
     io.commit.debug_wdata(w) := rob_debug_wdata(rob_head)
-
-    if (usingVector) {
-      robSetVL(w).valid := will_commit(w) && rob_vleff_exception(rob_head) && rob_uop(rob_head).v_eidx < io.csrVConfig.vl
-      robSetVL(w).bits  := rob_uop(rob_head).v_eidx
-    }
   } //for (w <- 0 until coreWidth)
 
   // **************************************************************************
@@ -723,10 +713,6 @@ class Rob(
                            (!can_commit(w) || can_throw_exception(w))) || block_commit
     block_xcpt           = will_commit(w)
   }
-  if (usingVector) {
-    io.setVL.valid := VecInit(robSetVL.map(_.valid)).asUInt().orR()
-    io.setVL.bits := Mux1H(robSetVL.map(_.valid), robSetVL.map(_.bits))
-  }
 
   // Note: exception must be in the commit bundle.
   // Note: exception must be the first valid instruction in the commit bundle.
@@ -746,8 +732,7 @@ class Rob(
   io.com_xcpt.bits.is_rvc    := com_xcpt_uop.is_rvc
   io.com_xcpt.bits.pc_lob    := com_xcpt_uop.pc_lob
   if(usingVector) {
-    io.com_xcpt.bits.vls_xcpt.valid := io.com_xcpt.valid && com_xcpt_uop.is_rvv &&
-                                      (com_xcpt_uop.uses_ldq || com_xcpt_uop.uses_stq)
+    io.com_xcpt.bits.vls_xcpt.valid := io.com_xcpt.valid && com_xcpt_uop.is_v_ls
     io.com_xcpt.bits.vls_xcpt.bits  := com_xcpt_uop.v_eidx
   }
 

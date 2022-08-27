@@ -90,9 +90,10 @@ abstract class AbstractRenameStage(
 
     // commit stage
     val com_valids = Input(Vec(plWidth, Bool()))
-    val com_uops = Input(Vec(plWidth, new MicroOp()))
+    val com_uops   = Input(Vec(plWidth, new MicroOp()))
     val rbk_valids = Input(Vec(plWidth, Bool()))
-    val rollback = Input(Bool())
+    val vl_xcpt    = if (vector) Input(Vec(plWidth, Bool())) else null
+    val rollback   = Input(Bool())
     val vbusy_status    = if (vector) Output(UInt(numPhysRegs.W)) else Output(UInt(0.W))
     val tr_busy_status  = if (matrix) Output(UInt(numPhysRegs.W)) else null
     val acc_busy_status = if (matrix) Output(UInt(numPhysRegs.W)) else null
@@ -591,11 +592,9 @@ extends AbstractRenameStage(
     ren2_br_tags(w).valid := ren2_fire(w) && ren2_uops(w).allocate_brtag
 
     val com_uop = io.com_uops(w)
-    com_valids(w) := io.com_valids(w) && com_uop.ldst_val && com_uop.rt(RD, rtype) &&
-                     (!(com_uop.uses_ldq || com_uop.uses_stq) || com_uop.v_split_last)
-    rbk_valids(w) := io.rbk_valids(w) && com_uop.ldst_val && com_uop.rt(RD, rtype) &&
-                     (!(com_uop.uses_ldq || com_uop.uses_stq) || com_uop.v_split_first)
-    ren2_br_tags(w).bits  := ren2_uops(w).br_tag
+    com_valids(w) := io.com_valids(w) && com_uop.ldst_val && com_uop.rt(RD, rtype) 
+    rbk_valids(w) := io.rbk_valids(w) && com_uop.ldst_val && com_uop.rt(RD, rtype)
+    ren2_br_tags(w).bits := ren2_uops(w).br_tag
   }
 
   //-------------------------------------------------------------
@@ -631,8 +630,8 @@ extends AbstractRenameStage(
     // vstart control
     ren2.vstartSrc  := maptable.io.vstart_resps(w)
   }
-  ren2_alloc_reqs zip rbk_valids.reverse zip remap_reqs map {
-    case ((a,r),rr) => rr.valid := a || r}
+  ren2_alloc_reqs zip rbk_valids.reverse zip io.vl_xcpt zip remap_reqs map {
+    case (((a,r),x),rr) => rr.valid := a || (r && !x)}
 
   // Hook up inputs.
   maptable.io.map_reqs    := map_reqs
@@ -663,10 +662,10 @@ extends AbstractRenameStage(
     freelist.io.reqs(w).valid := ren2_alloc_reqs(w)
     freelist.io.reqs(w).bits  := ren2_uops(w)
   }
-  (freelist.io.dealloc_pregs zip io.com_uops zip com_valids zip rbk_valids).map { case(((da, uop), c), r) => {
+  (freelist.io.dealloc_pregs zip io.com_uops zip com_valids zip rbk_valids zip io.vl_xcpt).map { case((((da, uop), c), r), x) => {
     da.zipWithIndex.map { case (d, i) => {
       d.valid := (c || r) && uop.stale_pvd(i).valid
-      d.bits  := Mux(io.rollback, uop.pvd(i).bits, uop.stale_pvd(i).bits)
+      d.bits  := Mux(io.rollback && !x, uop.pvd(i).bits, uop.stale_pvd(i).bits)
     }}
   }}
   freelist.io.ren_br_tags := ren2_br_tags
@@ -697,22 +696,27 @@ extends AbstractRenameStage(
   for (w <- 0 until plWidth) {
     busytable.io.rebusy_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) //&& io.dis_fire_first(w)
   }
-  for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) {
-    val wkUop   = wk.bits.uop
-    val v_eidx  = wkUop.v_eidx
-    val vsew    = wkUop.vd_eew(1,0)
-    val ecnt    = wkUop.v_split_ecnt
-    val rmask   = VRegMask(v_eidx, vsew, ecnt, vLenb)
-    val tailMask = Mux(wkUop.rt(RD, isMaskVD), Fill(vLenb, wkUop.v_split_last) << (v_eidx >> 3)(log2Ceil(vLenb)-1, 0),
-                                               Fill(vLenb, wkUop.v_split_last) << (v_eidx << vsew)(log2Ceil(vLenb)-1, 0))
-    val isUdCopy   = wkUop.uopc.isOneOf(uopVL, uopVLM, uopVLFF) && !wkUop.uses_ldq
-    val udTail     = Cat((0 until vLenb).map(i => (i.U + v_eidx >= wkUop.vconfig.vl)).reverse)
-    val udTailMask = Mux1H(UIntToOH(vsew),
-                           Seq(udTail,
-                               FillInterleaved(2, udTail(vLenb/2-1, 0)),
-                               FillInterleaved(4, udTail(vLenb/4-1, 0)),
-                               FillInterleaved(8, udTail(vLenb/8-1, 0))))
-    bs := Mux(isUdCopy, udTailMask, rmask | tailMask)
+  for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) { bs := wk.bits.vmask }
+  //   val wkUop   = wk.bits.uop
+  //   val v_eidx  = wkUop.v_eidx
+  //   val vsew    = wkUop.vd_eew(1,0)
+  //   val ecnt    = wkUop.v_split_ecnt
+  //   val rmask   = VRegMask(v_eidx, vsew, ecnt, vLenb)
+  //   val tailMask = Mux(wkUop.rt(RD, isMaskVD), Fill(vLenb, wkUop.v_split_last) << (v_eidx >> 3)(log2Ceil(vLenb)-1, 0),
+  //                                              Fill(vLenb, wkUop.v_split_last) << (v_eidx << vsew)(log2Ceil(vLenb)-1, 0))
+  //   val isUdCopy   = wkUop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLOX, uopVLUX) && !wkUop.uses_ldq
+  //   val udTail     = Cat((0 until vLenb).map(i => (i.U + v_eidx >= wkUop.vconfig.vl)).reverse)
+  //   val udTailMask = Mux1H(UIntToOH(vsew),
+  //                          Seq(udTail,
+  //                              FillInterleaved(2, udTail(vLenb/2-1, 0)),
+  //                              FillInterleaved(4, udTail(vLenb/4-1, 0)),
+  //                              FillInterleaved(8, udTail(vLenb/8-1, 0))))
+  //   bs := Mux(isUdCopy, udTailMask, rmask | tailMask)
+  // }
+  val idx = PriorityEncoder(io.vl_xcpt.asUInt)
+  for(i <- 0 until 8) {
+    busytable.io.clr_valids(i) := (rbk_valids zip io.vl_xcpt zip io.com_uops).map{ case((r, x), uop) => r & x & uop.pvd(i).valid }.orR
+    busytable.io.clr_pdsts(i)  := io.com_uops(idx).pvd(i).bits
   }
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),

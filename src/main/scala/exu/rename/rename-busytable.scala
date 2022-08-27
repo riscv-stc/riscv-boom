@@ -94,6 +94,9 @@ class VecRenameBusyTable(
     val wb_valids   = Input(Vec(numWbPorts, Bool()))
     val wb_bits     = Input(Vec(numWbPorts, UInt(vLenb.W)))
 
+    val clr_valids  = Input(Vec(8, Bool()))
+    val clr_pdsts   = Input(Vec(8, UInt(pregSz.W)))
+
     val debug = new Bundle {
       val busytable = Output(Vec(numPregs, UInt(vLenb.W)))
     }
@@ -105,8 +108,8 @@ class VecRenameBusyTable(
 
     for (r <- 0 until numPregs) {
       busy_table_wb(r) := busy_table(r) & ~(io.wb_pdsts zip io.wb_valids zip io.wb_bits).map {case ((pdst, valid), bits) =>
-        bits & Fill(vLenb, (r.U === pdst && valid).asUInt)
-      }.reduce(_|_)
+        bits & Fill(vLenb, (r.U === pdst && valid).asUInt) }.reduce(_|_) &
+        ~(io.clr_pdsts zip io.clr_valids).map { case(pdst, valid) => Fill(vLenb, r.U === pdst && valid).asUInt }.reduce(_|_)
       busy_table_next(r) := (io.ren_uops zip io.rebusy_reqs).map {case (uop, rbreq) =>
         Fill(vLenb, (uop.pvd.map(vd => vd.valid && vd.bits === r.U).reduce(_ || _) && rbreq).asUInt)
       }.reduce(_|_) | busy_table_wb(r)
