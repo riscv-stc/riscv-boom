@@ -85,7 +85,8 @@ abstract class AbstractRenameStage(
     //val dis_fire_first = if (vector) Input(Vec(coreWidth, Bool())) else null
 
     // wakeup ports
-    val wakeups   = Flipped(Vec(numWbPorts, Valid(new ExeUnitResp(xLen))))
+    val wakeups   = if (vector) Flipped(Vec(numWbPorts, Valid(new ExeUnitResp(vLen)))) 
+                    else        Flipped(Vec(numWbPorts, Valid(new ExeUnitResp(xLen))))
     val vl_wakeup = if (usingVector) Flipped(Valid(new VlWakeupResp())) else null
 
     // commit stage
@@ -111,14 +112,12 @@ abstract class AbstractRenameStage(
   val ren1_fire       = Wire(Vec(plWidth, Bool()))
   val ren1_uops       = Wire(Vec(plWidth, new MicroOp))
 
-
   // Stage 2
   val ren2_fire       = io.dis_fire
   val ren2_ready      = io.dis_ready
   val ren2_valids     = Wire(Vec(plWidth, Bool()))
   val ren2_uops       = Wire(Vec(plWidth, new MicroOp))
   val ren2_alloc_reqs = Wire(Vec(plWidth, Bool()))
-
 
   //-------------------------------------------------------------
   // pipeline registers
@@ -697,26 +696,18 @@ extends AbstractRenameStage(
     busytable.io.rebusy_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) //&& io.dis_fire_first(w)
   }
   for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) { bs := wk.bits.vmask }
-  //   val wkUop   = wk.bits.uop
-  //   val v_eidx  = wkUop.v_eidx
-  //   val vsew    = wkUop.vd_eew(1,0)
-  //   val ecnt    = wkUop.v_split_ecnt
-  //   val rmask   = VRegMask(v_eidx, vsew, ecnt, vLenb)
-  //   val tailMask = Mux(wkUop.rt(RD, isMaskVD), Fill(vLenb, wkUop.v_split_last) << (v_eidx >> 3)(log2Ceil(vLenb)-1, 0),
-  //                                              Fill(vLenb, wkUop.v_split_last) << (v_eidx << vsew)(log2Ceil(vLenb)-1, 0))
-  //   val isUdCopy   = wkUop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLOX, uopVLUX) && !wkUop.uses_ldq
-  //   val udTail     = Cat((0 until vLenb).map(i => (i.U + v_eidx >= wkUop.vconfig.vl)).reverse)
-  //   val udTailMask = Mux1H(UIntToOH(vsew),
-  //                          Seq(udTail,
-  //                              FillInterleaved(2, udTail(vLenb/2-1, 0)),
-  //                              FillInterleaved(4, udTail(vLenb/4-1, 0)),
-  //                              FillInterleaved(8, udTail(vLenb/8-1, 0))))
-  //   bs := Mux(isUdCopy, udTailMask, rmask | tailMask)
-  // }
-  val idx = PriorityEncoder(io.vl_xcpt.asUInt)
+  
+  // clear busy bits when:
+  // 1. commit a vlexff instuction that raises an exception at element index > 0
+  // 2. a vload instruction raises an exception, record exception element index in vstart csr and commit pvd
+  val vlClrValids = (com_valids zip rbk_valids zip io.vl_xcpt zip io.com_uops).map { case(((c, r), x), uop) => 
+    (r & x) | (c & uop.uopc.isOneOf(uopVLFF) & uop.exception)
+  }
+  val vlClear  = vlClrValids.reduce(_||_)
+  val vlClrUop = Mux1H(vlClrValids, io.com_uops)
   for(i <- 0 until 8) {
-    busytable.io.clr_valids(i) := (rbk_valids zip io.vl_xcpt zip io.com_uops).map{ case((r, x), uop) => r & x & uop.pvd(i).valid }.orR
-    busytable.io.clr_pdsts(i)  := io.com_uops(idx).pvd(i).bits
+    busytable.io.clr_valids(i) := vlClear && vlClrUop.pvd(i).valid
+    busytable.io.clr_pdsts(i)  := vlClrUop.pvd(i).bits
   }
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),

@@ -29,8 +29,6 @@ import boom.util._
 class VecPipeline(implicit p: Parameters) extends BoomModule
 {
   val vecIssueParams = issueParams.find(_.iqType == IQT_VEC.litValue).get
-  //val vmxIssueParams = issueParams.find(_.iqType == IQT_VMX.litValue).get
-  //require(vecIssueParams.dispatchWidth == vmxIssueParams.dispatchWidth)
   val dispatchWidth = vecIssueParams.dispatchWidth
   val numWakeupPorts = vecWidth + memWidth // internal wakeups
 
@@ -42,23 +40,18 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val status           = Input(new MStatus())
 
     val vec_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
-    //val vmx_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
     val vbusy_status     = Input(UInt(numVecPhysRegs.W))
 
     val fromMat          = if (usingMatrix) Vec(matWidth, Flipped(Decoupled(new ExeUnitResp(vLen)))) else null
     val ll_wports        = Flipped(Decoupled(new ExeUnitResp(vLen)))
-//  val to_int_iss       = Decoupled(new ExeUnitResp(eLen))
-//  val to_sdq           = Decoupled(new ExeUnitResp(eLen))
     val to_int           = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
     val to_fp            = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
-    //val vmupdate         = Output(Vec(1, Valid(new MicroOp)))
     val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
     val fpupdate         = Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen))))
     val lsu_vrf_rport    = new RegisterFileReadPortIO(vpregSz, vLen)
-    //val lsu_vrf_wbk      = Flipped(new ExeUnitResp(vLen))
 
     val vl_wakeup        = Input(Valid(new VlWakeupResp()))
-    val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(eLen))) // wakeup issue_units for mem, int and fp
+    val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units for mem, int and fp
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
     val debug_wb_wdata   = Output(Vec(numWakeupPorts, UInt((eLen).W)))
@@ -68,10 +61,6 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
       val vec_req_valids      = Vec(vecIssueParams.issueWidth, Bool())
       val vec_iss_slots_empty = Bool()
       val vec_iss_slots_full  = Bool()
-      //val vmx_iss_valids      = Vec(vmxIssueParams.issueWidth, Bool())
-      //val vmx_req_valids      = Vec(vmxIssueParams.issueWidth, Bool())
-      //val vmx_iss_slots_empty = Bool()
-      //val vmx_iss_slots_full  = Bool()
       val div_busy            = Vec(vecIssueParams.issueWidth, Bool())
       val fdiv_busy           = Vec(vecIssueParams.issueWidth, Bool())
     })
@@ -85,7 +74,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
                          vecIssueParams,
                          numWakeupPorts, vector = true))
   vec_issue_unit.suggestName("vec_issue_unit")
-  
+
   val viu = Seq(vec_issue_unit) //vmx_issue_unit
   val vregfile       = Module(new RegisterFileSynthesizable(numVecPhysRegs,
                          exe_units.numVrfReadPorts + memWidth,
@@ -136,7 +125,6 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   // Input (Dispatch)
   for (w <- 0 until dispatchWidth) {
     vec_issue_unit.io.dis_uops(w) <> io.vec_dis_uops(w)
-    //vmx_issue_unit.io.dis_uops(w) <> io.vmx_dis_uops(w)
   }
 
   //-------------------------------------------------------------
@@ -194,7 +182,6 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   vregister_read.io.brupdate := io.brupdate
   vregister_read.io.kill := io.flush_pipeline
-  //io.vmupdate := vregister_read.io.vmupdate
 
   //-------------------------------------------------------------
   // **** Execute Stage ****

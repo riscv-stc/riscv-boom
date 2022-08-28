@@ -946,7 +946,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // Decoders
   val vcq_data = Wire(new VconfigDecodeSignals())
   val vcq_empty = WireInit(false.B)
-  //val vcq_idx = Wire(UInt(log2Ceil(vcqSz).W))
 
   for (w <- 0 until coreWidth) {
     dec_valids(w) := io.ifu.fetchpacket.valid && dec_fbundle.uops(w).valid &&
@@ -1018,7 +1017,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   vcq_data.vconfig := Mux(dec_vconfig_valid.head, dec_vconfig.head.vconfig, Mux(vcq_empty, csr.io.vector.get.vconfig, vcq.io.get_vconfig.vconfig))
 
-  //vcq_data.vl_ready := Mux(vcq_empty, true.B, vcq.io.get_vconfig.vl_ready)
   vcq_data.vl_ready := Mux(dec_vconfig_valid.head, dec_vconfig.head.vl_ready, Mux(vcq_empty, true.B, vcq.io.get_vconfig.vl_ready))
 
   vcq.io.update_vl.valid := vl_wakeup.valid
@@ -1271,13 +1269,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dis_rocc_alloc_stall = (dis_uops.map(_.uopc === uopROCC) zip block_rocc) map {case (p,r) =>
                                if (usingRoCC) p && r else false.B}
 
-  //dis_prev_split_actv(0) := false.B
-  //(1 until coreWidth).map(w => dis_prev_split_actv(w) := dis_split_actv.slice(0, w).reduce(_ || _))
   val dis_hazards = (0 until coreWidth).map(w =>
                       dis_valids(w) &&
                       (  !rob.io.ready
                       || ren_stalls(w)
-                      //|| dis_prev_split_actv(w)
                       || io.lsu.ldq_full(w) && dis_uops(w).uses_ldq
                       || io.lsu.stq_full(w) && dis_uops(w).uses_stq
                       || !dispatcher.io.ren_uops(w).ready
@@ -1557,9 +1552,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     // m_pipeline
     m_pipeline.io.intupdate             := iregister_read.io.intupdate
   } else if (usingVector) {
-    //mem_iss_unit.io.vmupdate := vmupdate
-    //int_iss_unit.io.vmupdate.map(_.valid := false.B)
-    //int_iss_unit.io.vmupdate.map(_.bits := DontCare)
     v_pipeline.io.intupdate := iregister_read.io.intupdate
     v_pipeline.io.fpupdate := fp_pipeline.io.fpupdate
   }
@@ -1712,18 +1704,19 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv }.reduce(_ || _)
     val cmt_sat = (0 until coreParams.retireWidth).map{i =>
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat }.reduce(_ || _)
-    val vleffXcpt = Cat((0 until coreParams.retireWidth).map{i =>
-        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).uopc.isOneOf(uopVLFF) && rob.io.commit.uops(i).exception}.reverse).asUInt
-    val vleffVl   = rob.io.commit.uops(PriorityEncoder(vleffXcpt)).v_eidx
+    val vleffXcpt = (0 until coreParams.retireWidth).map{i =>
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).uopc.isOneOf(uopVLFF) && rob.io.commit.uops(i).exception}
+    val vleffSetVL = vleffXcpt.reduce(_||_)
+    val vleffVl    = Mux1H(vleffXcpt, rob.io.commit.uops.map(_.v_eidx))
     val vcq_setVL = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq.io.empty
 
     csr.io.vector.get.set_vs_dirty        := cmt_rvv
-    csr.io.vector.get.set_vconfig.valid   := csr_vld && vsetvl || vleffXcpt.orR || vcq_setVL
+    csr.io.vector.get.set_vconfig.valid   := csr_vld && vsetvl || vleffSetVL || vcq_setVL
     csr.io.vector.get.set_vconfig.bits    := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
     csr.io.vector.get.set_vconfig.bits.vl := Mux(csr_vld && vsetvl, csr_uop.vconfig.vl,
-                                             Mux(vleffXcpt.orR, vleffVl,
-                                             Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig.vl,
-                                                            csr.io.vector.get.vconfig.vl)))
+                                             Mux(vleffSetVL, vleffVl,
+                                             Mux(vcq_setVL,  vcq.io.vcq_Wcsr.vconfig.vl,
+                                                             csr.io.vector.get.vconfig.vl)))
     csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
     csr.io.vector.get.set_vstart.valid := cmt_archlast_rvv || rob.io.com_xcpt.bits.vls_xcpt.valid
     csr.io.vector.get.set_vstart.bits  := Mux(cmt_archlast_rvv, 0.U, rob.io.com_xcpt.bits.vls_xcpt.bits)
@@ -1772,18 +1765,19 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv }.reduce(_ || _)
     val cmt_sat = (0 until coreParams.retireWidth).map{i =>
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv && rob.io.commit.uops(i).vxsat }.reduce(_ || _)
-    val vleffXcpt = Cat((0 until coreParams.retireWidth).map{i =>
-        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).uopc.isOneOf(uopVLFF) && rob.io.commit.uops(i).exception}.reverse).asUInt
-    val vleffVl   = rob.io.commit.uops(PriorityEncoder(vleffXcpt)).v_eidx
-    val vcq_setVL = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq.io.empty
+    val vleffXcpt = (0 until coreParams.retireWidth).map{i =>
+        rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).uopc.isOneOf(uopVLFF) && rob.io.commit.uops(i).exception}
+    val vleffSetVL = vleffXcpt.reduce(_||_)
+    val vleffVl    = Mux1H(vleffXcpt, rob.io.commit.uops.map(_.v_eidx))
+    val vcq_setVL  = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq.io.empty
 
     csr.io.vector.get.set_vs_dirty        := cmt_rvv
-    csr.io.vector.get.set_vconfig.valid   := csr_vld && vsetvl || vleffXcpt.orR || vcq_setVL
+    csr.io.vector.get.set_vconfig.valid   := csr_vld && vsetvl || vleffSetVL || vcq_setVL
     csr.io.vector.get.set_vconfig.bits    := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
     csr.io.vector.get.set_vconfig.bits.vl := Mux(csr_vld && vsetvl, csr_uop.vconfig.vl,
-                                             Mux(vleffXcpt.orR, vleffVl,
-                                             Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig.vl,
-                                                            csr.io.vector.get.vconfig.vl)))
+                                             Mux(vleffSetVL, vleffVl,
+                                             Mux(vcq_setVL,  vcq.io.vcq_Wcsr.vconfig.vl,
+                                                             csr.io.vector.get.vconfig.vl)))
     csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
     csr.io.vector.get.set_vstart.valid := cmt_archlast_rvv || rob.io.com_xcpt.bits.vls_xcpt.valid
     csr.io.vector.get.set_vstart.bits  := Mux(cmt_archlast_rvv, 0.U, rob.io.com_xcpt.bits.vls_xcpt.bits)
@@ -1836,10 +1830,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     io.lsu.dis_uops(w).valid := dis_fire(w)
     io.lsu.dis_uops(w).bits  := dis_uops(w)
   }
-  io.lsu.vbusy_status    := v_rename_stage.io.vbusy_status
+  io.lsu.vbusy_status := v_rename_stage.io.vbusy_status
 
   // tell LSU about committing loads and stores to clear entries
-  io.lsu.commit                  := rob.io.commit
+  io.lsu.commit  := rob.io.commit
 
   // tell LSU that it should fire a load that waits for the rob to clear
   io.lsu.commit_load_at_rob_head := rob.io.com_load_is_at_rob_head
@@ -1849,9 +1843,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   // Handle Branch Mispeculations
   io.lsu.brupdate := brupdate
-  //if (usingVector) {
-    //io.lsu.vmupdate := vmupdate
-  //}
+
   io.lsu.rob_head_idx := rob.io.rob_head_idx
   io.lsu.rob_pnr_idx  := rob.io.rob_pnr_idx
 
@@ -1860,19 +1852,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   if (usingFPU) {
     io.lsu.fp_stdata <> fp_pipeline.io.to_sdq
-//} else {
-//  io.lsu.fp_stdata.valid := false.B
-//  io.lsu.fp_stdata.bits := DontCare
-//  fp_pipeline.io.to_sdq.ready := false.B
   }
-
-//if (usingVector) {
-//  io.lsu.v_stdata <> v_pipeline.io.to_sdq
-//} else {
-//  io.lsu.v_stdata.valid := false.B
-//  io.lsu.v_stdata.bits := DontCare
-//  v_pipeline.io.to_sdq.ready := false.B
-//}
 
   //-------------------------------------------------------------
   //-------------------------------------------------------------

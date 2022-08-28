@@ -140,7 +140,7 @@ class CommitSignals(implicit p: Parameters) extends BoomBundle
   // Perform rollback of rename state (in conjuction with commit.uops).
   val rbk_valids = Vec(retireWidth, Bool())
   val rollback   = Bool()
-  // for vload instructions, commit mapptable and freelist even it raises an exception
+  // for vload instructions, commit maptable and freelist even it raises an exception
   val vl_xcpt    = if (usingVector) Vec(retireWidth, Bool()) else null
 
   val debug_wdata = Vec(retireWidth, UInt(xLen.W))
@@ -352,7 +352,7 @@ class Rob(
       rob_fflags(rob_tail)    := 0.U
 
       if (usingVector) {
-        rob_ud_bsy(rob_tail) := io.enq_uops(w).is_rvv && io.enq_uops(w).uses_ldq
+        rob_ud_bsy(rob_tail) := io.enq_uops(w).is_rvv && io.enq_uops(w).uses_ldq && !io.enq_uops(w).exception
         rob_ls_cnt(rob_tail) := vLen.asUInt     // max value: vlen
         rob_ls_wbs(rob_tail) := 0.U
       }
@@ -545,6 +545,10 @@ class Rob(
       rob_exception(lxcpt_idx)     := Mux(isVleffFalse, false.B, true.B)
       rob_uop(lxcpt_idx).v_eidx    := io.lxcpt.bits.uop.v_eidx
       rob_uop(lxcpt_idx).exception := isVleffFalse
+      when (isVleffFalse) {
+        rob_bsy(lxcpt_idx)    := false.B
+        rob_unsafe(lxcpt_idx) := false.B
+      }
       when(io.lxcpt.bits.cause =/= MINI_EXCEPTION_MEM_ORDERING) {
         // In the case of a mem-ordering failure, the failing load will have been marked safe already.
         assert(rob_unsafe(GetRowIdx(io.lxcpt.bits.uop.rob_idx)),
@@ -587,7 +591,8 @@ class Rob(
     io.commit.rollback := (rob_state === s_rollback)
     // commit a vload instruction even it raises an exception
     if (usingVector) {
-      io.commit.vl_xcpt(w) := rob_uop(com_idx).is_rvv && rob_uop(com_idx).uses_ldq && (rob_tail === rob_head) && (w.U === rob_head_lsb)
+      io.commit.vl_xcpt(w) := rob_uop(com_idx).is_rvv && rob_uop(com_idx).uses_ldq && rob_uop(com_idx).v_eidx > 0.U && 
+                              (rob_tail === rob_head) && (w.U === rob_head_lsb)
     }
 
     assert (!(io.commit.valids.reduce(_||_) && io.commit.rbk_valids.reduce(_||_)),
@@ -796,8 +801,7 @@ class Rob(
     enq_xcpts(i) := io.enq_valids(i) && io.enq_uops(i).exception
   }
 
-  val realLxcpt = if (usingVector) {io.lxcpt.valid &&
-                !(io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.v_eidx.orR())}
+  val realLxcpt = if (usingVector) {io.lxcpt.valid && !(io.lxcpt.bits.uop.uopc.isOneOf(uopVLFF) && io.lxcpt.bits.uop.v_eidx.orR())}
                   else             io.lxcpt.valid
   when (!(io.flush.valid || exception_thrown) && rob_state =/= s_rollback) {
     when (realLxcpt) {

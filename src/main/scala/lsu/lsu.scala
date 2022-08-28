@@ -213,8 +213,7 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
   // Tell the IQs that the load we speculated last cycle was misspeculated
   val ld_miss      = Output(Bool())
 
-  val brupdate       = Input(new BrUpdateInfo)
-  //val vmupdate       = if (usingVector) Input(Vec(vecWidth, Valid(new MicroOp))) else null
+  val brupdate     = Input(new BrUpdateInfo)
   val rob_pnr_idx  = Input(UInt(robAddrSz.W))
   val rob_head_idx = Input(UInt(robAddrSz.W))
   val exception    = Input(Bool())
@@ -293,7 +292,6 @@ class STQEntry(implicit p: Parameters) extends BoomBundle()(p)
 
 class VLDQEntry(implicit p: Parameters) extends LDQEntry()(p)
 {
-  //val is_aumus            = Bool()
   val vmask               = UInt(vLenb.W) // for fast unit-stride vl
   val shdir               = Bool()
   val shamt               = UInt(log2Ceil(vLenb.max(p(freechips.rocketchip.subsystem.CacheBlockBytes))).W)
@@ -302,7 +300,6 @@ class VLDQEntry(implicit p: Parameters) extends LDQEntry()(p)
 class VSTQEntry(implicit p: Parameters) extends STQEntry()(p)
 {
   val executed            = Bool()
-  //val is_aumus            = Bool()
   val vmask               = UInt(vLenb.W) // for fast unit-stride vl
   val shdir               = Bool()
   val shamt               = UInt(log2Ceil(vLenb.max(p(freechips.rocketchip.subsystem.CacheBlockBytes))).W)
@@ -753,7 +750,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   // Can we fire a vldq lookup
   val vldq_lkup_sel = AgePriorityEncoderOH((0 until numVLdqEntries).map(i => {
     val e = vldq(i)
-    e.valid && e.bits.addr.valid && e.bits.addr_is_virtual && !e.bits.executed && !e.bits.order_fail
+    e.valid && e.bits.addr.valid && e.bits.addr_is_virtual && !e.bits.executed && !e.bits.order_fail && !e.bits.st_dep_mask(stq_head)
   }), vldq_head)
   val vldq_lkup_e   = Mux1H(vldq_lkup_sel, vldq)
   val vldq_lkup_idx = Mux1H(vldq_lkup_sel, (0 until numVLdqEntries).map(i => i.U(vldqAddrSz.W)))
@@ -766,6 +763,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   !vldq_lkup_e.bits.executed                             &&
                                   !vldq_lkup_e.bits.order_fail                           &&
                                   !vldq_lkup_e.bits.uop.exception                        &&
+                                  !vldq_lkup_e.bits.st_dep_mask(stq_head)                &&
                                    io.vmem.req.ready))
 
   // Can we fire a vldq exception report
@@ -813,7 +811,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   // Can we fire a vlxq lookup
   val vlxq_lkup_unorder = AgePriorityEncoderOH((0 until numVLxqEntries).map(i => {
     val e = vlxq(i)
-    e.valid && e.bits.addr.valid && e.bits.addr_is_virtual && !e.bits.executed && !e.bits.order_fail
+    e.valid && e.bits.addr.valid && e.bits.addr_is_virtual && !e.bits.executed && !e.bits.order_fail && !e.bits.st_dep_mask(stq_head)
   }), vlxq_head)
   val vlxq_lkup_sel = Mux(vlxq(vlxq_head).bits.uop.is_ordered, UIntToOH(vlxq_head), vlxq_lkup_unorder)
   val vlxq_lkup_e   = Mux1H(vlxq_lkup_sel, vlxq)
@@ -1495,6 +1493,9 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     }
     when (vldq_head === i.U && will_fire_vldq_exception(0)) {
       vldq(i).bits.succeeded := true.B
+      when (vldq(i).bits.uop.uopc.isOneOf(uopVLFF) && vldq(i).bits.uop.v_eidx > 0.U) {
+        ldq(vldq(i).bits.uop.ldq_idx).bits.succeeded := true.B      // vleff exception at element index > 0 can commit
+      }
     }
 
     when (vldq_lkup_sel(i) && will_fire_vldq_lookup(0)) {
@@ -1604,7 +1605,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val fired_release        = RegNext(will_fire_release)
   val fired_load_retry     = widthMap(w => RegNext(will_fire_load_retry   (w) && !IsKilledByBranch(io.core.brupdate, ldq_retry_e.bits.uop)))
   val fired_sta_retry      = widthMap(w => RegNext(will_fire_sta_retry    (w) && !IsKilledByBranch(io.core.brupdate, stq_retry_e.bits.uop)))
-  //val fired_store_commit   = RegNext(will_fire_store_commit)
   val fired_load_wakeup    = widthMap(w => RegNext(will_fire_load_wakeup  (w) && !IsKilledByBranch(io.core.brupdate, ldq_wakeup_e.bits.uop)))
   val fired_hella_incoming = RegNext(will_fire_hella_incoming)
   val fired_hella_wakeup   = RegNext(will_fire_hella_wakeup)
@@ -2261,7 +2261,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         val ldq_idx = io.dmem.resp(w).bits.uop.ldq_idx
         val send_iresp = ldq(ldq_idx).bits.uop.rt(RD, isInt)
         val send_fresp = ldq(ldq_idx).bits.uop.rt(RD, isFloat)
-        //val send_vresp = ldq(ldq_idx).bits.uop.rt(RD, isVector)
 
         io.core.exe(w).iresp.bits.uop  := ldq(ldq_idx).bits.uop
         io.core.exe(w).fresp.bits.uop  := ldq(ldq_idx).bits.uop
@@ -2269,11 +2268,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         io.core.exe(w).iresp.bits.data := io.dmem.resp(w).bits.data
         io.core.exe(w).fresp.valid     := send_fresp
         io.core.exe(w).fresp.bits.data := io.dmem.resp(w).bits.data
-        //if (usingVector) {
-          //io.core.exe(w).vresp.valid     := send_vresp
-          //io.core.exe(w).vresp.bits.uop  := ldq(ldq_idx).bits.uop
-          //io.core.exe(w).vresp.bits.data := io.dmem.resp(w).bits.data
-        //}
 
         assert(send_iresp ^ send_fresp)
         dmem_resp_fired(w) := true.B
@@ -2323,11 +2317,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       io.core.exe(w).fresp.bits.uop  := forward_uop
       io.core.exe(w).iresp.bits.data := loadgen.data
       io.core.exe(w).fresp.bits.data := loadgen.data
-      //if (usingVector) {
-        //io.core.exe(w).vresp.valid := (forward_uop.rt(RD, isVector)) && data_ready && live
-        //io.core.exe(w).vresp.bits.uop  := forward_uop
-        //io.core.exe(w).vresp.bits.data := loadgen.data
-      //}
 
       when (data_ready && live) {
         ldq(f_idx).bits.succeeded := data_ready
