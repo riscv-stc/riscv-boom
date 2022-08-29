@@ -937,7 +937,7 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
   val do_enq = WireDefault(io.enq.fire())
   val do_deq = WireDefault(io.deq)
 
-  def inc(ptr: UInt) = {
+ /* def inc(ptr: UInt) = {
     val n = ptr.getWidth
     Cat(ptr(n-2,0), ptr(n-1))
   }
@@ -945,33 +945,32 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
     val n = ptr.getWidth
     Cat(ptr(0), ptr(n-1,1))
   }
-
+*/
   when(do_enq) {
     ram(enq_ptr) := io.enq.bits
-    enq_ptr := inc(enq_ptr)
+    enq_ptr := WrapInc(enq_ptr, num_entries)
   }
   io.enq_idx := enq_ptr
 
   when(do_deq && !empty) {
-    deq_ptr := inc(deq_ptr)
+    deq_ptr := WrapInc(deq_ptr, num_entries)
     io.vcq_Wcsr := ram(deq_ptr)
   }
   when(io.update_vl.valid) {
     ram(io.update_vl_idx).vconfig.vl := io.update_vl.bits.vconfig.vl
     ram(io.update_vl_idx).vl_ready := io.update_vl.bits.vl_ready
-    // ram(io.update_vl_idx).vconfig.vtype := io.update_vl.bits.vconfig.vtype
   }
   when(do_enq =/= do_deq) {
     maybe_full := do_enq
   }
   when(io.flush) {
-    enq_ptr := 1.U
-    deq_ptr := 1.U
+    enq_ptr := 0.U
+    deq_ptr := 0.U
     maybe_full := false.B
   }
 
   io.enq_idx := enq_ptr
   io.enq.ready := !full
-  io.get_vconfig := ram(dec(enq_ptr))
+  io.get_vconfig := ram(WrapDec(enq_ptr, num_entries))
   io.empty := empty
 }

@@ -989,10 +989,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   // Vconfig Mask Logic
-  dec_vconfigmask_logic.io.vconfig_mask_update := RegNext(Mux((rob.io.commit.valids.head & rob.io.commit.uops.head.is_vsetvli) ||
-      (rob.io.commit.valids.head & rob.io.commit.uops.head.is_vsetivli), rob.io.commit.uops.head.vconfig_mask,
-    Mux((rob.io.commit.valids.last & rob.io.commit.uops.last.is_vsetvli) ||
-      (rob.io.commit.valids.last & rob.io.commit.uops.last.is_vsetivli), rob.io.commit.uops.last.vconfig_mask, 0.U)))
+  dec_vconfigmask_logic.io.vconfig_mask_update := RegNext(Mux(rob.io.commit.valids.head & (rob.io.commit.uops.head.is_vsetvli || rob.io.commit.uops.head.is_vsetivli),
+                                                          UIntToOH(rob.io.commit.uops.head.vconfig_tag),
+                                                          Mux(rob.io.commit.valids.last & (rob.io.commit.uops.last.is_vsetvli || rob.io.commit.uops.last.is_vsetivli),
+                                                          UIntToOH(rob.io.commit.uops.last.vconfig_tag), 0.U)))
 
   dec_vconfigmask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
   vconfig_mask_full := dec_vconfigmask_logic.io.is_full
@@ -1000,7 +1000,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   for (w <- 0 until coreWidth) {
     dec_vconfigmask_logic.io.is_vconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_vsetvli && !(dec_uops(w).ldst === 0.U && dec_uops(w).lrs1 === 0.U) || dec_uops(w).is_vsetivli)
     dec_vconfigmask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_vsetvli && !(dec_uops(w).ldst === 0.U && dec_uops(w).lrs1 === 0.U) || dec_uops(w).is_vsetivli)
-    //dec_uops(w).vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag(w)
     dec_uops(w).vconfig_mask := dec_vconfigmask_logic.io.vconfig_mask(w)
   }
 
