@@ -681,7 +681,7 @@ class Rob(
                "[rob] writeback (" + i + ") occurred to an invalid ROB entry.")
 
       assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
-               !rob_bsy(GetRowIdx(rob_idx))),
+               !(rob_bsy(GetRowIdx(rob_idx)) || rob_ud_bsy(GetRowIdx(rob_idx)))),
                "[rob] writeback (" + i + ") occurred to a not-busy ROB entry.")
 
       assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
