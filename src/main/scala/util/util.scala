@@ -383,6 +383,25 @@ object AgePriorityEncoder
   }
 }
 
+object AgePriorityEncoderN
+{
+  def apply(in: Seq[UInt], state: Seq[Bool], selN: Int): (Seq[UInt], Seq[Bool]) = {
+    val n = in.size
+
+    val tem_in = (in zip state).map { case (i, s) => (i, s) }
+    val temp = tem_in.slice(selN, n) ++ tem_in.slice(0, selN)
+
+    val rdy_list = temp.collect { case v if v._2.equals(true.B) => v }
+    val not_rdy_list = temp.collect { case v if ! v._2.equals(true.B) => v }
+
+    val res = rdy_list ++ not_rdy_list
+    val idx  = res.map { _._1 }
+    val rdy  = res.map { _._2 }
+
+    (idx, rdy)
+  }
+}
+
 object AgePriorityEncoderOH
 {
   def apply(in: Seq[Bool], head: UInt): UInt = {
