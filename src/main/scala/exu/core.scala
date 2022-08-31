@@ -989,10 +989,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   // Vconfig Mask Logic
-  dec_vconfigmask_logic.io.vconfig_mask_update := RegNext(Mux(rob.io.commit.valids.head & (rob.io.commit.uops.head.is_vsetvli || rob.io.commit.uops.head.is_vsetivli),
-                                                          UIntToOH(rob.io.commit.uops.head.vconfig_tag),
-                                                          Mux(rob.io.commit.valids.last & (rob.io.commit.uops.last.is_vsetvli || rob.io.commit.uops.last.is_vsetivli),
-                                                          UIntToOH(rob.io.commit.uops.last.vconfig_tag), 0.U)))
+  val mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).map{ case(v, uop) => v && (uop.is_vsetvli || uop.is_vsetivli) }
+  dec_vconfigmask_logic.io.vconfig_mask_update := RegNext(Mux(!mask_updates.reduce(_|_), 0.U,
+                                                          Mux1H(mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.vconfig_tag)))))
 
   dec_vconfigmask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
   vconfig_mask_full := dec_vconfigmask_logic.io.is_full
@@ -1003,8 +1002,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     dec_uops(w).vconfig_mask := dec_vconfigmask_logic.io.vconfig_mask(w)
   }
 
-  dec_uops.head.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head
-  dec_uops.last.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head + (dec_vconfigmask_logic.io.is_vconfig.head && dec_vconfigmask_logic.io.will_fire.head).asUInt()
+  val dec_vconfig_fires = (dec_vconfigmask_logic.io.is_vconfig zip dec_vconfigmask_logic.io.will_fire).map{ case(v, f) => (v && f).asUInt }
+  val dec_vconfig_nums  = dec_vconfig_fires.scanLeft(0.U)(_ + _)
+  (dec_uops zip dec_vconfig_nums).map{ case(dec_uop, fire_num) => 
+    dec_uop.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head + fire_num }
 
   //vconfig instruction decode info enq to VCQ
   val vcq = Module(new VconfigQueue())
