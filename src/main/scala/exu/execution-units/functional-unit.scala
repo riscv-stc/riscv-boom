@@ -1769,16 +1769,16 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     val e16red_identity: UInt = Mux1H(Seq(
       u.uopc.isOneOf(uopVMAX) -> 0x8000.U(16.W),
       u.uopc.isOneOf(uopVMIN) -> 0x7FFF.U(16.W),
-      u.uopc.isOneOf(uopVFMAX)-> 0xFC00.U(16.W),
-      u.uopc.isOneOf(uopVFMIN)-> 0x7C00.U(16.W),
+      //u.uopc.isOneOf(uopVFMAX)-> 0xFC00.U(16.W),
+      u.uopc.isOneOf(uopVFMIN, uopVFMAX)-> 0x7C01.U(16.W),
       u.uopc.isOneOf(uopVAND, uopVMINU) -> ~(0.U(16.W))
       //u.uopc.isOneOf(uopVADD, uopVMAXU, uopVOR, uopVXOR, uopVFADD) -> 0.U(16.W)
     ))
     val e32red_identity: UInt = Mux1H(Seq(
       u.uopc.isOneOf(uopVMAX) -> 0x80000000L.U(32.W),
       u.uopc.isOneOf(uopVMIN) -> 0x7FFFFFFFL.U(32.W),
-      u.uopc.isOneOf(uopVFMAX)-> 0xFF800000L.U(32.W),
-      u.uopc.isOneOf(uopVFMIN)-> 0x7F800000L.U(32.W),
+      //u.uopc.isOneOf(uopVFMAX)-> 0xFF800000L.U(32.W),
+      u.uopc.isOneOf(uopVFMIN, uopVFMAX)-> 0x7F800001L.U(32.W),
       u.uopc.isOneOf(uopVAND, uopVMINU) -> ~(0.U(32.W))
       //u.uopc.isOneOf(uopVADD, uopVMAXU, uopVOR, uopVXOR, uopVFADD) -> 0.U(32.W)
     ))
@@ -1786,8 +1786,9 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     val e64red_identity: UInt = Mux1H(Seq(
         u.uopc.isOneOf(uopVMAX) -> Cat(1.U(1.W), 0.U((eLen-1).W)), // signed low limit
         u.uopc.isOneOf(uopVMIN) -> Cat(0.U(1.W), Fill(eLen-1, 1.U(1.W))), // signed high limit
-        u.uopc.isOneOf(uopVFMAX)-> Cat(0xFFF.U(12.W), Fill(eLen-12, 0.U(1.W))), // -INF
-        u.uopc.isOneOf(uopVFMIN)-> Cat(0x7FF.U(12.W), Fill(eLen-12, 0.U(1.W))), // +INF
+        //u.uopc.isOneOf(uopVFMAX)-> Cat(0xFFF.U(12.W), Fill(eLen-12, 0.U(1.W))), // -INF
+        //u.uopc.isOneOf(uopVFMIN)-> Cat(0x7FF.U(12.W), Fill(eLen-12, 0.U(1.W))), // +IN
+        u.uopc.isOneOf(uopVFMIN, uopVFMAX)-> Cat(0x7FF.U(12.W), Fill(eLen-13, 0.U(1.W)), 1.U), // qNaN
         u.uopc.isOneOf(uopVAND, uopVMINU) -> ~(0.U(eLen.W))
         // omit default clause because Mux1H returns zero when nothing matches
         //u.uopc.isOneOf(uopVADD, uopVMAXU, uopVOR, uopVXOR, uopVFADD) -> 0.U(eLen.W)
