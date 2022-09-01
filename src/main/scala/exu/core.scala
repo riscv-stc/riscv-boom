@@ -89,7 +89,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   var v_pipeline: VecPipeline = null
   if (usingVector) {
     v_pipeline = Module(new VecPipeline)
-    v_pipeline.io.ll_wports := DontCare
+
+    for (i <- 0 until numVLdPorts) {
+      v_pipeline.io.ll_wports(i) := DontCare
+    }
+
     v_pipeline.io.intupdate := DontCare
     v_pipeline.io.fpupdate := DontCare
   }
@@ -1927,12 +1931,17 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       ll_wbarb.io.in(attachBase + i) <> v_pipeline.io.to_int(i)
     }
     v_pipeline.io.fromMat   <> m_pipeline.io.toVec
-    v_pipeline.io.ll_wports <> io.lsu.vrf_wbk
+
+    v_pipeline.io.ll_wports <> io.lsu.vrf_wbk_ports
+
+    for (i <- 0 until numVLdPorts) {
+      m_pipeline.io.lsu_tile_wbk(i).bits   := io.lsu.tile_wbk_ports(i).bits
+      m_pipeline.io.lsu_tile_wbk(i).valid  := io.lsu.tile_wbk_ports(i).valid
+      io.lsu.tile_wbk_ports(i).ready             := true.B
+    }
+
     io.lsu.vrf_rport        <> v_pipeline.io.lsu_vrf_rport
     io.lsu.tile_rport       <> m_pipeline.io.lsu_tile_rport
-    m_pipeline.io.lsu_tile_wbk.bits   := io.lsu.tile_wbk.bits
-    m_pipeline.io.lsu_tile_wbk.valid  := io.lsu.tile_wbk.valid
-    io.lsu.tile_wbk.ready             := true.B
 
   } else if (usingVector) {
     fp_pipeline.io.fromVec <> v_pipeline.io.to_fp
@@ -1940,10 +1949,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       val attachBase: Int = 2 + (if(usingRoCC) 1 else 0)
       ll_wbarb.io.in(attachBase + i) <> v_pipeline.io.to_int(i)
     }
-    //v_pipeline.io.to_fp.ready := true.B
-    //v_pipeline.io.lsu_vrf_wbk  <> io.lsu.vrf_wbk
-    v_pipeline.io.ll_wports     <> io.lsu.vrf_wbk
-    //v_pipeline.io.lsu_vrf_rport <> io.lsu.vrf_rport
+
+    v_pipeline.io.ll_wports <> io.lsu.vrf_wbk_ports
     io.lsu.vrf_rport <> v_pipeline.io.lsu_vrf_rport
   }
 

@@ -43,19 +43,16 @@
 
 package boom.lsu
 
-import chisel3._
+import chisel3.{when, _}
 import chisel3.util._
-
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{Str, UIntIsOneOf}
-
 import freechips.rocketchip.diplomacy._
-
 import boom.common._
 import boom.common.MicroOpcodes._
-import boom.exu.{BrUpdateInfo, Exception, FuncUnitReq, FuncUnitResp, CommitSignals, ExeUnitResp, VlWakeupResp, RegisterFileReadPortIO, TrTileRegReadPortIO}
+import boom.exu.{BrUpdateInfo, CommitSignals, Exception, ExeUnitResp, FuncUnitReq, FuncUnitResp, RegisterFileReadPortIO, TrTileRegReadPortIO, VlWakeupResp}
 import boom.util._
 
 class LSUExeIO(implicit p: Parameters) extends BoomBundle()(p)
@@ -188,9 +185,9 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
 
   val fp_stdata    = if (usingFPU)    Flipped(Decoupled(new ExeUnitResp(fLen))) else null
   val vrf_rport    = if (usingVector) Flipped(new RegisterFileReadPortIO(vpregSz, vLen)) else null
-  val vrf_wbk      = if (usingVector) Decoupled(new ExeUnitResp(vLen))   else null
+  val vrf_wbk_ports = if (usingVector) Vec(numVLdPorts, Decoupled(new ExeUnitResp(vLen))) else null
   val tile_rport   = if (usingMatrix) Flipped(new TrTileRegReadPortIO()) else null
-  val tile_wbk     = if (usingMatrix) Decoupled(new ExeUnitResp(vLen))   else null
+  val tile_wbk_ports     = if (usingMatrix) Vec(numVLdPorts, Decoupled(new ExeUnitResp(vLen))) else null
   val vbusy_status = if (usingVector) Input(UInt(numVecPhysRegs.W))      else null
 
   val commit      = Input(new CommitSignals)
@@ -1590,28 +1587,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     }
   }
 
-  // resp port polling
-  val vload_resp_e        = VecInit(io.vmem_ld_ports.map(port => Mux(port.resp.bits.is_unit, vldq(port.resp.bits.vldq_idx), vlxq(port.resp.bits.vldq_idx))))
-  val vload_resp_valid    = VecInit((io.vmem_ld_ports zip vload_resp_e).map { case (port, e) => port.resp.valid && e.valid && !port.resp.bits.is_vst })
-
-  val vld_resp_ports_ohs = VecInit((0 until numVLdPorts) map { i => vload_resp_valid(i) === true.B })
-  val vld_resp_port_head = RegInit(0.U(4.W))
-  val vld_resp_port = if (numVLdPorts > 1) AgePriorityEncoder(vld_resp_ports_ohs, vld_resp_port_head) else 0.U
-  vld_resp_port_head := vld_resp_port
-
   for (i <- 0 until numVLdqEntries) {
-    when (io.vmem_ld_ports(vld_resp_port).resp.bits.vldq_idx === i.U && io.vmem_ld_ports(vld_resp_port).resp.valid &&
-      !io.vmem_ld_ports(vld_resp_port).resp.bits.is_vst && io.vmem_ld_ports(vld_resp_port).resp.bits.is_unit) {
-      vldq(i).bits.succeeded := true.B
-
-      val ldq_idx = vldq(i).bits.uop.ldq_idx
-      ldq(ldq_idx).bits.finished_cnt := ldq(ldq_idx).bits.finished_cnt + 1.U
-
-      when ((ldq(ldq_idx).bits.finished_cnt +& 1.U) >= ldq(ldq_idx).bits.split_cnt) {
-        ldq(ldq_idx).bits.succeeded := true.B
-      }
-    }
-
     when (vldq_head === i.U && will_fire_vldq_exception(0)) {
       vldq(i).bits.succeeded := true.B
       when (vldq(i).bits.uop.uopc.isOneOf(uopVLFF) && vldq(i).bits.uop.v_eidx > 0.U) {
@@ -1661,20 +1637,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   }
 
   for (i <- 0 until numVLxqEntries) {
-    for (j <- 0 until numVLdPorts) {
-      when(io.vmem_ld_ports(j).resp.bits.vldq_idx === i.U && io.vmem_ld_ports(j).resp.valid &&
-        !io.vmem_ld_ports(j).resp.bits.is_vst && !io.vmem_ld_ports(j).resp.bits.is_unit) {
-        vlxq(i).bits.succeeded := true.B
-
-        val ldq_idx = vlxq(i).bits.uop.ldq_idx
-        ldq(ldq_idx).bits.finished_cnt := ldq(ldq_idx).bits.finished_cnt + 1.U
-
-        when ((ldq(ldq_idx).bits.finished_cnt +& 1.U) >= ldq(ldq_idx).bits.split_cnt) {
-          ldq(ldq_idx).bits.succeeded := true.B
-        }
-      }
-    }
-
     when (vlxq_head === i.U && will_fire_vlxq_exception(0)) {
       vlxq(i).bits.succeeded := true.B
     }
@@ -1892,12 +1854,37 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     io.core.tile_rport.msew  := vstq_commit_e.bits.uop.m_ls_ew
   }
 
+  // resp port polling
+  val vload_resp_e        = VecInit(io.vmem_ld_ports.map(port => Mux(port.resp.bits.is_unit, vldq(port.resp.bits.vldq_idx), vlxq(port.resp.bits.vldq_idx))))
+  val vload_resp_valid    = VecInit((io.vmem_ld_ports zip vload_resp_e).map { case (port, e) => port.resp.valid && e.valid && !port.resp.bits.is_vst })
   val vle_wbk_valid       = VecInit((vload_resp_valid zip vload_resp_e).map { case (valid, e) => valid && e.bits.uop.is_rvv })
   val mle_wbk_valid       = VecInit((vload_resp_valid zip vload_resp_e).map { case (valid, e) => valid && e.bits.uop.is_rvm })
   val vload_resp_data_shl = Wire(Vec(numVLdPorts, UInt(vLen.W)))
   val vload_resp_data_shr = Wire(Vec(numVLdPorts, UInt(vLen.W)))
 
   for (i <- 0 until numVLdPorts) {
+    val vldq_idx = io.vmem_ld_ports(i).resp.bits.vldq_idx
+
+    when (io.vmem_ld_ports(i).resp.valid && !io.vmem_ld_ports(i).resp.bits.is_vst && io.vmem_ld_ports(i).resp.bits.is_unit) {
+      vldq(vldq_idx).bits.succeeded := true.B
+
+      val ldq_idx = vldq(vldq_idx).bits.uop.ldq_idx
+      ldq(ldq_idx).bits.finished_cnt := ldq(ldq_idx).bits.finished_cnt + 1.U
+
+      when ((ldq(ldq_idx).bits.finished_cnt +& 1.U) >= ldq(ldq_idx).bits.split_cnt) {
+        ldq(ldq_idx).bits.succeeded := true.B
+      }
+    }.elsewhen(io.vmem_ld_ports(i).resp.valid && !io.vmem_ld_ports(i).resp.bits.is_vst && !io.vmem_ld_ports(i).resp.bits.is_unit) {
+      vlxq(vldq_idx).bits.succeeded := true.B
+
+      val ldq_idx = vlxq(vldq_idx).bits.uop.ldq_idx
+      ldq(ldq_idx).bits.finished_cnt := ldq(ldq_idx).bits.finished_cnt + 1.U
+
+      when ((ldq(ldq_idx).bits.finished_cnt +& 1.U) >= ldq(ldq_idx).bits.split_cnt) {
+        ldq(ldq_idx).bits.succeeded := true.B
+      }
+    }
+
     vload_resp_data_shr(i)    := io.vmem_ld_ports(i).resp.bits.cdata >> (vload_resp_e(i).bits.shamt ## 0.U(3.W))
     vload_resp_data_shl(i)    := io.vmem_ld_ports(i).resp.bits.cdata << (vload_resp_e(i).bits.shamt ## 0.U(3.W))
   }
@@ -1931,37 +1918,43 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   vlud_dat_q.io.enq.bits.uop      := vlud_vrf_q.io.deq.bits.uop
   vlud_dat_q.io.enq.bits.mask     := vlud_vrf_q.io.deq.bits.mask
   vlud_dat_q.io.enq.bits.data     := io.core.vrf_rport.data
-  vlud_dat_q.io.deq.ready         := !vload_resp_valid(vld_resp_port)
+  vlud_dat_q.io.deq.ready         := !vload_resp_valid(0) // use port 0 to write back stable pdst data
 
   // VRF write back
-  io.core.vrf_wbk                   := DontCare
-  io.core.vrf_wbk.valid             := vle_wbk_valid(vld_resp_port) || vlud_dat_q.io.deq.fire
-  io.core.vrf_wbk.bits.uop          := Mux(vle_wbk_valid(vld_resp_port), vload_resp_e(vld_resp_port).bits.uop, vlud_dat_q.io.deq.bits.uop)
-  io.core.vrf_wbk.bits.data         := Mux(!vle_wbk_valid(vld_resp_port),             vlud_dat_q.io.deq.bits.data,
-                                       Mux(!io.vmem_ld_ports(vld_resp_port).resp.bits.is_unit, idxRespData(vld_resp_port),
-                                       Mux(vload_resp_e(vld_resp_port).bits.shdir,    vload_resp_data_shr(vld_resp_port), vload_resp_data_shl(vld_resp_port))))
-  io.core.vrf_wbk.bits.vmask        := Mux(!vle_wbk_valid(vld_resp_port),             vlud_dat_q.io.deq.bits.mask,
-                                       Mux(!io.vmem_ld_ports(vld_resp_port).resp.bits.is_unit, idxRespVm(vld_resp_port), vload_resp_e(vld_resp_port).bits.vmask))
-  io.core.vrf_wbk.bits.predicated   := false.B
-  io.core.vrf_wbk.bits.fflags.valid := false.B
-  when (vlud_dat_q.io.deq.valid && !vle_wbk_valid(vld_resp_port)) {
-    io.core.vrf_wbk.bits.uop.uses_ldq := false.B
-  }
+  for (i <- 0 until numVLdPorts) {
+    val wbk_data = Mux(!io.vmem_ld_ports(i).resp.bits.is_unit, idxRespData(i),
+      Mux(vload_resp_e(i).bits.shdir, vload_resp_data_shr(i), vload_resp_data_shl(i)))
+    val vmask = Mux(!io.vmem_ld_ports(i).resp.bits.is_unit, idxRespVm(i), vload_resp_e(i).bits.vmask)
 
-  when (io.core.vrf_wbk.valid) {
-    assert (io.core.vrf_wbk.ready)
-  }
-  // tile register write back
-  io.core.tile_wbk                   := DontCare
-  io.core.tile_wbk.valid             := mle_wbk_valid(vld_resp_port)
-  io.core.tile_wbk.bits.uop          := vload_resp_e(vld_resp_port).bits.uop
-  io.core.tile_wbk.bits.data         := Mux(vload_resp_e(vld_resp_port).bits.shdir, vload_resp_data_shr(vld_resp_port),
-                                        vload_resp_data_shl(vld_resp_port))
-  io.core.tile_wbk.bits.vmask        := vload_resp_e(vld_resp_port).bits.vmask
-  io.core.tile_wbk.bits.predicated   := false.B
-  io.core.tile_wbk.bits.fflags.valid := false.B
-  when (io.core.tile_wbk.valid) {
-    assert (io.core.tile_wbk.ready)
+    io.core.vrf_wbk_ports(i) := DontCare
+    io.core.vrf_wbk_ports(i).valid := vle_wbk_valid(i) || (vlud_dat_q.io.deq.fire && i.asUInt === 0.U)
+    io.core.vrf_wbk_ports(i).bits.uop := Mux(i.asUInt === 0.U, Mux(vle_wbk_valid(i), vload_resp_e(i).bits.uop, vlud_dat_q.io.deq.bits.uop), vload_resp_e(i).bits.uop)
+    io.core.vrf_wbk_ports(i).bits.data := Mux(i.asUInt === 0.U, Mux(!vle_wbk_valid(i), vlud_dat_q.io.deq.bits.data, wbk_data), wbk_data)
+    io.core.vrf_wbk_ports(i).bits.vmask := Mux(i.asUInt === 0.U, Mux(!vle_wbk_valid(i), vlud_dat_q.io.deq.bits.mask, vmask), vmask)
+    io.core.vrf_wbk_ports(i).bits.predicated := false.B
+    io.core.vrf_wbk_ports(i).bits.fflags.valid := false.B
+
+    when(vlud_dat_q.io.deq.valid && !vle_wbk_valid(i) && i.asUInt === 0.U) {
+      io.core.vrf_wbk_ports(i).bits.uop.uses_ldq := false.B
+    }
+
+    when (io.core.vrf_wbk_ports(i).valid) {
+      assert (io.core.vrf_wbk_ports(i).ready)
+    }
+
+    // tile register write back
+    io.core.tile_wbk_ports(i)                   := DontCare
+    io.core.tile_wbk_ports(i).valid             := mle_wbk_valid(i)
+    io.core.tile_wbk_ports(i).bits.uop          := vload_resp_e(i).bits.uop
+    io.core.tile_wbk_ports(i).bits.data         := Mux(vload_resp_e(i).bits.shdir, vload_resp_data_shr(i),
+      vload_resp_data_shl(i))
+    io.core.tile_wbk_ports(i).bits.vmask        := vload_resp_e(i).bits.vmask
+    io.core.tile_wbk_ports(i).bits.predicated   := false.B
+    io.core.tile_wbk_ports(i).bits.fflags.valid := false.B
+
+    when (io.core.tile_wbk_ports(i).valid) {
+      assert (io.core.tile_wbk_ports(i).ready)
+    }
   }
 
   val vldq_done = Cat(vldq.map(x => x.valid && x.bits.executed && x.bits.succeeded && !x.bits.uop.exception).reverse)
