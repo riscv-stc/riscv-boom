@@ -1008,20 +1008,29 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   val dec_vconfig_fires = (dec_vconfigmask_logic.io.is_vconfig zip dec_vconfigmask_logic.io.will_fire).map{ case(v, f) => (v && f).asUInt }
   val dec_vconfig_nums  = dec_vconfig_fires.scanLeft(0.U)(_ + _)
-  (dec_uops zip dec_vconfig_nums).map{ case(dec_uop, fire_num) => 
+  (dec_uops zip dec_vconfig_nums).map{ case(dec_uop, fire_num) =>
     dec_uop.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head + fire_num }
 
   //vconfig instruction decode info enq to VCQ
   val vcq = Module(new VconfigQueue())
+  val youngest_vconfig_idx = (coreWidth - 1).U - PriorityEncoder(dec_vconfig_valid.reverse)
+  val oldest_vconfig_idx = PriorityEncoder(dec_vconfig_valid)
+  val vconfig_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
+  /**
+   *  when a group have at lest one inst between two vsetvl , eg. {vset2, vadd, vset0, vle},
+   *  pipeline will hazard the instruction right after the oldest vestvl,
+   *  and this instruction group will be divide into {vsetvl0, vle} + {xx, xx, vsetvl2, vadd}.
+   */
+  vconfig_stall(oldest_vconfig_idx + 1.U) := (youngest_vconfig_idx - oldest_vconfig_idx + 1.U) > dec_vconfig_nums(youngest_vconfig_idx)
+
   vcq.io.enq.bits  := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
   vcq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_vsetivli||u.is_vsetvli)}.reduce(_ | _)
   vcq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_vsetivli||u.is_vsetvli, false.B)}.reduce(_ | _)
   vcq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
   vcq_empty        := vcq.io.empty
 
-  vcq_data.vconfig := Mux(dec_vconfig_valid.head, dec_vconfig.head.vconfig, Mux(vcq_empty, csr.io.vector.get.vconfig, vcq.io.get_vconfig.vconfig))
-
-  vcq_data.vl_ready := Mux(dec_vconfig_valid.head, dec_vconfig.head.vl_ready, Mux(vcq_empty, true.B, vcq.io.get_vconfig.vl_ready))
+  vcq_data.vconfig := Mux(dec_vconfig_valid(oldest_vconfig_idx), dec_vconfig(oldest_vconfig_idx).vconfig, Mux(vcq_empty, csr.io.vector.get.vconfig, vcq.io.get_vconfig.vconfig))
+  vcq_data.vl_ready := Mux(dec_vconfig_valid(oldest_vconfig_idx), dec_vconfig(oldest_vconfig_idx).vl_ready, Mux(vcq_empty, true.B, vcq.io.get_vconfig.vl_ready))
 
   vcq.io.update_vl.valid := vl_wakeup.valid
   vcq.io.update_vl.bits.vl_ready := vl_wakeup.valid
