@@ -30,7 +30,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 {
   val matIssueParams = issueParams.find(_.iqType == IQT_MAT.litValue).get
   val dispatchWidth  = matIssueParams.dispatchWidth
-  val numWakeupPorts = matWidth * 3 + numVLdPorts     // (MCLRACC; MOPA) + (VLSU to tr tile + VLSU to acc tile)
+  val numWakeupPorts = matWidth*2 + 2     // (MCLRACC; MOPA) + (VLSU to tr tile + VLSU to acc tile)
 
   val io = IO(new Bundle {
     // pipeline ctrl signals
@@ -49,7 +49,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     // scalar pipeline related
     val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
     val lsu_tile_rport   = new TrTileRegReadPortIO()
-    val lsu_tile_wbk     = Vec(numVLdPorts, Flipped(Decoupled(new ExeUnitResp(vLen))))
+    val lsu_tile_wbk     = Flipped(Decoupled(new ExeUnitResp(vLen)))
     // mset_wakeup, vsetvl related wakeup
     // val mset_wakeup        = Input(Valid(new MlWakeupResp()))  // TODO: msettype/msettile speculation optimization
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units
@@ -62,7 +62,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   // construct all of the modules
   val issue_unit   = Module(new IssueUnitCollapsing(matIssueParams, numWakeupPorts, vector = false, matrix = true))
   val exe_units    = new boom.exu.ExecutionUnits(matrix=true)
-  val trtileReg    = Module(new TrTileReg(exe_units.numTrTileReadPorts+1, numVLdPorts))
+  val trtileReg    = Module(new TrTileReg(exe_units.numTrTileReadPorts+1, 1))
   val trtileReader = Module(new TileRegisterRead(
                        matWidth,
                        exe_units.withFilter(_.readsTrTile).map(_.supportedFuncUnits),
@@ -163,27 +163,19 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
   // TODO: wrap vlsu write with uops for tr_tile write control
-  for (i <- 0 until numVLdPorts) {
-    val lsuWbkBits = io.lsu_tile_wbk(i).bits
-    trtileReg.io.writePorts(i).valid := io.lsu_tile_wbk(i).valid && lsuWbkBits.uop.rt(RD, isTrTile)
-    trtileReg.io.writePorts(i).bits.msew := lsuWbkBits.uop.m_ls_ew
-    trtileReg.io.writePorts(i).bits.tt := lsuWbkBits.uop.rt(RD, isTrTile).asUInt ## !lsuWbkBits.uop.isHSlice.asUInt
-    trtileReg.io.writePorts(i).bits.addr := lsuWbkBits.uop.pdst
-    trtileReg.io.writePorts(i).bits.index := lsuWbkBits.uop.m_sidx
-    trtileReg.io.writePorts(i).bits.data := lsuWbkBits.data
-    trtileReg.io.writePorts(i).bits.byteMask := lsuWbkBits.vmask
+  val lsuWbkBits = io.lsu_tile_wbk.bits
+  trtileReg.io.writePorts(0).valid          := io.lsu_tile_wbk.valid && lsuWbkBits.uop.rt(RD, isTrTile)
+  trtileReg.io.writePorts(0).bits.msew      := lsuWbkBits.uop.m_ls_ew
+  trtileReg.io.writePorts(0).bits.tt        := lsuWbkBits.uop.rt(RD, isTrTile).asUInt ## !lsuWbkBits.uop.isHSlice.asUInt
+  trtileReg.io.writePorts(0).bits.addr      := lsuWbkBits.uop.pdst
+  trtileReg.io.writePorts(0).bits.index     := lsuWbkBits.uop.m_sidx
+  trtileReg.io.writePorts(0).bits.data      := lsuWbkBits.data
+  trtileReg.io.writePorts(0).bits.byteMask  := lsuWbkBits.vmask
 
-    exe_units.withFilter(_.writesAccTile).map(eu => {
-      eu.io.mlsuWbk.valid := io.lsu_tile_wbk(i).valid && lsuWbkBits.uop.rt(RD, isAccTile)
-      eu.io.mlsuWbk.bits  := io.lsu_tile_wbk(i).bits }
-    )
-
-    //vld write back clears busy table in rename but not busy bit in rob entry.
-    io.wakeups(i) <> DontCare
-    io.wakeups(i).valid := io.lsu_tile_wbk(i).valid && lsuWbkBits.uop.rt(RD, isTrTile)
-    io.wakeups(i).bits := io.lsu_tile_wbk(i).bits
-  }
-
+  exe_units.withFilter(_.writesAccTile).map(eu => {
+    eu.io.mlsuWbk.valid := io.lsu_tile_wbk.valid && lsuWbkBits.uop.rt(RD, isAccTile)
+    eu.io.mlsuWbk.bits  := io.lsu_tile_wbk.bits }
+  )
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Commit Stage ****
@@ -193,8 +185,14 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   //io.wakeups(0).valid := ll_wbarb.io.out.valid
   //io.wakeups(0).bits := ll_wbarb.io.out.bits
   //ll_wbarb.io.out.ready := true.B
+
+  var w_cnt = 0
+  //vld write back clears busy table in rename but not busy bit in rob entry.
+  io.wakeups(w_cnt) <> DontCare
+  io.wakeups(w_cnt).valid := io.lsu_tile_wbk.valid && lsuWbkBits.uop.rt(RD, isTrTile)
+  io.wakeups(w_cnt).bits  := io.lsu_tile_wbk.bits
   // from MatExeUnit
-  var w_cnt = numVLdPorts
+  w_cnt = 1
   for(eu <- exe_units) {
     io.wakeups(w_cnt)   := eu.io.mclrResp
     io.wakeups(w_cnt+1) := eu.io.mopaResp
