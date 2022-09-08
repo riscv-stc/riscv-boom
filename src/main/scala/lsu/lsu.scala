@@ -3080,7 +3080,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   io.vrf_emul        := emulCtr
 
   // update ls count in rob
-  io.update_ls.valid            := (state === s_idle && io.req.valid && ioUop.uses_ldq) || 
+  io.update_ls.valid            := (state === s_idle && io.req.valid && ioUop.uses_ldq && ioUop.is_rvv) || 
                                    (io.resp.fire && ((state === s_split && (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl)) || 
                                                      (state === s_slice && (misaligned || sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast)))
   io.update_ls.bits.ud_copy     := (state === s_idle)
