@@ -224,8 +224,8 @@ class PE(
   })
 
   // acc registers
-  val c0 = Reg(Vec(numAccTiles, UInt(32.W)))
-  val c1 = Reg(Vec(numAccTiles, UInt(32.W)))
+  val c0 = RegInit(VecInit(Seq.fill(numAccTiles)(0.U(32.W))))
+  val c1 = RegInit(VecInit(Seq.fill(numAccTiles)(0.U(32.W))))
 
   // -----------------------------------------------------------------------------------
   // matrix multiply-accumulate
