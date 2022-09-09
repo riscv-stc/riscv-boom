@@ -2877,7 +2877,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   val splitFinished  = WireInit(false.B)
   val sliceBaseAddr  = RegInit(0.U(xLen.W))
   val sliceBlockAddr = RegInit(0.U(xLen.W))
-  val sliceBlockOff  = sliceBaseAddr(clSizeLog2-1, 0)
+  val sliceBlockOff  = (sliceBaseAddr + sliceBlockAddr)(clSizeLog2-1, 0)
   val sliceAddrInc   = WireInit(0.U((clSizeLog2+1).W))
   val sliceLenLast   = WireInit(false.B)
   val sliceBytes     = Mux(io.req.fire, ioUop.m_slice_len << ioUop.m_ls_ew, uop.m_slice_len << uop.m_ls_ew)
@@ -2952,7 +2952,6 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
       is (s_slice) {
         when (io.resp.fire) {
           sliceLenCtr      := sliceLenCtr + 1.U
-          sliceCntCtr      := sliceCntCtr + 1.U
           sliceBlockAddr   := sliceBlockAddr + sliceAddrInc
           splitCnt         := splitCnt + 1.U
 
@@ -3026,7 +3025,6 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
       is (s_slice) {
         when (io.resp.fire) {
           sliceLenCtr      := sliceLenCtr + 1.U
-          sliceCntCtr    := sliceCntCtr + 1.U
           sliceBlockAddr   := sliceBlockAddr + sliceAddrInc
           splitCnt         := splitCnt + 1.U
 
