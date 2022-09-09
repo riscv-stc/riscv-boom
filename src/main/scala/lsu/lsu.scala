@@ -2952,6 +2952,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
       is (s_slice) {
         when (io.resp.fire) {
           sliceLenCtr      := sliceLenCtr + 1.U
+          sliceCntCtr      := sliceCntCtr + 1.U
           sliceBlockAddr   := sliceBlockAddr + sliceAddrInc
           splitCnt         := splitCnt + 1.U
 
@@ -3025,6 +3026,7 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
       is (s_slice) {
         when (io.resp.fire) {
           sliceLenCtr      := sliceLenCtr + 1.U
+          sliceCntCtr    := sliceCntCtr + 1.U
           sliceBlockAddr   := sliceBlockAddr + sliceAddrInc
           splitCnt         := splitCnt + 1.U
 
