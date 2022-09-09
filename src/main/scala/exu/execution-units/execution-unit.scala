@@ -1412,14 +1412,14 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.rowWriteReq.bits.sidx  := io.mlsuWbk.bits.uop.m_sidx
   mxu.io.rowWriteReq.bits.rtype := io.mlsuWbk.bits.uop.td_eew
   mxu.io.rowWriteReqUop         := io.mlsuWbk.bits.uop
-  mxu.io.rowWriteData           := io.mlsuWbk.bits.data
+  mxu.io.rowWriteData           := io.mlsuWbk.bits.data & FillInterleaved(8, io.mlsuWbk.bits.vmask)
   // write col slices
   mxu.io.colWriteReq.valid      := io.mlsuWbk.valid && io.mlsuWbk.bits.uop.rt(RD, isAccTile) && !io.mlsuWbk.bits.uop.isHSlice
   mxu.io.colWriteReq.bits.ridx  := io.mlsuWbk.bits.uop.pdst
   mxu.io.colWriteReq.bits.sidx  := io.mlsuWbk.bits.uop.m_sidx
   mxu.io.colWriteReq.bits.rtype := io.mlsuWbk.bits.uop.td_eew
   mxu.io.colWriteReqUop         := io.mlsuWbk.bits.uop
-  mxu.io.colWriteData           := io.mlsuWbk.bits.data
+  mxu.io.colWriteData           := io.mlsuWbk.bits.data & FillInterleaved(8, io.mlsuWbk.bits.vmask)
 
   // Outputs (Write Port #0)  ---------------
   if (writesAccTile) {

@@ -945,7 +945,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   //-------------------------------------------------------------
   // Decoders
-  val vcq_data = Wire(new VconfigDecodeSignals())
+  val vcq_data  = Wire(Vec(coreWidth, new VconfigDecodeSignals()))
   val vcq_empty = WireInit(false.B)
 
   for (w <- 0 until coreWidth) {
@@ -960,8 +960,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     decode_units(w).io.interrupt_cause := csr.io.interrupt_cause
     if (usingVector) {
       decode_units(w).io.csr_vstart       := csr.io.vector.get.vstart
-      decode_units(w).io.csr_vconfig      := vcq_data.vconfig
-      decode_units(w).io.enq.uop.vl_ready := vcq_data.vl_ready
+      decode_units(w).io.csr_vconfig      := vcq_data(w).vconfig
+      decode_units(w).io.enq.uop.vl_ready := vcq_data(w).vl_ready
       decode_units(w).io.csr_vconfig.vtype.reserved := DontCare
 
       dec_vconfig_valid(w) := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 87.U) && (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && ((dec_fbundle.uops(w).bits.inst(31, 30) === 3.U) || !dec_fbundle.uops(w).bits.inst(31))
@@ -1026,8 +1026,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   vcq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
   vcq_empty        := vcq.io.empty
 
-  vcq_data.vconfig := Mux(dec_vconfig_valid(oldest_vconfig_idx), dec_vconfig(oldest_vconfig_idx).vconfig, Mux(vcq_empty, csr.io.vector.get.vconfig, vcq.io.get_vconfig.vconfig))
-  vcq_data.vl_ready := Mux(dec_vconfig_valid(oldest_vconfig_idx), dec_vconfig(oldest_vconfig_idx).vl_ready, Mux(vcq_empty, true.B, vcq.io.get_vconfig.vl_ready))
+  for(w <- 0 until coreWidth) {
+    vcq_data(w).vconfig  := Mux(dec_vconfig_valid(oldest_vconfig_idx) && oldest_vconfig_idx < w.U, dec_vconfig(oldest_vconfig_idx).vconfig, Mux(vcq_empty, csr.io.vector.get.vconfig, vcq.io.get_vconfig.vconfig))
+    vcq_data(w).vl_ready := Mux(dec_vconfig_valid(oldest_vconfig_idx) && oldest_vconfig_idx < w.U, dec_vconfig(oldest_vconfig_idx).vl_ready, Mux(vcq_empty, true.B, vcq.io.get_vconfig.vl_ready))
+  }
 
   vcq.io.update_vl.valid := vl_wakeup.valid
   vcq.io.update_vl.bits.vl_ready := vl_wakeup.valid

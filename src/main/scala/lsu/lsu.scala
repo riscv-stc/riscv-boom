@@ -300,6 +300,7 @@ class VLDQEntry(implicit p: Parameters) extends LDQEntry()(p)
 class VSTQEntry(implicit p: Parameters) extends STQEntry()(p)
 {
   val executed            = Bool()
+  val killed              = Bool()        // killed by branch
   val vmask               = UInt(vLenb.W) // for fast unit-stride vl
   val shdir               = Bool()
   val shamt               = UInt(log2Ceil(vLenb.max(p(freechips.rocketchip.subsystem.CacheBlockBytes))).W)
@@ -910,6 +911,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vstq(vstq_tail).bits.data.valid       := DontCare                   // TODO: Optimization using .data.valid
     vstq(vstq_tail).bits.committed        := false.B
     vstq(vstq_tail).bits.succeeded        := false.B
+    vstq(vstq_tail).bits.killed           := false.B
     vstq(vstq_tail).bits.vmask            := vsagu.io.resp_vm
     vstq(vstq_tail).bits.shamt            := vsagu.io.resp_shamt
     vstq(vstq_tail).bits.shdir            := vsagu.io.resp_shdir
@@ -953,6 +955,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vsxq(vsxq_tail).bits.committed        := false.B
     vsxq(vsxq_tail).bits.executed         := false.B
     vsxq(vsxq_tail).bits.succeeded        := false.B
+    vsxq(vsxq_tail).bits.killed           := false.B
     vsxq(vsxq_tail).bits.vmask            := vsxagu.io.resp_vm
     vsxq(vsxq_tail).bits.shamt            := vsxagu.io.resp_shamt
     vsxq(vsxq_tail).bits.shdir            := vsxagu.io.resp_shdir
@@ -1827,7 +1830,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vldq(vldq_head).valid := false.B
   }
 
-  val vstq_done = Cat(vstq.map(x => x.valid && x.bits.committed && x.bits.succeeded && !x.bits.uop.exception).reverse)
+  val vstq_done   = Cat(vstq.map(x => x.valid && x.bits.committed && x.bits.succeeded && !x.bits.uop.exception).reverse)
+  val vstq_killed = Cat(vstq.map(x => x.bits.killed).reverse)
   when (vstq_done(vstq_head)) {
     vstq_head := WrapInc(vstq_head, numVStqEntries)
     vstq(vstq_head).valid := false.B
@@ -1837,6 +1841,13 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq(stq_idx).bits.succeeded := true.B
     }
   }
+  when (vstq_killed(vstq_head)) {
+    vstq_head := WrapInc(vstq_head, numVStqEntries)
+    vstq(vstq_head).bits.killed := false.B
+  }
+  when (vstq_killed(vstq_execute_head)) {
+    vstq_execute_head := WrapInc(vstq_execute_head, numVStqEntries)
+  }
 
   val vlxq_done = Cat(vlxq.map(x => x.valid && x.bits.executed && x.bits.succeeded && !x.bits.uop.exception).reverse)
   when (vlxq_done(vlxq_head)) {
@@ -1844,7 +1855,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vlxq(vlxq_head).valid := false.B
   }
 
-  val vsxq_done = Cat(vsxq.map(x => x.valid && x.bits.committed && x.bits.succeeded && !x.bits.uop.exception).reverse)
+  val vsxq_done   = Cat(vsxq.map(x => x.valid && x.bits.committed && x.bits.succeeded && !x.bits.uop.exception).reverse)
+  val vsxq_killed = Cat(vsxq.map(x => x.bits.killed).reverse)
   when (vsxq_done(vsxq_head)) {
     vsxq_head := WrapInc(vsxq_head, numVSxqEntries)
     vsxq(vsxq_head).valid := false.B
@@ -1852,6 +1864,13 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       val stq_idx = vsxq(vsxq_head).bits.uop.stq_idx
       stq(stq_idx).bits.succeeded := true.B
     }
+  }
+  when (vsxq_killed(vsxq_head)) {
+    vsxq_head := WrapInc(vsxq_head, numVSxqEntries)
+    vsxq(vsxq_head).bits.killed := false.B
+  }
+  when (vsxq_killed(vsxq_execute_head)) {
+    vsxq_execute_head := WrapInc(vsxq_execute_head, numVSxqEntries)
   }
 
   // wire address generator units
@@ -2394,6 +2413,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       {
         vstq(i).valid           := false.B
         vstq(i).bits.addr.valid := false.B
+        vstq(i).bits.killed     := true.B        // us
       }
     }
   }
@@ -2421,6 +2441,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       {
         vsxq(i).valid           := false.B
         vsxq(i).bits.addr.valid := false.B
+        vsxq(i).bits.killed     := true.B
       }
     }
   }
@@ -2672,6 +2693,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         vstq(i).bits.committed  := false.B
         vstq(i).bits.executed   := false.B
         vstq(i).bits.succeeded  := false.B
+        vstq(i).bits.killed     := false.B
       }
 
       vsxq_head := 0.U
@@ -2685,6 +2707,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         vsxq(i).bits.committed  := false.B
         vsxq(i).bits.executed   := false.B
         vsxq(i).bits.succeeded  := false.B
+        vsxq(i).bits.killed     := false.B
       }
     }
       .otherwise // exception
@@ -2711,6 +2734,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
           vstq(i).bits.committed  := false.B
           vstq(i).bits.executed   := false.B
           vstq(i).bits.succeeded  := false.B
+          vstq(i).bits.killed     := false.B
         }
       }
 
@@ -2723,6 +2747,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
           vsxq(i).bits.committed  := false.B
           vsxq(i).bits.executed   := false.B
           vsxq(i).bits.succeeded  := false.B
+          vsxq(i).bits.killed     := false.B
         }
       }
     }
