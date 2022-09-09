@@ -377,7 +377,7 @@ class ALUUnit(
     val block_pc = AlignPCToBoundary(io.get_ftq_pc.pc, icBlockBytes)
     val uop_pc = (block_pc | uop.pc_lob) - Mux(uop.edge_inst, 2.U, 0.U)
 
-    op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data,
+    op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data,
                Mux(uop.ctrl.op1_sel.asUInt === OP1_PC  , Sext(uop_pc, xLen), 0.U))
   } else if(usingMatrix && isCsrUnit) {
     val msetr    = uop.uopc.isOneOf(uopMSETTYPE, uopMSETTILEM, uopMSETTILEK, uopMSETTILEN, uopMSETTSIDXI)
@@ -386,18 +386,19 @@ class ALUUnit(
     val msettype = uop.uopc.isOneOf(uopMSETTYPE,  uopMSETTYPEI)
     val msetm    = uop.uopc.isOneOf(uopMSETTILEM, uopMSETTILEMI)
     val msetn    = uop.uopc.isOneOf(uopMSETTILEN, uopMSETTILENI)
-    val useMax   = uop.ldst =/= 0.U && uop.lrs1 === 0.U
-    val msetdata = Mux(mseti, imm_xprlen(27,15), io.req.bits.rs1_data)
+    val useMax   = uop.ldst =/= 0.U && uop.lrs1 === 0.U && msetr
+    val msetdata = Mux(mseti, uop.imm_packed(15,3), rs1_data(12,0))
     val tilemMax = numTrTileRows.U
     val tilenMax = vLenb.U >> io.mconfig.mtype.msew
     val tilekMax = tilemMax.min(tilenMax)
     val msettile = Mux(msetm, tilemMax,
                    Mux(msetn, tilenMax, tilekMax)).min(Mux(useMax, tilemMax+tilenMax, msetdata))
-    op1_data = Mux(msettype, msetdata, 
+    op1_data = Mux(msettype, msetdata,
                Mux(mset,     msettile,
-               Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data, 0.U)))
+               Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data, 0.U)))
+    io.resp.bits.uop.mconfig.mtype := RegEnable(MType.fromUInt(msetdata), msettype)
   } else {
-    op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , io.req.bits.rs1_data, 0.U)
+    op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data, 0.U)
   }
 
   // operand 2 select
@@ -415,7 +416,7 @@ class ALUUnit(
 
     op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,     Sext(imm_xprlen.asUInt, xLen),
                Mux(uop.ctrl.op2_sel === OP2_IMMC,    uop.prs1(4,0),
-               Mux(uop.ctrl.op2_sel === OP2_RS2 ,    io.req.bits.rs2_data,
+               Mux(uop.ctrl.op2_sel === OP2_RS2 ,    rs2_data,
                Mux(uop.ctrl.op2_sel === OP2_NEXT,    Mux(uop.is_rvc, 2.U, 4.U),
                Mux(uop.ctrl.op2_sel === OP2_VL,      new_vl, 0.U)))))
 
@@ -425,7 +426,7 @@ class ALUUnit(
   } else {
     op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,     Sext(imm_xprlen.asUInt, xLen),
                Mux(uop.ctrl.op2_sel === OP2_IMMC,    uop.prs1(4,0),
-               Mux(uop.ctrl.op2_sel === OP2_RS2 ,    io.req.bits.rs2_data,
+               Mux(uop.ctrl.op2_sel === OP2_RS2 ,    rs2_data,
                Mux(uop.ctrl.op2_sel === OP2_NEXT,    Mux(uop.is_rvc, 2.U, 4.U), 0.U))))
   }
 
@@ -543,7 +544,8 @@ class ALUUnit(
   val r_pred = Reg(Vec(numStages, Bool()))
   val alu_out = WireInit(alu.io.out)
   alu_out := Mux(uop.is_sfb_shadow && io.req.bits.pred_data, Mux(uop.ldst_is_rs1, io.req.bits.rs1_data, io.req.bits.rs2_data),
-             Mux(uop.uopc === uopMOV, io.req.bits.rs2_data, alu.io.out))
+             Mux(uop.uopc === uopMOV, io.req.bits.rs2_data,
+             Mux(uop.is_unique && uop.is_rvm, op1_data, alu.io.out)))
   r_val (0) := io.req.valid
   r_data(0) := Mux(uop.is_sfb_br, pc_sel === PC_BRJMP, alu_out)
   r_pred(0) := uop.is_sfb_shadow && io.req.bits.pred_data

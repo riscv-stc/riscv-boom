@@ -527,6 +527,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
   // matrix stuff
   if (usingMatrix) {
+    dontTouch(io.csr_mconfig.mtype.msew)
     val csr_msew = io.csr_mconfig.mtype.msew
     val csr_tilem = io.csr_tilem
     val csr_tilen = io.csr_tilen

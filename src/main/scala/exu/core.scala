@@ -1750,7 +1750,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     m_pipeline.io.tilem  := csr.io.matrix.get.tilem
     m_pipeline.io.tilen  := csr.io.matrix.get.tilen
     m_pipeline.io.tilek  := csr.io.matrix.get.tilek
-    val useCurrentVal = csr_uop.ldst === 0.U && csr_uop.lrs1 === 0.U
+    val useCurrentVal = (csr_uop.ldst === 0.U && csr_uop.lrs1 === 0.U) && (csr_uop.lrs1_rtype === RT_FIX)
     csr.io.matrix.get.set_mconfig.valid := csr_vld && msettype
     csr.io.matrix.get.set_mconfig.bits  := csr_uop.mconfig
     csr.io.matrix.get.set_tilem.valid   := csr_vld && msettilem && !useCurrentVal
