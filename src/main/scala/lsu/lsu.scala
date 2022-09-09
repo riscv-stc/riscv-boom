@@ -982,24 +982,24 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   uses_dc:   Boolean,
                                   uses_lcam: Boolean,
                                   uses_rob:  Boolean,
+                                  uses_vmem: Boolean = false,
                                   uses_vla:  Boolean = false,
-                                  uses_vsa:  Boolean = false,
-                                  uses_vrf:  Boolean = false
+                                  uses_vsa:  Boolean = false
                  ): Bool = {
-      val will_fire = can_fire && !(uses_tlb.B && !tlb_avail) &&
+      val will_fire = can_fire && !(uses_tlb.B  && !tlb_avail)  &&
                                   !(uses_lcam.B && !lcam_avail) &&
-                                  !(uses_dc.B && !dc_avail) &&
-                                  !(uses_rob.B && !rob_avail) &&
-                                  !(uses_vla.B && !vla_avail) &&
-                                  !(uses_vsa.B && !vsa_avail) &&
-                                  !(uses_vrf.B && !vmem_avail)
+                                  !(uses_dc.B   && !dc_avail)   &&
+                                  !(uses_rob.B  && !rob_avail)  &&
+                                  !(uses_vmem.B && !vmem_avail) &&
+                                  !(uses_vla.B  && !vla_avail)  &&
+                                  !(uses_vsa.B  && !vsa_avail) 
       tlb_avail  = tlb_avail  && !(will_fire && uses_tlb.B)
       lcam_avail = lcam_avail && !(will_fire && uses_lcam.B)
       dc_avail   = dc_avail   && !(will_fire && uses_dc.B)
       rob_avail  = rob_avail  && !(will_fire && uses_rob.B)
+      vmem_avail = vmem_avail && !(will_fire && uses_vmem.B)
       vla_avail  = vla_avail  && !(will_fire && uses_vla.B)
       vsa_avail  = vsa_avail  && !(will_fire && uses_vsa.B)
-      vmem_avail = vmem_avail && !(will_fire && uses_vrf.B)
       dontTouch(will_fire) // dontTouch these so we can inspect the will_fire signals
       will_fire
     }
