@@ -727,7 +727,7 @@ class MXU(
   rowReadReqValid := false.B
   switch(rowReadState) {
     is(sliceReady) {
-      when(io.rowReadReq.valid) {
+      when(io.rowReadReq.valid && io.rowReadReqUop.rt(RS1, isAccTile)) {
         when(rowReadCtrls.rtype =/= INT8TYPE && rowReadCtrls.rtype =/= FP16TYPE) {
           rowReadState := sliceWait
           rowVsCount   := Mux(rowReadCtrls.rtype === INT32TYPE, 4.U, 2.U)
@@ -806,7 +806,7 @@ class MXU(
   colReadReqValid := false.B
   switch(colReadState) {
     is(sliceReady) {
-      when(io.colReadReq.valid) {
+      when(io.colReadReq.valid && io.colReadReqUop.rt(RS1, isAccTile)) {
         when(colReadCtrls.rtype === INT32TYPE || colReadCtrls.rtype === FP32TYPE) {
           colReadState := sliceWait
           colVsCount   := 2.U
@@ -893,10 +893,14 @@ class MXU(
   io.clrRespUop        := Pipe(clrReqFire, io.clrReqUop, meshCols).bits
   io.rowReadResp       := mesh.io.rowReadResp
   io.rowReadRespUop    := Pipe(io.rowReadReq.valid, io.rowReadReqUop, meshCols).bits
+  val trRowValid        = ShiftRegister(io.rowReadReq.valid && io.rowReadReqUop.rt(RS1, isTrTile), meshCols)
+  val trRowData         = Pipe(io.rowReadReq.valid, io.macReqSrcA, meshCols).bits
   io.rowWriteResp      := mesh.io.rowWriteResp
   io.rowWriteRespUop   := Pipe(io.rowWriteReq.valid, io.rowWriteReqUop, meshCols).bits
   io.colReadResp       := mesh.io.colReadResp
   io.colReadRespUop    := Pipe(io.colReadReq.valid, io.colReadReqUop, meshRows).bits
+  val trColValid        = ShiftRegister(io.colReadReq.valid && io.colReadReqUop.rt(RS1, isTrTile), meshRows)
+  val trColData         = Pipe(io.colReadReq.valid, io.macReqSrcA, meshRows).bits
   io.colWriteResp      := mesh.io.colWriteResp
   io.colWriteRespUop   := Pipe(io.colWriteReq.valid, io.colWriteReqUop, meshRows).bits
 
@@ -976,9 +980,9 @@ class MXU(
     colRespCount := 0.U
   }
   
-  io.rowReadData.valid := mesh.io.rowReadResp.valid || rowRespCount > 0.U
-  io.rowReadData.bits  := rowReadDataMux.asUInt
+  io.rowReadData.valid := mesh.io.rowReadResp.valid || rowRespCount > 0.U || trRowValid
+  io.rowReadData.bits  := Mux(trRowValid, trRowData, rowReadDataMux.asUInt)
   
-  io.colReadData.valid := mesh.io.colReadResp.valid || colRespCount > 0.U
-  io.colReadData.bits  := colReadDataMux.asUInt
+  io.colReadData.valid := mesh.io.colReadResp.valid || colRespCount > 0.U || trColValid
+  io.colReadData.bits  := Mux(trColValid, trColData, colReadDataMux.asUInt)
 }
