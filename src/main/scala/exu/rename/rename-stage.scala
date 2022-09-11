@@ -877,18 +877,19 @@ class MatRenameStage(
     map_reqs(w).lrs3 := ren1.lrs3
     map_reqs(w).ldst := ren1.ldst
 
-    trremap_reqs(w).ldst := Mux(io.rollback, com.ldst      , ren2.ldst)
-    trremap_reqs(w).pdst := Mux(io.rollback, com.stale_pdst, ren2.pdst)
+    trremap_reqs(w).ldst  := Mux(io.rollback, com.ldst      , ren2.ldst)
+    trremap_reqs(w).pdst  := Mux(io.rollback, com.stale_pdst, ren2.pdst)
     accremap_reqs(w).ldst := Mux(io.rollback, com.ldst      , ren2.ldst)
     accremap_reqs(w).pdst := Mux(io.rollback, com.stale_pdst, ren2.pdst)
   }
 
-  for (w <- 0 until plWidth) {
-    trremap_reqs(w).valid := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_TR || rbk_valids(w) && io.com_uops(w).dst_rtype === RT_TR
-    accremap_reqs(w).valid := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_ACC  || rbk_valids(w) && io.com_uops(w).dst_rtype === RT_ACC
+  ren2_alloc_reqs zip ren2_uops zip rbk_valids.reverse zip io.com_uops.reverse zip trremap_reqs map {
+    case ((((a, a_uop), r), r_uop), tr) => tr.valid := (a && a_uop.dst_rtype === RT_TR) || (r && r_uop.dst_rtype === RT_TR)
   }
-  //ren2_alloc_reqs zip rbk_valids.reverse zip trremap_reqs map {
-   // case ((a,r),rr) => rr.valid := a || r}
+
+  ren2_alloc_reqs zip ren2_uops zip rbk_valids.reverse zip io.com_uops.reverse zip accremap_reqs map {
+    case ((((a, a_uop), r), r_uop), acc) => acc.valid := (a && a_uop.dst_rtype === RT_ACC) || (r && r_uop.dst_rtype === RT_ACC)
+  }
 
   // Hook up inputs.
   trmaptable.io.map_reqs    := map_reqs

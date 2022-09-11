@@ -1476,7 +1476,8 @@ class MatExeUnit() (implicit p: Parameters)
       ll_vresp_finished                   := Mux(ll_vresp_uop.uopc === uopMMV_V, ll_vresp_valid, false.B)
       //FIXME : data should be 2*SEW expanded
       io.ll_vresp.bits.data               := Mux(ll_vresp_uop.uopc === uopMQMV_V, Cat(0.U(((vLen/4)*3).W), ll_vresp_data(((vLen/4)*1)-1, 0)),
-        Mux(ll_vresp_uop.uopc === uopMWMV_V, Cat(0.U((vLen/2).W), ll_vresp_data(vLen/2-1,0)), ll_vresp_data))
+                                             Mux(ll_vresp_uop.uopc === uopMWMV_V, Cat(0.U((vLen/2).W), ll_vresp_data(vLen/2-1,0)), ll_vresp_data))
+      io.ll_vresp.bits.vmask              := Fill(vLenb, 1.U(1.W))
     }
     when(ll2_vresp_valid) {
       io.ll_vresp.valid                   := ll2_vresp_valid && !ll_vresp_finished
@@ -1489,7 +1490,8 @@ class MatExeUnit() (implicit p: Parameters)
       ll_vresp_finished                   := Mux(ll2_vresp_uop.uopc === uopMQMV_V, false.B, ll2_vresp_valid)
       //FIXME : data should be 2*SEW expanded
       io.ll_vresp.bits.data               := Mux(ll2_vresp_uop.uopc === uopMQMV_V, Cat(0.U(((vLen/4)*3).W), ll2_vresp_data(((vLen/4)*2)-1, (vLen/4)*1)),
-        Cat(0.U((vLen/2).W), ll2_vresp_data(vLen-1,vLen/2)))
+                                                                                   Cat(0.U((vLen/2).W), ll2_vresp_data(vLen-1,vLen/2)))
+      io.ll_vresp.bits.vmask              := Fill(vLenb, 1.U(1.W))
     }
     when(ll3_vresp_valid) {
       io.ll_vresp.valid                   := ll3_vresp_valid && !ll_vresp_finished
@@ -1502,6 +1504,7 @@ class MatExeUnit() (implicit p: Parameters)
       ll_vresp_finished                   := false.B
       //FIXME : data should be 2*SEW expanded
       io.ll_vresp.bits.data               := Cat(0.U(((vLen/4)*3).W), ll3_vresp_data(((vLen/4)*3)-1, (vLen/4)*2))
+      io.ll_vresp.bits.vmask              := Fill(vLenb, 1.U(1.W))
     }
     when(ll4_vresp_valid) {
       io.ll_vresp.valid                   := ll4_vresp_valid && !ll_vresp_finished
@@ -1514,6 +1517,7 @@ class MatExeUnit() (implicit p: Parameters)
       ll_vresp_finished                   := ll4_vresp_valid
       //FIXME : data should be 2*SEW expanded
       io.ll_vresp.bits.data               := Cat(0.U(((vLen/4)*3).W), ll4_vresp_data(vLen-1, (vLen/4)*3))
+      io.ll_vresp.bits.vmask              := Fill(vLenb, 1.U(1.W))
     }
 
     when(io.req.valid && (io.req.bits.uop.uopc.isOneOf(uopMMV_V,uopMWMV_V,uopMQMV_V))) {
