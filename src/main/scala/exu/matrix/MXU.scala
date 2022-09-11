@@ -677,6 +677,7 @@ class MXU(
     val rowReadResp     = Output(Valid(new SliceCtrls(meshRows*tileRows, numAccTiles)))
     val rowReadRespUop  = Output(new MicroOp())
     val rowReadData     = Decoupled(UInt(dataWidth.W))
+    val rowReadMask     = Output(UInt((dataWidth/8).W))
     // write row slices
     val rowWriteReq     = Flipped(Decoupled(new SliceCtrls(meshRows*tileRows, numAccTiles)))
     val rowWriteReqUop  = Input(new MicroOp())
@@ -689,6 +690,7 @@ class MXU(
     val colReadResp     = Output(Valid(new SliceCtrls(meshCols*tileCols*2, numAccTiles)))
     val colReadRespUop  = Output(new MicroOp())
     val colReadData     = Decoupled(UInt(dataWidth.W))
+    val colReadMask     = Output(UInt((dataWidth/8).W))
     // write col slices
     val colWriteReq     = Flipped(Decoupled(new SliceCtrls(meshCols*tileCols*2, numAccTiles)))
     val colWriteReqUop  = Input(new MicroOp())
@@ -979,10 +981,26 @@ class MXU(
     (0 until meshRows*tileRows/2).foreach(i => colReadDataMux(4*i+3)   := mesh.io.colReadData(16*meshRows*tileRows+32*i+31, 16*meshRows*tileRows+32*i+24))
     colRespCount := 0.U
   }
+
+  // mask generation:
+  val rowMask     = Cat((0 until dataWidth/8).map(i => i.U < io.rowReadRespUop.m_slice_len).reverse)
+  val rowByteMask = Mux1H(UIntToOH(io.rowReadRespUop.ts1_eew),
+                           Seq(rowMask,
+                               FillInterleaved(2, rowMask(dataWidth/16-1, 0)),
+                               FillInterleaved(4, rowMask(dataWidth/32-1, 0)),
+                               FillInterleaved(8, rowMask(dataWidth/64-1, 0))))
+  val colMask     = Cat((0 until dataWidth/8).map(i => i.U < io.colReadRespUop.m_slice_len).reverse)
+  val colByteMask = Mux1H(UIntToOH(io.colReadRespUop.ts1_eew),
+                           Seq(colMask,
+                               FillInterleaved(2, colMask(dataWidth/16-1, 0)),
+                               FillInterleaved(4, colMask(dataWidth/32-1, 0)),
+                               FillInterleaved(8, colMask(dataWidth/64-1, 0))))
   
   io.rowReadData.valid := mesh.io.rowReadResp.valid || rowRespCount > 0.U || trRowValid
   io.rowReadData.bits  := Mux(trRowValid, trRowData, rowReadDataMux.asUInt)
+  io.rowReadMask       := rowByteMask
   
   io.colReadData.valid := mesh.io.colReadResp.valid || colRespCount > 0.U || trColValid
   io.colReadData.bits  := Mux(trColValid, trColData, colReadDataMux.asUInt)
+  io.colReadMask       := colByteMask
 }

@@ -695,7 +695,9 @@ extends AbstractRenameStage(
   for (w <- 0 until plWidth) {
     busytable.io.rebusy_reqs(w) := ren2_uops(w).ldst_val && ren2_uops(w).rt(RD, rtype) //&& io.dis_fire_first(w)
   }
-  for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) { bs := wk.bits.vmask }
+  for ((bs, wk) <- busytable.io.wb_bits zip io.wakeups) { 
+    bs := Mux(wk.bits.uop.is_rvm, Fill(vLenb, 1.U(1.W)), wk.bits.vmask)
+  }
   
   // clear busy bits when:
   // 1. commit a vlexff instuction that raises an exception at element index > 0

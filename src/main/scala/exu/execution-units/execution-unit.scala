@@ -1438,8 +1438,9 @@ class MatExeUnit() (implicit p: Parameters)
   if (writesLlVrf) {
     val ll_vresp_valid = (mxu.io.rowReadData.valid && mxu.io.rowReadRespUop.rt(RD, isVector)) ||
                          (mxu.io.colReadData.valid && mxu.io.colReadRespUop.rt(RD, isVector))
-    val ll_vresp_uop =   Mux(mxu.io.rowReadData.valid, mxu.io.rowReadRespUop, mxu.io.colReadRespUop)
-    val ll_vresp_data =  Mux(mxu.io.rowReadData.valid, mxu.io.rowReadData.bits, mxu.io.colReadData.bits)
+    val ll_vresp_uop   =  Mux(mxu.io.rowReadData.valid, mxu.io.rowReadRespUop, mxu.io.colReadRespUop)
+    val ll_vresp_data  =  Mux(mxu.io.rowReadData.valid, mxu.io.rowReadData.bits, mxu.io.colReadData.bits)
+    val ll_vresp_mask  =  Mux(mxu.io.rowReadData.valid, mxu.io.rowReadMask, mxu.io.colReadMask)
 
     val ll2_vresp_valid = RegInit(false.B)
     val ll3_vresp_valid = RegInit(false.B)
@@ -1475,7 +1476,7 @@ class MatExeUnit() (implicit p: Parameters)
       //FIXME : data should be 2*SEW expanded
       io.ll_vresp.bits.data               := Mux(ll_vresp_uop.uopc === uopMQMV_V, Cat(0.U(((vLen/4)*3).W), ll_vresp_data(((vLen/4)*1)-1, 0)),
                                              Mux(ll_vresp_uop.uopc === uopMWMV_V, Cat(0.U((vLen/2).W), ll_vresp_data(vLen/2-1,0)), ll_vresp_data))
-      io.ll_vresp.bits.vmask              := Fill(vLenb, 1.U(1.W))
+      io.ll_vresp.bits.vmask              := ll_vresp_mask
     }
     when(ll2_vresp_valid) {
       io.ll_vresp.valid                   := ll2_vresp_valid && !ll_vresp_finished
