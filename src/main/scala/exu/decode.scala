@@ -601,7 +601,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     //matrix illegal instruction handler
 
     val illegal_msew = cs.is_rvm && !cs.inst_unique && (td_eew > 2.U || ts1_eew > 2.U || ts2_eew > 2.U)
-    illegal_matrix_case := illegal_msew
+    illegal_matrix_case := illegal_msew || cs.is_rvm && io.csr_mconfig.mtype.mill && !cs.inst_unique
 
   } // if usingMatrix
   io.deq.uop := uop
