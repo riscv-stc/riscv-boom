@@ -2897,23 +2897,23 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   }
   // appended for mle and mse control
   val sliceCntCtr    = RegInit(0.U(vLenbSz.W))
-  val sliceLenCtr    = RegInit(0.U((vcRatioSz+1).W))
-  val splitCnt       = RegInit(0.U((vLenbSz+1).W))
-  val splitFinished  = WireInit(false.B)
+  val sliceQuadCtr   = RegInit(0.U(2.W))
+  val splitCnt       = RegInit(0.U((vLenSz+1).W))
   val sliceBaseAddr  = RegInit(0.U(xLen.W))
   val sliceBlockAddr = RegInit(0.U(xLen.W))
   val sliceBlockOff  = (sliceBaseAddr + sliceBlockAddr)(clSizeLog2-1, 0)
   val sliceAddrInc   = WireInit(0.U((clSizeLog2+1).W))
   val sliceLenLast   = WireInit(false.B)
   val sliceBytes     = Mux(io.req.fire, ioUop.m_slice_len << ioUop.m_ls_ew, uop.m_slice_len << uop.m_ls_ew)
+  val clLeftBytes    = clSize.U - sliceBlockOff
+  val sliceLeftBytes = sliceBytes - sliceBlockAddr
+  val sliceCrossBlk  = RegNext(clLeftBytes < sliceLeftBytes && clLeftBytes < vLenb.U)
   if (vLenb > clSize) {
-    sliceAddrInc := Mux(sliceLenCtr === 0.U,       clSize.U - sliceBlockOff,
-                    Mux(sliceLenCtr === vcRatio.U, sliceBlockOff, clSize.U))
-    sliceLenLast := sliceLenCtr + 1.U === vcRatio.U + (sliceBlockOff =/= 0.U).asUInt
+    sliceAddrInc := sliceLeftBytes.min(clLeftBytes)
+    sliceLenLast := sliceLeftBytes <= clLeftBytes
   } else {
-    sliceAddrInc := Mux(sliceLenCtr === 0.U, (clSize.U - sliceBlockOff).min(sliceBytes),
-                                             RegNext(sliceBlockOff) +& sliceBytes - clSize.U)
-    sliceLenLast := sliceBlockOff <= (clSize.U - sliceBytes)
+    sliceAddrInc := sliceLeftBytes.min(clLeftBytes).min(vLenb.U)
+    sliceLenLast := sliceLeftBytes <= clLeftBytes.min(vLenb.U)
   }
 
   when (io.req.valid) {
@@ -2976,12 +2976,10 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
       }
       is (s_slice) {
         when (io.resp.fire) {
-          sliceLenCtr      := sliceLenCtr + 1.U
           sliceBlockAddr   := sliceBlockAddr + sliceAddrInc
           splitCnt         := splitCnt + 1.U
 
           when (sliceLenLast) {
-            sliceLenCtr    := 0.U
             sliceCntCtr    := sliceCntCtr + 1.U
             sliceBaseAddr  := sliceBaseAddr + op2
             sliceBlockAddr := 0.U
@@ -3047,14 +3045,12 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
           }
         }
       }
-      is (s_slice) {
+      is(s_slice) {
         when (io.resp.fire) {
-          sliceLenCtr      := sliceLenCtr + 1.U
           sliceBlockAddr   := sliceBlockAddr + sliceAddrInc
           splitCnt         := splitCnt + 1.U
 
           when (sliceLenLast) {
-            sliceLenCtr    := 0.U
             sliceCntCtr    := sliceCntCtr + 1.U
             sliceBaseAddr  := sliceBaseAddr + op2
             sliceBlockAddr := 0.U
@@ -3127,16 +3123,17 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   io.resp.bits.uop.v_split_last := Mux(state === s_udcpy, emulCtr + 1.U === nrVecGroup(emul, uop.v_seg_nf),
                                                           uop.v_eidx +& eidxInc >= uop.vconfig.vl)
   io.resp.bits.uop.m_sidx       := sliceCntCtr
-  io.resp.bits.uop.m_split_first:= (sliceCntCtr === 0.U) && (sliceLenCtr === 0.U)
+  io.resp.bits.uop.m_split_first:= (sliceCntCtr === 0.U) && (sliceBlockAddr === 0.U)
   io.resp.bits.uop.m_split_last := (sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast
+  io.resp.bits.uop.m_slice_quad := sliceBlockAddr >> vLenbSz.U
   io.resp_vm                    := Mux(uop.is_rvv, VRegMask(uop.v_eidx, eew, eidxInc, vLenb) & activeByteMask,
                                                    VRegMask(sliceBlockAddr, 0.U, sliceAddrInc, vLenb))
-  io.resp_shdir                 := Mux(uop.is_rvm && sliceLenCtr === 0.U, true.B,
+  io.resp_shdir                 := Mux(uop.is_rvm, !sliceCrossBlk,
                                    Mux(uop.is_rvv && usSplitCtr === 0.U,  true.B, false.B))
   val shamt = if(vLenb > clSize) (usSplitCtr << clSizeLog2.U) - clOffset
               else               vLenb.U - usSplitLeftCnt
-  io.resp_shamt                 := Mux(uop.is_rvm && sliceLenCtr === 0.U, sliceBlockOff,
-                                   Mux(uop.is_rvm, (sliceLenCtr << clSizeLog2.U) - sliceBlockOff,
+  io.resp_shamt                 := Mux(uop.is_rvm && !sliceCrossBlk, sliceBlockOff,          // FIXME
+                                   Mux(uop.is_rvm, RegNext(clLeftBytes),                     // FIXME
                                    Mux(usSplitCtr === 0.U, clOffset, shamt)))
 
   io.resp.bits.addr := Mux(uop.is_rvv, op1 + op2, sliceBaseAddr+sliceBlockAddr)

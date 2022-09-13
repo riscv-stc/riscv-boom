@@ -195,6 +195,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val m_slice_cnt      = if (usingMatrix) UInt((vLenbSz+1).W)  else null   // tilem in mopa instructions
   val m_slice_len      = if (usingMatrix) UInt((vLenbSz+1).W)  else null   // tilek in mopa instructions
   val m_tilen          = if (usingMatrix) UInt((vLenbSz+1).W)  else null   // tilen in mopa instructions
+  val m_slice_quad     = if (usingMatrix) UInt(2.W)       else null
   val ts1_eew          = if (usingMatrix) UInt(2.W)       else null
   val ts2_eew          = if (usingMatrix) UInt(2.W)       else null
   val td_eew           = if (usingMatrix) UInt(2.W)       else null

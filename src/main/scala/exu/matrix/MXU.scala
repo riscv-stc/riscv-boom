@@ -23,6 +23,13 @@ object AccTileConstants
   val FP16TYPE    = 5.U(3.W)
   val FP32TYPE    = 6.U(3.W)
   val FP64TYPE    = 7.U(3.W)
+  // slice groups
+  val W0          = 0.U(2.W)
+  val W1          = 1.U(2.W)
+  val Q0          = 0.U(2.W)
+  val Q1          = 1.U(2.W)
+  val Q2          = 2.U(2.W)
+  val Q3          = 3.U(2.W)
 }
 
 import AccTileConstants._
@@ -209,8 +216,10 @@ class PE(
     // write row slices, control signals propagated vertically
     val rowWriteReq  = Input(Valid(new SliceCtrls(numMeshRows, numAccTiles)))
     val rowWriteDin  = Input(UInt(64.W))
+    val rowWriteMask = Input(UInt(2.W))
     val rowWriteResp = Output(Valid(new SliceCtrls(numMeshRows, numAccTiles)))
     val rowWriteDout = Output(UInt(64.W))
+    val rowWriteMout = Output(UInt(2.W))
     // read col slices, control signals propagated horizontally
     val colReadReq   = Input(Valid(new SliceCtrls(numMeshCols, numAccTiles)))
     val colReadDin   = Input(UInt(32.W))
@@ -219,8 +228,10 @@ class PE(
     // write col slices, control signals propagated horizontally
     val colWriteReq  = Input(Valid(new SliceCtrls(numMeshCols, numAccTiles)))
     val colWriteDin  = Input(UInt(32.W))
+    val colWriteMask = Input(UInt(1.W))
     val colWriteResp = Output(Valid(new SliceCtrls(numMeshCols, numAccTiles)))
     val colWriteDout = Output(UInt(32.W))
+    val colWriteMout = Output(UInt(1.W))
   })
 
   // acc registers
@@ -259,7 +270,6 @@ class PE(
   // latency = 1 for int8 mac; 3 for fp16 mac
   when(macReqValid && macReqCtrls.srcType(2)) {
     c0(macReqCtrls.dstRidx) := fpMac.io.out
-    // c0(macReqCtrls.ridx) := intMac0.io.out
   } .elsewhen(macReqValid) {
     c0(macReqCtrls.dstRidx) := intMac0.io.out
     c1(macReqCtrls.dstRidx) := intMac1.io.out
@@ -300,14 +310,19 @@ class PE(
   val rowWriteValid = io.rowWriteReq.valid
   val rowWrtieCtrls = io.rowWriteReq.bits
   val rowWriteHit   = rowWriteValid && rowWrtieCtrls.sidx === rowIndex.U
+  val rowWriteHitC0 = rowWriteHit && io.rowWriteMask(0).asBool
+  val rowWriteHitC1 = rowWriteHit && io.rowWriteMask(1).asBool
 
-  when(rowWriteHit) {
+  when(rowWriteHitC0) {
     c0(rowWrtieCtrls.ridx) := io.rowWriteDin(31, 0)
-    when(!rowWrtieCtrls.rtype(2)) { c1(rowWrtieCtrls.ridx) := io.rowWriteDin(63, 32) }
+  }
+  when(rowWriteHitC1) {
+    c1(rowWrtieCtrls.ridx) := io.rowWriteDin(63, 32)
   }
 
   io.rowWriteResp := io.rowWriteReq
   io.rowWriteDout := io.rowWriteDin
+  io.rowWriteMout := io.rowWriteMask
 
   // -----------------------------------------------------------------------------------
   // read col slices
@@ -331,14 +346,15 @@ class PE(
   val colWriteHitC0 = colWriteValid && Mux(colWriteCtrls.rtype(2), colWriteCtrls.sidx === (colIndex >> 1).U, colWriteCtrls.sidx === colIndex.U)
   val colWriteHitC1 = colWriteValid && !colWriteCtrls.rtype(2) && colWriteCtrls.sidx === (colIndex + 1).U
 
-  when(colWriteHitC0) {
+  when(colWriteHitC0 && io.colWriteMask.asBool) {
     c0(colWriteCtrls.ridx) := io.colWriteDin
-  } .elsewhen(colWriteHitC1) {
+  } .elsewhen(colWriteHitC1 && io.colWriteMask.asBool) {
     c1(colWriteCtrls.ridx) := io.colWriteDin
   }
 
   io.colWriteResp := io.colWriteReq
   io.colWriteDout := io.colWriteDin
+  io.colWriteMout := io.colWriteMask
 }
 
 /**
@@ -373,8 +389,10 @@ class Tile(
     // write row slices, control signals propagated vertically
     val rowWriteReq  = Input(Valid(new SliceCtrls(numMeshRows, numAccTiles)))
     val rowWriteDin  = Input(UInt((tileCols*64).W))
+    val rowWriteMask = Input(UInt((tileCols*2).W))
     val rowWriteResp = Output(Valid(new SliceCtrls(numMeshRows, numAccTiles)))
     val rowWriteDout = Output(UInt((tileCols*64).W))
+    val rowWriteMout = Output(UInt((tileCols*2).W))
     // read col slice, control signals propagated horizontally
     val colReadReq   = Input(Valid(new SliceCtrls(numMeshCols, numAccTiles)))
     val colReadDin   = Input(UInt((tileRows*32).W))
@@ -383,8 +401,10 @@ class Tile(
     // write col slice, control signals propagated horizontally
     val colWriteReq  = Input(Valid(new SliceCtrls(numMeshCols, numAccTiles)))
     val colWriteDin  = Input(UInt((tileRows*32).W))
+    val colWriteMask = Input(UInt(tileRows.W))
     val colWriteResp = Output(Valid(new SliceCtrls(numMeshCols, numAccTiles)))
     val colWriteDout = Output(UInt((tileRows*32).W))
+    val colWriteMout = Output(UInt(tileRows.W))
   })
 
   val tile = Seq.tabulate(tileRows, tileCols)((i, j) => Module(new PE(numMeshRows, numMeshCols, indexh+i, indexv+j*2, numAccTiles)))
@@ -423,6 +443,13 @@ class Tile(
       case (colWriteData, pe) => {
         pe.io.colWriteDin := colWriteData
         pe.io.colWriteDout
+      }
+    }
+    val peColWmask = io.colWriteMask(r).asUInt
+    tile(r).foldLeft(peColWmask) {
+      case (colWriteMask, pe) => {
+        pe.io.colWriteMask := colWriteMask
+        pe.io.colWriteMout
       }
     }
   }
@@ -474,6 +501,13 @@ class Tile(
         pe.io.rowWriteDout
       }
     }
+    val peRowWmask = io.rowWriteMask(2*c+1, 2*c)
+    tileT(c).foldLeft(peRowWmask) {
+      case(rowWriteMask, pe) => {
+        pe.io.rowWriteMask := rowWriteMask
+        pe.io.rowWriteMout
+      }
+    }
   }
 
   // tile's bottom IO
@@ -487,26 +521,32 @@ class Tile(
   val macOutSrcAMux   = WireInit(VecInit(Seq.fill(tileRows)(0.U(16.W))))
   val colReadDataMux  = WireInit(VecInit(Seq.fill(tileRows)(0.U(32.W))))
   val colWriteDataMux = WireInit(VecInit(Seq.fill(tileRows)(0.U(32.W))))
+  val colWriteMaskMux = WireInit(VecInit(Seq.fill(tileRows)(0.U(1.W))))
   for(r <- 0 until tileRows) {
     macOutSrcAMux(r)   := tile(r)(tileCols-1).io.macOutSrcA
     colReadDataMux(r)  := tile(r)(tileCols-1).io.colReadDout
     colWriteDataMux(r) := tile(r)(tileCols-1).io.colWriteDout
+    colWriteMaskMux(r) := tile(r)(tileCols-1).io.colWriteMout
   }
 
   val macOutSrcBMux   = WireInit(VecInit(Seq.fill(tileCols)(0.U(16.W))))
   val rowReadDataMux  = WireInit(VecInit(Seq.fill(tileCols)(0.U(64.W))))
   val rowWriteDataMux = WireInit(VecInit(Seq.fill(tileCols)(0.U(64.W))))
+  val rowWriteMaskMux = WireInit(VecInit(Seq.fill(tileCols)(0.U(2.W))))
   for(c <- 0 until tileCols) {
     macOutSrcBMux(c)   := tile(tileRows-1)(c).io.macOutSrcB
     rowReadDataMux(c)  := tile(tileRows-1)(c).io.rowReadDout
     rowWriteDataMux(c) := tile(tileRows-1)(c).io.rowWriteDout
+    rowWriteMaskMux(c) := tile(tileRows-1)(c).io.rowWriteMout
   }
   io.macOutSrcA   := macOutSrcAMux.asUInt
   io.macOutSrcB   := macOutSrcBMux.asUInt
   io.colReadDout  := colReadDataMux.asUInt
   io.colWriteDout := colWriteDataMux.asUInt
+  io.colWriteMout := colWriteMaskMux.asUInt
   io.rowReadDout  := rowReadDataMux.asUInt
   io.rowWriteDout := rowWriteDataMux.asUInt
+  io.rowWriteMout := rowWriteMaskMux.asUInt
 }
 
 class Mesh(
@@ -532,7 +572,8 @@ class Mesh(
     val rowReadData  = Output(UInt((meshCols*tileCols*64).W))
     // write row slices, control signals propagated vertically
     val rowWriteReq  = Input(Valid(new SliceCtrls(meshRows*tileRows, numAccTiles)))
-    val rowWriteData  = Input(UInt((meshCols*tileCols*64).W))
+    val rowWriteData = Input(UInt((meshCols*tileCols*64).W))
+    val rowWriteMask = Input(UInt((meshCols*tileCols*2).W)) 
     val rowWriteResp = Output(Valid(new SliceCtrls(meshRows*tileRows, numAccTiles)))
     // read col slice, control signals propagated horizontally
     val colReadReq   = Input(Valid(new SliceCtrls(meshCols*tileCols*2, numAccTiles)))
@@ -540,7 +581,8 @@ class Mesh(
     val colReadData  = Output(UInt((meshRows*tileRows*32).W))
     // write col slice, control signals propagated horizontally
     val colWriteReq  = Input(Valid(new SliceCtrls(meshCols*tileCols*2, numAccTiles)))
-    val colWriteData  = Input(UInt((meshRows*tileRows*32).W))
+    val colWriteData = Input(UInt((meshRows*tileRows*32).W))
+    val colWriteMask = Input(UInt((meshRows*tileRows).W))
     val colWriteResp = Output(Valid(new SliceCtrls(meshCols*tileCols*2, numAccTiles)))
   })
 
@@ -577,6 +619,12 @@ class Mesh(
       case(colWriteData, tile) => {
         tile.io.colWriteDin := RegNext(colWriteData)
         tile.io.colWriteDout
+      }
+    }
+    mesh(r).foldLeft(io.colWriteMask(tileRows*(r+1)-1, tileRows*r)) {
+      case(colWriteMask, tile) => {
+        tile.io.colWriteMask := RegNext(colWriteMask)
+        tile.io.colWriteMout
       }
     }
   }
@@ -623,6 +671,12 @@ class Mesh(
       case(rowWriteData, tile) => {
         tile.io.rowWriteDin := RegNext(rowWriteData)
         tile.io.rowWriteDout
+      }
+    }
+    meshT(c).foldLeft(io.rowWriteMask(2*tileCols*(c+1)-1, 2*tileCols*c)) {
+      case(rowWriteMask, tile) => {
+        tile.io.rowWriteMask := RegNext(rowWriteMask)
+        tile.io.rowWriteMout
       }
     }
   }
@@ -682,6 +736,7 @@ class MXU(
     val rowWriteReq     = Flipped(Decoupled(new SliceCtrls(meshRows*tileRows, numAccTiles)))
     val rowWriteReqUop  = Input(new MicroOp())
     val rowWriteData    = Input(UInt(dataWidth.W))
+    val rowWriteMask    = Input(UInt((dataWidth/8).W))
     val rowWriteResp    = Output(Valid(new SliceCtrls(meshRows*tileRows, numAccTiles)))
     val rowWriteRespUop = Output(new MicroOp())
     // read col slices
@@ -695,6 +750,7 @@ class MXU(
     val colWriteReq     = Flipped(Decoupled(new SliceCtrls(meshCols*tileCols*2, numAccTiles)))
     val colWriteReqUop  = Input(new MicroOp())
     val colWriteData    = Input(UInt(dataWidth.W))
+    val colWriteMask    = Input(UInt((dataWidth/8).W))
     val colWriteResp    = Output(Valid(new SliceCtrls(meshCols*tileCols*2, numAccTiles)))
     val colWriteRespUop = Output(new MicroOp())
   })
@@ -720,7 +776,9 @@ class MXU(
   val colReadReqValid  = RegInit(false.B)
   val colWriteReqValid = RegInit(false.B)
   val rowWriteDataAggr = RegInit(VecInit(Seq.fill(meshCols*tileCols*2)(0.U(32.W))))
+  val rowWriteMaskAggr = RegInit(VecInit(Seq.fill(meshCols*tileCols*2)(0.U(1.W))))
   val colWriteDataAggr = RegInit(VecInit(Seq.fill(meshRows*tileRows)(0.U(32.W))))
+  val colWriteMaskAggr = RegInit(VecInit(Seq.fill(meshRows*tileRows)(0.U(1.W))))
 
   // -----------------------------------------------------------------------------------
   // read row slices
@@ -754,50 +812,68 @@ class MXU(
   val rowWriteCtrls = io.rowWriteReq.bits
   rowWriteReqValid := false.B
 
+  val rowSliceIdx = io.rowWriteReqUop.m_slice_quad
   when(io.rowWriteReq.valid) {
+    (0 until meshCols*tileCols*2).foreach { i => 
+      rowWriteDataAggr(i) := 0.U
+      rowWriteMaskAggr(i) := 0.U
+    }
     when(rowWriteCtrls.rtype === INT8TYPE) {
-      (0 until meshCols*tileCols*2).foreach(i => rowWriteDataAggr(i) := Cat(0.U(24.W), io.rowWriteData(8*i+7, 8*i)))
-      rowWriteReqValid := true.B
+      (0 until meshCols*tileCols*2).foreach { i => 
+        rowWriteDataAggr(i) := io.rowWriteData(8*i+7, 8*i)
+        rowWriteMaskAggr(i) := io.rowWriteMask(i)
+      }
     } .elsewhen(rowWriteCtrls.rtype === INT16TYPE) {
-      when(rowVsCount === 0.U) {
-        (0 until meshCols*tileCols).foreach(i => rowWriteDataAggr(i) := Cat(0.U(16.W), io.rowWriteData(16*i+15, 16*i)))
-        rowVsCount := rowVsCount + 1.U
+      when(rowSliceIdx === W0) {
+        (0 until meshCols*tileCols).foreach { i => 
+          rowWriteDataAggr(i) := io.rowWriteData(16*i+15, 16*i)
+          rowWriteMaskAggr(i) := io.rowWriteMask(2*i)
+        }
       } .otherwise {
-        (0 until meshCols*tileCols).foreach(i => rowWriteDataAggr(meshCols*tileCols+i) := Cat(0.U(16.W), io.rowWriteData(16*i+15, 16*i)))
-        rowVsCount := 0.U
-        rowWriteReqValid := true.B
+        (0 until meshCols*tileCols).foreach { i => 
+          rowWriteDataAggr(meshCols*tileCols+i) := io.rowWriteData(16*i+15, 16*i)
+          rowWriteMaskAggr(meshCols*tileCols+i) := io.rowWriteMask(2*i)
+        }
       }
     } .elsewhen(rowWriteCtrls.rtype === INT32TYPE) {
-      when(rowVsCount === 0.U) {
-        (0 until meshCols*tileCols/2).foreach(i => rowWriteDataAggr(i) := io.rowWriteData(32*i+31, 32*i))
-        rowVsCount := rowVsCount + 1.U
-      } .elsewhen(rowVsCount === 1.U) {
-        (0 until meshCols*tileCols/2).foreach(i => rowWriteDataAggr(meshCols*tileCols/2+i) := io.rowWriteData(32*i+31, 32*i))
-        rowVsCount := rowVsCount + 1.U
-      } .elsewhen(rowVsCount === 2.U) {
-        (0 until meshCols*tileCols/2).foreach(i => rowWriteDataAggr(meshCols*tileCols+i) := io.rowWriteData(32*i+31, 32*i))
-        rowVsCount := rowVsCount + 1.U
+      when(rowSliceIdx === Q0) {
+        (0 until meshCols*tileCols/2).foreach { i =>
+          rowWriteDataAggr(i) := io.rowWriteData(32*i+31, 32*i)
+          rowWriteMaskAggr(i) := io.rowWriteMask(4*i)
+        }
+      } .elsewhen(rowSliceIdx === Q1) {
+         (0 until meshCols*tileCols/2).foreach { i => 
+           rowWriteDataAggr(meshCols*tileCols/2+i) := io.rowWriteData(32*i+31, 32*i)
+           rowWriteMaskAggr(meshCols*tileCols/2+i) := io.rowWriteMask(4*i)
+         }
+      } .elsewhen(rowSliceIdx === Q2) {
+        (0 until meshCols*tileCols/2).foreach { i => 
+          rowWriteDataAggr(meshCols*tileCols+i) := io.rowWriteData(32*i+31, 32*i)
+          rowWriteMaskAggr(meshCols*tileCols+i) := io.rowWriteMask(4*i)
+        }
       } .otherwise {
-        (0 until meshCols*tileCols/2).foreach(i => rowWriteDataAggr(3*meshCols*tileCols/2+i) := io.rowWriteData(32*i+31, 32*i))
-        rowVsCount := 0.U
-        rowWriteReqValid := true.B
+        (0 until meshCols*tileCols/2).foreach { i => 
+          rowWriteDataAggr(3*meshCols*tileCols/2+i) := io.rowWriteData(32*i+31, 32*i)
+          rowWriteMaskAggr(3*meshCols*tileCols/2+i) := io.rowWriteMask(4*i)
+        }
       }
     } .elsewhen(rowWriteCtrls.rtype === FP16TYPE) {
-      (0 until meshCols*tileCols).foreach(i => rowWriteDataAggr(2*i)   := Cat(0.U(16.W), io.rowWriteData(16*i+15, 16*i)))
-      (0 until meshCols*tileCols).foreach(i => rowWriteDataAggr(2*i+1) := 0.U(32.W))
-      rowWriteReqValid := true.B
-    } .otherwise {
-      when(rowVsCount === 0.U) {
-        (0 until meshCols*tileCols/2).foreach(i => rowWriteDataAggr(2*i)   := io.rowWriteData(32*i+31, 32*i))
-        (0 until meshCols*tileCols/2).foreach(i => rowWriteDataAggr(2*i+1) := 0.U(32.W))
-        rowVsCount := rowVsCount + 1.U
-      } .otherwise {
-        (0 until meshCols*tileCols/2).foreach(i => rowWriteDataAggr(meshCols*tileCols+2*i)   := Cat(0.U(32.W), io.rowWriteData(32*i+31, 32*i)))
-        (0 until meshCols*tileCols/2).foreach(i => rowWriteDataAggr(meshCols*tileCols+2*i+1) := 0.U(32.W))
-        rowVsCount := 0.U
-        rowWriteReqValid := true.B
+      (0 until meshCols*tileCols).foreach { i => 
+        rowWriteDataAggr(2*i) := io.rowWriteData(16*i+15, 16*i)
+        rowWriteMaskAggr(2*i) := io.rowWriteMask(2*i)
       }
-      assert(rowWriteCtrls.rtype === FP32TYPE, "INT64 and FP64 not supported\n")
+    } .otherwise {
+      when(rowSliceIdx === W0) {
+        (0 until meshCols*tileCols/2).foreach{ i => 
+          rowWriteDataAggr(2*i) := io.rowWriteData(32*i+31, 32*i)
+          rowWriteMaskAggr(2*i) := io.rowWriteMask(4*i)
+        }
+      } .otherwise {
+        (0 until meshCols*tileCols/2).foreach { i => 
+          rowWriteDataAggr(meshCols*tileCols+2*i) := io.rowWriteData(32*i+31, 32*i)
+          rowWriteMaskAggr(meshCols*tileCols+2*i) := io.rowWriteMask(4*i)
+        }
+      }
     }
   }
 
@@ -831,22 +907,34 @@ class MXU(
   // -----------------------------------------------------------------------------------
   val colWriteCtrls = io.colWriteReq.bits
   colWriteReqValid := false.B
-  
+
+  val colSliceIdx = io.colWriteReqUop.m_slice_quad
   when(io.colWriteReq.valid) {
+    (0 until meshRows*tileRows).foreach { i => 
+      colWriteDataAggr(i) := 0.U
+      colWriteMaskAggr(i) := 0.U
+    }
     when(colWriteCtrls.rtype === INT8TYPE) {
-      (0 until meshRows*tileRows).foreach(i => colWriteDataAggr(i) := Cat(0.U(24.W), io.colWriteData(8*i+7, 8*i)))
-      colWriteReqValid := true.B
+      (0 until meshRows*tileRows).foreach { i => 
+        colWriteDataAggr(i) := io.colWriteData(8*i+7, 8*i)
+        colWriteMaskAggr(i) := io.colWriteMask(i)
+      }
     } .elsewhen(colWriteCtrls.rtype === INT16TYPE || colWriteCtrls.rtype === FP16TYPE) {
-      (0 until meshRows*tileRows).foreach(i => colWriteDataAggr(i) := Cat(0.U(16.W), io.colWriteData(16*i+15, 16*i)))
-      colWriteReqValid := true.B
+      (0 until meshRows*tileRows).foreach { i => 
+        colWriteDataAggr(i) := io.colWriteData(16*i+15, 16*i)
+        colWriteMaskAggr(i) := io.colWriteMask(2*i)
+      }
     } .otherwise {
-      when(colVsCount === 0.U) {
-        (0 until meshRows*tileRows/2).foreach(i => colWriteDataAggr(i) := io.colWriteData(32*i+31, 32*i))
-        colVsCount := colVsCount + 1.U
+      when(colSliceIdx === Q0) {
+        (0 until meshRows*tileRows/2).foreach { i => 
+          colWriteDataAggr(i) := io.colWriteData(32*i+31, 32*i)
+          colWriteMaskAggr(i) := io.colWriteMask(4*i)
+        }
       } .otherwise {
-        (0 until meshRows*tileRows/2).foreach(i => colWriteDataAggr(meshRows*tileRows/2+i) := io.colWriteData(32*i+31, 32*i))
-        colVsCount := 0.U
-        colWriteReqValid := true.B
+        (0 until meshRows*tileRows/2).foreach { i => 
+          colWriteDataAggr(meshRows*tileRows/2+i) := io.colWriteData(32*i+31, 32*i)
+          colWriteDataAggr(meshRows*tileRows/2+i) := io.colWriteMask(4*i)
+        }
       }
       assert(colWriteCtrls.rtype === INT32TYPE || colWriteCtrls.rtype === FP32TYPE, "INT64 and FP64 not supported\n")
     }
@@ -860,14 +948,16 @@ class MXU(
   mesh.io.clrReq.bits       := io.clrReq.bits
   mesh.io.rowReadReq.valid  := rowReadReqValid
   mesh.io.rowReadReq.bits   := RegNext(io.rowReadReq.bits)
-  mesh.io.rowWriteReq.valid := rowWriteReqValid
+  mesh.io.rowWriteReq.valid := RegNext(io.rowWriteReq.valid)
   mesh.io.rowWriteReq.bits  := RegNext(io.rowWriteReq.bits)
   mesh.io.rowWriteData      := rowWriteDataAggr.asUInt
+  mesh.io.rowWriteMask      := rowWriteMaskAggr.asUInt
   mesh.io.colReadReq.valid  := colReadReqValid
   mesh.io.colReadReq.bits   := RegNext(io.colReadReq.bits)
-  mesh.io.colWriteReq.valid := colWriteReqValid
+  mesh.io.colWriteReq.valid := RegNext(io.colWriteReq.valid)
   mesh.io.colWriteReq.bits  := RegNext(io.colWriteReq.bits)
   mesh.io.colWriteData      := colWriteDataAggr.asUInt
+  mesh.io.colWriteMask      := colWriteMaskAggr.asUInt
   for(c <- 0 until meshCols) {
     mesh.io.macReq(c).valid := ShiftRegister(macReqFire, c, true.B)
     mesh.io.macReq(c).bits  := ShiftRegister(io.macReq.bits, c, true.B)
