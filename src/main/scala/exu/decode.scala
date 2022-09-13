@@ -540,12 +540,12 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val mslice_tt0 = uop.inst(28).asBool()     //1: col,  0: row
     val mslice_dim = uop.inst(27,26)
 
-    val slice_cnt_tilem = (mslice_dim === 1.U &&  csr_mltr) || (mslice_dim === 0.U)
+    val slice_cnt_tilem = (mslice_dim === 1.U && !csr_mltr) || (mslice_dim === 0.U)
     val slice_cnt_tilen = (mslice_dim === 2.U &&  csr_mrtr)
-    val slice_cnt_tilek = (mslice_dim === 1.U && !csr_mltr) || (mslice_dim === 2.U && !csr_mrtr)
-    val slice_len_tilem = (mslice_dim === 1.U && !csr_mltr)
+    val slice_cnt_tilek = (mslice_dim === 1.U &&  csr_mltr) || (mslice_dim === 2.U && !csr_mrtr)
+    val slice_len_tilem = (mslice_dim === 1.U &&  csr_mltr)
     val slice_len_tilen = (mslice_dim === 2.U && !csr_mrtr) || (mslice_dim === 0.U)
-    val slice_len_tilek = (mslice_dim === 1.U &&  csr_mltr) || (mslice_dim === 2.U && csr_mrtr)
+    val slice_len_tilek = (mslice_dim === 1.U && !csr_mltr) || (mslice_dim === 2.U && csr_mrtr)
 
     val sel_slice_cnt = Mux(slice_cnt_tilem, csr_tilem,
                         Mux(slice_cnt_tilen, csr_tilen, csr_tilek))
