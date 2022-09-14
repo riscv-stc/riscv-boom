@@ -765,7 +765,7 @@ class MXU(
 
   // row slice writes and col slice writes may occured simultaneously when writing different acc tiles,
   // should be guaranteed by rename/issue logic
-  val sliceReady :: sliceWait :: sliceResp :: Nil = Enum(3)
+  val sliceReady :: sliceWait :: sliceResp :: trSliceResp :: Nil = Enum(4)
   val rowReadState     = RegInit(sliceReady)
   val colReadState     = RegInit(sliceReady)
   val rowVsCount       = RegInit(0.U(2.W))
@@ -782,6 +782,8 @@ class MXU(
   // -----------------------------------------------------------------------------------
   // read row slices, add back-pressure mechanism (not pipelined)
   // -----------------------------------------------------------------------------------
+  val trRowValid   = ShiftRegister(io.rowReadReq.valid && io.rowReadReqUop.rt(RS1, isTrTile), meshCols)
+  val trRowData    = Pipe(io.rowReadReq.valid, io.macReqSrcA, meshCols).bits
   val rowReadCtrls = io.rowReadReq.bits
   rowReadReqValid := false.B
   switch(rowReadState) {
@@ -792,6 +794,8 @@ class MXU(
         }
         rowReadState    := sliceWait
         rowReadReqValid := true.B
+      } .elsewhen(io.rowReadReq.valid) {
+        rowReadState    := sliceWait
       }
     }
     is(sliceWait) {
@@ -802,6 +806,8 @@ class MXU(
         rowVsCount   := rowVsCount - 1.U
       } .elsewhen(mesh.io.rowReadResp.valid) {
         rowReadState := sliceResp
+      } .elsewhen(trRowValid) {
+        rowReadState := trSliceResp
       }
     }
     is(sliceResp) {
@@ -809,6 +815,11 @@ class MXU(
         rowReadState := sliceReady
       } .elsewhen(io.rowReadData.fire) {
         rowVsCount   := rowVsCount - 1.U
+      }
+    }
+    is(trSliceResp) {
+      when(io.rowReadData.fire) {
+        rowReadState := sliceReady
       }
     }
   }
@@ -887,6 +898,8 @@ class MXU(
   // -----------------------------------------------------------------------------------
   // read col slices, add back-pressure mechanism (not pipelined)
   // -----------------------------------------------------------------------------------
+  val trColValid        = ShiftRegister(io.colReadReq.valid && io.colReadReqUop.rt(RS1, isTrTile), meshRows)
+  val trColData         = Pipe(io.colReadReq.valid, io.macReqSrcA, meshRows).bits
   val colReadCtrls = io.colReadReq.bits
   colReadReqValid := false.B
   switch(colReadState) {
@@ -897,6 +910,8 @@ class MXU(
         }
         colReadState := sliceWait
         colReadReqValid := true.B
+      } .elsewhen(io.colReadReq.valid) {
+        colReadState := sliceWait
       }
     }
     is(sliceWait) {
@@ -907,6 +922,8 @@ class MXU(
         colVsCount   := colVsCount - 1.U
       } .elsewhen(mesh.io.colReadResp.valid) {
         colReadState := sliceResp
+      } .elsewhen(trColValid) {
+        colReadState := trSliceResp
       }
     }
     is(sliceResp) {
@@ -914,6 +931,11 @@ class MXU(
         colReadState := sliceReady
       } .elsewhen(io.colReadData.fire) {
         colVsCount   := colVsCount - 1.U
+      }
+    }
+    is(trSliceResp) {
+      when(io.colReadData.fire) {
+        colReadState := sliceReady
       }
     }
   }
@@ -999,13 +1021,9 @@ class MXU(
   io.clrResp           := mesh.io.clrResp
   io.clrRespUop        := Pipe(clrReqFire, io.clrReqUop, meshCols).bits
   io.rowReadResp       := mesh.io.rowReadResp
-  val trRowValid        = ShiftRegister(io.rowReadReq.valid && io.rowReadReqUop.rt(RS1, isTrTile), meshCols)
-  val trRowData         = Pipe(io.rowReadReq.valid, io.macReqSrcA, meshCols).bits
   io.rowWriteResp      := mesh.io.rowWriteResp
   io.rowWriteRespUop   := Pipe(io.rowWriteReq.valid, io.rowWriteReqUop, meshCols).bits
   io.colReadResp       := mesh.io.colReadResp
-  val trColValid        = ShiftRegister(io.colReadReq.valid && io.colReadReqUop.rt(RS1, isTrTile), meshRows)
-  val trColData         = Pipe(io.colReadReq.valid, io.macReqSrcA, meshRows).bits
   io.colWriteResp      := mesh.io.colWriteResp
   io.colWriteRespUop   := Pipe(io.colWriteReq.valid, io.colWriteReqUop, meshRows).bits
 
@@ -1123,20 +1141,21 @@ class MXU(
                                FillInterleaved(4, colMask(dataWidth/32-1, 0)),
                                FillInterleaved(8, colMask(dataWidth/64-1, 0))))
   
-  io.rowReadData.valid := mesh.io.rowReadResp.valid || (rowReadState === sliceResp) || trRowValid
-  io.rowReadData.bits  := Mux(trRowValid, trRowData, rowReadDataMux.asUInt)
+  io.rowReadData.valid := mesh.io.rowReadResp.valid || (rowReadState === sliceResp) || trRowValid || (rowReadState === trSliceResp)
+  io.rowReadData.bits  := Mux(trRowValid || (rowReadState === trSliceResp), trRowData, rowReadDataMux.asUInt)
   io.rowReadMask       := rowByteMask
   
-  io.colReadData.valid := mesh.io.colReadResp.valid || (colReadState === sliceResp) || trColValid
-  io.colReadData.bits  := Mux(trColValid, trColData, colReadDataMux.asUInt)
+  io.colReadData.valid := mesh.io.colReadResp.valid || (colReadState === sliceResp) || trColValid || (colReadState === trSliceResp)
+  io.colReadData.bits  := Mux(trColValid || (colReadState === trSliceResp), trColData, colReadDataMux.asUInt)
   io.colReadMask       := colByteMask
 
   val pipeRowReadUop = Pipe(io.rowReadReq.valid, io.rowReadReqUop, meshCols).bits
   io.rowReadRespUop := pipeRowReadUop
   io.rowReadRespUop.m_split_last  := rowVsCount === 0.U
   io.rowReadRespUop.v_split_last  := rowVsCount === 0.U
-  val vRowIdx = Mux(trRowValid || rowRespCtrls.rtype === INT8TYPE || rowRespCtrls.rtype === FP16TYPE, 0.U,
-                Mux(rowRespCtrls.rtype === INT32TYPE, 3.U - rowVsCount, 1.U - rowVsCount))
+  val vRowIdx = Mux(trRowValid || (rowReadState === sliceResp), 0.U,
+                Mux(rowRespCtrls.rtype === INT8TYPE || rowRespCtrls.rtype === FP16TYPE, 0.U,
+                Mux(rowRespCtrls.rtype === INT32TYPE, 3.U - rowVsCount, 1.U - rowVsCount)))
   io.rowReadRespUop.pdst          := pipeRowReadUop.pvd(vRowIdx).bits 
   io.rowReadRespUop.stale_pdst    := pipeRowReadUop.stale_pvd(vRowIdx).bits
 
@@ -1144,7 +1163,7 @@ class MXU(
   io.colReadRespUop := pipeColReadUop
   io.colReadRespUop.m_split_last  := colVsCount === 0.U
   io.colReadRespUop.v_split_last  := colVsCount === 0.U
-  val vColIdx = Mux(trColValid, 0.U,
+  val vColIdx = Mux(trColValid || (colReadState === trSliceResp), 0.U,
                 Mux(colRespCtrls.rtype === INT32TYPE || colRespCtrls.rtype === FP32TYPE, 1.U - colVsCount, 0.U))
   io.colReadRespUop.pdst          := pipeColReadUop.pvd(vColIdx).bits
   io.colReadRespUop.stale_pdst    := pipeColReadUop.stale_pvd(vColIdx).bits

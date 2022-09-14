@@ -51,10 +51,8 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false, val matr
   val in_uop        = Flipped(Valid(new MicroOp())) // if valid, this WILL overwrite an entry!
   val out_uop       = Output(new MicroOp()) // the updated slot uop; will be shifted upwards in a collasping queue.
   val uop           = Output(new MicroOp()) // the current Slot's uop. Sent down the pipeline when issued.
-  //val vmupdate      = if (usingVector && !vector) Input(Vec(1, Valid(new MicroOp))) else null
   val intupdate     = if (vector || matrix) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
   val fpupdate      = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
-  //val vecUpdate     = if (vector) Input(Vec(vecWidth, Valid(new ExeUnitResp(eLen)))) else null
   val vbusy_status  = if (vector) Input(UInt(numVecPhysRegs.W)) else null
 
   val debug = {
@@ -290,7 +288,6 @@ class IssueSlot(
         in_p1 := ~io.in_uop.bits.prs1_busy
         in_p2 := ~io.in_uop.bits.prs2_busy
         in_p3 := ~io.in_uop.bits.prs3_busy
-        //in_pm := ~io.in_uop.bits.prvm_busy
         ps    := ~io.in_uop.bits.v_scalar_busy
         sdata := io.in_uop.bits.v_scalar_data
       } else {
