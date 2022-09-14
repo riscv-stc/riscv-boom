@@ -911,10 +911,10 @@ class MatRenameStage(
     val trmappings  = trmaptable.io.map_resps(w)
     val accmappings = accmaptable.io.map_resps(w)
 
-    uop.prs1       := trmappings.prs1
-    uop.prs2       := trmappings.prs2
-    uop.prs3       := Mux(uop.dst_rtype === RT_TR, trmappings.prs3, Mux(uop.dst_rtype === RT_ACC, accmappings.prs3, 0.U))
-    uop.stale_pdst := Mux(uop.dst_rtype === RT_TR, trmappings.stale_pdst, Mux(uop.dst_rtype === RT_ACC, accmappings.stale_pdst, 0.U))
+    uop.prs1       := Mux(uop.lrs1_rtype === RT_TR, trmappings.prs1, accmappings.prs1)
+    uop.prs2       := Mux(uop.lrs2_rtype === RT_TR, trmappings.prs2, accmappings.prs2)
+    uop.prs3       := Mux(uop.dst_rtype  === RT_TR, trmappings.prs3, accmappings.prs3)
+    uop.stale_pdst := Mux(uop.dst_rtype  === RT_TR, trmappings.stale_pdst, accmappings.stale_pdst)
   }
 
   //-------------------------------------------------------------
