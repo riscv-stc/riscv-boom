@@ -761,16 +761,15 @@ class MXU(
   val macReqFire = io.macReq.valid & io.macReq.ready
   val clrReqFire = io.clrReq.valid & io.clrReq.ready
 
+  val mesh = Module(new Mesh(meshRows, meshCols, tileRows, tileCols, numAccTiles))
+
   // row slice writes and col slice writes may occured simultaneously when writing different acc tiles,
   // should be guaranteed by rename/issue logic
-  val sliceReady :: sliceWait :: Nil = Enum(2)
-  // val sliceReady :: sliceWait :: sliceCross :: Nil = Enum(3)
+  val sliceReady :: sliceWait :: sliceResp :: Nil = Enum(3)
   val rowReadState     = RegInit(sliceReady)
   val colReadState     = RegInit(sliceReady)
-  val rowVsCount       = RegInit(0.U(3.W))
-  val colVsCount       = RegInit(0.U(3.W))
-  val rowRespCount     = RegInit(0.U(2.W))
-  val colRespCount     = RegInit(0.U(2.W))
+  val rowVsCount       = RegInit(0.U(2.W))
+  val colVsCount       = RegInit(0.U(2.W))
   val rowReadReqValid  = RegInit(false.B)
   val rowWriteReqValid = RegInit(false.B)
   val colReadReqValid  = RegInit(false.B)
@@ -781,7 +780,7 @@ class MXU(
   val colWriteMaskAggr = RegInit(VecInit(Seq.fill(meshRows*tileRows)(0.U(1.W))))
 
   // -----------------------------------------------------------------------------------
-  // read row slices
+  // read row slices, add back-pressure mechanism (not pipelined)
   // -----------------------------------------------------------------------------------
   val rowReadCtrls = io.rowReadReq.bits
   rowReadReqValid := false.B
@@ -789,19 +788,27 @@ class MXU(
     is(sliceReady) {
       when(io.rowReadReq.valid && io.rowReadReqUop.rt(RS1, isAccTile)) {
         when(rowReadCtrls.rtype =/= INT8TYPE && rowReadCtrls.rtype =/= FP16TYPE) {
-          rowReadState := sliceWait
-          rowVsCount   := Mux(rowReadCtrls.rtype === INT32TYPE, 4.U, 2.U)
-          assert(rowReadCtrls.rtype =/= INT64TYPE && rowReadCtrls.rtype =/= FP64TYPE, "INT64 and FP64 not supported\n")
+          rowVsCount   := Mux(rowReadCtrls.rtype === INT32TYPE, 3.U, 1.U)
         }
+        rowReadState    := sliceWait
         rowReadReqValid := true.B
       }
     }
     is(sliceWait) {
-      when(rowVsCount === 1.U) {
+      when(io.rowReadData.fire && rowVsCount === 0.U) {
+        rowReadState := sliceReady 
+      } .elsewhen(io.rowReadData.fire) {
+        rowReadState := sliceResp
+        rowVsCount   := rowVsCount - 1.U
+      } .elsewhen(mesh.io.rowReadResp.valid) {
+        rowReadState := sliceResp
+      }
+    }
+    is(sliceResp) {
+      when(io.rowReadData.fire && rowVsCount === 0.U) {
         rowReadState := sliceReady
-        rowVsCount   := 0.U
-      } .otherwise {
-        rowVsCount := rowVsCount - 1.U
+      } .elsewhen(io.rowReadData.fire) {
+        rowVsCount   := rowVsCount - 1.U
       }
     }
   }
@@ -878,7 +885,7 @@ class MXU(
   }
 
   // -----------------------------------------------------------------------------------
-  // read col slices
+  // read col slices, add back-pressure mechanism (not pipelined)
   // -----------------------------------------------------------------------------------
   val colReadCtrls = io.colReadReq.bits
   colReadReqValid := false.B
@@ -886,18 +893,27 @@ class MXU(
     is(sliceReady) {
       when(io.colReadReq.valid && io.colReadReqUop.rt(RS1, isAccTile)) {
         when(colReadCtrls.rtype === INT32TYPE || colReadCtrls.rtype === FP32TYPE) {
-          colReadState := sliceWait
-          colVsCount   := 2.U
+          colVsCount   := 1.U
         }
+        colReadState := sliceWait
         colReadReqValid := true.B
       }
     }
     is(sliceWait) {
-      when(colVsCount === 1.U) {
+      when(io.colReadData.fire && colVsCount === 0.U) {
+        colReadState := sliceReady 
+      } .elsewhen(io.colReadData.fire) {
+        colReadState := sliceResp
+        colVsCount   := colVsCount - 1.U
+      } .elsewhen(mesh.io.colReadResp.valid) {
+        colReadState := sliceResp
+      }
+    }
+    is(sliceResp) {
+      when(io.colReadData.fire && colVsCount === 0.U) {
         colReadState := sliceReady
-        colVsCount   := 0.U
-      } .otherwise {
-        colVsCount := colVsCount - 1.U
+      } .elsewhen(io.colReadData.fire) {
+        colVsCount   := colVsCount - 1.U
       }
     }
   }
@@ -943,7 +959,6 @@ class MXU(
   // -----------------------------------------------------------------------------------
   // mopa 
   // -----------------------------------------------------------------------------------
-  val mesh = Module(new Mesh(meshRows, meshCols, tileRows, tileCols, numAccTiles))
   mesh.io.clrReq.valid      := clrReqFire
   mesh.io.clrReq.bits       := io.clrReq.bits
   mesh.io.rowReadReq.valid  := rowReadReqValid
@@ -984,13 +999,11 @@ class MXU(
   io.clrResp           := mesh.io.clrResp
   io.clrRespUop        := Pipe(clrReqFire, io.clrReqUop, meshCols).bits
   io.rowReadResp       := mesh.io.rowReadResp
-  io.rowReadRespUop    := Pipe(io.rowReadReq.valid, io.rowReadReqUop, meshCols).bits
   val trRowValid        = ShiftRegister(io.rowReadReq.valid && io.rowReadReqUop.rt(RS1, isTrTile), meshCols)
   val trRowData         = Pipe(io.rowReadReq.valid, io.macReqSrcA, meshCols).bits
   io.rowWriteResp      := mesh.io.rowWriteResp
   io.rowWriteRespUop   := Pipe(io.rowWriteReq.valid, io.rowWriteReqUop, meshCols).bits
   io.colReadResp       := mesh.io.colReadResp
-  io.colReadRespUop    := Pipe(io.colReadReq.valid, io.colReadReqUop, meshRows).bits
   val trColValid        = ShiftRegister(io.colReadReq.valid && io.colReadReqUop.rt(RS1, isTrTile), meshRows)
   val trColData         = Pipe(io.colReadReq.valid, io.macReqSrcA, meshRows).bits
   io.colWriteResp      := mesh.io.colWriteResp
@@ -998,78 +1011,102 @@ class MXU(
 
   val rowRespCtrls   = mesh.io.rowReadResp.bits
   val rowReadDataMux = WireInit(VecInit(Seq.fill(meshCols*tileCols*2)(0.U(8.W))))
-  when(mesh.io.rowReadResp.valid && io.rowReadData.ready) {
-    when(rowRespCtrls.rtype === INT8TYPE) {
-      (0 until meshCols*tileCols*2).foreach(i => rowReadDataMux(i)     := mesh.io.rowReadData(32*i+7, 32*i))
-    } .elsewhen(rowRespCtrls.rtype === INT16TYPE) {
-      (0 until meshCols*tileCols).foreach(i => rowReadDataMux(2*i)     := mesh.io.rowReadData(32*i+7,  32*i))
-      (0 until meshCols*tileCols).foreach(i => rowReadDataMux(2*i+1)   := mesh.io.rowReadData(32*i+15, 32*i+8))
-      rowRespCount := 1.U
-    } .elsewhen(rowRespCtrls.rtype === INT32TYPE) {
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i)   := mesh.io.rowReadData(32*i+7,  32*i))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+1) := mesh.io.rowReadData(32*i+15, 32*i+8))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+2) := mesh.io.rowReadData(32*i+23, 32*i+16))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+3) := mesh.io.rowReadData(32*i+31, 32*i+24))
-      rowRespCount := 3.U
-    } .elsewhen(rowRespCtrls.rtype === FP16TYPE) {
-      (0 until meshCols*tileCols).foreach(i => rowReadDataMux(2*i)     := mesh.io.rowReadData(64*i+7,  64*i))
-      (0 until meshCols*tileCols).foreach(i => rowReadDataMux(2*i+1)   := mesh.io.rowReadData(64*i+15, 64*i+8))
-    } .otherwise {
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i)   := mesh.io.rowReadData(64*i+7,  64*i))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+1) := mesh.io.rowReadData(64*i+15, 64*i+8))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+2) := mesh.io.rowReadData(64*i+23, 64*i+16))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+3) := mesh.io.rowReadData(64*i+31, 64*i+24))
-      rowRespCount := 1.U
+  when(rowRespCtrls.rtype === INT8TYPE) {
+    (0 until meshCols*tileCols*2).foreach { i => 
+      rowReadDataMux(i) := mesh.io.rowReadData(32*i+7, 32*i)
     }
-  } .elsewhen(rowRespCount > 0.U && io.rowReadData.ready) {
-    when(rowRespCount === 3.U) {
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i)   := mesh.io.rowReadData(16*meshCols*tileCols+32*i+7,  16*meshCols*tileCols+32*i))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+1) := mesh.io.rowReadData(16*meshCols*tileCols+32*i+15, 16*meshCols*tileCols+32*i+8))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+2) := mesh.io.rowReadData(16*meshCols*tileCols+32*i+23, 16*meshCols*tileCols+32*i+16))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+3) := mesh.io.rowReadData(16*meshCols*tileCols+32*i+31, 16*meshCols*tileCols+32*i+24))
-    } .elsewhen(rowRespCount === 2.U) {
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i)   := mesh.io.rowReadData(32*meshCols*tileCols+32*i+7,  32*meshCols*tileCols+32*i))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+1) := mesh.io.rowReadData(32*meshCols*tileCols+32*i+15, 32*meshCols*tileCols+32*i+8))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+2) := mesh.io.rowReadData(32*meshCols*tileCols+32*i+23, 32*meshCols*tileCols+32*i+16))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+3) := mesh.io.rowReadData(32*meshCols*tileCols+32*i+31, 32*meshCols*tileCols+32*i+24))
-    } .elsewhen(rowRespCount === 1.U && rowRespCtrls.rtype === INT32TYPE) {
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i)   := mesh.io.rowReadData(48*meshCols*tileCols+32*i+7,  48*meshCols*tileCols+32*i))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+1) := mesh.io.rowReadData(48*meshCols*tileCols+32*i+15, 48*meshCols*tileCols+32*i+8))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+2) := mesh.io.rowReadData(48*meshCols*tileCols+32*i+23, 48*meshCols*tileCols+32*i+16))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+3) := mesh.io.rowReadData(48*meshCols*tileCols+32*i+31, 48*meshCols*tileCols+32*i+24))
-    } .elsewhen(rowRespCount === 1.U && rowRespCtrls.rtype === INT16TYPE) {
-      (0 until meshCols*tileCols).foreach(i => rowReadDataMux(2*i)     := mesh.io.rowReadData(32*meshCols*tileCols+32*i+7,  32*meshCols*tileCols+32*i))
-      (0 until meshCols*tileCols).foreach(i => rowReadDataMux(2*i+1)   := mesh.io.rowReadData(32*meshCols*tileCols+32*i+15, 32*meshCols*tileCols+32*i+8))
+  } .elsewhen(rowRespCtrls.rtype === INT16TYPE) {
+    when(rowVsCount === 1.U) {
+      (0 until meshCols*tileCols).foreach { i => 
+        rowReadDataMux(2*i)   := mesh.io.rowReadData(32*i+7,  32*i)
+        rowReadDataMux(2*i+1) := mesh.io.rowReadData(32*i+15, 32*i+8)
+      }
     } .otherwise {
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i)   := mesh.io.rowReadData(32*meshCols*tileCols+64*i+7,  32*meshCols*tileCols+64*i))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+1) := mesh.io.rowReadData(32*meshCols*tileCols+64*i+15, 32*meshCols*tileCols+64*i+8))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+2) := mesh.io.rowReadData(32*meshCols*tileCols+64*i+23, 32*meshCols*tileCols+64*i+16))
-      (0 until meshCols*tileCols/2).foreach(i => rowReadDataMux(4*i+3) := mesh.io.rowReadData(32*meshCols*tileCols+64*i+31, 32*meshCols*tileCols+64*i+24))
+      (0 until meshCols*tileCols).foreach { i => 
+        rowReadDataMux(2*i)   := mesh.io.rowReadData(32*meshCols*tileCols+32*i+7,  32*meshCols*tileCols+32*i)
+        rowReadDataMux(2*i+1) := mesh.io.rowReadData(32*meshCols*tileCols+32*i+15, 32*meshCols*tileCols+32*i+8)
+      }
     }
-    rowRespCount := rowRespCount - 1.U
+  } .elsewhen(rowRespCtrls.rtype === INT32TYPE) {
+    when(rowVsCount === 3.U) {
+      (0 until meshCols*tileCols/2).foreach { i => 
+        rowReadDataMux(4*i)   := mesh.io.rowReadData(32*i+7,  32*i)
+        rowReadDataMux(4*i+1) := mesh.io.rowReadData(32*i+15, 32*i+8)
+        rowReadDataMux(4*i+2) := mesh.io.rowReadData(32*i+23, 32*i+16)
+        rowReadDataMux(4*i+3) := mesh.io.rowReadData(32*i+31, 32*i+24)
+      }
+    } .elsewhen(rowVsCount === 2.U) {
+      (0 until meshCols*tileCols/2).foreach { i => 
+        rowReadDataMux(4*i)   := mesh.io.rowReadData(16*meshCols*tileCols+32*i+7,  16*meshCols*tileCols+32*i)
+        rowReadDataMux(4*i+1) := mesh.io.rowReadData(16*meshCols*tileCols+32*i+15, 16*meshCols*tileCols+32*i+8)
+        rowReadDataMux(4*i+2) := mesh.io.rowReadData(16*meshCols*tileCols+32*i+23, 16*meshCols*tileCols+32*i+16)
+        rowReadDataMux(4*i+3) := mesh.io.rowReadData(16*meshCols*tileCols+32*i+31, 16*meshCols*tileCols+32*i+24)
+      }
+    } .elsewhen(rowVsCount === 1.U) {
+      (0 until meshCols*tileCols/2).foreach { i => 
+        rowReadDataMux(4*i)   := mesh.io.rowReadData(32*meshCols*tileCols+32*i+7,  32*meshCols*tileCols+32*i)
+        rowReadDataMux(4*i+1) := mesh.io.rowReadData(32*meshCols*tileCols+32*i+15, 32*meshCols*tileCols+32*i+8)
+        rowReadDataMux(4*i+2) := mesh.io.rowReadData(32*meshCols*tileCols+32*i+23, 32*meshCols*tileCols+32*i+16)
+        rowReadDataMux(4*i+3) := mesh.io.rowReadData(32*meshCols*tileCols+32*i+31, 32*meshCols*tileCols+32*i+24)
+      }
+    } .otherwise {
+      (0 until meshCols*tileCols/2).foreach { i => 
+        rowReadDataMux(4*i)   := mesh.io.rowReadData(48*meshCols*tileCols+32*i+7,  48*meshCols*tileCols+32*i)
+        rowReadDataMux(4*i+1) := mesh.io.rowReadData(48*meshCols*tileCols+32*i+15, 48*meshCols*tileCols+32*i+8)
+        rowReadDataMux(4*i+2) := mesh.io.rowReadData(48*meshCols*tileCols+32*i+23, 48*meshCols*tileCols+32*i+16)
+        rowReadDataMux(4*i+3) := mesh.io.rowReadData(48*meshCols*tileCols+32*i+31, 48*meshCols*tileCols+32*i+24)
+      }
+    }
+  } .elsewhen(rowRespCtrls.rtype === FP16TYPE) {
+    (0 until meshCols*tileCols).foreach { i => 
+      rowReadDataMux(2*i)   := mesh.io.rowReadData(64*i+7,  64*i)
+      rowReadDataMux(2*i+1) := mesh.io.rowReadData(64*i+15, 64*i+8)
+    }
+  } .otherwise {
+    when(rowVsCount === 1.U) {
+      (0 until meshCols*tileCols/2).foreach{ i => 
+        rowReadDataMux(4*i)   := mesh.io.rowReadData(64*i+7,  64*i)
+        rowReadDataMux(4*i+1) := mesh.io.rowReadData(64*i+15, 64*i+8)
+        rowReadDataMux(4*i+2) := mesh.io.rowReadData(64*i+23, 64*i+16)
+        rowReadDataMux(4*i+3) := mesh.io.rowReadData(64*i+31, 64*i+24)
+      }
+    } .otherwise {
+      (0 until meshCols*tileCols/2).foreach { i => 
+        rowReadDataMux(4*i)   := mesh.io.rowReadData(32*meshCols*tileCols+64*i+7,  32*meshCols*tileCols+64*i)
+        rowReadDataMux(4*i+1) := mesh.io.rowReadData(32*meshCols*tileCols+64*i+15, 32*meshCols*tileCols+64*i+8)
+        rowReadDataMux(4*i+2) := mesh.io.rowReadData(32*meshCols*tileCols+64*i+23, 32*meshCols*tileCols+64*i+16)
+        rowReadDataMux(4*i+3) := mesh.io.rowReadData(32*meshCols*tileCols+64*i+31, 32*meshCols*tileCols+64*i+24)
+      }
+    }
   }
 
   val colRespCtrls   = mesh.io.colReadResp.bits
   val colReadDataMux = WireInit(VecInit(Seq.fill(meshRows*tileRows*2)(0.U(8.W))))
-  when(mesh.io.colReadResp.valid && io.colReadData.ready) {
-    when(colRespCtrls.rtype === INT8TYPE) {
-      (0 until meshRows*tileRows).foreach(i => colReadDataMux(i)       := mesh.io.colReadData(32*i+7, 32*i))
-    } .elsewhen(colRespCtrls.rtype === INT16TYPE || colRespCtrls.rtype === FP16TYPE) {
-      (0 until meshRows*tileRows).foreach(i => colReadDataMux(2*i)     := mesh.io.colReadData(32*i+7,  32*i))
-      (0 until meshRows*tileRows).foreach(i => colReadDataMux(2*i+1)   := mesh.io.colReadData(32*i+15, 32*i+8))
-    } .otherwise{
-      (0 until meshRows*tileRows/2).foreach(i => colReadDataMux(4*i)   := mesh.io.colReadData(32*i+7,  32*i))
-      (0 until meshRows*tileRows/2).foreach(i => colReadDataMux(4*i+1) := mesh.io.colReadData(32*i+15, 32*i+8))
-      (0 until meshRows*tileRows/2).foreach(i => colReadDataMux(4*i+2) := mesh.io.colReadData(32*i+23, 32*i+16))
-      (0 until meshRows*tileRows/2).foreach(i => colReadDataMux(4*i+3) := mesh.io.colReadData(32*i+31, 32*i+24))
-      colRespCount := 1.U
+  when(colRespCtrls.rtype === INT8TYPE) {
+    (0 until meshRows*tileRows).foreach { i => 
+      colReadDataMux(i) := mesh.io.colReadData(32*i+7, 32*i)
     }
-  } .elsewhen(colRespCount > 0.U && io.colReadData.ready) {
-    (0 until meshRows*tileRows/2).foreach(i => colReadDataMux(4*i)     := mesh.io.colReadData(16*meshRows*tileRows+32*i+7,  16*meshRows*tileRows+32*i))
-    (0 until meshRows*tileRows/2).foreach(i => colReadDataMux(4*i+1)   := mesh.io.colReadData(16*meshRows*tileRows+32*i+15, 16*meshRows*tileRows+32*i+8))
-    (0 until meshRows*tileRows/2).foreach(i => colReadDataMux(4*i+2)   := mesh.io.colReadData(16*meshRows*tileRows+32*i+23, 16*meshRows*tileRows+32*i+16))
-    (0 until meshRows*tileRows/2).foreach(i => colReadDataMux(4*i+3)   := mesh.io.colReadData(16*meshRows*tileRows+32*i+31, 16*meshRows*tileRows+32*i+24))
-    colRespCount := 0.U
+  } .elsewhen(colRespCtrls.rtype === INT16TYPE || colRespCtrls.rtype === FP16TYPE) {
+    (0 until meshRows*tileRows).foreach { i => 
+      colReadDataMux(2*i)   := mesh.io.colReadData(32*i+7,  32*i)
+      colReadDataMux(2*i+1) := mesh.io.colReadData(32*i+15, 32*i+8)
+    }
+  } .otherwise {
+    when(colVsCount === 1.U) {
+      (0 until meshRows*tileRows/2).foreach { i => 
+        colReadDataMux(4*i)   := mesh.io.colReadData(32*i+7,  32*i)
+        colReadDataMux(4*i+1) := mesh.io.colReadData(32*i+15, 32*i+8)
+        colReadDataMux(4*i+2) := mesh.io.colReadData(32*i+23, 32*i+16)
+        colReadDataMux(4*i+3) := mesh.io.colReadData(32*i+31, 32*i+24)
+      }
+    } .otherwise {
+      (0 until meshRows*tileRows/2).foreach { i => 
+        colReadDataMux(4*i)   := mesh.io.colReadData(16*meshRows*tileRows+32*i+7,  16*meshRows*tileRows+32*i)
+        colReadDataMux(4*i+1) := mesh.io.colReadData(16*meshRows*tileRows+32*i+15, 16*meshRows*tileRows+32*i+8)
+        colReadDataMux(4*i+2) := mesh.io.colReadData(16*meshRows*tileRows+32*i+23, 16*meshRows*tileRows+32*i+16)
+        colReadDataMux(4*i+3) := mesh.io.colReadData(16*meshRows*tileRows+32*i+31, 16*meshRows*tileRows+32*i+24)
+      }
+    }
   }
 
   // mask generation:
@@ -1086,11 +1123,29 @@ class MXU(
                                FillInterleaved(4, colMask(dataWidth/32-1, 0)),
                                FillInterleaved(8, colMask(dataWidth/64-1, 0))))
   
-  io.rowReadData.valid := mesh.io.rowReadResp.valid || rowRespCount > 0.U || trRowValid
+  io.rowReadData.valid := mesh.io.rowReadResp.valid || (rowReadState === sliceResp) || trRowValid
   io.rowReadData.bits  := Mux(trRowValid, trRowData, rowReadDataMux.asUInt)
   io.rowReadMask       := rowByteMask
   
-  io.colReadData.valid := mesh.io.colReadResp.valid || colRespCount > 0.U || trColValid
+  io.colReadData.valid := mesh.io.colReadResp.valid || (colReadState === sliceResp) || trColValid
   io.colReadData.bits  := Mux(trColValid, trColData, colReadDataMux.asUInt)
   io.colReadMask       := colByteMask
+
+  val pipeRowReadUop = Pipe(io.rowReadReq.valid, io.rowReadReqUop, meshCols).bits
+  io.rowReadRespUop := pipeRowReadUop
+  io.rowReadRespUop.m_split_last  := rowVsCount === 0.U
+  io.rowReadRespUop.v_split_last  := rowVsCount === 0.U
+  val vRowIdx = Mux(trRowValid || rowRespCtrls.rtype === INT8TYPE || rowRespCtrls.rtype === FP16TYPE, 0.U,
+                Mux(rowRespCtrls.rtype === INT32TYPE, 3.U - rowVsCount, 1.U - rowVsCount))
+  io.rowReadRespUop.pdst          := pipeRowReadUop.pvd(vRowIdx).bits 
+  io.rowReadRespUop.stale_pdst    := pipeRowReadUop.stale_pvd(vRowIdx).bits
+
+  val pipeColReadUop = Pipe(io.colReadReq.valid, io.colReadReqUop, meshRows).bits
+  io.colReadRespUop := pipeColReadUop
+  io.colReadRespUop.m_split_last  := colVsCount === 0.U
+  io.colReadRespUop.v_split_last  := colVsCount === 0.U
+  val vColIdx = Mux(trColValid, 0.U,
+                Mux(colRespCtrls.rtype === INT32TYPE || colRespCtrls.rtype === FP32TYPE, 1.U - colVsCount, 0.U))
+  io.colReadRespUop.pdst          := pipeColReadUop.pvd(vColIdx).bits
+  io.colReadRespUop.stale_pdst    := pipeColReadUop.stale_pvd(vColIdx).bits
 }
