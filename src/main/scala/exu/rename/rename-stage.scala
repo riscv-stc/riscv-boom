@@ -978,10 +978,20 @@ class MatRenameStage(
   for ((uop, w) <- ren2_uops.zipWithIndex) {
     val trbusy = trbusytable.io.busy_resps(w)
     val accbusy = accbusytable.io.busy_resps(w)
-    when(uop.isHSlice =/= trbusy.prs1_busy(vLenb) && trbusy.prs1_busy(vLenb-1, 0).orR()) {
-      uop.pts1_busy := Fill(vLenb, 1.U(1.W))
-    }.otherwise {
-      uop.pts1_busy := trbusy.prs1_busy
+
+    when(uop.lrs1_rtype === RT_TR) {
+      when(uop.isHSlice =/= trbusy.prs1_busy(vLenb) && trbusy.prs1_busy(vLenb-1, 0).orR()) {
+        uop.pts1_busy := Fill(vLenb, 1.U(1.W))
+      }.otherwise {
+        uop.pts1_busy := trbusy.prs1_busy
+      }
+    }
+    when(uop.lrs1_rtype === RT_ACC) {
+      when(uop.isHSlice =/= accbusy.prs1_busy(vLenb) && accbusy.prs1_busy(vLenb-1, 0).orR()) {
+        uop.pts1_busy := Fill(vLenb, 1.U(1.W))
+      }.otherwise {
+        uop.pts1_busy := accbusy.prs1_busy
+      }
     }
     when(uop.isHSlice =/= trbusy.prs2_busy(vLenb) && trbusy.prs2_busy(vLenb-1, 0).orR()) {
       uop.pts2_busy := Fill(vLenb, 1.U(1.W))

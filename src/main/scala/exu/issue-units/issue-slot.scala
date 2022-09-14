@@ -481,6 +481,7 @@ class IssueSlot(
     when(io.request && io.grant && next_uop_mopa) {
       io.uop.m_split_first := slot_uop.m_sidx === 0.U
       io.uop.m_split_last  := slot_uop.m_sidx === slot_uop.m_tilek - 1.U
+      io.uop.m_sidx        := slot_uop.m_sidx
       io.out_uop.m_sidx    := slot_uop.m_sidx + 1.U
       io.out_uop.prs3      := slot_uop.pdst
       slot_uop.m_sidx      := slot_uop.m_sidx + 1.U
