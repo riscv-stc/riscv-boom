@@ -477,6 +477,7 @@ class IssueSlot(
     io.out_uop.pts3_busy := ~p3
     io.out_uop.m_sidx    := sidx
     io.out_uop.m_scalar_busy := ~ps
+    io.uop.m_sidx        := sidx
     when(io.request && io.grant && next_uop_mopa) {
       io.uop.m_split_first := slot_uop.m_sidx === 0.U
       io.uop.m_split_last  := slot_uop.m_sidx === slot_uop.m_tilek - 1.U
