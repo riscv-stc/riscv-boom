@@ -1370,8 +1370,8 @@ class MatExeUnit() (implicit p: Parameters)
   // -------------------------------MXU Unit -------------------------------
   val mxu = Module(new MXU(mxuMeshRows, mxuMeshCols, mxuTileRows, mxuTileCols, dataWidth=vLen, numMatAccPhysRegs))
 
-  hSliceBusy := !mxu.io.rowReadReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE) && io.req.bits.uop.vd_emul > 0.U)
-  vSliceBusy := !mxu.io.colReadReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE) && io.req.bits.uop.vd_emul > 0.U)
+  hSliceBusy := !mxu.io.rowReadReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE))
+  vSliceBusy := !mxu.io.colReadReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE))
 
   // matrix multiplication related
   // TODO: confirm latency

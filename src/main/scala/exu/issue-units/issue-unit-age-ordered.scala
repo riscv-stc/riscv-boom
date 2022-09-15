@@ -125,12 +125,19 @@ class IssueUnitCollapsing(
 
     for (w <- 0 until issueWidth) {
       val can_allocate = (issue_slots(i).uop.fu_code & io.fu_types(w)) =/= 0.U
-      // Div (vdiv) cannot be issued continously
+      // Div (vdiv) cannot be issued continuously
       val isDivPrev = iss_valids_prev(w) && iss_fucode_prev(w).fu_code === FU_DIV
       val isDivCurr = issue_slots(i).uop.fu_code === FU_DIV
       val canDivIss = !(isDivCurr && isDivPrev)
+      // mmv cannot be issued continuously
+      val canMMVIss = if (matrix) WireInit(true.B) else true.B
+      if (matrix) {
+        val isMMVPrev = iss_valids_prev(w) && (iss_fucode_prev(w).fu_code === FU_HSLICE || iss_fucode_prev(w).fu_code === FU_VSLICE)
+        val isMMVCurr = issue_slots(i).uop.fu_code === FU_HSLICE || issue_slots(i).uop.fu_code === FU_VSLICE
+        canMMVIss    := !(isMMVCurr && isMMVPrev)
+      }
 
-      when (requests(i) && !uop_issued && can_allocate && !port_issued(w) && canDivIss) {
+      when (requests(i) && !uop_issued && can_allocate && !port_issued(w) && canDivIss && canMMVIss) {
         issue_slots(i).grant := true.B
         io.iss_valids(w) := true.B
         io.iss_uops(w) := issue_slots(i).uop
