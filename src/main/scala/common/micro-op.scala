@@ -1156,14 +1156,14 @@ object MicroOpcodes extends Enumeration {
   //mmov
   val uopMMV_V_enum       = Value
   val uopMMV_V            = uopMMV_V_enum.id.U(UOPC_SZ.W)
-  val uopMMV_T_enum       = Value
-  val uopMMV_T            = uopMMV_T_enum.id.U(UOPC_SZ.W)
   val uopMWMV_V_enum      = Value
   val uopMWMV_V           = uopMWMV_V_enum.id.U(UOPC_SZ.W)
-  val uopMWMV_T_enum      = Value
-  val uopMWMV_T           = uopMWMV_T_enum.id.U(UOPC_SZ.W)
   val uopMQMV_V_enum      = Value
   val uopMQMV_V           = uopMQMV_V_enum.id.U(UOPC_SZ.W)
+  val uopMMV_T_enum       = Value
+  val uopMMV_T            = uopMMV_T_enum.id.U(UOPC_SZ.W)
+  val uopMWMV_T_enum      = Value
+  val uopMWMV_T           = uopMWMV_T_enum.id.U(UOPC_SZ.W)
   val uopMQMV_T_enum      = Value
   val uopMQMV_T           = uopMQMV_T_enum.id.U(UOPC_SZ.W)
 

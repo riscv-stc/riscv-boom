@@ -1392,21 +1392,21 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.rowReadReq.valid       := io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE)
   mxu.io.rowReadReq.bits.ridx   := io.req.bits.uop.prs1
   mxu.io.rowReadReq.bits.sidx   := io.req.bits.uop.m_sidx
-  mxu.io.rowReadReq.bits.rtype  := io.req.bits.uop.td_eew
+  mxu.io.rowReadReq.bits.rtype  := Cat(io.req.bits.uop.fp_val.asUInt, io.req.bits.uop.td_eew)
   mxu.io.rowReadReqUop          := io.req.bits.uop
   mxu.io.rowReadData.ready      := io.ll_vresp.ready
   // read col slices
   mxu.io.colReadReq.valid       := io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE)
   mxu.io.colReadReq.bits.ridx   := io.req.bits.uop.prs1
   mxu.io.colReadReq.bits.sidx   := io.req.bits.uop.m_sidx
-  mxu.io.colReadReq.bits.rtype  := io.req.bits.uop.td_eew
+  mxu.io.colReadReq.bits.rtype  := Cat(io.req.bits.uop.fp_val.asUInt, io.req.bits.uop.td_eew)
   mxu.io.colReadReqUop          := io.req.bits.uop
   mxu.io.colReadData.ready      := io.ll_vresp.ready && !mxu.io.rowReadData.valid          // FIXME
   // write row slices
   mxu.io.rowWriteReq.valid      := io.mlsuWbk.valid && io.mlsuWbk.bits.uop.rt(RD, isAccTile) && io.mlsuWbk.bits.uop.isHSlice
   mxu.io.rowWriteReq.bits.ridx  := io.mlsuWbk.bits.uop.pdst
   mxu.io.rowWriteReq.bits.sidx  := io.mlsuWbk.bits.uop.m_sidx
-  mxu.io.rowWriteReq.bits.rtype := io.mlsuWbk.bits.uop.td_eew
+  mxu.io.rowWriteReq.bits.rtype := Cat(io.mlsuWbk.bits.uop.fp_val.asUInt, io.mlsuWbk.bits.uop.td_eew)
   mxu.io.rowWriteReqUop         := io.mlsuWbk.bits.uop
   mxu.io.rowWriteData           := io.mlsuWbk.bits.data
   mxu.io.rowWriteMask           := io.mlsuWbk.bits.vmask
@@ -1414,7 +1414,7 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.colWriteReq.valid      := io.mlsuWbk.valid && io.mlsuWbk.bits.uop.rt(RD, isAccTile) && !io.mlsuWbk.bits.uop.isHSlice
   mxu.io.colWriteReq.bits.ridx  := io.mlsuWbk.bits.uop.pdst
   mxu.io.colWriteReq.bits.sidx  := io.mlsuWbk.bits.uop.m_sidx
-  mxu.io.colWriteReq.bits.rtype := io.mlsuWbk.bits.uop.td_eew
+  mxu.io.colWriteReq.bits.rtype := Cat(io.mlsuWbk.bits.uop.fp_val.asUInt, io.mlsuWbk.bits.uop.td_eew)
   mxu.io.colWriteReqUop         := io.mlsuWbk.bits.uop
   mxu.io.colWriteData           := io.mlsuWbk.bits.data
   mxu.io.colWriteMask           := io.mlsuWbk.bits.vmask
