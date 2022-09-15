@@ -1022,10 +1022,10 @@ class MXU(
   io.clrRespUop        := Pipe(clrReqFire, io.clrReqUop, meshCols).bits
   io.rowReadResp       := mesh.io.rowReadResp
   io.rowWriteResp      := mesh.io.rowWriteResp
-  io.rowWriteRespUop   := Pipe(io.rowWriteReq.valid, io.rowWriteReqUop, meshCols).bits
+  io.rowWriteRespUop   := Pipe(io.rowWriteReq.valid, io.rowWriteReqUop, meshCols+2).bits
   io.colReadResp       := mesh.io.colReadResp
   io.colWriteResp      := mesh.io.colWriteResp
-  io.colWriteRespUop   := Pipe(io.colWriteReq.valid, io.colWriteReqUop, meshRows).bits
+  io.colWriteRespUop   := Pipe(io.colWriteReq.valid, io.colWriteReqUop, meshRows+2).bits
 
   val rowRespCtrls   = mesh.io.rowReadResp.bits
   val rowReadDataMux = WireInit(VecInit(Seq.fill(meshCols*tileCols*2)(0.U(8.W))))
