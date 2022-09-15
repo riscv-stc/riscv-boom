@@ -623,8 +623,8 @@ class MemAddrCalcUnit(implicit p: Parameters)
       "FP store-data should now be going through a different unit.")
   }
 
-  assert (!(uop.fp_val && io.req.valid && uop.uopc =/= uopLD && uop.uopc =/= uopSTA),
-          "[maddrcalc] assert we never get store data in here.")
+  // assert (!(uop.fp_val && io.req.valid && uop.uopc =/= uopLD && uop.uopc =/= uopSTA),
+          // "[maddrcalc] assert we never get store data in here.")
 
   if (usingVector) {
     assert (!(uop.is_rvv && io.req.valid && !uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVSA, uopVSMA, uopVLS, uopVSSA, uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)))
