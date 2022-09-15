@@ -589,7 +589,6 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.m_split_first := true.B    //remove split after dispatch
     uop.m_split_last  := true.B
     uop.isHSlice      := !mslice_tt0
-    uop.mslice_dim    := mslice_dim
     when (cs.is_rvm && cs.uopc.isOneOf(uopMLE)) {
       uop.dst_rtype  := Mux(uop.inst(29).asBool(), RT_TR, RT_ACC)
     }

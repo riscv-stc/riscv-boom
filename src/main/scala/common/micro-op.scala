@@ -199,7 +199,6 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val ts1_eew          = if (usingMatrix) UInt(2.W)       else null
   val ts2_eew          = if (usingMatrix) UInt(2.W)       else null
   val td_eew           = if (usingMatrix) UInt(2.W)       else null
-  val mslice_dim       = if (usingMatrix) UInt(2.W)       else null
   val mconfig          = if (usingMatrix) new MConfig     else null
   val isHSlice         = if (usingMatrix) Bool()          else null
   // purely debug information
