@@ -146,7 +146,8 @@ class IssueSlot(
       ret       := Mux(uop.rt(RS1, isVector), !io.vbusy_status(pvs1),
                    Mux(uop.uses_scalar, ps, true.B))
     } else if(matrix) {
-      ret := Mux(uop.rt(RS1, isMatrix), p1(uop.m_sidx), true.B)
+      ret := Mux(uop.rt(RS1, isMatrix) && uop.m_scalar_busy, false.B, 
+             Mux(uop.rt(RS1, isMatrix), p1(uop.m_sidx), true.B))
     } else {
       ret := p1(0)
     }
