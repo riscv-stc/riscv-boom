@@ -792,9 +792,7 @@ class MXU(
   switch(rowReadState) {
     is(sliceReady) {
       when(io.rowReadReq.valid && io.rowReadReqUop.rt(RS1, isAccTile)) {
-        when(rowReadCtrls.rtype =/= INT8TYPE && rowReadCtrls.rtype =/= FP16TYPE) {
-          rowVsCount    := Mux(rowReadCtrls.rtype === INT32TYPE, 3.U, 1.U)
-        }
+        rowVsCount      := Mux(io.rowReadReqUop.vd_emul === 2.U, 3.U, io.rowReadReqUop.vd_emul)
         rowReadState    := sliceWait
         rowReadReqValid := true.B
       } .elsewhen(io.rowReadReq.valid) {
@@ -806,7 +804,6 @@ class MXU(
         rowReadState := sliceReady 
       } .elsewhen(io.rowReadData.fire) {
         rowReadState := sliceResp
-        rowVsCount   := rowVsCount - 1.U
         rowVregIdx   := rowVregIdx + 1.U
       } .elsewhen(mesh.io.rowReadResp.valid) {
         rowReadState := sliceResp
@@ -815,11 +812,10 @@ class MXU(
       }
     }
     is(sliceResp) {
-      when(io.rowReadData.fire && rowVsCount === 0.U) {
+      when(io.rowReadData.fire && rowVregIdx === rowVsCount) {
         rowReadState := sliceReady
         rowVregIdx   := 0.U
       } .elsewhen(io.rowReadData.fire) {
-        rowVsCount   := rowVsCount - 1.U
         rowVregIdx   := rowVregIdx + 1.U
       }
     }
@@ -912,9 +908,7 @@ class MXU(
   switch(colReadState) {
     is(sliceReady) {
       when(io.colReadReq.valid && io.colReadReqUop.rt(RS1, isAccTile)) {
-        when(colReadCtrls.rtype === INT32TYPE || colReadCtrls.rtype === FP32TYPE) {
-          colVsCount   := 1.U
-        }
+        colVsCount   := io.colReadReqUop.vd_emul
         colReadState := sliceWait
         colReadReqValid := true.B
       } .elsewhen(io.colReadReq.valid) {
@@ -926,7 +920,6 @@ class MXU(
         colReadState := sliceReady 
       } .elsewhen(io.colReadData.fire) {
         colReadState := sliceResp
-        colVsCount   := colVsCount - 1.U
         colVregIdx   := colVregIdx + 1.U
       } .elsewhen(mesh.io.colReadResp.valid) {
         colReadState := sliceResp
@@ -935,11 +928,10 @@ class MXU(
       }
     }
     is(sliceResp) {
-      when(io.colReadData.fire && colVsCount === 0.U) {
+      when(io.colReadData.fire && colVregIdx === colVsCount) {
         colReadState := sliceReady
         colVregIdx   := 0.U
       } .elsewhen(io.colReadData.fire) {
-        colVsCount   := colVsCount - 1.U
         colVregIdx   := colVregIdx + 1.U
       }
     }
@@ -1044,7 +1036,7 @@ class MXU(
       rowReadDataMux(i) := mesh.io.rowReadData(32*i+7, 32*i)
     }
   } .elsewhen(rowRespCtrls.rtype === INT16TYPE) {
-    when(rowVsCount === 1.U) {
+    when(rowVregIdx === 0.U) {
       (0 until meshCols*tileCols).foreach { i => 
         rowReadDataMux(2*i)   := mesh.io.rowReadData(32*i+7,  32*i)
         rowReadDataMux(2*i+1) := mesh.io.rowReadData(32*i+15, 32*i+8)
@@ -1056,21 +1048,21 @@ class MXU(
       }
     }
   } .elsewhen(rowRespCtrls.rtype === INT32TYPE) {
-    when(rowVsCount === 3.U) {
+    when(rowVregIdx === 0.U) {
       (0 until meshCols*tileCols/2).foreach { i => 
         rowReadDataMux(4*i)   := mesh.io.rowReadData(32*i+7,  32*i)
         rowReadDataMux(4*i+1) := mesh.io.rowReadData(32*i+15, 32*i+8)
         rowReadDataMux(4*i+2) := mesh.io.rowReadData(32*i+23, 32*i+16)
         rowReadDataMux(4*i+3) := mesh.io.rowReadData(32*i+31, 32*i+24)
       }
-    } .elsewhen(rowVsCount === 2.U) {
+    } .elsewhen(rowVregIdx === 1.U) {
       (0 until meshCols*tileCols/2).foreach { i => 
         rowReadDataMux(4*i)   := mesh.io.rowReadData(16*meshCols*tileCols+32*i+7,  16*meshCols*tileCols+32*i)
         rowReadDataMux(4*i+1) := mesh.io.rowReadData(16*meshCols*tileCols+32*i+15, 16*meshCols*tileCols+32*i+8)
         rowReadDataMux(4*i+2) := mesh.io.rowReadData(16*meshCols*tileCols+32*i+23, 16*meshCols*tileCols+32*i+16)
         rowReadDataMux(4*i+3) := mesh.io.rowReadData(16*meshCols*tileCols+32*i+31, 16*meshCols*tileCols+32*i+24)
       }
-    } .elsewhen(rowVsCount === 1.U) {
+    } .elsewhen(rowVregIdx === 2.U) {
       (0 until meshCols*tileCols/2).foreach { i => 
         rowReadDataMux(4*i)   := mesh.io.rowReadData(32*meshCols*tileCols+32*i+7,  32*meshCols*tileCols+32*i)
         rowReadDataMux(4*i+1) := mesh.io.rowReadData(32*meshCols*tileCols+32*i+15, 32*meshCols*tileCols+32*i+8)
@@ -1091,7 +1083,7 @@ class MXU(
       rowReadDataMux(2*i+1) := mesh.io.rowReadData(64*i+15, 64*i+8)
     }
   } .otherwise {
-    when(rowVsCount === 1.U) {
+    when(rowVregIdx === 0.U) {
       (0 until meshCols*tileCols/2).foreach{ i => 
         rowReadDataMux(4*i)   := mesh.io.rowReadData(64*i+7,  64*i)
         rowReadDataMux(4*i+1) := mesh.io.rowReadData(64*i+15, 64*i+8)
@@ -1120,7 +1112,7 @@ class MXU(
       colReadDataMux(2*i+1) := mesh.io.colReadData(32*i+15, 32*i+8)
     }
   } .otherwise {
-    when(colVsCount === 1.U) {
+    when(colVregIdx === 0.U) {
       (0 until meshRows*tileRows/2).foreach { i => 
         colReadDataMux(4*i)   := mesh.io.colReadData(32*i+7,  32*i)
         colReadDataMux(4*i+1) := mesh.io.colReadData(32*i+15, 32*i+8)
@@ -1161,15 +1153,15 @@ class MXU(
 
   val pipeRowReadUop = Pipe(io.rowReadReq.valid, io.rowReadReqUop, meshCols).bits
   io.rowReadRespUop := pipeRowReadUop
-  io.rowReadRespUop.m_split_last  := rowVsCount === 0.U
-  io.rowReadRespUop.v_split_last  := rowVsCount === 0.U
+  io.rowReadRespUop.m_split_last  := rowVregIdx === rowVsCount
+  io.rowReadRespUop.v_split_last  := rowVregIdx === rowVsCount
   io.rowReadRespUop.pdst          := pipeRowReadUop.pvd(rowVregIdx).bits 
   io.rowReadRespUop.stale_pdst    := pipeRowReadUop.stale_pvd(rowVregIdx).bits
 
   val pipeColReadUop = Pipe(io.colReadReq.valid, io.colReadReqUop, meshRows).bits
   io.colReadRespUop := pipeColReadUop
-  io.colReadRespUop.m_split_last  := colVsCount === 0.U
-  io.colReadRespUop.v_split_last  := colVsCount === 0.U
+  io.colReadRespUop.m_split_last  := colVregIdx === colVsCount
+  io.colReadRespUop.v_split_last  := colVregIdx === colVsCount
   io.colReadRespUop.pdst          := pipeColReadUop.pvd(colVregIdx).bits
   io.colReadRespUop.stale_pdst    := pipeColReadUop.stale_pvd(colVregIdx).bits
 }
