@@ -248,7 +248,8 @@ class PE(
   fpMac.io.src1           := io.macReqSrcA
   fpMac.io.src2           := io.macReqSrcB
   fpMac.io.src3           := c0(macReqCtrls.srcRidx)
-  fpMac.io.srcType        := macReqCtrls.srcType
+  // fpMac.io.srcType        := macReqCtrls.srcType
+  fpMac.io.srcType        := macReqCtrls.outType         // Attentions here!
   fpMac.io.outType        := macReqCtrls.outType
   fpMac.io.roundingMode   := macReqCtrls.rm
   fpMac.io.detectTininess := hardfloat.consts.tininess_afterRounding
