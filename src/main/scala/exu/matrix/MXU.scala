@@ -1130,13 +1130,15 @@ class MXU(
   }
 
   // mask generation:
-  val rowMask     = Cat((0 until dataWidth/8).map(i => i.U + (rowVregIdx << vLenbSz.U) < (io.rowReadRespUop.m_slice_len << io.rowReadRespUop.ts1_eew)).reverse)
+  val rowVregOff  = rowVregIdx << (vLenbSz.U - io.rowReadRespUop.ts1_eew)
+  val rowMask     = Cat((0 until dataWidth/8).map(i => i.U + rowVregOff < io.rowReadRespUop.m_slice_len).reverse)
   val rowByteMask = Mux1H(UIntToOH(io.rowReadRespUop.ts1_eew),
                            Seq(rowMask,
                                FillInterleaved(2, rowMask(dataWidth/16-1, 0)),
                                FillInterleaved(4, rowMask(dataWidth/32-1, 0)),
                                FillInterleaved(8, rowMask(dataWidth/64-1, 0))))
-  val colMask     = Cat((0 until dataWidth/8).map(i => i.U + (colVregIdx << vLenbSz.U) < (io.colReadRespUop.m_slice_len << io.colReadRespUop.ts1_eew)).reverse)
+  val colVregOff  = colVregIdx << (vLenbSz.U - io.colReadRespUop.ts1_eew)
+  val colMask     = Cat((0 until dataWidth/8).map(i => i.U + colVregOff < io.colReadRespUop.m_slice_len).reverse)
   val colByteMask = Mux1H(UIntToOH(io.colReadRespUop.ts1_eew),
                            Seq(colMask,
                                FillInterleaved(2, colMask(dataWidth/16-1, 0)),
