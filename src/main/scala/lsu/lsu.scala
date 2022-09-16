@@ -2908,12 +2908,13 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   val clLeftBytes    = clSize.U - sliceBlockOff
   val sliceLeftBytes = sliceBytes - sliceBlockAddr
   val sliceCrossBlk  = RegNext(clLeftBytes < sliceLeftBytes && clLeftBytes < vLenb.U)
+  val sliceCrossByte = RegNext(vLenb.U - clLeftBytes)
   if (vLenb > clSize) {
     sliceAddrInc := sliceLeftBytes.min(clLeftBytes)
     sliceLenLast := sliceLeftBytes <= clLeftBytes
   } else {
-    sliceAddrInc := sliceLeftBytes.min(clLeftBytes).min(vLenb.U)
-    sliceLenLast := sliceLeftBytes <= clLeftBytes.min(vLenb.U)
+    sliceAddrInc := Mux(sliceCrossBlk, sliceLeftBytes.min(sliceCrossByte), sliceLeftBytes.min(clLeftBytes).min(vLenb.U))
+    sliceLenLast := Mux(sliceCrossBlk, sliceLeftBytes <= sliceCrossByte,   sliceLeftBytes <= clLeftBytes.min(vLenb.U))
   }
 
   when (io.req.valid) {
