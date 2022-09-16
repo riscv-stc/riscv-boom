@@ -164,7 +164,9 @@ class MatRenameBusyTable(
     // Rebusy newly allocated registers.
     busy_table_next(r) := busy_table_wb(r) | (io.ren_uops zip io.rebusy_reqs)
       .map { case (uop, req) => Cat(Mux((r.U === uop.pdst) && req, uop.isHSlice, busy_table(r)(vLenb)) ,
-        Fill(vLenb, ((r.U === uop.pdst) && req).asUInt()) & MaskGen(uop.m_sidx, uop.m_slice_cnt, vLenb)) }.reduce(_ | _)
+        Fill(vLenb, ((r.U === uop.pdst) && req).asUInt()) &
+          Mux(uop.dst_rtype === RT_ACC && !uop.uses_ldq, MaskGenAcc(uop.m_sidx, uop.m_slice_cnt, vLenb),
+                                                               MaskGen(uop.m_sidx, uop.m_slice_cnt, vLenb))) }.reduce(_ | _)
 
     // Read the busy table.
     for (i <- 0 until plWidth) {

@@ -747,6 +747,15 @@ object MaskGen {
   }
 }
 
+object MaskGenAcc {
+  def apply(lsb: UInt, len: UInt, width: Int): UInt = {
+    val ret = Wire(UInt(width.W))
+    val full = Fill(width, 1.U(1.W)) << lsb
+    ret := full & (full << len)
+    ret
+  }
+}
+
 object VRegMask {
   /**
    * Get byte level mask for vreg
