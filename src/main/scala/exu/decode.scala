@@ -438,7 +438,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.vs2_emul    := vs2_emul
     if(usingMatrix) {
       uop.vd_emul := Mux(cs.uopc.isOneOf(uopMQMV_V), 2.U,
-                     Mux(cs.uopc.isOneOf(uopMWMV_V), 1.U, 0.U))
+                     Mux(cs.uopc.isOneOf(uopMWMV_V), 1.U, 
+                     Mux(cs.uopc.isOneOf(uopMMV_V),  0.U, vd_emul)))
     }
     //when (cs.is_rvv && !uop.v_unmasked) {
       //when (is_v_ls) {
