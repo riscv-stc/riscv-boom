@@ -1845,7 +1845,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   io.lsu.vbusy_status := v_rename_stage.io.vbusy_status
 
   // tell LSU about committing loads and stores to clear entries
-  io.lsu.commit  := rob.io.commit
+  io.lsu.commit    := rob.io.commit
+
+  io.lsu.commit_vs := rob.io.commit_vs
 
   // tell LSU that it should fire a load that waits for the rob to clear
   io.lsu.commit_load_at_rob_head := rob.io.com_load_is_at_rob_head
@@ -2093,6 +2095,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // LSU <> ROB
   rob.io.lsu_clr_bsy    := io.lsu.clr_bsy
   rob.io.lsu_clr_unsafe := io.lsu.clr_unsafe
+  rob.io.lsu_clr_retire := io.lsu.clr_retire
   rob.io.lsu_update_ls := io.lsu.update_ls
   rob.io.lxcpt          <> io.lsu.lxcpt
 

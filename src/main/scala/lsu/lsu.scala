@@ -196,12 +196,17 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
   val commit      = Input(new CommitSignals)
   val commit_load_at_rob_head = Input(Bool())
 
+  val commit_vs   = Input(Vec(retireWidth, Bool()))
+
   // Stores clear busy bit when stdata is received
   // memWidth for int, 1 for fp (to avoid back-pressure fpstdat)
-  val clr_bsy         = Output(Vec(memWidth + 1, Valid(new MicroOp)))
+  val clr_bsy        = Output(Vec(memWidth + 1, Valid(new MicroOp)))
 
   // Speculatively safe load (barring memory ordering failure)
-  val clr_unsafe      = Output(Vec(memWidth, Valid(new MicroOp)))
+  val clr_unsafe     = Output(Vec(memWidth, Valid(new MicroOp)))
+
+  // clear vs entry in rob after vs writes data to memory
+  val clr_retire     = Output(Valid(new MicroOp))
 
   val update_ls      = if (usingMatrix || usingVector) Output(Vec(4, Valid(new LSSplitCnt()))) else null
 
@@ -2477,10 +2482,24 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   var temp_stq_commit_head = stq_commit_head
   var temp_ldq_head        = ldq_head
   for (w <- 0 until coreWidth) {
-    val commit_store = io.core.commit.valids(w) && io.core.commit.uops(w).uses_stq
-    val commit_load  = io.core.commit.valids(w) && io.core.commit.uops(w).uses_ldq
-    val idx = Mux(commit_store, temp_stq_commit_head, temp_ldq_head)
+    val commit_load   = io.core.commit.valids(w) && io.core.commit.uops(w).uses_ldq
+    val commit_store  = io.core.commit.valids(w) && io.core.commit.uops(w).uses_stq && !io.core.commit.uops(w).is_vm_ext
+    val commit_vstore = io.core.commit_vs(w)     && io.core.commit.uops(w).uses_stq && io.core.commit.uops(w).is_vm_ext
+    val idx  = Mux(commit_load, temp_ldq_head, temp_stq_commit_head)
     when (commit_store) {
+      stq(idx).bits.committed := true.B
+    } .elsewhen (commit_load) {
+      assert (ldq(idx).valid, "[lsu] trying to commit an un-allocated load entry.")
+      assert ((ldq(idx).bits.executed || ldq(idx).bits.forward_std_val) && ldq(idx).bits.succeeded,
+        "[lsu] trying to commit an un-executed load entry.")
+
+      ldq(idx).valid                 := false.B
+      ldq(idx).bits.addr.valid       := false.B
+      ldq(idx).bits.executed         := false.B
+      ldq(idx).bits.succeeded        := false.B
+      ldq(idx).bits.order_fail       := false.B
+      ldq(idx).bits.forward_std_val  := false.B
+    } .elsewhen (commit_vstore) {
       stq(idx).bits.committed := true.B
 
       for (i <- 0 until numVStqEntries) {
@@ -2495,31 +2514,20 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
           vsxq(i).bits.committed  := true.B
         }
       }
-    } .elsewhen (commit_load) {
-      assert (ldq(idx).valid, "[lsu] trying to commit an un-allocated load entry.")
-      assert ((ldq(idx).bits.executed || ldq(idx).bits.forward_std_val) && ldq(idx).bits.succeeded,
-        "[lsu] trying to commit an un-executed load entry.")
-
-      ldq(idx).valid                 := false.B
-      ldq(idx).bits.addr.valid       := false.B
-      ldq(idx).bits.executed         := false.B
-      ldq(idx).bits.succeeded        := false.B
-      ldq(idx).bits.order_fail       := false.B
-      ldq(idx).bits.forward_std_val  := false.B
     }
 
     if (MEMTRACE_PRINTF) {
-      when (commit_store || commit_load) {
-        val uop    = Mux(commit_store, stq(idx).bits.uop, ldq(idx).bits.uop)
-        val addr   = Mux(commit_store, stq(idx).bits.addr.bits, ldq(idx).bits.addr.bits)
-        val stdata = Mux(commit_store, stq(idx).bits.data.bits, 0.U)
-        val wbdata = Mux(commit_store, stq(idx).bits.debug_wb_data, ldq(idx).bits.debug_wb_data)
+      when (commit_store || commit_load || commit_vstore) {
+        val uop    = Mux(commit_load, ldq(idx).bits.uop, stq(idx).bits.uop)
+        val addr   = Mux(commit_load, ldq(idx).bits.addr.bits, stq(idx).bits.addr.bits)
+        val stdata = Mux(commit_load, 0.U, stq(idx).bits.data.bits)
+        val wbdata = Mux(commit_load, ldq(idx).bits.debug_wb_data, stq(idx).bits.debug_wb_data)
         printf("MT %x %x %x %x %x %x %x\n",
           io.core.tsc_reg, uop.uopc, uop.mem_cmd, uop.mem_size, addr, stdata, wbdata)
       }
     }
 
-    temp_stq_commit_head = Mux(commit_store,
+    temp_stq_commit_head = Mux(commit_store || commit_vstore,
                                WrapInc(temp_stq_commit_head, numStqEntries),
                                temp_stq_commit_head)
 
@@ -2556,6 +2564,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     }
   }
 
+  io.core.clr_retire.valid := clear_store && stq(stq_head).bits.uop.is_vm_ext
+  io.core.clr_retire.bits  := stq(stq_head).bits.uop
 
   // -----------------------
   // Hellacache interface

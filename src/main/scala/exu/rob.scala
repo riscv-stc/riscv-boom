@@ -70,10 +70,13 @@ class RobIo(
 
   // Unbusying ports for stores.
   // +1 for fpstdata
-  val lsu_clr_bsy      = Input(Vec(memWidth + 1, Valid(new MicroOp)))
+  val lsu_clr_bsy     = Input(Vec(memWidth + 1, Valid(new MicroOp)))
 
   // Port for unmarking loads/stores as speculation hazards..
-  val lsu_clr_unsafe   = Input(Vec(memWidth, Valid(new MicroOp)))
+  val lsu_clr_unsafe  = Input(Vec(memWidth, Valid(new MicroOp)))
+
+  // Port for clear vs entry in rob
+  val lsu_clr_retire  = Input(Valid(new MicroOp))
 
   val lsu_update_ls   = if (usingMatrix || usingVector) Input(Vec(4, Valid(new LSSplitCnt()))) else null
 
@@ -92,6 +95,8 @@ class RobIo(
 
   // Commit stage (free resources; also used for rollback).
   val commit = Output(new CommitSignals())
+
+  val commit_vs = Output(Vec(retireWidth, Bool()))
 
   // tell the LSU that the head of the ROB is a load
   // (some loads can only execute once they are at the head of the ROB).
@@ -259,6 +264,8 @@ class Rob(
   val will_commit         = Wire(Vec(coreWidth, Bool()))
   val can_commit          = Wire(Vec(coreWidth, Bool()))
   val can_throw_exception = Wire(Vec(coreWidth, Bool()))
+  val vs_retired          = Wire(Vec(coreWidth, Bool())) // for vector store only
+  val will_commit_vs      = Wire(Vec(coreWidth, Bool())) // for vector store only
 
   val rob_pnr_unsafe      = Wire(Vec(coreWidth, Bool())) // are the instructions at the pnr unsafe?
   val rob_head_vals       = Wire(Vec(coreWidth, Bool())) // are the instructions at the head valid?
@@ -326,6 +333,7 @@ class Rob(
     val rob_ls_cnt    = if (usingVector) Reg(Vec(numRobRows, UInt((vLenSz+1).W))) else null  
     val rob_ls_wbs    = if (usingVector) Reg(Vec(numRobRows, UInt((vLenSz+1).W))) else null  
     val rob_unsafe    = Reg(Vec(numRobRows, Bool()))
+    val rob_vs_retire = Reg(Vec(numRobRows, Bool()))
     val rob_uop       = Reg(Vec(numRobRows, new MicroOp()))
     val rob_exception = Reg(Vec(numRobRows, Bool()))
     val rob_predicated = Reg(Vec(numRobRows, Bool())) // Was this instruction predicated out?
@@ -345,6 +353,7 @@ class Rob(
       rob_bsy(rob_tail)       := !(io.enq_uops(w).is_fence ||
                                    io.enq_uops(w).is_fencei)
       rob_unsafe(rob_tail)    := io.enq_uops(w).unsafe
+      rob_vs_retire(rob_tail) := !(io.enq_uops(w).is_vm_ext && io.enq_uops(w).uses_stq)
       rob_uop(rob_tail)       := io.enq_uops(w)
       rob_exception(rob_tail) := io.enq_uops(w).exception
       rob_predicated(rob_tail)   := false.B
@@ -523,6 +532,11 @@ class Rob(
         rob_unsafe(cidx) := false.B
       }
     }
+    // clear vs entry in rob
+    when(io.lsu_clr_retire.valid && MatchBank(GetBankIdx(io.lsu_clr_retire.bits.rob_idx))) {
+      val cidx = GetRowIdx(io.lsu_clr_retire.bits.rob_idx)
+      rob_vs_retire(cidx) := true.B
+    }
 
     //-----------------------------------------------
     // Accruing fflags
@@ -567,10 +581,12 @@ class Rob(
                      Mux(rob_uop(rob_head).is_rvv,           ~io.vbusy_status(rob_uop(rob_head).stale_pdst), 
                      Mux(rob_uop(rob_head).rt(RD, isTrTile), ~io.tr_busy_status(rob_uop(rob_head).stale_pdst),
                                                              ~io.acc_busy_status(rob_uop(rob_head).stale_pdst))))
+    vs_retired(w) := rob_vs_retire(rob_head)
 
     // use the same "com_uop" for both rollback AND commit
     // Perform Commit
-    io.commit.valids(w) := will_commit(w)
+    io.commit_vs(w)          := will_commit_vs(w)
+    io.commit.valids(w)      := will_commit(w)
     io.commit.arch_valids(w) := will_commit(w) && !rob_predicated(com_idx)
     io.commit.uops(w)   := rob_uop(com_idx)
     io.commit.debug_insts(w) := rob_debug_inst_rdata(w)
@@ -713,7 +729,8 @@ class Rob(
   for (w <- 0 until coreWidth) {
     will_throw_exception = (can_throw_exception(w) && !block_commit && !block_xcpt) || will_throw_exception
 
-    will_commit(w)       := can_commit(w) && !can_throw_exception(w) && !block_commit
+    will_commit_vs(w)    := can_commit(w) && !can_throw_exception(w) && !block_commit
+    will_commit(w)       := can_commit(w) && !can_throw_exception(w) && !block_commit && vs_retired(w)
     block_commit         = (rob_head_vals(w) &&
                            (!can_commit(w) || can_throw_exception(w))) || block_commit
     block_xcpt           = will_commit(w)
