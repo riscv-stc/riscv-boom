@@ -220,7 +220,6 @@ class MatRenameFreeList(
     // Pregs returned by the ROB.
     val dealloc_pregs = Input(Vec(plWidth, Valid(UInt(pregSz.W))))
 
-    val mapcontains0 = Input(Bool())
     // Branch info for starting new allocation lists.
     val ren_br_tags   = Input(Vec(plWidth, Valid(UInt(brTagSz.W))))
 
@@ -234,7 +233,7 @@ class MatRenameFreeList(
     }
   })
   // The free list register array and its branch allocation lists.
-  val free_list = RegInit(UInt(numPregs.W), ~(1.U(numPregs.W)))
+  val free_list = RegInit(UInt(numPregs.W), Fill(numPregs-numLregs, 1.U(1.W)) ## Fill(numLregs, 0.U(1.W)))
   val br_alloc_lists = Reg(Vec(maxBrCount, UInt(numPregs.W)))
 
   // Select pregs from the free list.
@@ -263,19 +262,15 @@ class MatRenameFreeList(
   }
 
   // Update the free list.
-  free_list := (free_list & ~sel_mask | dealloc_mask) & Mux(io.mapcontains0, ~(1.U(numPregs.W)), Fill(numPregs, 1.U(1.W)))
+  free_list := (free_list & ~sel_mask | dealloc_mask)
 
   // Pipeline logic | hookup outputs.
   for (w <- 0 until plWidth) {
     val can_sel = sels(w).orR
-    val r_valid = RegInit(false.B)
-    val r_sel   = RegEnable(OHToUInt(sels(w)), sel_fire(w))
+    sel_fire(w) := io.reqs(w).valid
 
-    r_valid := r_valid && !io.reqs(w).valid || can_sel
-    sel_fire(w) := (!r_valid || io.reqs(w).valid) && can_sel
-
-    io.alloc_pregs(w).bits  := r_sel
-    io.alloc_pregs(w).valid := r_valid
+    io.alloc_pregs(w).bits  := PriorityEncoder(sels(w))
+    io.alloc_pregs(w).valid := can_sel
   }
 
   io.debug.freelist := free_list | io.alloc_pregs.map(p => UIntToOH(p.bits) & Fill(n, p.valid)).reduce(_|_)

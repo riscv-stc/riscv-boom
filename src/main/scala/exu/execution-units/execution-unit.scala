@@ -1376,10 +1376,13 @@ class MatExeUnit() (implicit p: Parameters)
   // matrix multiplication related
   // TODO: confirm latency
   mxu.io.macReq.valid           := io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM)
-  mxu.io.macReq.bits.srcRidx    := io.req.bits.uop.prs3
+  mxu.io.macReq.bits.src1Ridx   := Mux(io.req.bits.uop.uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA), io.req.bits.uop.prs3, io.req.bits.uop.prs1)
+  mxu.io.macReq.bits.src2Ridx   := io.req.bits.uop.prs3
   mxu.io.macReq.bits.dstRidx    := io.req.bits.uop.pdst
   mxu.io.macReq.bits.srcType    := Cat(io.req.bits.uop.fp_val.asUInt, io.req.bits.uop.ts1_eew)
   mxu.io.macReq.bits.outType    := Cat(io.req.bits.uop.fp_val.asUInt, io.req.bits.uop.td_eew)
+  mxu.io.macReq.bits.aluType    := Mux(io.req.bits.uop.uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA), MACC,
+                                   Mux(io.req.bits.uop.uopc.isOneOf(uopMADD, uopMWADD, uopMQADD), ADD, SUB))
   mxu.io.macReq.bits.rm         := io.fcsr_rm
   mxu.io.macReqSrcA             := io.req.bits.rs1_data
   mxu.io.macReqSrcB             := io.req.bits.rs2_data

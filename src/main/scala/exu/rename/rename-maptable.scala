@@ -371,12 +371,10 @@ class MatRenameMapTable(
     // Signals for restoring state following misspeculation.
     val brupdate    = Input(new BrUpdateInfo)
     val rollback    = Input(Bool())
-
-    val mapcontains0 = Output(Bool())
   })
 
   // The map table register array and its branch snapshots.
-  val map_table = RegInit(VecInit(Seq.fill(numLregs){0.U(pregSz.W)}))
+  val map_table = RegInit(VecInit((0 until numLregs).map(_.U(pregSz.W))))
   val br_snapshots = Reg(Vec(maxBrCount, Vec(numLregs, UInt(pregSz.W))))
 
   // The intermediate states of the map table following modification by each pipeline slot.
@@ -420,11 +418,9 @@ class MatRenameMapTable(
     }}
   }
 
-  io.mapcontains0 := map_table.contains(0.U)
-
   // These cases may occur soon after reset, as all maptable entries are initialized to 'p0'.
   io.remap_reqs map (req => (req.pdst, req.valid)) foreach {case (pd,r) =>
-    assert(!r || !map_table.contains(pd.asUInt) || pd.asUInt === 0.U && io.rollback,
+    assert(!r || !map_table.contains(pd.asUInt),
       "[maptable] Trying to write a duplicate mapping.")
   }
 }

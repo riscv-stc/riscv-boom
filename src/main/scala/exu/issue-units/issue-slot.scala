@@ -165,7 +165,7 @@ class IssueSlot(
       val reduce_busy = uop.pvs2.map(pvs2 => pvs2.valid && io.vbusy_status(pvs2.bits)).reduce(_ || _)
       ret       := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))
     } else if(matrix) {
-      ret := Mux(uop.rt(RS2, isTrTile), p2(uop.m_sidx),
+      ret := Mux(uop.rt(RS2, isMatrix), p2(uop.m_sidx),
              Mux(uop.rt(RS2, isInt),    ps, true.B))
     } else {
       ret := p2(0)

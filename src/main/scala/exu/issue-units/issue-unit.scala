@@ -206,8 +206,6 @@ abstract class IssueUnit(
         dis_uops(w).prs1_busy := false.B
         dis_uops(w).pts2_busy := 0.U
         dis_uops(w).pts3_busy := 0.U
-      } .elsewhen(dis_uops(w).uopc.isOneOf(uopMMUL, uopMWMUL, uopMQMUL)) {
-        dis_uops(w).pts2_busy := 0.U
       }
     }
 

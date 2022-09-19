@@ -30,17 +30,24 @@ object AccTileConstants
   val Q1          = 1.U(2.W)
   val Q2          = 2.U(2.W)
   val Q3          = 3.U(2.W)
+  // alu types
+  val MACC        = 0.U(2.W)
+  val MULT        = 1.U(2.W)
+  val ADD         = 2.U(2.W)
+  val SUB         = 3.U(2.W)
 }
 
 import AccTileConstants._
 
 class MacCtrls(val numAccTiles: Int = 2) extends Bundle 
 {
-  val srcRidx = UInt(log2Ceil(numAccTiles).W)
-  val dstRidx = UInt(log2Ceil(numAccTiles).W)
-  val srcType = UInt(3.W)
-  val outType = UInt(3.W)
-  val rm      = UInt(3.W)                      // rounding mode
+  val src1Ridx = UInt(log2Ceil(numAccTiles).W)
+  val src2Ridx = UInt(log2Ceil(numAccTiles).W)
+  val dstRidx  = UInt(log2Ceil(numAccTiles).W)
+  val srcType  = UInt(3.W)
+  val outType  = UInt(3.W)
+  val aluType  = UInt(2.W)
+  val rm       = UInt(3.W)                      // rounding mode
 }
 
 class ClrCtrls(val numAccTiles: Int = 2) extends Bundle {
@@ -58,11 +65,12 @@ class SliceCtrls(val sliceNums: Int, val numAccTiles: Int = 2) extends Bundle {
 class IntMacUnit extends Module 
 {
   val io = IO(new Bundle {
-    val src1    = Input(UInt(8.W))
-    val src2    = Input(UInt(8.W))
+    val src1    = Input(UInt(32.W))
+    val src2    = Input(UInt(32.W))
     val src3    = Input(UInt(32.W))
     val srcType = Input(UInt(3.W))
     val outType = Input(UInt(3.W))
+    val aluType = Input(UInt(2.W))
     val out     = Output(UInt(32.W))
   })
 
@@ -70,29 +78,42 @@ class IntMacUnit extends Module
   val sMin = WireInit(0.U(32.W))
   sMax := Mux(io.outType === INT8TYPE,  0x7F.U,
           Mux(io.outType === INT16TYPE, 0x7FFF.U, 0x7FFFFFFF.U))
-  sMin := Mux(io.outType === INT8TYPE,  Cat(Fill(24, 1.U(1.W)), 0x80.U(8.W)),
-          Mux(io.outType === INT16TYPE, Cat(Fill(16, 1.U(1.W)), 0x8000.U(16.W)), Cat(1.U(1.W), Fill(31, 0.U(1.W)))))
+  sMin := Mux(io.outType === INT8TYPE,  Fill(24, 1.U(1.W)) ## 0x80.U(8.W),
+          Mux(io.outType === INT16TYPE, Fill(16, 1.U(1.W)) ## 0x8000.U(16.W), 
+                                        1.U(1.W) ## Fill(31, 0.U(1.W))))
 
-  val lhs  = io.src1.asSInt
-  val rhs  = io.src2.asSInt
+  // macc, mult
+  val lhs  = io.src1(7, 0).asSInt
+  val rhs  = io.src2(7, 0).asSInt
   val acc  = WireInit(0.U(32.W))
-  acc := Mux(io.outType === INT8TYPE,  Cat(Fill(24, io.src3(7)),  io.src3( 7, 0)),
-         Mux(io.outType === INT16TYPE, Cat(Fill(16, io.src3(15)), io.src3(15, 0)), io.src3))
+  acc := Mux(io.outType === INT8TYPE,  Fill(24, io.src3(7))  ## io.src3( 7, 0),
+         Mux(io.outType === INT16TYPE, Fill(16, io.src3(15)) ## io.src3(15, 0), io.src3))
   val macc = lhs * rhs +& acc.asSInt
 
-  io.out := Mux(macc > sMax.asSInt, sMax,
-            Mux(macc < sMin.asSInt, sMin, macc(31, 0)))
+  // add, sub
+  val in1 = Mux(io.srcType === INT8TYPE,  Fill(24, io.src1(7))  ## io.src1( 7, 0),
+            Mux(io.srcType === INT16TYPE, Fill(16, io.src1(15)) ## io.src1(15, 0), io.src1))
+  val in2 = Mux(io.srcType === INT8TYPE,  Fill(24, io.src2(7))  ## io.src2( 7, 0),
+            Mux(io.srcType === INT16TYPE, Fill(16, io.src2(15)) ## io.src2(15, 0), io.src2))
+  val in2_inv = Mux(io.aluType === SUB, ~in2, in2)
+  val adder   = io.src1.asSInt + in2_inv.asSInt + (io.aluType === SUB).asSInt
+
+  val result  = Mux(io.aluType(1), adder, macc)
+
+  io.out := Mux(result > sMax.asSInt, sMax,
+            Mux(result < sMin.asSInt, sMin, result(31, 0)))
 }
 
 // may use blackbox hardfloat modules
 class FpMacUnit extends Module 
 {
   val io = IO(new Bundle {
-    val src1           = Input(UInt(16.W))
-    val src2           = Input(UInt(16.W))
+    val src1           = Input(UInt(32.W))
+    val src2           = Input(UInt(32.W))
     val src3           = Input(UInt(32.W))
     val srcType        = Input(UInt(3.W))
     val outType        = Input(UInt(3.W))
+    val aluType        = Input(UInt(2.W))
     val roundingMode   = Input(UInt(3.W))
     val detectTininess = Input(UInt(1.W))
     val out            = Output(UInt(32.W))
@@ -203,8 +224,8 @@ class PE(
     val macReqSrcA   = Input(UInt(16.W))
     val macReqSrcB   = Input(UInt(16.W))
     val macReqOut    = Output(Valid(new MacCtrls(numAccTiles)))
-    val macOutSrcA   = Output(UInt(16.W))                      // for systolic horizontally
-    val macOutSrcB   = Output(UInt(16.W))                      // for systolic vertically
+    val macOutSrcA   = Output(UInt(16.W))                                 // for systolic horizontally
+    val macOutSrcB   = Output(UInt(16.W))                                 // for systolic vertically
     // clear tile slices, control signals propagated vertically
     val clrReqIn     = Input(Valid(new ClrCtrls(numAccTiles)))
     val clrReqOut    = Output(Valid(new ClrCtrls(numAccTiles)))
@@ -247,28 +268,31 @@ class PE(
   val fpMac = Module(new FpMacUnit())
   fpMac.io.src1           := io.macReqSrcA
   fpMac.io.src2           := io.macReqSrcB
-  fpMac.io.src3           := c0(macReqCtrls.srcRidx)
+  fpMac.io.src3           := c0(macReqCtrls.src1Ridx)
   // fpMac.io.srcType        := macReqCtrls.srcType
   fpMac.io.srcType        := macReqCtrls.outType         // Attentions here!
   fpMac.io.outType        := macReqCtrls.outType
+  fpMac.io.aluType        := macReqCtrls.aluType
   fpMac.io.roundingMode   := macReqCtrls.rm
   fpMac.io.detectTininess := hardfloat.consts.tininess_afterRounding
 
   // int8 MAC function units
   val intMac0 = Module(new IntMacUnit())
   val intMac1 = Module(new IntMacUnit())
-  intMac0.io.src1    := io.macReqSrcA( 7, 0)
-  intMac0.io.src2    := io.macReqSrcB( 7, 0)
-  intMac0.io.src3    := c0(macReqCtrls.srcRidx)
+  intMac0.io.src1    := Mux(macReqCtrls.aluType === MACC, io.macReqSrcA( 7, 0), c0(macReqCtrls.src1Ridx))
+  intMac0.io.src2    := Mux(macReqCtrls.aluType === MACC, io.macReqSrcB( 7, 0), c0(macReqCtrls.src2Ridx))
+  intMac0.io.src3    := c0(macReqCtrls.src1Ridx)
   intMac0.io.srcType := macReqCtrls.srcType
   intMac0.io.outType := macReqCtrls.outType
-  intMac1.io.src1    := io.macReqSrcA( 7, 0)
-  intMac1.io.src2    := io.macReqSrcB(15, 8)
-  intMac1.io.src3    := c1(macReqCtrls.srcRidx)
+  intMac0.io.aluType := macReqCtrls.aluType
+  intMac1.io.src1    := Mux(macReqCtrls.aluType === MACC, io.macReqSrcA( 7, 0), c1(macReqCtrls.src1Ridx))
+  intMac1.io.src2    := Mux(macReqCtrls.aluType === MACC, io.macReqSrcB(15, 8), c1(macReqCtrls.src2Ridx))
+  intMac1.io.src3    := c1(macReqCtrls.src1Ridx)
   intMac1.io.srcType := macReqCtrls.srcType
   intMac1.io.outType := macReqCtrls.outType
+  intMac1.io.aluType := macReqCtrls.aluType
 
-  // latency = 1 for int8 mac; 3 for fp16 mac
+  // TODO: Optimization, latency = 1 for int8 mac; 3 for fp16 mac
   when(macReqValid && macReqCtrls.srcType(2)) {
     c0(macReqCtrls.dstRidx) := fpMac.io.out
   } .elsewhen(macReqValid) {

@@ -558,8 +558,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     val msew = Mux(is_mls, cs.v_ls_ew, csr_msew)
     val is_mmv = cs.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V)
-    val mqwiden = cs.uopc.isOneOf(uopMQMUL,uopMQOPA,uopMQMV_T,uopMQMV_V)
-    val mwwiden = cs.uopc.isOneOf(uopMWMUL,uopMWOPA,uopMFWOPA,uopMWMV_T,uopMWMV_V)
+    val mqwiden = cs.uopc.isOneOf(uopMQOPA,uopMQMV_T,uopMQMV_V)
+    val mwwiden = cs.uopc.isOneOf(uopMWOPA,uopMFWOPA,uopMWMV_T,uopMWMV_V)
     val td_mwfactor = Mux(mqwiden, 2.U, Mux(mwwiden, 1.U, 0.U))
     val td_mnfactor = Mux(cs.uopc === uopMFNCVT, 1.U, 0.U)
     val ts1_mwfactor = Mux(mqwiden && is_mmv, 2.U, Mux(mwwiden && is_mmv, 1.U, 0.U))
