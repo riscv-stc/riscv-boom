@@ -557,6 +557,8 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               numFpPhysRegisters = 48,
               numLdqEntries = 16,
               numStqEntries = 16,
+              numVLdqEntries = 18,
+              numVStqEntries = 18,
               maxBrCount = 12,
               maxVconfigCount = 4,
               numFetchBufferEntries = 16,

@@ -343,6 +343,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val vsxq_tail         = Reg(UInt(vsxqAddrSz.W))
   val vsxq_execute_head = Reg(UInt(vsxqAddrSz.W)) 
 
+  require(numVStqEntries > 16) // Avoid deadlock between vsagu and ROB when vstq is full
+
   // If we got a mispredict, the tail will be misaligned for 1 extra cycle
   assert (io.core.brupdate.b2.mispredict ||
           stq(stq_execute_head).valid ||
@@ -3399,7 +3401,7 @@ class VecMem(implicit p: Parameters) extends LazyModule
 {
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
       name = s"l1-vec-memq",
-      sourceId = IdRange(0, 64),
+      sourceId = IdRange(0, 128),
       supportsProbe = TransferSizes.none
   )))))
   lazy val module = new VecMemImp(this)
