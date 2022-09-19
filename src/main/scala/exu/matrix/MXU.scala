@@ -121,8 +121,8 @@ class FpMacUnit extends Module
   val H = new FType(5, 11)
   val S = new FType(8, 24)
   // convert fp16 or fp32 to recoded format
-  val recA     = recFNFromFN(H.exp, H.sig, io.src1)
-  val recB     = recFNFromFN(H.exp, H.sig, io.src2)
+  val recA     = recFNFromFN(H.exp, H.sig, io.src1(15, 0))
+  val recB     = recFNFromFN(H.exp, H.sig, io.src2(15, 0))
   val recCFP16 = recFNFromFN(H.exp, H.sig, io.src3(15, 0))
   val recCFP32 = recFNFromFN(S.exp, S.sig, io.src3)
 

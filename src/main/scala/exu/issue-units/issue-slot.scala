@@ -120,7 +120,7 @@ class IssueSlot(
   val vrg_has_vupd = slot_uop.rt(RS1, isVector) && slot_uop.uopc === uopVRGATHER || slot_uop.uopc === uopVRGATHEREI16
   val next_uop_has_vupd = next_uop.rt(RS1, isVector) && next_uop.uopc === uopVRGATHER || next_uop.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
   val next_uop_vcompress = next_uop.uopc === uopVCOMPRESS
-  val next_uop_mopa       = if (matrix) next_uop.uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA, uopMFOPA, uopMFWOPA) else null
+  val next_uop_mopa       = if (matrix) next_uop.uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA) else null
   val next_uop_ts1_hslice = if (matrix) Mux(next_uop_mopa, false.B, next_uop.isHSlice) else null
   val next_uop_ts2_hslice = if (matrix) Mux(next_uop_mopa, true.B,  next_uop.isHSlice) else null
 

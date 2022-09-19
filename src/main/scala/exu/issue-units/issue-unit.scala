@@ -198,7 +198,7 @@ abstract class IssueUnit(
         }
       }
     } else if (iqType == IQT_MAT.litValue) {
-      when(dis_uops(w).uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA, uopMFOPA, uopMFWOPA)) {
+      when(dis_uops(w).uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA)) {
         dis_uops(w).prs1_busy := false.B
         dis_uops(w).prs2_busy := false.B
         dis_uops(w).prs3_busy := false.B
