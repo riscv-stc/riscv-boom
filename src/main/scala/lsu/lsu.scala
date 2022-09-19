@@ -1430,7 +1430,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vmem_req.shdir    := vldq_lkup_e.bits.shdir
     vmem_req.shamt    := vldq_lkup_e.bits.shamt
     vmem_req.vldq_idx := vldq_lkup_idx
-  } .elsewhen (will_fire_vstq_commit(memWidth-1)) {
+  } .elsewhen (will_fire_vstq_commit(memWidth-1) && !pf_st(memWidth-1) && !ae_st(memWidth-1)) {
     vmem_req.uop      := vstq_commit_e.bits.uop
     vmem_req.addr     := vstq_commit_e.bits.addr.bits
     vmem_req.mask     := vstq_commit_e.bits.vmask
@@ -1449,7 +1449,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vmem_req.shdir    := vlxq_lkup_e.bits.shdir
     vmem_req.shamt    := vlxq_lkup_e.bits.shamt
     vmem_req.vldq_idx := vlxq_lkup_idx
-  } .elsewhen (will_fire_vsxq_commit(memWidth-1)) {
+  } .elsewhen (will_fire_vsxq_commit(memWidth-1) && !pf_st(memWidth-1) && !ae_st(memWidth-1)) {
     vmem_req.uop      := vsxq_commit_e.bits.uop
     vmem_req.addr     := vsxq_commit_e.bits.addr.bits
     vmem_req.mask     := vsxq_commit_e.bits.vmask
@@ -1466,9 +1466,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq_execute_head := WrapInc(stq_execute_head, numStqEntries)
     }
   }
-  io.vmem.req.valid     := (will_fire_vldq_lookup(0) && !exe_tlb_miss(0) && !exe_tlb_uncacheable(0) && !vldq_lkup_e.bits.uop.exception) ||
-                           (will_fire_vlxq_lookup(0) && !exe_tlb_miss(0) && !exe_tlb_uncacheable(0) && !vlxq_lkup_e.bits.uop.exception)  ||
-                           (will_fire_vstq_commit(memWidth-1) || will_fire_vsxq_commit(memWidth-1))
+  io.vmem.req.valid     := (will_fire_vldq_lookup(0) && !exe_tlb_miss(0) && !exe_tlb_uncacheable(0) && !pf_ld(0) && !ae_ld(0)) ||
+                           (will_fire_vlxq_lookup(0) && !exe_tlb_miss(0) && !exe_tlb_uncacheable(0) && !pf_ld(0) && !ae_ld(0)) ||
+                           (will_fire_vsxq_commit(memWidth-1) && !pf_st(memWidth-1) && !ae_st(memWidth-1)) ||
+                           (will_fire_vstq_commit(memWidth-1) && !pf_st(memWidth-1) && !ae_st(memWidth-1))
   io.vmem.req.bits      := vmem_req
   io.vmem.s1_vdata      := Mux(RegNext(vmem_req.uop.is_rvm),    io.core.tile_rport.data,
                            Mux(RegNext(vmem_req.uop.v_unit_ls), io.core.vrf_rport.data,  RegNext(vsxq_commit_e.bits.data.bits)))

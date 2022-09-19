@@ -428,8 +428,8 @@ class IssueSlot(
                                                                                      u.bits.data))))
       val fp_sel   = io.fpupdate.map(u => u.valid && u.bits.uop.prs1 === next_uop.prs1 && next_uop.rt(RS1, isFloat))
       val fp_data  = io.fpupdate.map(_.bits.data)
-      ps := ps || int_sel.reduce(_||_) || fp_sel.reduce(_||_)
       when(int_sel.reduce(_||_) || fp_sel.reduce(_||_)) {
+        ps    := true.B
         sdata := Mux1H(int_sel++fp_sel, int_data++fp_data)
       }
       assert(PopCount(int_sel++fp_sel) <= 1.U, "Multiple drivers")

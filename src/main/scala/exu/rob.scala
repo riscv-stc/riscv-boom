@@ -265,6 +265,7 @@ class Rob(
   val can_commit          = Wire(Vec(coreWidth, Bool()))
   val can_throw_exception = Wire(Vec(coreWidth, Bool()))
   val vs_retired          = Wire(Vec(coreWidth, Bool())) // for vector store only
+  val vs_committed        = Wire(Vec(coreWidth, Bool())) // for vector store only
   val will_commit_vs      = Wire(Vec(coreWidth, Bool())) // for vector store only
 
   val rob_pnr_unsafe      = Wire(Vec(coreWidth, Bool())) // are the instructions at the pnr unsafe?
@@ -333,6 +334,7 @@ class Rob(
     val rob_ls_cnt    = if (usingVector) Reg(Vec(numRobRows, UInt((vLenSz+1).W))) else null  
     val rob_ls_wbs    = if (usingVector) Reg(Vec(numRobRows, UInt((vLenSz+1).W))) else null  
     val rob_unsafe    = Reg(Vec(numRobRows, Bool()))
+    val rob_vs_commit = Reg(Vec(numRobRows, Bool()))
     val rob_vs_retire = Reg(Vec(numRobRows, Bool()))
     val rob_uop       = Reg(Vec(numRobRows, new MicroOp()))
     val rob_exception = Reg(Vec(numRobRows, Bool()))
@@ -353,6 +355,7 @@ class Rob(
       rob_bsy(rob_tail)       := !(io.enq_uops(w).is_fence ||
                                    io.enq_uops(w).is_fencei)
       rob_unsafe(rob_tail)    := io.enq_uops(w).unsafe
+      rob_vs_commit(rob_tail) := false.B
       rob_vs_retire(rob_tail) := !(io.enq_uops(w).is_vm_ext && io.enq_uops(w).uses_stq)
       rob_uop(rob_tail)       := io.enq_uops(w)
       rob_exception(rob_tail) := io.enq_uops(w).exception
@@ -537,6 +540,9 @@ class Rob(
       val cidx = GetRowIdx(io.lsu_clr_retire.bits.rob_idx)
       rob_vs_retire(cidx) := true.B
     }
+    when(will_commit_vs(w)) {
+      rob_vs_commit(rob_head) := true.B
+    }
 
     //-----------------------------------------------
     // Accruing fflags
@@ -581,11 +587,12 @@ class Rob(
                      Mux(rob_uop(rob_head).is_rvv,           ~io.vbusy_status(rob_uop(rob_head).stale_pdst), 
                      Mux(rob_uop(rob_head).rt(RD, isTrTile), ~io.tr_busy_status(rob_uop(rob_head).stale_pdst),
                                                              ~io.acc_busy_status(rob_uop(rob_head).stale_pdst))))
-    vs_retired(w) := rob_vs_retire(rob_head)
+    vs_retired(w)   := rob_vs_retire(rob_head)
+    vs_committed(w) := rob_vs_commit(rob_head)
 
     // use the same "com_uop" for both rollback AND commit
     // Perform Commit
-    io.commit_vs(w)          := will_commit_vs(w)
+    io.commit_vs(w)          := will_commit_vs(w) && !rob_vs_commit(rob_head)
     io.commit.valids(w)      := will_commit(w)
     io.commit.arch_valids(w) := will_commit(w) && !rob_predicated(com_idx)
     io.commit.uops(w)   := rob_uop(com_idx)
@@ -729,7 +736,7 @@ class Rob(
   for (w <- 0 until coreWidth) {
     will_throw_exception = (can_throw_exception(w) && !block_commit && !block_xcpt) || will_throw_exception
 
-    will_commit_vs(w)    := can_commit(w) && !can_throw_exception(w) && !block_commit
+    will_commit_vs(w)    := can_commit(w) && !can_throw_exception(w) && !block_commit && !vs_committed(w)
     will_commit(w)       := can_commit(w) && !can_throw_exception(w) && !block_commit && vs_retired(w)
     block_commit         = (rob_head_vals(w) &&
                            (!can_commit(w) || can_throw_exception(w))) || block_commit
