@@ -96,7 +96,7 @@ class IntMacUnit extends Module
   val in2 = Mux(io.srcType === INT8TYPE,  Fill(24, io.src3(7))  ## io.src3( 7, 0),
             Mux(io.srcType === INT16TYPE, Fill(16, io.src3(15)) ## io.src3(15, 0), io.src3))
   val in2_inv = Mux(io.aluType === SUB, ~in2, in2)
-  val adder   = io.src1.asSInt + in2_inv.asSInt + Mux(io.aluType === SUB, 1.S, 0.S)
+  val adder   = in1.asSInt +& in2_inv.asSInt + Mux(io.aluType === SUB, 1.S, 0.S)
 
   val result  = Mux(io.aluType(1), adder, macc)
 
@@ -264,7 +264,7 @@ class PE(
   fpMac.io.src1           := Mux(macReqCtrls.aluType === MACC, io.macReqSrcA, c0(macReqCtrls.src1Ridx))
   fpMac.io.src2           := io.macReqSrcB
   fpMac.io.src3           := c0(macReqCtrls.src2Ridx)
-  fpMac.io.srcType        := Mux(macReqCtrls.aluType === MACC, macReqCtrls.outType, macReqCtrls.srcType)
+  fpMac.io.srcType        := macReqCtrls.outType      // Attention here, fpMac support fp16 multiply only
   fpMac.io.outType        := macReqCtrls.outType
   fpMac.io.aluType        := macReqCtrls.aluType
   fpMac.io.roundingMode   := macReqCtrls.rm
@@ -276,13 +276,13 @@ class PE(
   intMac0.io.src1    := Mux(macReqCtrls.aluType === MACC, io.macReqSrcA( 7, 0), c0(macReqCtrls.src1Ridx))
   intMac0.io.src2    := io.macReqSrcB( 7, 0)
   intMac0.io.src3    := c0(macReqCtrls.src2Ridx)
-  intMac0.io.srcType := macReqCtrls.srcType
+  intMac0.io.srcType := macReqCtrls.outType
   intMac0.io.outType := macReqCtrls.outType
   intMac0.io.aluType := macReqCtrls.aluType
   intMac1.io.src1    := Mux(macReqCtrls.aluType === MACC, io.macReqSrcA( 7, 0), c1(macReqCtrls.src1Ridx))
   intMac1.io.src2    := io.macReqSrcB(15, 8)
   intMac1.io.src3    := c1(macReqCtrls.src2Ridx)
-  intMac1.io.srcType := macReqCtrls.srcType
+  intMac1.io.srcType := macReqCtrls.outType
   intMac1.io.outType := macReqCtrls.outType
   intMac1.io.aluType := macReqCtrls.aluType
 
