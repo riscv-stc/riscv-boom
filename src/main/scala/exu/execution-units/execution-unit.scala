@@ -1376,8 +1376,8 @@ class MatExeUnit() (implicit p: Parameters)
   // matrix multiplication related
   // TODO: confirm latency
   mxu.io.macReq.valid           := io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM)
-  mxu.io.macReq.bits.src1Ridx   := Mux(io.req.bits.uop.uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA), io.req.bits.uop.prs3, io.req.bits.uop.prs1)
-  mxu.io.macReq.bits.src2Ridx   := io.req.bits.uop.prs3
+  mxu.io.macReq.bits.src1Ridx   := Mux(io.req.bits.uop.uopc.isOneOf(uopMRSUB, uopMWRSUB, uopMQRSUB), io.req.bits.uop.prs3, io.req.bits.uop.prs1)
+  mxu.io.macReq.bits.src2Ridx   := Mux(io.req.bits.uop.uopc.isOneOf(uopMRSUB, uopMWRSUB, uopMQRSUB), io.req.bits.uop.prs1, io.req.bits.uop.prs3)
   mxu.io.macReq.bits.dstRidx    := io.req.bits.uop.pdst
   mxu.io.macReq.bits.srcType    := Cat(io.req.bits.uop.fp_val.asUInt, io.req.bits.uop.ts1_eew)
   mxu.io.macReq.bits.outType    := Cat(io.req.bits.uop.fp_val.asUInt, io.req.bits.uop.td_eew)

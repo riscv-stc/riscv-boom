@@ -557,7 +557,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                         Mux(slice_len_tilen, csr_tilen, csr_tilek))
 
     val msew = Mux(is_mls, cs.v_ls_ew, csr_msew)
-    val is_mmv = cs.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V)
+    val is_mmv  = cs.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V)
+    val is_mopa = cs.uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA)
     val mqwiden = cs.uopc.isOneOf(uopMQOPA,uopMQMV_T,uopMQMV_V)
     val mwwiden = cs.uopc.isOneOf(uopMWOPA,uopMWMV_T,uopMWMV_V)
     val td_mwfactor = Mux(mqwiden, 2.U, Mux(mwwiden, 1.U, 0.U))
@@ -577,7 +578,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     }
 
     uop.m_is_split    := cs.can_be_split
-    uop.m_slice_cnt   := Mux(is_mls, sel_slice_cnt, csr_tilem)
+    uop.m_slice_cnt   := Mux(is_mls,  sel_slice_cnt, 
+                         Mux(is_mopa, csr_tilek, csr_tilem))
     uop.m_slice_len   := Mux(is_mls, sel_slice_len, 
                          Mux(is_mmv && mslice_dim === 2.U, csr_tilem,
                          Mux(is_mmv && mslice_dim === 3.U, csr_tilen, csr_tilek)))

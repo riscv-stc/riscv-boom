@@ -66,7 +66,7 @@ class IntMacUnit extends Module
 {
   val io = IO(new Bundle {
     val src1    = Input(UInt(32.W))
-    val src2    = Input(UInt(32.W))
+    val src2    = Input(UInt(8.W))
     val src3    = Input(UInt(32.W))
     val srcType = Input(UInt(3.W))
     val outType = Input(UInt(3.W))
@@ -93,10 +93,10 @@ class IntMacUnit extends Module
   // add, sub
   val in1 = Mux(io.srcType === INT8TYPE,  Fill(24, io.src1(7))  ## io.src1( 7, 0),
             Mux(io.srcType === INT16TYPE, Fill(16, io.src1(15)) ## io.src1(15, 0), io.src1))
-  val in2 = Mux(io.srcType === INT8TYPE,  Fill(24, io.src2(7))  ## io.src2( 7, 0),
-            Mux(io.srcType === INT16TYPE, Fill(16, io.src2(15)) ## io.src2(15, 0), io.src2))
+  val in2 = Mux(io.srcType === INT8TYPE,  Fill(24, io.src3(7))  ## io.src3( 7, 0),
+            Mux(io.srcType === INT16TYPE, Fill(16, io.src3(15)) ## io.src3(15, 0), io.src3))
   val in2_inv = Mux(io.aluType === SUB, ~in2, in2)
-  val adder   = io.src1.asSInt + in2_inv.asSInt + (io.aluType === SUB).asSInt
+  val adder   = io.src1.asSInt + in2_inv.asSInt + Mux(io.aluType === SUB, 1.S, 0.S)
 
   val result  = Mux(io.aluType(1), adder, macc)
 
@@ -109,7 +109,7 @@ class FpMacUnit extends Module
 {
   val io = IO(new Bundle {
     val src1           = Input(UInt(32.W))
-    val src2           = Input(UInt(32.W))
+    val src2           = Input(UInt(16.W))
     val src3           = Input(UInt(32.W))
     val srcType        = Input(UInt(3.W))
     val outType        = Input(UInt(3.W))
@@ -120,23 +120,32 @@ class FpMacUnit extends Module
   })
   val H = new FType(5, 11)
   val S = new FType(8, 24)
-  // convert fp16 or fp32 to recoded format
-  val recA     = recFNFromFN(H.exp, H.sig, io.src1(15, 0))
-  val recB     = recFNFromFN(H.exp, H.sig, io.src2(15, 0))
+  // convert fp16 A, B, and C to recoded format
+  val recAFP16 = recFNFromFN(H.exp, H.sig, io.src1(15, 0))
+  val recBFP16 = recFNFromFN(H.exp, H.sig, io.src2(15, 0))
   val recCFP16 = recFNFromFN(H.exp, H.sig, io.src3(15, 0))
+
+  val recA16ToRec32 = Module(new RecFNToRecFN(H.exp, H.sig, S.exp, S.sig))
+  recA16ToRec32.io.in := recAFP16
+  recA16ToRec32.io.roundingMode   := io.roundingMode
+  recA16ToRec32.io.detectTininess := io.detectTininess
+
+  val recC16ToRec32 = Module(new RecFNToRecFN(H.exp, H.sig, S.exp, S.sig))
+  recC16ToRec32.io.in := recCFP16
+  recC16ToRec32.io.roundingMode   := io.roundingMode
+  recC16ToRec32.io.detectTininess := io.detectTininess
+
+  // convert fp32 A, B and C to recoded format
+  val recAFP32 = recFNFromFN(S.exp, S.sig, io.src1)
   val recCFP32 = recFNFromFN(S.exp, S.sig, io.src3)
 
-  val rec16ToRec32 = Module(new RecFNToRecFN(H.exp, H.sig, S.exp, S.sig))
-  rec16ToRec32.io.in := recCFP16
-  rec16ToRec32.io.roundingMode   := io.roundingMode
-  rec16ToRec32.io.detectTininess := io.detectTininess
-
-  val recC = Mux(io.srcType === FP32TYPE, recCFP32, rec16ToRec32.io.out)
+  val recA = Mux(io.srcType === FP32TYPE, recAFP32, recA16ToRec32.io.out)
+  val recC = Mux(io.srcType === FP32TYPE, recCFP32, recC16ToRec32.io.out)
 
   // recoded fp16 * fp16
   val recMul = Module(new MulRecFNToFullRaw(H.exp, H.sig))
-  recMul.io.a := recA
-  recMul.io.b := recB
+  recMul.io.a := recAFP16
+  recMul.io.b := recBFP16
   val recMulOut = Wire(new RawFloat(H.exp, H.sig*2-1))
   recMulOut.isNaN  := recMul.io.out_isNaN
   recMulOut.isInf  := recMul.io.out_isInf
@@ -144,13 +153,6 @@ class FpMacUnit extends Module
   recMulOut.sign   := recMul.io.out_sign
   recMulOut.sExp   := recMul.io.out_sExp
   recMulOut.sig    := recMul.io.out_sig
-
-  // for debug
-  val recMulFN = Module(new MulRecFN(H.exp, H.sig))
-  recMulFN.io.a := recA
-  recMulFN.io.b := recB
-  recMulFN.io.roundingMode := io.roundingMode
-  val recMulFNOut = fNFromRecFN(H.exp, H.sig, recMulFN.io.out)
 
   // round raw results to recFN(32)
   val anyRawToRec = Module(new RoundAnyRawFNToRecFN(H.exp, H.sig*2-1, S.exp, S.sig, 0))
@@ -160,18 +162,11 @@ class FpMacUnit extends Module
   anyRawToRec.io.roundingMode   := io.roundingMode
   anyRawToRec.io.detectTininess := io.detectTininess
 
-  val anyRawToRecFP16 = Module(new RoundAnyRawFNToRecFN(H.exp, H.sig*2-1, H.exp, H.sig, 0))
-  anyRawToRecFP16.io.invalidExc     := recMul.io.invalidExc
-  anyRawToRecFP16.io.infiniteExc    := false.B
-  anyRawToRecFP16.io.in             := recMulOut
-  anyRawToRecFP16.io.roundingMode   := io.roundingMode
-  anyRawToRecFP16.io.detectTininess := io.detectTininess
-
   // recoded fp32 + fp32
   val recAdd = Module(new AddRecFNToRaw(S.exp, S.sig))
-  recAdd.io.subOp   := false.B
-  recAdd.io.a       := recC
-  recAdd.io.b       := anyRawToRec.io.out
+  recAdd.io.subOp   := io.aluType === SUB
+  recAdd.io.a       := Mux(io.aluType(1), recA, anyRawToRec.io.out)
+  recAdd.io.b       := recC
   recAdd.io.roundingMode := io.roundingMode
   val recAddOut = Wire(new RawFloat(S.exp, S.sig+2))
   recAddOut.isNaN  := recAdd.io.out_isNaN
@@ -266,11 +261,10 @@ class PE(
   val macReqCtrls = io.macReqIn.bits
   // fp16*fp16+fp32
   val fpMac = Module(new FpMacUnit())
-  fpMac.io.src1           := io.macReqSrcA
+  fpMac.io.src1           := Mux(macReqCtrls.aluType === MACC, io.macReqSrcA, c0(macReqCtrls.src1Ridx))
   fpMac.io.src2           := io.macReqSrcB
-  fpMac.io.src3           := c0(macReqCtrls.src1Ridx)
-  // fpMac.io.srcType        := macReqCtrls.srcType
-  fpMac.io.srcType        := macReqCtrls.outType         // Attentions here!
+  fpMac.io.src3           := c0(macReqCtrls.src2Ridx)
+  fpMac.io.srcType        := Mux(macReqCtrls.aluType === MACC, macReqCtrls.outType, macReqCtrls.srcType)
   fpMac.io.outType        := macReqCtrls.outType
   fpMac.io.aluType        := macReqCtrls.aluType
   fpMac.io.roundingMode   := macReqCtrls.rm
@@ -280,14 +274,14 @@ class PE(
   val intMac0 = Module(new IntMacUnit())
   val intMac1 = Module(new IntMacUnit())
   intMac0.io.src1    := Mux(macReqCtrls.aluType === MACC, io.macReqSrcA( 7, 0), c0(macReqCtrls.src1Ridx))
-  intMac0.io.src2    := Mux(macReqCtrls.aluType === MACC, io.macReqSrcB( 7, 0), c0(macReqCtrls.src2Ridx))
-  intMac0.io.src3    := c0(macReqCtrls.src1Ridx)
+  intMac0.io.src2    := io.macReqSrcB( 7, 0)
+  intMac0.io.src3    := c0(macReqCtrls.src2Ridx)
   intMac0.io.srcType := macReqCtrls.srcType
   intMac0.io.outType := macReqCtrls.outType
   intMac0.io.aluType := macReqCtrls.aluType
   intMac1.io.src1    := Mux(macReqCtrls.aluType === MACC, io.macReqSrcA( 7, 0), c1(macReqCtrls.src1Ridx))
-  intMac1.io.src2    := Mux(macReqCtrls.aluType === MACC, io.macReqSrcB(15, 8), c1(macReqCtrls.src2Ridx))
-  intMac1.io.src3    := c1(macReqCtrls.src1Ridx)
+  intMac1.io.src2    := io.macReqSrcB(15, 8)
+  intMac1.io.src3    := c1(macReqCtrls.src2Ridx)
   intMac1.io.srcType := macReqCtrls.srcType
   intMac1.io.outType := macReqCtrls.outType
   intMac1.io.aluType := macReqCtrls.aluType

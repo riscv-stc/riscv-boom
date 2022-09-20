@@ -3140,8 +3140,9 @@ class VecLSAddrGenUnit(implicit p: Parameters) extends BoomModule()(p)
   io.resp.bits.uop.m_split_first:= (sliceCntCtr === 0.U) && (sliceBlockAddr === 0.U)
   io.resp.bits.uop.m_split_last := (sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast
   io.resp.bits.uop.m_slice_quad := sliceBlockAddr >> vLenbSz.U
-  io.resp_vm                    := Mux(uop.is_rvv, VRegMask(uop.v_eidx, eew, eidxInc, vLenb) & activeByteMask,
-                                                   VRegMask(sliceBlockAddr, 0.U, sliceAddrInc, vLenb))
+  io.resp_vm                    := Mux(uop.is_rvv,    VRegMask(uop.v_eidx, eew, eidxInc, vLenb) & activeByteMask,
+                                   Mux(sliceCrossBlk, VRegMask(RegNext(clLeftBytes), 0.U, sliceAddrInc, vLenb),
+                                                      VRegMask(sliceBlockAddr, 0.U, sliceAddrInc, vLenb)))
   io.resp_shdir                 := Mux(uop.is_rvm, !sliceCrossBlk,
                                    Mux(uop.is_rvv && usSplitCtr === 0.U,  true.B, false.B))
   val shamt = if(vLenb > clSize) (usSplitCtr << clSizeLog2.U) - clOffset

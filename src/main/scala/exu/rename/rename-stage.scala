@@ -28,6 +28,7 @@ import freechips.rocketchip.rocket.{CSRs, CSR}
 import boom.common._
 import boom.util._
 import boom.common.MicroOpcodes._
+import FUConstants._
 
 /**
  * IO bundle to interface with the Register Rename logic
@@ -953,18 +954,18 @@ class MatRenameStage(
   //-------------------------------------------------------------
   // Busy Table
   for (w <- 0 until plWidth) {
-    trbusytable.io.rebusy_reqs(w) := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_TR
+    trbusytable.io.rebusy_reqs(w)  := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_TR
     accbusytable.io.rebusy_reqs(w) := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_ACC
   }
-  trbusytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
+  trbusytable.io.ren_uops  := ren2_uops  // expects pdst to be set up.
   trbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_TR)
-  trbusytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
-  trbusytable.io.wb_bits  := io.wakeups.map(w => UIntToOH(w.bits.uop.m_sidx))
+  trbusytable.io.wb_pdsts  := io.wakeups.map(_.bits.uop.pdst)
+  trbusytable.io.wb_bits   := io.wakeups.map(w => UIntToOH(w.bits.uop.m_sidx))
 
-  accbusytable.io.ren_uops := ren2_uops  // expects pdst to be set up.
+  accbusytable.io.ren_uops  := ren2_uops  // expects pdst to be set up.
   accbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_ACC)
-  accbusytable.io.wb_pdsts := io.wakeups.map(_.bits.uop.pdst)
-  accbusytable.io.wb_bits  := io.wakeups.map(w => Mux(w.bits.uop.m_is_split, UIntToOH(w.bits.uop.m_sidx), Fill(vLenb, 1.U(1.W))))
+  accbusytable.io.wb_pdsts  := io.wakeups.map(_.bits.uop.pdst)
+  accbusytable.io.wb_bits   := io.wakeups.map(w => Mux(w.bits.uop.m_is_split, UIntToOH(w.bits.uop.m_sidx), Fill(vLenb, 1.U(1.W))))
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
     "[rename] Wakeup has wrong rtype.")
@@ -981,7 +982,7 @@ class MatRenameStage(
         uop.pts1_busy := trbusy.prs1_busy
       }
     } .elsewhen(uop.lrs1_rtype === RT_ACC) {
-      when(uop.isHSlice =/= accbusy.prs1_busy(vLenb) && accbusy.prs1_busy(vLenb-1, 0).orR()) {
+      when(uop.fu_code =/= FU_GEMM && uop.isHSlice =/= accbusy.prs1_busy(vLenb) && accbusy.prs1_busy(vLenb-1, 0).orR()) {
         uop.pts1_busy := Fill(vLenb, 1.U(1.W))
       }.otherwise {
         uop.pts1_busy := accbusy.prs1_busy
@@ -995,7 +996,7 @@ class MatRenameStage(
         uop.pts2_busy := trbusy.prs2_busy
       }
     } .elsewhen(uop.lrs2_rtype === RT_ACC) {
-      when(uop.isHSlice =/= accbusy.prs2_busy(vLenb) && accbusy.prs2_busy(vLenb-1, 0).orR()) {
+      when(uop.fu_code =/= FU_GEMM && uop.isHSlice =/= accbusy.prs2_busy(vLenb) && accbusy.prs2_busy(vLenb-1, 0).orR()) {
         uop.pts2_busy := Fill(vLenb, 1.U(1.W))
       }.otherwise {
         uop.pts2_busy := accbusy.prs2_busy
@@ -1008,13 +1009,8 @@ class MatRenameStage(
       }.otherwise {
         uop.pts3_busy := trbusy.prs3_busy
       }
-    }
-    when(uop.dst_rtype === RT_ACC) {
-      when(accbusy.prs3_busy(vLenb) && accbusy.prs3_busy(vLenb-1, 0).orR()) {
-        uop.pts3_busy := Fill(vLenb, 1.U(1.W))
-      }.otherwise {
-        uop.pts3_busy := accbusy.prs3_busy
-      }
+    } .elsewhen(uop.dst_rtype === RT_ACC) {
+      uop.pts3_busy := accbusy.prs3_busy
     }
 
     val valid = ren2_valids(w)
