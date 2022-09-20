@@ -770,13 +770,12 @@ class MatRenameBypass(
   val bypass_pdsts = older_uops.map(_.pdst)
   when (do_bypass_rs1) { bypassed_uop.prs1       := Mux1H(bypass_sel_rs1, bypass_pdsts) }
   when (do_bypass_rs2) { bypassed_uop.prs2       := Mux1H(bypass_sel_rs2, bypass_pdsts) }
+  when (do_bypass_dst) { bypassed_uop.prs3       := Mux1H(bypass_sel_dst, bypass_pdsts) }
   when (do_bypass_dst) { bypassed_uop.stale_pdst := Mux1H(bypass_sel_dst, bypass_pdsts) }
 
   bypassed_uop.pts1_busy := uop.pts1_busy | Fill(vLenb, do_bypass_rs1)
   bypassed_uop.pts2_busy := uop.pts2_busy | Fill(vLenb, do_bypass_rs2)
-
-  bypassed_uop.prs3      := DontCare
-  bypassed_uop.pts3_busy := 0.U
+  bypassed_uop.pts3_busy := uop.pts3_busy | Fill(vLenb, do_bypass_dst)
 
   io.o_uop := bypassed_uop
 }

@@ -1226,7 +1226,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
                                            (dis_uops(w).rt(RS1, isVector ), v_uop.prs1_busy)))
         dis_uops(w).pts1_busy := m_uop.pts1_busy
         dis_uops(w).pts2_busy := m_uop.pts2_busy
-        dis_uops(w).pts3_busy := m_uop.pts3_busy
+        dis_uops(w).pts3_busy := Mux(dis_uops(w).rt(RD,  isAccTile), m_uop.pts3_busy, 0.U)
         dis_uops(w).pdst := Mux(dis_uops(w).rt(RD, isFloat ), f_uop.pdst,
                             Mux(dis_uops(w).rt(RD, isInt   ), i_uop.pdst,
                             Mux(dis_uops(w).rt(RD, isMatrix), m_uop.pdst,
@@ -1241,6 +1241,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         dis_uops(w).prs2 := Mux(dis_uops(w).rt(RS2, isFloat ), f_uop.prs2,
                             Mux(dis_uops(w).rt(RS2, isInt   ), i_uop.prs2,
                             Mux(dis_uops(w).rt(RS2, isMatrix), m_uop.prs2, dis_uops(w).lrs2)))
+        dis_uops(w).prs3 := Mux(dis_uops(w).rt(RD,  isAccTile), m_uop.prs3, f_uop.prs3)
         dis_uops(w).m_scalar_busy := dis_uops(w).is_rvm && dis_uops(w).uses_scalar
       }
     } else {

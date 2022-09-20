@@ -146,8 +146,10 @@ class IssueSlot(
       ret       := Mux(uop.rt(RS1, isVector), !io.vbusy_status(pvs1),
                    Mux(uop.uses_scalar, ps, true.B))
     } else if(matrix) {
-      ret := Mux(uop.rt(RS1, isMatrix) && uop.m_scalar_busy, false.B, 
-             Mux(uop.rt(RS1, isMatrix), p1(uop.m_sidx), true.B))
+      ret := Mux(uop.rt(RS1, isMatrix) && uop.m_scalar_busy, false.B,
+             Mux(uop.rt(RS1, isTrTile), p1(uop.m_sidx),
+             Mux(uop.fu_code === FU_GEMM, p1.andR,
+             Mux(uop.rt(RS1, isAccTile), p1(uop.m_sidx), true.B))))
     } else {
       ret := p1(0)
     }
@@ -182,7 +184,8 @@ class IssueSlot(
       val stale_pvd = uop.stale_pvd(rsel).bits
       ret          := !uop.rt(RD, isVector) || !io.vbusy_status(stale_pvd)
     } else if(matrix) {
-      ret := Mux(uop.rt(RD, isAccTile), p3(uop.m_sidx), true.B)
+      ret := Mux(!uop.rt(RD, isAccTile), true.B,
+             Mux(uop.fu_code === FU_GEMM, p3.andR, p3(uop.m_sidx)))
     } else {
       ret := p3(0)
     }
@@ -329,11 +332,13 @@ class IssueSlot(
       val wk_ts1 = wk_valid && (wk_pdst === next_uop.prs1) && (wk_uop.dst_rtype === next_uop.lrs1_rtype)
       val wk_ts2 = wk_valid && (wk_pdst === next_uop.prs2) && (wk_uop.dst_rtype === next_uop.lrs2_rtype)
       val wk_ts3 = wk_valid && (wk_pdst === next_uop.prs3) &&  wk_uop.rt(RD, isAccTile)
-      wake_p1(i) := Mux(next_uop.rt(RS1, isTrTile) && wk_uop.isHSlice === next_uop_ts1_hslice, wk_ts1 << wk_uop.m_sidx,
-                    Mux(wk_uop.m_split_last, Fill(vLenb, wk_ts1), 0.U))
+      wake_p1(i) := Mux(next_uop.rt(RS1, isAccTile) && wk_uop.uses_ldq, wk_ts1 << wk_uop.m_sidx,
+                    Mux(next_uop.rt(RS1, isTrTile)  && wk_uop.isHSlice === next_uop_ts1_hslice, wk_ts1 << wk_uop.m_sidx,
+                    Mux(wk_uop.m_split_last, Fill(vLenb, wk_ts1), 0.U)))
       wake_p2(i) := Mux(next_uop.rt(RS2, isTrTile) && wk_uop.isHSlice === next_uop_ts2_hslice, wk_ts2 << wk_uop.m_sidx,
                     Mux(wk_uop.m_split_last, Fill(vLenb, wk_ts2), 0.U))
-      wake_p3(i) := Mux(wk_uop.m_split_last, Fill(vLenb, wk_ts3), 0.U)
+      wake_p3(i) := Mux(next_uop.rt(RS1, isAccTile) && wk_uop.uses_ldq, wk_ts3 << wk_uop.m_sidx,
+                    Mux(wk_uop.m_split_last, Fill(vLenb, wk_ts3), 0.U))
     } else {
       when (wk_valid && (wk_pdst === next_uop.prs1)) {
         next_p1 := true.B
