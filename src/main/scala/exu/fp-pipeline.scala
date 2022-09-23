@@ -20,6 +20,7 @@ import freechips.rocketchip.tile
 
 import boom.exu.FUConstants._
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.util.{BoomCoreStringPrefix}
 
 /**
@@ -46,13 +47,21 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
     val from_int         = Flipped(Decoupled(new ExeUnitResp(fLen+1)))// from integer RF
     val to_sdq           = Decoupled(new ExeUnitResp(fLen))           // to Load/Store Unit
     val to_int           = Decoupled(new ExeUnitResp(xLen))           // to integer RF
+    val fpupdate         = if (usingVector) Output(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
 
+    val fromVec: Vec[DecoupledIO[ExeUnitResp]] = Flipped(Vec(vecWidth, Decoupled(new ExeUnitResp(eLen))))
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(fLen+1)))
-    val wb_valids        = Input(Vec(numWakeupPorts, Bool()))
-    val wb_pdsts         = Input(Vec(numWakeupPorts, UInt(width=fpPregSz.W)))
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
     val debug_wb_wdata   = Output(Vec(numWakeupPorts, UInt((fLen+1).W)))
+
+    val perf = Output(new Bundle {
+      val iss_valids = Vec(fpIssueParams.issueWidth, Bool())
+      val exe_units_req_valids = Vec(fpIssueParams.issueWidth, Bool())
+      val iss_slots_empty = Bool()
+      val iss_slots_full  = Bool()
+      val fdiv_busy       = Vec(fpIssueParams.issueWidth, Bool())
+    })
   })
 
   //**********************************
@@ -77,7 +86,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
                          exe_units.withFilter(_.readsFrf).map(x => 3),
                          0, // No bypass for FP
                          0,
-                         fLen+1))
+                         fLen+1, float = true))
 
   require (exe_units.count(_.readsFrf) == issue_unit.issueWidth)
   require (exe_units.numFrfWritePorts + numLlPorts == numWakeupPorts)
@@ -87,6 +96,12 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
 
   val iss_valids = Wire(Vec(exe_units.numFrfReaders, Bool()))
   val iss_uops   = Wire(Vec(exe_units.numFrfReaders, new MicroOp()))
+
+  io.perf.iss_valids := iss_valids
+  io.perf.exe_units_req_valids := exe_units.map(u => u.io.req.valid)
+  io.perf.iss_slots_full := issue_unit.io.perf.full
+  io.perf.iss_slots_empty := issue_unit.io.perf.empty
+  io.perf.fdiv_busy := exe_units.map(u => if(u.hasFdiv) u.io.perf.fdiv_busy else false.B)
 
   issue_unit.io.tsc_reg := io.debug_tsc_reg
   issue_unit.io.brupdate := io.brupdate
@@ -98,6 +113,9 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   }
   issue_unit.io.ld_miss := false.B
 
+  issue_unit.io.vl_wakeup.valid := false.B
+  issue_unit.io.vl_wakeup.bits  := DontCare
+
   require (exe_units.numTotalBypassPorts == 0)
 
   //-------------------------------------------------------------
@@ -107,6 +125,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   // Input (Dispatch)
   for (w <- 0 until dispatchWidth) {
     issue_unit.io.dis_uops(w) <> io.dis_uops(w)
+	issue_unit.io.dis_uops(w).bits.vl_ready := true.B
   }
 
   //-------------------------------------------------------------
@@ -136,6 +155,12 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   }
   issue_unit.io.pred_wakeup_port.valid := false.B
   issue_unit.io.pred_wakeup_port.bits := DontCare
+
+  if (usingVector) {
+    //issue_unit.io.vmupdate.map(_.valid := false.B)
+    //issue_unit.io.vmupdate.map(_.bits := DontCare)
+    io.fpupdate := fregister_read.io.fpupdate
+  }
 
   //-------------------------------------------------------------
   // **** Register Read Stage ****
@@ -167,31 +192,44 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   // **** Writeback Stage ****
   //-------------------------------------------------------------
 
-  val ll_wbarb = Module(new Arbiter(new ExeUnitResp(fLen+1), 2))
+  val ll_wbarb = Module(new Arbiter(new ExeUnitResp(fLen+1), 2 + vecWidth))
 
 
   // Hookup load writeback -- and recode FP values.
   ll_wbarb.io.in(0) <> io.ll_wports(0)
   ll_wbarb.io.in(0).bits.data := recode(io.ll_wports(0).bits.data,
-                                        io.ll_wports(0).bits.uop.mem_size =/= 2.U)
+                                        io.ll_wports(0).bits.uop.mem_size - 1.U)
+  assert(!io.ll_wports(0).valid || (io.ll_wports(0).bits.uop.mem_size <= 3.U &&
+                                    io.ll_wports(0).bits.uop.mem_size >= 1.U),
+         "illegal mem_size for FP load")
 
   val ifpu_resp = io.from_int
   ll_wbarb.io.in(1) <> ifpu_resp
+
+  val vecResp: Vec[DecoupledIO[ExeUnitResp]] = io.fromVec
+    Seq.tabulate(vecWidth)(i => i).foreach{ i =>
+      ll_wbarb.io.in(2 + i) <> vecResp(i)
+      ll_wbarb.io.in(2 + i).bits.data := recode(vecResp(i).bits.data,
+        vecResp(i).bits.uop.mem_size)
+    }
 
 
   // Cut up critical path by delaying the write by a cycle.
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
-  fregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, fpregSz, fLen+1, RT_FLT))
+  fregfile.io.write_ports(0) := RegNext(WritePort(ll_wbarb.io.out, fpregSz, fLen+1, isFloat))
 
   assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
-  when (ifpu_resp.valid) { assert (ifpu_resp.bits.uop.rf_wen && ifpu_resp.bits.uop.dst_rtype === RT_FLT) }
+  when (ifpu_resp.valid) { assert (ifpu_resp.bits.uop.rf_wen && ifpu_resp.bits.uop.rt(RD, isFloat)) }
 
   var w_cnt = 1
   for (i <- 1 until memWidth) {
-    fregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), fpregSz, fLen+1, RT_FLT))
+    fregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), fpregSz, fLen+1, isFloat))
     fregfile.io.write_ports(w_cnt).bits.data := RegNext(recode(io.ll_wports(i).bits.data,
-                                                               io.ll_wports(i).bits.uop.mem_size =/= 2.U))
+                                                               io.ll_wports(i).bits.uop.mem_size - 1.U))
+    assert(!io.ll_wports(i).valid || (io.ll_wports(i).bits.uop.mem_size <= 3.U &&
+                                      io.ll_wports(i).bits.uop.mem_size >= 1.U),
+           "illegal mem_size for FP load")
     w_cnt += 1
   }
   for (eu <- exe_units) {
@@ -203,7 +241,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
       when (eu.io.fresp.valid) {
         assert(eu.io.fresp.ready, "No backpressuring the FPU")
         assert(eu.io.fresp.bits.uop.rf_wen, "rf_wen must be high here")
-        assert(eu.io.fresp.bits.uop.dst_rtype === RT_FLT, "wb type must be FLT for fpu")
+        assert(eu.io.fresp.bits.uop.rt(RD, isFloat), "wb type must be FLT for fpu")
       }
       w_cnt += 1
     }
@@ -232,7 +270,10 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   for (i <- 1 until memWidth) {
     io.wakeups(w_cnt) := io.ll_wports(i)
     io.wakeups(w_cnt).bits.data := recode(io.ll_wports(i).bits.data,
-      io.ll_wports(i).bits.uop.mem_size =/= 2.U)
+                                          io.ll_wports(i).bits.uop.mem_size - 1.U)
+    assert(!io.ll_wports(i).valid || (io.ll_wports(i).bits.uop.mem_size <= 3.U &&
+                                      io.ll_wports(i).bits.uop.mem_size >= 1.U),
+           "illegal mem_size for FP load")
     w_cnt += 1
   }
   for (eu <- exe_units) {
@@ -240,7 +281,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
       val exe_resp = eu.io.fresp
       val wb_uop = eu.io.fresp.bits.uop
       val wport = io.wakeups(w_cnt)
-      wport.valid := exe_resp.valid && wb_uop.dst_rtype === RT_FLT
+      wport.valid := exe_resp.valid && wb_uop.rt(RD, isFloat)
       wport.bits := exe_resp.bits
 
       w_cnt += 1
@@ -255,7 +296,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
     wdata := ieee(wakeup.bits.data)
   }
 
-  exe_units.map(_.io.fcsr_rm := io.fcsr_rm)
+  exe_units.withFilter(_.hasFcsr).map(_.io.fcsr_rm := io.fcsr_rm)
   exe_units.map(_.io.status := io.status)
 
   //-------------------------------------------------------------

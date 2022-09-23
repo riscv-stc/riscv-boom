@@ -36,6 +36,7 @@ case class BoomCoreParams(
   numIntPhysRegisters: Int = 96,
   numFpPhysRegisters: Int = 64,
   maxBrCount: Int = 4,
+  maxVconfigCount: Int = 4,
   numFetchBufferEntries: Int = 16,
   enableAgePriorityIssue: Boolean = true,
   enablePrefetching: Boolean = false,
@@ -47,6 +48,7 @@ case class BoomCoreParams(
   enableBTBFastRepair: Boolean = true,
   useAtomicsOnlyForIO: Boolean = false,
   ftq: FtqParameters = FtqParameters(),
+  vcq: VcqParameters = VcqParameters(),
   intToFpLatency: Int = 2,
   imulLatency: Int = 3,
   nPerfCounters: Int = 0,
@@ -94,6 +96,27 @@ case class BoomCoreParams(
   clockGate: Boolean = false,
   mcontextWidth: Int = 0,
   scontextWidth: Int = 0,
+
+  /* vector extension */
+  override val minFLen: Int = 16,
+  override val useVector: Boolean = false,
+  override val vLen: Int = 0,
+  override val eLen: Int = 0,
+  override val vMemDataBits: Int = 0,
+  numVecPhysRegisters: Int = 0,
+  numVLdqEntries: Int = 16,
+  numVStqEntries: Int = 16,
+  numVLxqEntries: Int = 16,
+  numVSxqEntries: Int = 16,
+
+   /* matrix extension */
+  override val useMatrix: Boolean = false,
+  override val mLen: Int = 0,
+  override val mxuTileRows: Int = 0,
+  override val mxuTileCols: Int = 0,
+
+  numMatTrRegisters: Int = 0,
+  numMatAccRegisters: Int = 0,
 
   /* debug stuff */
   enableCommitLogPrintf: Boolean = false,
@@ -164,7 +187,9 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val numLdqEntries = boomParams.numLdqEntries       // number of LAQ entries
   val numStqEntries = boomParams.numStqEntries       // number of SAQ/SDQ entries
   val maxBrCount    = boomParams.maxBrCount          // number of branches we can speculate simultaneously
+  val maxVconfigCount  = boomParams.maxVconfigCount  // number of vconfigs we can speculate simultaneously
   val ftqSz         = boomParams.ftq.nEntries        // number of FTQ entries
+  val vcqSz         = boomParams.vcq.nEntries        // number of FTQ entries
   val numFetchBufferEntries = boomParams.numFetchBufferEntries // number of instructions that stored between fetch&decode
 
   val numIntPhysRegs= boomParams.numIntPhysRegisters // size of the integer physical register file
@@ -173,6 +198,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   //************************************
   // Functional Units
   val usingFDivSqrt = boomParams.fpu.isDefined && boomParams.fpu.get.divSqrt
+  val usingzfhExt   = boomParams.fpu.isDefined && boomParams.fpu.get.zfhExt
 
   val mulDivParams = boomParams.mulDiv.getOrElse(MulDivParams())
   // TODO: Allow RV32IF
@@ -184,6 +210,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val imulLatency = boomParams.imulLatency
   val dfmaLatency = if (boomParams.fpu.isDefined) boomParams.fpu.get.dfmaLatency else 3
   val sfmaLatency = if (boomParams.fpu.isDefined) boomParams.fpu.get.sfmaLatency else 3
+  val hfmaLatency = if (boomParams.fpu.isDefined) boomParams.fpu.get.hfmaLatency else 3
   // All FPU ops padded out to same delay for writeport scheduling.
   require (sfmaLatency == dfmaLatency)
 
@@ -202,9 +229,15 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
 
   val intIssueParam = issueParams.find(_.iqType == IQT_INT.litValue).get
   val memIssueParam = issueParams.find(_.iqType == IQT_MEM.litValue).get
+  val fpIssueParam  = issueParams.find(_.iqType == IQT_FP.litValue).get
+  val vecIssueParam = if (usingVector) issueParams.find(_.iqType == IQT_VEC.litValue).get else null
+  val matIssueParam = if (usingMatrix) issueParams.find(_.iqType == IQT_MAT.litValue).get else null
 
   val intWidth = intIssueParam.issueWidth
   val memWidth = memIssueParam.issueWidth
+  val fpWidth  = fpIssueParam.issueWidth
+  val vecWidth = if (usingVector) vecIssueParam.issueWidth else 0
+  val matWidth = if (usingMatrix) matIssueParam.issueWidth else 0
 
   issueParams.map(x => require(x.dispatchWidth <= coreWidth && x.dispatchWidth > 0))
 
@@ -249,19 +282,59 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val enableBTBFastRepair = boomParams.enableBTBFastRepair
 
   //************************************
+  // vector stuff
+  require (issueParams.count(_.iqType == IQT_VEC.litValue) == 1 || !usingVector)
+  val numVecPhysRegs = boomParams.numVecPhysRegisters
+  //require (numVecPhysRegs % 8 == 0, "Number of vector physical register must be multiple of 8")
+  def numELENinVLEN = if (usingVector) vLen/eLen else 0
+  //def numVecPhysElens= boomParams.numVecPhysRegisters * numELENinVLEN
+  def vLenb   = vLen/8
+  def vLenSz  = if (usingVector) log2Ceil(vLen) else 0
+  def vLenbSz = if (usingVector) log2Ceil(vLenb) else 0
+  def eLenSelSz = if (usingVector) log2Ceil(numELENinVLEN) else 0
+  def eLenb = eLen/8
+  def eLenSz = if (usingVector) log2Ceil(eLen) else 0
+  //val minFLen = boomParams.minFLen
+  val numVLdqEntries = if (usingVector) boomParams.numVLdqEntries else 0
+  val numVStqEntries = if (usingVector) boomParams.numVStqEntries else 0
+  val vldqAddrSz     = log2Ceil(numVLdqEntries)
+  val vstqAddrSz     = log2Ceil(numVStqEntries)
+  val numVLxqEntries = if (usingVector) boomParams.numVLxqEntries else 0
+  val numVSxqEntries = if (usingVector) boomParams.numVSxqEntries else 0
+  val vlxqAddrSz     = log2Ceil(numVLxqEntries)
+  val vsxqAddrSz     = log2Ceil(numVSxqEntries)
+  val maxUnitEntries = if (numVLdqEntries > numVStqEntries) numVLdqEntries else numVStqEntries
+  val maxIdxEntries = if (numVLxqEntries > numVSxqEntries) numVLxqEntries else numVSxqEntries
+  val maxEntries = if (maxUnitEntries > maxIdxEntries) maxUnitEntries else maxIdxEntries
+
+  // matrix stuff
+  require (issueParams.count(_.iqType == IQT_MAT.litValue) == 1 || !usingMatrix)
+  val numMatTrPhysRegs  = if (usingMatrix) boomParams.numMatTrRegisters else 0
+  val numMatAccPhysRegs = if (usingMatrix) boomParams.numMatAccRegisters else 0
+  def maxTrTileCols = vLenb
+  def numTrTileRows = mLen/vLen
+  def mxuMeshRows = mLen/(vLen*mxuTileRows)
+  def mxuMeshCols = vLen/(16*mxuTileCols)
+
+
+  //************************************
   // Implicitly calculated constants
   val numRobRows      = numRobEntries/coreWidth
   val robAddrSz       = log2Ceil(numRobRows) + log2Ceil(coreWidth)
   // the f-registers are mapped into the space above the x-registers
-  val logicalRegCount = if (usingFPU) 64 else 32
+  val logicalRegCount = 32 //if (usingFPU) 64 else 32
   val lregSz          = log2Ceil(logicalRegCount)
   val ipregSz         = log2Ceil(numIntPhysRegs)
   val fpregSz         = log2Ceil(numFpPhysRegs)
-  val maxPregSz       = ipregSz max fpregSz
+  val vpregSz         = if (usingVector) log2Ceil(numVecPhysRegs) else 0
+  val tpregSz         = if (usingMatrix) log2Ceil(numMatTrPhysRegs) else 0
+  //val vElenSz         = if (usingVector) log2Ceil(numVecPhysElens) else 0
+  val maxPregSz       = ipregSz max fpregSz max vpregSz
   val ldqAddrSz       = log2Ceil(numLdqEntries)
   val stqAddrSz       = log2Ceil(numStqEntries)
   val lsuAddrSz       = ldqAddrSz max stqAddrSz
   val brTagSz         = log2Ceil(maxBrCount)
+  val vconfigTagSz    = log2Ceil(maxVconfigCount)
 
   require (numIntPhysRegs >= (32 + coreWidth))
   require (numFpPhysRegs >= (32 + coreWidth))

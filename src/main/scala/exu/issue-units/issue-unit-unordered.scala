@@ -88,7 +88,7 @@ class IssueUnitStatic(
 
   for (w <- 0 until issueWidth) {
     io.iss_valids(w) := false.B
-    io.iss_uops(w)   := NullMicroOp
+    io.iss_uops(w)   := NullMicroOp()
     // unsure if this is overkill
     io.iss_uops(w).prs1 := 0.U
     io.iss_uops(w).prs2 := 0.U

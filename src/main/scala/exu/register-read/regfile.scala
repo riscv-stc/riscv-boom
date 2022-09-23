@@ -17,9 +17,10 @@ import chisel3._
 import chisel3.util._
 
 import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.tile.TileKey
 
 import boom.common._
-import boom.util.{BoomCoreStringPrefix}
+import boom.util._
 
 /**
  * IO bundle for a register read port
@@ -39,10 +40,11 @@ class RegisterFileReadPortIO(val addrWidth: Int, val dataWidth: Int)(implicit p:
  * @param addrWidth size of register address in bits
  * @param dataWidth size of register in bits
  */
-class RegisterFileWritePort(val addrWidth: Int, val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
+class RegisterFileWritePort(val addrWidth: Int, val dataWidth: Int, val vector: Boolean = false)(implicit p: Parameters) extends BoomBundle
 {
   val addr = UInt(addrWidth.W)
   val data = UInt(dataWidth.W)
+  val mask = if (vector) UInt(dataWidth.W) else null
 }
 
 /**
@@ -50,15 +52,26 @@ class RegisterFileWritePort(val addrWidth: Int, val dataWidth: Int)(implicit p: 
  */
 object WritePort
 {
-  def apply(enq: DecoupledIO[ExeUnitResp], addrWidth: Int, dataWidth: Int, rtype: UInt)
-    (implicit p: Parameters): Valid[RegisterFileWritePort] = {
-     val wport = Wire(Valid(new RegisterFileWritePort(addrWidth, dataWidth)))
-
-     wport.valid     := enq.valid && enq.bits.uop.dst_rtype === rtype
-     wport.bits.addr := enq.bits.uop.pdst
-     wport.bits.data := enq.bits.data
-     enq.ready       := true.B
-     wport
+  def apply(
+    enq: DecoupledIO[ExeUnitResp],
+    addrWidth: Int,
+    dataWidth: Int,
+    rtype: UInt => Bool,
+    vector: Boolean = false,
+    llport: Boolean = false,
+  ) (implicit p: Parameters): Valid[RegisterFileWritePort] = {
+    val wport = Wire(Valid(new RegisterFileWritePort(addrWidth, dataWidth, vector)))
+    val enq_uop = enq.bits.uop
+    wport.valid := enq.valid && enq_uop.rt(RD, rtype)
+    wport.bits.addr := enq_uop.pdst
+    wport.bits.data := enq.bits.data
+    if (vector) {
+      val vLen = p(TileKey).core.vLen
+      wport.bits.data := Mux(enq_uop.rt(RD, isMaskVD), enq.bits.data << enq_uop.v_eidx, enq.bits.data)
+      wport.bits.mask := Mux(enq_uop.rt(RD, isMaskVD), Fill(vLen, 1.U(1.W)) << enq_uop.v_eidx, FillInterleaved(8, enq.bits.vmask))
+    }
+    enq.ready := true.B
+    wport
   }
 }
 
@@ -76,12 +89,13 @@ abstract class RegisterFile(
   numReadPorts: Int,
   numWritePorts: Int,
   registerWidth: Int,
-  bypassableArray: Seq[Boolean]) // which write ports can be bypassed to the read ports?
+  bypassableArray: Seq[Boolean], // which write ports can be bypassed to the read ports?
+  vector: Boolean = false)
   (implicit p: Parameters) extends BoomModule
 {
   val io = IO(new BoomBundle {
     val read_ports = Vec(numReadPorts, new RegisterFileReadPortIO(maxPregSz, registerWidth))
-    val write_ports = Flipped(Vec(numWritePorts, Valid(new RegisterFileWritePort(maxPregSz, registerWidth))))
+    val write_ports = Flipped(Vec(numWritePorts, Valid(new RegisterFileWritePort(maxPregSz, registerWidth, vector))))
   })
 
   private val rf_cost = (numReadPorts + numWritePorts) * (numReadPorts + 2*numWritePorts)
@@ -108,9 +122,10 @@ class RegisterFileSynthesizable(
    numReadPorts: Int,
    numWritePorts: Int,
    registerWidth: Int,
-   bypassableArray: Seq[Boolean])
+   bypassableArray: Seq[Boolean],
+   vector: Boolean = false)
    (implicit p: Parameters)
-   extends RegisterFile(numRegisters, numReadPorts, numWritePorts, registerWidth, bypassableArray)
+   extends RegisterFile(numRegisters, numReadPorts, numWritePorts, registerWidth, bypassableArray, vector)
 {
   // --------------------------------------------------------------
 
@@ -125,7 +140,7 @@ class RegisterFileSynthesizable(
   val read_addrs = io.read_ports.map(p => RegNext(p.addr))
 
   for (i <- 0 until numReadPorts) {
-    read_data(i) := regfile(read_addrs(i))
+    read_data(i) := Mux(read_addrs(i)===0.U, 0.U, regfile(read_addrs(i)))
   }
 
   // --------------------------------------------------------------
@@ -158,21 +173,62 @@ class RegisterFileSynthesizable(
   // --------------------------------------------------------------
   // Write ports.
 
-  for (wport <- io.write_ports) {
-    when (wport.valid) {
-      regfile(wport.bits.addr) := wport.bits.data
-    }
-  }
+  if (vector) {
+    require(registerWidth == vLen)
 
-  // ensure there is only 1 writer per register (unless to preg0)
-  if (numWritePorts > 1) {
-    for (i <- 0 until (numWritePorts - 1)) {
-      for (j <- (i + 1) until numWritePorts) {
-        assert(!io.write_ports(i).valid ||
-               !io.write_ports(j).valid ||
-               (io.write_ports(i).bits.addr =/= io.write_ports(j).bits.addr) ||
-               (io.write_ports(i).bits.addr === 0.U), // note: you only have to check one here
-          "[regfile] too many writers a register")
+    when (reset.asBool) {
+      for (r <- 0 until numRegisters) {
+        regfile(r) := 0.U
+      }
+    }
+
+    // for vector you need merge write ports since they may access the same ELEN on different elements
+    for (r <- 0 until numRegisters) {
+      when (io.write_ports.map(w => w.valid && r.U === w.bits.addr).reduce(_|_)) {
+        val old_data = regfile(r)
+        val new_data = Wire(Vec(vLen, UInt(1.W)))
+        (0 until vLen).map(x => new_data(x) := old_data(x))
+        for (wport <- io.write_ports) {
+          for (i <- 0 until vLen) {
+            when (wport.valid && r.U === wport.bits.addr && wport.bits.mask(i)) {
+              new_data(i) := wport.bits.data(i)
+            }
+          }
+        }
+        regfile(r) := Mux(r.U === 0.U, 0.U, Cat(new_data.reverse))
+      }
+    }
+
+    // ensure there is only 1 writer per element (unless to preg0)
+    if (numWritePorts > 1) {
+      for (i <- 0 until (numWritePorts - 1)) {
+        for (j <- (i + 1) until numWritePorts) {
+          assert(!io.write_ports(i).valid ||
+                 !io.write_ports(j).valid ||
+                 (io.write_ports(i).bits.addr =/= io.write_ports(j).bits.addr) ||
+                 (io.write_ports(i).bits.addr === io.write_ports(j).bits.addr) && ((io.write_ports(i).bits.mask & io.write_ports(j).bits.mask) === 0.U) ||
+                 (io.write_ports(i).bits.addr === 0.U),
+            "[regfile] too many writers a register")
+        }
+      }
+    }
+  } else {
+    for (wport <- io.write_ports) {
+      when (wport.valid) {
+        regfile(wport.bits.addr) := wport.bits.data
+      }
+    }
+
+    // ensure there is only 1 writer per register (unless to preg0)
+    if (numWritePorts > 1) {
+      for (i <- 0 until (numWritePorts - 1)) {
+        for (j <- (i + 1) until numWritePorts) {
+          assert(!io.write_ports(i).valid ||
+                 !io.write_ports(j).valid ||
+                 (io.write_ports(i).bits.addr =/= io.write_ports(j).bits.addr) ||
+                 (io.write_ports(i).bits.addr === 0.U), // note: you only have to check one here
+            "[regfile] too many writers a register")
+        }
       }
     }
   }

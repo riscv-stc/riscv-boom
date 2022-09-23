@@ -18,13 +18,12 @@ package boom.ifu
 
 import chisel3._
 import chisel3.util._
-
-import freechips.rocketchip.config.{Parameters}
-import freechips.rocketchip.util.{Str}
-
+import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.util.Str
 import boom.common._
 import boom.exu._
 import boom.util._
+import freechips.rocketchip.rocket.VConfig
 
 /**
  * FTQ Parameters used in configurations
@@ -129,6 +128,9 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
     val ras_update_idx = Output(UInt(log2Ceil(nRasEntries).W))
     val ras_update_pc  = Output(UInt(vaddrBitsExtended.W))
 
+    val perf = Output(new Bundle {
+      val full  = Bool()
+    })
   })
   val bpd_ptr    = RegInit(0.U(idx_sz.W))
   val deq_ptr    = RegInit(0.U(idx_sz.W))
@@ -362,4 +364,7 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
   for (w <- 0 until coreWidth) {
     io.debug_fetch_pc(w) := RegNext(pcs(io.debug_ftq_idx(w)))
   }
+
+  // perf event
+  io.perf.full := full
 }

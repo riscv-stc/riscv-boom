@@ -71,12 +71,7 @@ def writeOutputDecode(line, idx):
 # If its cycle matches the previous event, we supress the print.
 def writeOutputRename(line, idx, prev_cycle):
     cycle = int(line[idx+2+19:])
-#    debug_cycle = int(line[idx+2:].split(':')[2])
-#    assert cycle==debug_cycle
-    if cycle == prev_cycle:
-        print "O3PipeView:rename: 0"
-    else:
-        print line[idx+2:],
+    print line[idx+2:],
     return cycle
 
 # remove the fseq number and print the line.
@@ -84,12 +79,7 @@ def writeOutputRename(line, idx, prev_cycle):
 # If its cycle matches the previous event, we supress the print.
 def writeOutputDispatch(line, idx, prev_cycle):
     cycle = int(line[idx+2+21:])
-#    debug_cycle = int(line[idx+2:].split(':')[2])
-#    assert cycle==debug_cycle
-    if cycle == prev_cycle:
-        print "O3PipeView:dispatch: 0"
-    else:
-        print line[idx+2:],
+    print line[idx+2:],
 
 # re-create the proper output from the retire message and
 # the store-comp message
@@ -187,15 +177,43 @@ def generate_pipeview_file(log):
                     writeOutput(fetch, idx)
                     assert fetch_id != last_fseq, "Found duplicate fseq number."
                     last_fseq = fetch_id
-                    c = writeOutputDecode(q_dec.popleft(), idx)
-                    c = writeOutputRename(q_ren.popleft(), idx, c)
-                    writeOutputDispatch(q_dis.popleft(), idx, c)
+
+                    while q_dec:
+                        decode_id = getFSeqNum(q_dec[0], idx)
+                        if decode_id == fetch_id:
+                            c = writeOutputDecode(q_dec.popleft(), idx)
+                            break
+                        elif decode_id > fetch_id:
+                            print("O3PipeView:decode: 0")
+                            break
+                        else:
+                            q_dec.popleft()
+
+                    while q_ren:
+                        rename_id = getFSeqNum(q_ren[0], idx)
+                        if rename_id == fetch_id:
+                            c = writeOutputRename(q_ren.popleft(), idx, c)
+                            break
+                        elif rename_id > fetch_id:
+                            print("O3PipeView:rename: 0")
+                            break
+                        else:
+                            q_ren.popleft()
+
+                    while q_dis:
+                        dispatch_id = getFSeqNum(q_dis[0], idx)
+                        if dispatch_id == fetch_id:
+                            writeOutputDispatch(q_dis.popleft(), idx, c)
+                            break
+                        elif dispatch_id > fetch_id:
+                            print("O3PipeView:dispatch: 0")
+                            break
+                        else:
+                            q_dis.popleft()
+
                     findAndPrintEvent(fetch_id, l_iss, "issue", idx)
                     findAndPrintEvent(fetch_id, l_wb, "complete", idx)
-                    if isStore(fetch):
-                        writeRetireStoreOutput(line, l_stc.pop(0), r_id, idx, s_idx)
-                    else:
-                        writeOutput(line, idx)
+                    writeOutput(line, idx)
                     break
                 else:
                     # print out misspeculated instruction

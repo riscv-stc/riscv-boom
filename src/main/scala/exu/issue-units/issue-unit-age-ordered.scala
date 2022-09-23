@@ -28,10 +28,18 @@ import boom.common._
  */
 class IssueUnitCollapsing(
   params: IssueParams,
-  numWakeupPorts: Int)
-  (implicit p: Parameters)
-  extends IssueUnit(params.numEntries, params.issueWidth, numWakeupPorts, params.iqType, params.dispatchWidth)
-{
+  numWakeupPorts: Int,
+  vector: Boolean = false,
+  matrix: Boolean = false)
+(implicit p: Parameters) extends IssueUnit(
+  params.numEntries,
+  params.issueWidth,
+  numWakeupPorts,
+  params.iqType,
+  params.dispatchWidth,
+  vector,
+  matrix
+) {
   //-------------------------------------------------------------
   // Figure out how much to shift entries by
 
@@ -93,7 +101,7 @@ class IssueUnitCollapsing(
   // set default
   for (w <- 0 until issueWidth) {
     io.iss_valids(w) := false.B
-    io.iss_uops(w)   := NullMicroOp
+    io.iss_uops(w)   := NullMicroOp()
     // unsure if this is overkill
     io.iss_uops(w).prs1 := 0.U
     io.iss_uops(w).prs2 := 0.U
@@ -108,14 +116,28 @@ class IssueUnitCollapsing(
     port_issued(w) = false.B
   }
 
+  val iss_valids_prev = RegNext(io.iss_valids)
+  val iss_fucode_prev = RegNext(io.iss_uops)
+
   for (i <- 0 until numIssueSlots) {
     issue_slots(i).grant := false.B
     var uop_issued = false.B
 
     for (w <- 0 until issueWidth) {
       val can_allocate = (issue_slots(i).uop.fu_code & io.fu_types(w)) =/= 0.U
+      // Div (vdiv) cannot be issued continuously
+      val isDivPrev = iss_valids_prev(w) && iss_fucode_prev(w).fu_code === FU_DIV
+      val isDivCurr = issue_slots(i).uop.fu_code === FU_DIV
+      val canDivIss = !(isDivCurr && isDivPrev)
+      // mmv cannot be issued continuously
+      val canMMVIss = if (matrix) WireInit(true.B) else true.B
+      if (matrix) {
+        val isMMVPrev = iss_valids_prev(w) && (iss_fucode_prev(w).fu_code === FU_HSLICE || iss_fucode_prev(w).fu_code === FU_VSLICE)
+        val isMMVCurr = issue_slots(i).uop.fu_code === FU_HSLICE || issue_slots(i).uop.fu_code === FU_VSLICE
+        canMMVIss    := !(isMMVCurr && isMMVPrev)
+      }
 
-      when (requests(i) && !uop_issued && can_allocate && !port_issued(w)) {
+      when (requests(i) && !uop_issued && can_allocate && !port_issued(w) && canDivIss && canMMVIss) {
         issue_slots(i).grant := true.B
         io.iss_valids(w) := true.B
         io.iss_uops(w) := issue_slots(i).uop

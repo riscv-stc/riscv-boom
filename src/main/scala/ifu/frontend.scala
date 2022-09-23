@@ -247,8 +247,26 @@ class FetchBundle(implicit p: Parameters) extends BoomBundle
   val fsrc    = UInt(BSRC_SZ.W)
   // Source of the prediction to this bundle
   val tsrc    = UInt(BSRC_SZ.W)
+
+  val debug_events  = Vec(fetchWidth, new DebugStageEvents)
 }
 
+
+class IFUPerfEvents extends FrontendPerfEvents {
+  val f1_clear = Bool()
+  val f2_clear = Bool()
+  val f3_clear = Bool()
+  val f4_clear = Bool()
+
+  val fb_full = Bool()
+  val fb_empty = Bool()
+  val ftq_full = Bool()
+
+  val iCache_stalls  = Bool() 
+  val iTLB_stalls    = Bool() 
+  val badResteers    = Bool()
+  val unknownsBranchCycles = Bool()
+}
 
 
 /**
@@ -285,7 +303,8 @@ class BoomFrontendIO(implicit p: Parameters) extends BoomBundle
 
   val flush_icache = Output(Bool())
 
-  val perf = Input(new FrontendPerfEvents)
+  val perf = Input(new IFUPerfEvents)
+  val tsc_reg           = Output(UInt(xLen.W))
 }
 
 /**
@@ -588,6 +607,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   // Tracks if last fetchpacket contained a half-inst
   val f3_prev_is_half = RegInit(false.B)
 
+  val f3_debug_pcs  = Wire(Vec(fetchWidth, UInt(vaddrBitsExtended.W)))
+
   require(fetchWidth >= 4) // Logic gets kind of annoying with fetchWidth = 2
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
   var redirect_found = false.B
@@ -631,6 +652,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
           f3_fetch_bundle.insts(i)     := inst0
           f3_fetch_bundle.exp_insts(i) := exp_inst0
           bpu.io.pc                    := pc0
+          f3_debug_pcs(i) := pc0
+
           brsigs                       := bpd_decoder0.io.out
           f3_fetch_bundle.edge_inst(b) := true.B
           if (b > 0) {
@@ -652,6 +675,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
           f3_fetch_bundle.insts(i)     := inst1
           f3_fetch_bundle.exp_insts(i) := exp_inst1
           bpu.io.pc                    := pc1
+          f3_debug_pcs(i) := pc1
           brsigs                       := bpd_decoder1.io.out
           f3_fetch_bundle.edge_inst(b) := false.B
         }
@@ -668,6 +692,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
         f3_fetch_bundle.insts(i)     := inst
         f3_fetch_bundle.exp_insts(i) := exp_inst
         bpu.io.pc                    := pc
+        f3_debug_pcs(i) := pc
         brsigs                       := bpd_decoder.io.out
         if (w == 1) {
           // Need special case since 0th instruction may carry over the wrap around
@@ -851,6 +876,45 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   f4_btb_corrections.io.enq.bits.meta                 := f3_fetch_bundle.bpd_meta
 
 
+  val f3_valid = f3.io.deq.valid
+  val f3_fire = f3_valid && f4_ready && !f3_clear
+  val fseq_reg = RegInit(0.U(xLen.W))
+
+  for (w <- 0 until fetchWidth) {
+    f3_fetch_bundle.debug_events(w).fetch_seq := DontCare
+  }
+
+  when (f3_fire) {
+    for (i <- 0 until fetchWidth) {
+        if (i == 0) {
+          f3_fetch_bundle.debug_events(i).fetch_seq := fseq_reg
+        } else {
+          f3_fetch_bundle.debug_events(i).fetch_seq := fseq_reg +
+            PopCount(f3_fetch_bundle.mask.asUInt()(i-1,0))
+        }
+      }
+  }
+
+  if (O3PIPEVIEW_PRINTF) {
+    when (f3_fire) {
+      fseq_reg := fseq_reg + PopCount(f3_fetch_bundle.mask)
+      val bundle = f3_fetch_bundle
+      for (i <- 0 until fetchWidth) {
+        when (bundle.mask(i)) {
+          // TODO for now, manually set the fetch_tsc to point to when the fetch
+          // started. This doesn't properly account for i-cache and i-tlb misses. :(
+          // Also not factoring in NPC.
+          printf("%d; O3PipeView:fetch:%d:0x%x:0:%d:DASM(%x)\n",
+            bundle.debug_events(i).fetch_seq,
+            io.cpu.tsc_reg - (2*O3_CYCLE_TIME).U,
+            f3_debug_pcs(i),
+            bundle.debug_events(i).fetch_seq,
+            bundle.insts(i))
+        }
+      }
+    }
+  }
+
   // -------------------------------------------------------
   // **** F4 ****
   // -------------------------------------------------------
@@ -984,6 +1048,56 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   ftq.io.debug_ftq_idx := io.cpu.debug_ftq_idx
   io.cpu.debug_fetch_pc := ftq.io.debug_fetch_pc
 
+  io.cpu.perf.f1_clear := f1_clear
+  io.cpu.perf.f2_clear := f2_clear
+  io.cpu.perf.f3_clear := f3_clear
+  io.cpu.perf.f4_clear := f4_clear
+
+  io.cpu.perf.fb_full  := fb.io.perf.maybe_full
+  io.cpu.perf.fb_empty  := fb.io.perf.amost_empty
+  io.cpu.perf.ftq_full := ftq.io.perf.full
+
+  val badResteers_flag = RegInit(false.B)
+  when (io.cpu.redirect_flush) {
+    badResteers_flag := true.B
+  } .elsewhen(!io.cpu.perf.fb_empty){
+    badResteers_flag := false.B
+  }
+  io.cpu.perf.badResteers    := badResteers_flag & io.cpu.perf.fb_empty
+
+  val icache_stall_scope = RegInit(false.B)
+  val icache_stall_find = RegInit(false.B)
+  when(io.cpu.perf.acquire & ~icache.io.resp.valid){
+    icache_stall_scope := true.B
+  } .elsewhen(f4_clear){
+    icache_stall_scope := false.B
+  } .elsewhen(icache.io.resp.valid){
+    icache_stall_scope := false.B
+  }
+
+  when(RegNext(RegNext(icache_stall_scope)) & io.cpu.perf.fb_empty){
+    icache_stall_find := true.B
+  } .elsewhen(~io.cpu.perf.fb_empty){
+    icache_stall_find := false.B
+  }
+  io.cpu.perf.iCache_stalls  := icache_stall_find
+
+  io.cpu.perf.iTLB_stalls    := false.B
+
+  val unknownsBranch_scope = RegInit(false.B)
+  when(f4_clear || badResteers_flag){
+    unknownsBranch_scope := false.B
+  } .elsewhen(ShiftRegister(f2_clear, 3) && io.cpu.perf.fb_empty){
+    unknownsBranch_scope := true.B
+  } .elsewhen(ShiftRegister(f1_clear, 4) && io.cpu.perf.fb_empty){
+    unknownsBranch_scope := true.B
+  } .elsewhen(ShiftRegister(f1_do_redirect, 3) && ShiftRegister(f2_do_redirect, 2) && io.cpu.perf.fb_empty){
+    unknownsBranch_scope := true.B
+  } .elsewhen(~io.cpu.perf.fb_empty){
+    unknownsBranch_scope := false.B
+  }
+
+  io.cpu.perf.unknownsBranchCycles := unknownsBranch_scope
 
   override def toString: String =
     (BoomCoreStringPrefix("====Overall Frontend Params====") + "\n"

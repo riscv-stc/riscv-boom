@@ -25,7 +25,7 @@ import boom.util.{BoomCoreStringPrefix}
  *
  * @param fpu using a FPU?
  */
-class ExecutionUnits(val fpu: Boolean)(implicit val p: Parameters) extends HasBoomCoreParameters
+class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val matrix: Boolean = false)(implicit val p: Parameters) extends HasBoomCoreParameters
 {
   val totalIssueWidth = issueParams.map(_.issueWidth).sum
 
@@ -95,13 +95,25 @@ class ExecutionUnits(val fpu: Boolean)(implicit val p: Parameters) extends HasBo
     exe_units.indexWhere(_.hasJmpUnit)
   }
 
+  lazy val csr_unit_idx = {
+    exe_units.indexWhere(_.hasCSR)
+  }
+
+
   lazy val rocc_unit = {
     require (usingRoCC)
     require (exe_units.count(_.hasRocc) == 1)
     exe_units.find(_.hasRocc).get
   }
 
-  if (!fpu) {
+  //lazy val vmx_unit = {
+    //require (usingVector)
+    //require (exe_units.count(_.hasVMX) == 1)
+    //exe_units.find(_.hasVMX).get
+  //}
+
+  if (!fpu && !vector && !matrix) {
+    // scalar integer
     val int_width = issueParams.find(_.iqType == IQT_INT.litValue).get.issueWidth
 
     for (w <- 0 until memWidth) {
@@ -125,13 +137,43 @@ class ExecutionUnits(val fpu: Boolean)(implicit val p: Parameters) extends HasBo
         hasIfpu        = is_nth(4) && usingFPU))
       exe_units += alu_exe_unit
     }
-  } else {
+  } else if (fpu && !vector && !matrix) {
+    // scalar float
     val fp_width = issueParams.find(_.iqType == IQT_FP.litValue).get.issueWidth
     for (w <- 0 until fp_width) {
       val fpu_exe_unit = Module(new FPUExeUnit(hasFpu = true,
                                              hasFdiv = usingFDivSqrt && (w==0),
                                              hasFpiu = (w==0)))
       exe_units += fpu_exe_unit
+    }
+  } else if (vector && !matrix) { // vector
+    val vec_width = issueParams.find(_.iqType == IQT_VEC.litValue).get.issueWidth
+    for (w <- 0 until vec_width) {
+      val vec_exe_unit = Module(new VecExeUnit(//hasVMX = false,
+                                               hasIfpu = true,
+                                               hasFpu = true,
+                                               hasFdiv = usingFDivSqrt))
+      vec_exe_unit.suggestName("vec_exe_unit")
+      exe_units += vec_exe_unit
+    }
+
+    //val vmx_exe_unit = Module(new VecExeUnit(hasVMX = true,
+    //                                         hasAlu = false,
+    //                                         hasMacc = false,
+    //                                         hasVMaskUnit = false,
+    //                                         hasDiv = false))
+    //vmx_exe_unit.suggestName("vmx_exe_unit")
+    //exe_units += vmx_exe_unit
+  }
+  else { // matrix
+    for(w <- 0 until matWidth) {
+      val mat_exe_unit = Module(new MatExeUnit())
+      mat_exe_unit.suggestName("mat_exe_unit")
+      exe_units += mat_exe_unit
+      //FIX ME
+      mat_exe_unit.io.mclrResp.ready := DontCare
+      mat_exe_unit.io.mopaResp.ready := DontCare
+      mat_exe_unit.io.mlsuResp.ready := DontCare
     }
   }
 
@@ -152,12 +194,12 @@ class ExecutionUnits(val fpu: Boolean)(implicit val p: Parameters) extends HasBo
     + exeUnitsStr.toString)
 
   require (exe_units.length != 0)
-  if (!fpu) {
+  if (!fpu && !vector & !matrix) {
     // if this is for FPU units, we don't need a memory unit (or other integer units).
     require (exe_units.map(_.hasMem).reduce(_|_), "Datapath is missing a memory unit.")
     require (exe_units.map(_.hasMul).reduce(_|_), "Datapath is missing a multiplier.")
     require (exe_units.map(_.hasDiv).reduce(_|_), "Datapath is missing a divider.")
-  } else {
+  } else if (fpu && !vector & !matrix) {
     require (exe_units.map(_.hasFpu).reduce(_|_),
       "Datapath is missing a fpu (or has an fpu and shouldnt).")
   }
@@ -172,6 +214,14 @@ class ExecutionUnits(val fpu: Boolean)(implicit val p: Parameters) extends HasBo
   val numFrfReadPorts     = exe_units.count(_.readsFrf) * 3
   val numFrfWritePorts    = exe_units.count(_.writesFrf)
   val numLlFrfWritePorts  = exe_units.count(_.writesLlFrf)
+
+  val numVrfReaders       = exe_units.count(_.readsVrf)
+  val numVrfReadPorts     = exe_units.count(_.readsVrf) * 4 // - exe_units.count(_.hasVMX) * 2
+  val numVrfWritePorts    = exe_units.count(_.writesVrf)
+  val numLlVrfWritePorts  = exe_units.count(_.writesLlVrf)
+
+  val numTrTileReaders    = exe_units.count(_.readsTrTile)
+  val numTrTileReadPorts  = exe_units.count(_.readsTrTile) * 2
 
   // The mem-unit will also bypass writes to readers in the RRD stage.
   // NOTE: This does NOT include the ll_wport

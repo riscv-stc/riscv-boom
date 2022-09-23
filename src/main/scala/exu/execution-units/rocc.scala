@@ -20,6 +20,7 @@ import freechips.rocketchip.tile.{RoCCCoreIO, RoCCInstruction}
 import freechips.rocketchip.rocket._
 
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.util._
 
 /**
@@ -200,15 +201,15 @@ class RoCCShim(implicit p: Parameters) extends BoomModule
   // Handle responses
 
   // Either we get a response, or the RoCC op expects no response
-  val handle_resp = ((io.core.rocc.resp.valid || rcq.io.deq.bits.dst_rtype === RT_X)
+  val handle_resp = ((io.core.rocc.resp.valid || rcq.io.deq.bits.rt(RD, isNotReg))
                   && io.resp.ready
                   && rcq.io.deq.valid)
 
-  io.core.rocc.resp.ready := io.resp.ready && rcq.io.deq.bits.dst_rtype =/= RT_X
+  io.core.rocc.resp.ready := io.resp.ready && rcq.io.deq.bits.rt(RD, isSomeReg)
   io.resp.valid           := false.B
   rcq.io.deq.ready        := false.B
   when (handle_resp) {
-    assert((rcq.io.deq.bits.dst_rtype === RT_X)
+    assert((rcq.io.deq.bits.rt(RD, isNotReg))
         || io.core.rocc.resp.bits.rd === rcq.io.deq.bits.ldst,
       "RoCC response destination register does not match expected")
 

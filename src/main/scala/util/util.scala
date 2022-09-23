@@ -17,11 +17,15 @@ import chisel3.util._
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.util.{Str}
-import freechips.rocketchip.config.{Parameters}
-import freechips.rocketchip.tile.{TileKey}
+import freechips.rocketchip.config.{Parameters, Config}
+import freechips.rocketchip.tile._
+import freechips.rocketchip.system._
+import freechips.rocketchip.tilelink._
+import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.subsystem._
 
 import boom.common.{MicroOp}
-import boom.exu.{BrUpdateInfo}
+import boom.exu._
 
 /**
  * Object to XOR fold a input register of fullLength into a compressedLength.
@@ -263,6 +267,17 @@ object Sext
 }
 
 /**
+ * Conditional extension for signed/unsigned UInt
+ */
+object Cext
+{
+  def apply(x: UInt, unsigned: Bool, length: Int): UInt = {
+    if (x.getWidth == length) return x
+    else return Cat(Fill(length-x.getWidth, !unsigned & x(x.getWidth-1)), x)
+  }
+}
+
+/**
  * Object to translate from BOOM's special "packed immediate" to a 32b signed immediate
  * Asking for U-type gives it shifted up 12 bits.
  */
@@ -288,11 +303,25 @@ object ImmGen
  */
 object ImmGenRm { def apply(ip: UInt): UInt = { return ip(2,0) } }
 
+// in scalar floating-point ins., sgnj/sgnjn/sgnjx are encoded in the RM field
+// in vector floating-point ins., sgnj/sgnjn/sgnjx are encoded in the funct6 field
+object ImmGenRmVSGN { def apply(ip: UInt): UInt = { return ip(16,14) } }
+
+// rounding mode: RTZ mode when vs1[2:1] = 2'b11 in vf*cvt.rtz* instructions
+object CheckF2IRm { def apply(ip: UInt): Bool = { return ip(5,4) === 3.U } }
+// rounding mode: RTO mode in vnfcvt.rod.f.f.w instruction
+object CheckF2FRm { def apply(ip: UInt): Bool = { return ip(3) === 1.U } }
+
 /**
  * Object to get the FP function fype from a packed immediate.
  * Note: only works if !(IS_B or IS_S)
  */
 object ImmGenTyp { def apply(ip: UInt): UInt = { return ip(9,8) } }
+
+// for RV-V instructions only!
+// For vfcvt.x*.f.v and vfcvt.f.x*.v instructions, signed or unsigned is encoded in the vs1 field
+// bit[15] in the instruction
+object ImmGenTypRVV { def apply(bit: UInt, ip: UInt): UInt = { return Cat(bit, ~ip(3)) } }
 
 /**
  * Object to see if an instruction is a JALR.
@@ -354,6 +383,39 @@ object AgePriorityEncoder
   }
 }
 
+object AgePriorityEncoderN
+{
+  def apply(in: Seq[UInt], state: Seq[Bool], selN: Int): (Seq[UInt], Seq[Bool]) = {
+    val n = in.size
+
+    val tem_in = (in zip state).map { case (i, s) => (i, s) }
+    val temp = tem_in.slice(selN, n) ++ tem_in.slice(0, selN)
+
+    val rdy_list = temp.collect { case v if v._2.equals(true.B) => v }
+    val not_rdy_list = temp.collect { case v if ! v._2.equals(true.B) => v }
+
+    val res = rdy_list ++ not_rdy_list
+    val idx  = res.map { _._1 }
+    val rdy  = res.map { _._2 }
+
+    (idx, rdy)
+  }
+}
+
+object AgePriorityEncoderOH
+{
+  def apply(in: Seq[Bool], head: UInt): UInt = {
+    val n = in.size
+    val ret = Wire(UInt(n.W))
+    val width = log2Ceil(in.size)
+    val temp_vec = (0 until n).map(i => in(i) && i.U >= head)
+    val temp_oh = PriorityEncoderOH(Cat(temp_vec.reverse))
+    val in_oh   = PriorityEncoderOH(Cat(in.reverse))
+    ret := Mux(temp_oh.orR, temp_oh, in_oh)
+    ret
+  }
+}
+
 /**
   * Object to determine whether queue
   * index i0 is older than index i1.
@@ -401,7 +463,7 @@ object Transpose
  */
 object SelectFirstN
 {
-  def apply(in: UInt, n: Int) = {
+  def apply(in: UInt, n: Int): Vec[UInt] = {
     val sels = Wire(Vec(n, UInt(in.getWidth.W)))
     var mask = in
 
@@ -459,6 +521,7 @@ class BranchKillableQueue[T <: boom.common.HasBoomUOP](gen: T, entries: Int, flu
 
     val empty   = Output(Bool())
     val count   = Output(UInt(log2Ceil(entries).W))
+    val enq_ptr = Output(UInt(log2Ceil(entries).W))
   })
 
   val ram     = Mem(entries, gen)
@@ -466,6 +529,7 @@ class BranchKillableQueue[T <: boom.common.HasBoomUOP](gen: T, entries: Int, flu
   val uops    = Reg(Vec(entries, new MicroOp))
 
   val enq_ptr = Counter(entries)
+  io.enq_ptr := enq_ptr.value
   val deq_ptr = Counter(entries)
   val maybe_full = RegInit(false.B)
 
@@ -656,3 +720,231 @@ object BoomCoreStringPrefix
     strs.map(str => prefix + str + "\n").mkString("")
   }
 }
+
+object VDataSwap {
+  def apply(d: UInt, sew: Int, elen: Int): UInt = {
+    val ret = Wire(UInt(elen.W))
+    val e_cnt = elen >> (3+sew)
+    for (e <- 0 until e_cnt) {
+      val e_lsb = e << (3+sew)
+      val e_bcnt = 1 << sew
+      for (b <- 0 until e_bcnt) {
+        val b_lsb = e_lsb + b * 8
+        val d_lsb = e_lsb + (e_bcnt-1-b)*8
+        ret(b_lsb+7, b_lsb) := d(d_lsb+7, d_lsb)
+      }
+    }
+    ret
+  }
+}
+
+object MaskGen {
+  def apply(lsb: UInt, len: UInt, width: Int): UInt = {
+    val ret = Wire(UInt(width.W))
+    val full = Fill(width, 1.U(1.W)) << lsb
+    ret := full & ((full << len) >> width.U)
+    ret
+  }
+}
+
+object MaskGenAcc {
+  def apply(lsb: UInt, len: UInt, width: Int): UInt = {
+    val ret = Wire(UInt(width.W))
+    val full = Fill(width, 1.U(1.W)) << lsb
+    ret := full & (full << len)
+    ret
+  }
+}
+
+object VRegMask {
+  /**
+   * Get byte level mask for vreg
+   */
+  def apply(v_eidx: UInt, vsew: UInt, ecnt: UInt, elenb: Int): UInt = {
+    val lsb = (v_eidx << vsew)(log2Ceil(elenb)-1, 0)
+    val len = ecnt << vsew
+    val ret = MaskGen(lsb, len, elenb)
+    ret
+  }
+}
+
+object VRegSel {
+  /**
+   * Get an eLen piece selector of a vLen register, not suitable for split whose ecnt size > eLen
+   */
+  def apply(v_eidx: UInt, vsew: UInt, ecnt: UInt, elenb: Int, eLenSelSz: Int): (UInt, UInt) = {
+    val rsel = Mux1H(UIntToOH(vsew(1,0)), Seq(v_eidx(eLenSelSz+2,3),v_eidx(eLenSelSz+1,2),v_eidx(eLenSelSz,1),v_eidx(eLenSelSz-1,0)))
+    val emsk = VRegMask(v_eidx, vsew, ecnt, elenb)
+    (rsel, emsk)
+  }
+
+  /**
+   * Get Register index (of the group) from v_eidx
+   */
+  def apply(v_eidx: UInt, vsew: UInt, eLenSelSz: Int): UInt = {
+    val ret = ((v_eidx << vsew) >> (eLenSelSz + 3).U)(2, 0)
+    ret
+  }
+}
+
+object VDataFill {
+  def apply(data: UInt, vsew: UInt, elen: Int): UInt = {
+    val ret = Mux1H(UIntToOH(vsew(1,0)), Seq(Fill(8,data(elen/8-1,0)),
+                                             Fill(4,data(elen/4-1,0)),
+                                             Fill(2,data(elen/2-1,0)),
+                                             data(elen-1,0)))
+    ret
+  }
+}
+
+object VDataSel {
+  def apply(vdata: UInt, vsew: UInt, v_eidx: UInt, vlen: Int, elen: Int): UInt = {
+    val ret = Wire(UInt(elen.W))
+    val vdata8 = VecInit.tabulate[UInt](vlen/8)(x => vdata(x*8+7, x*8))
+    val vdata16 = VecInit.tabulate[UInt](vlen/16)(x => vdata(x*16+15, x*16))
+    val vdata32 = VecInit.tabulate[UInt](vlen/32)(x => vdata(x*32+31, x*32))
+    val vdata64 = VecInit.tabulate[UInt](vlen/64)(x => vdata(x*64+63, x*64))
+    ret := Mux1H(UIntToOH(vsew(1,0)), Seq(vdata8(v_eidx(6,0)),
+                                          vdata16(v_eidx(5,0)),
+                                          vdata32(v_eidx(4,0)),
+                                          vdata64(v_eidx(3,0))))
+    ret
+  }
+}
+
+/**
+ * Object to check if MicroOp was killed due to an inactive vector mask
+ */
+/*object IsKilledByVM
+{
+  def apply(vmop: Vec[Valid[MicroOp]], uop: MicroOp): Bool = {
+    return vmop.map(u => u.valid && !u.bits.v_active && u.bits.rob_idx === uop.rob_idx).reduce(_||_)
+  }
+}*/
+
+object nrVecGroup
+{
+  def apply(emul: UInt, nf: UInt = 1.U): UInt = {
+    val emul_sign = emul(2)
+    val emul_mag  = emul(1,0)
+    val ret = (nf(3,0) << Mux(emul_sign, 0.U(2.W), emul_mag))(3,0)
+    ret
+  }
+}
+
+object lvdGroup
+{
+  def apply(lvd: UInt, emul: UInt, nf: UInt): Vec[Valid[UInt]] = {
+    val ret = Wire(Vec(8, Valid(UInt(5.W))))
+    val nr  = nrVecGroup(emul, nf)
+    //assert (nr <= 8.U)
+    for (i <- 0 until 8) {
+      ret(i).valid := i.U < nr
+      ret(i).bits  := (lvd + i.U)(4, 0)
+    }
+    ret
+  }
+
+  def apply(req: Valid[MicroOp]): Vec[Valid[UInt]] = {
+    val ret = Wire(Vec(8, Valid(UInt(5.W))))
+    val uop = req.bits
+    val lvd = uop.ldst
+    val emul = uop.vd_emul
+    val nf = uop.v_seg_nf
+    val grp = apply(lvd, emul, nf)
+    for (i <- 0 until 8) {
+      ret(i).valid := grp(i).valid && req.valid && uop.ldst_val
+      ret(i).bits  := grp(i).bits
+    }
+    ret
+  }
+}
+
+object BoomTestUtils extends boom.common.constants.ScalarOpConstants
+{
+
+  def NullBrUpdateInfo(implicit p: Parameters): BrUpdateInfo = {
+    val ret = Wire(new BrUpdateInfo)
+    ret.b1.resolve_mask     := 0.U
+    ret.b1.mispredict_mask  := 0.U
+    ret.b2.uop              := NullMicroOp(true)
+    ret.b2.valid            := false.B
+    ret.b2.mispredict       := false.B
+    ret.b2.taken            := false.B
+    ret.b2.cfi_type         := 0.U
+    ret.b2.pc_sel           := 0.U
+    ret.b2.jalr_target      := 0.U
+    ret.b2.target_offset    := 0.S
+    ret
+  }
+
+  def NullWakeup(implicit p: Parameters): Valid[ExeUnitResp] = {
+    val ret = Wire(new Valid(new ExeUnitResp(p(XLen))))
+    ret.valid                   := false.B
+    ret.bits.uop                := NullMicroOp(true)
+    ret.bits.data               := 0.U
+    ret.bits.predicated         := false.B
+    ret.bits.fflags.valid       := false.B
+    ret.bits.fflags.bits.uop    := NullMicroOp(true)
+    ret.bits.fflags.bits.flags  := 0.U
+    ret
+  }
+
+  def NullVConfig(implicit p: Parameters): VConfig = {
+    val ret = Wire(new VConfig)
+    ret.vl := 0.U
+    ret.vtype.reserved := DontCare
+    ret.vtype.vill := false.B
+    ret.vtype.vma  := false.B
+    ret.vtype.vta  := false.B
+    ret.vtype.vsew := 0.U
+    ret.vtype.vlmul_sign := false.B
+    ret.vtype.vlmul_mag  := 0.U
+    ret
+  }
+
+  private def augment(tp: TileParams)(implicit p: Parameters): Parameters = p.alterPartial {
+    case TileKey => tp
+    case TileVisibilityNodeKey => TLEphemeralNode()(ValName("fake"))
+    case LookupByHartId => lookupByHartId(Seq(tp))
+    // TODO: Figure out proper TL parameters
+  }
+
+  private def lookupByHartId(tps: Seq[TileParams]) = {
+    // return a new lookup hart
+    new LookupByHartIdImpl {
+      def apply[T <: Data](f: TileParams => Option[T], hartId: UInt): T =
+        PriorityMux(tps.collect { case t if f(t).isDefined => (t.hartId.U === hartId) -> f(t).get })
+    }
+  }
+
+  def getBoomParameters(configName: String, configPackage: String = "boom.common"): Parameters = {
+    // get the full path to the config
+    val fullConfigName: String = configPackage + "." + configName
+
+    // get the default unmodified params
+    val origParams: Parameters = try {
+      (Class.forName(fullConfigName)
+            .getDeclaredConstructor()
+            .newInstance()
+            .asInstanceOf[Config]
+       ++ Parameters.empty)
+    }
+    catch {
+      case e: java.lang.ClassNotFoundException => {
+        //throw new Exception(s"""Unable to find config "$fullConfigName".""", e)
+        println(s"""Unable to find config "$fullConfigName".""")
+        Parameters.empty
+      }
+    }
+
+    // get the tile parameters
+    val boomTileParams = origParams(TilesLocated(InSubsystem))(0).tileParams // this is a seq
+
+    // augment the parameters
+    val outParams = augment(boomTileParams)(origParams)
+
+    outParams
+  }
+}
+

@@ -64,7 +64,7 @@ class NLPrefetcher(implicit edge: TLEdgeOut, p: Parameters) extends DataPrefetch
 
   io.prefetch.valid            := req_valid && io.mshr_avail
   io.prefetch.bits.addr        := req_addr
-  io.prefetch.bits.uop         := NullMicroOp
+  io.prefetch.bits.uop         := NullMicroOp()
   io.prefetch.bits.uop.mem_cmd := req_cmd
   io.prefetch.bits.data        := DontCare
 

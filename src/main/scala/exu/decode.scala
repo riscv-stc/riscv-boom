@@ -5,20 +5,20 @@
 
 package boom.exu
 
+import Chisel.UInt
 import chisel3._
 import chisel3.util._
-
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.rocket.RVCExpander
-import freechips.rocketchip.rocket.{CSR,Causes}
-import freechips.rocketchip.util.{uintToBitPat,UIntIsOneOf}
-
+import freechips.rocketchip.rocket.{CSR, Causes, VConfig, VType, MConfig, MType}
+import freechips.rocketchip.util.{UIntIsOneOf, rightOR, uintToBitPat}
 import FUConstants._
 import boom.common._
+import boom.common.MicroOpcodes._
 import boom.util._
+import freechips.rocketchip.util._
 
-// scalastyle:off
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
  */
@@ -27,29 +27,49 @@ abstract trait DecodeConstants
   with freechips.rocketchip.rocket.constants.MemoryOpConstants
 {
   val xpr64 = Y // TODO inform this from xLen
-  val DC2 = BitPat.dontCare(2) // Makes the listing below more readable
+  val DC2   = BitPat.dontCare(2) // Makes the listing below more readable
+  val RT_DC = BitPat.dontCare(RT_X.getWidth)
   def decode_default: List[BitPat] =
-            //                                                                  frs3_en                        wakeup_delay
-            //     is val inst?                                                 |  imm sel                     |    bypassable (aka, known/fixed latency)
-            //     |  is fp inst?                                               |  |     uses_ldq              |    |  is_br
-            //     |  |  is single-prec?                        rs1 regtype     |  |     |  uses_stq           |    |  |
-            //     |  |  |  micro-code                          |       rs2 type|  |     |  |  is_amo          |    |  |
-            //     |  |  |  |         iq-type  func unit        |       |       |  |     |  |  |  is_fence     |    |  |
-            //     |  |  |  |         |        |                |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall?
-            //     |  |  |  |         |        |        dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
-            //     |  |  |  |         |        |        regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit
-            //     |  |  |  |         |        |        |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd
-            //     |  |  |  |         |        |        |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |
-              List(N, N, X, uopX    , IQT_INT, FU_X   , RT_X  , DC2    ,DC2    ,X, IS_X, X, X, X, X, N, M_X,   DC2, X, X, N, N, X, CSR.X)
+  //                                                       frs3_en                      wakeup_delay
+  //     is val inst?                                      |  imm sel                   |    bypassable (aka, known/fixed latency)
+  //     |  is fp inst?                                    |  |     uses_ldq            |    |  is_br              is vector instruction
+  //     |  |  is single-prec?               rs1 regtype   |  |     |  uses_stq         |    |  |                  |  can be split  allow_vd_is_v0
+  //     |  |  |  micro-code                 |      rs2 type  |     |  |  is_amo        |    |  |                  |  |  use vm?    |  not_use_vtype
+  //     |  |  |  |     iq-type  func unit   |      |      |  |     |  |  |  is_fence   |    |  |                  |  |  |  ew of ls vector
+  //     |  |  |  |     |        |           |      |      |  |     |  |  |  |  is_fencei    |  |  is breakpoint or ecall?  |       |  |  vd_unequal_vs1
+  //     |  |  |  |     |        |     dst   |      |      |  |     |  |  |  |  |  mem  |    |  |  |  is unique? (clear pipeline for it)  |  vd_unequal_vs2
+  //     |  |  |  |     |        |     regtype      |      |  |     |  |  |  |  |  cmd  |    |  |  |  |  flush on commit |  |       |  |  |  |  is matrix inst?
+  //     |  |  |  |     |        |     |     |      |      |  |     |  |  |  |  |  |    |    |  |  |  |  |  csr cmd   |  |  |    vstart_is_zero |
+  //     |  |  |  |     |        |     |     |      |      |  |     |  |  |  |  |  |    |    |  |  |  |  |  |      |  |  |  |    |  |  |  |  |  |
+    List(N, N, X, uopX, IQT_INT, FU_X, RT_X, RT_DC, RT_DC, X, IS_X, X, X, X, X, N, M_X, DC2, X, X, N, N, X, CSR.X, N, N, N, DC2, X, X, X, X, X, N)
 
   val table: Array[(BitPat, List[BitPat])]
 }
-// scalastyle:on
+
+object DecoderCSVReader {
+  def apply(csv: String, category: String, preContext: String, postContext: String): Array[(BitPat, List[BitPat])] = {
+    import scala.reflect.runtime.universe
+    import scala.tools.reflect.ToolBox
+    import scala.io.Source
+
+    println(s"Reading $category instructions from resources$csv")
+    val stream= getClass.getResourceAsStream(csv)
+    val lines = Source.fromInputStream(stream).mkString
+    val src   = lines.split("\n")
+                     .filter(_.startsWith(category))
+                     .map(_.split(" +"))
+                     .map(row => row(1) + " -> List(" + row.drop(2).mkString(",") + ")")
+                     .mkString(preContext, ",\n", postContext)
+    val tb    = universe.runtimeMirror(getClass.getClassLoader).mkToolBox()
+    val ret: Array[(BitPat, List[BitPat])] = tb.eval(tb.parse(src)).asInstanceOf[Array[(BitPat, List[BitPat])]]
+    ret
+  }
+}
 
 /**
  * Decoded control signals
  */
-class CtrlSigs extends Bundle
+class CtrlSigs extends Bundle with DecodeConstants
 {
   val legal           = Bool()
   val fp_val          = Bool()
@@ -57,9 +77,9 @@ class CtrlSigs extends Bundle
   val uopc            = UInt(UOPC_SZ.W)
   val iq_type         = UInt(IQT_SZ.W)
   val fu_code         = UInt(FUC_SZ.W)
-  val dst_type        = UInt(2.W)
-  val rs1_type        = UInt(2.W)
-  val rs2_type        = UInt(2.W)
+  val dst_type        = UInt(RT_X.getWidth.W)
+  val rs1_type        = UInt(RT_X.getWidth.W)
+  val rs2_type        = UInt(RT_X.getWidth.W)
   val frs3_en         = Bool()
   val imm_sel         = UInt(IS_X.getWidth.W)
   val uses_ldq        = Bool()
@@ -75,378 +95,39 @@ class CtrlSigs extends Bundle
   val inst_unique     = Bool()
   val flush_on_commit = Bool()
   val csr_cmd         = UInt(freechips.rocketchip.rocket.CSR.SZ.W)
+  val is_rvv          = Bool()
+  val can_be_split    = Bool()
+  val uses_vm         = Bool()
+  val v_ls_ew         = UInt(2.W)
   val rocc            = Bool()
+  val vstart_is_zero  = Bool()
+  val allow_vd_is_v0  = Bool()
+  val not_use_vtype   = Bool()
+  val vd_unequal_vs1  = Bool()
+  val vd_unequal_vs2  = Bool()
+  val is_rvm          = Bool()
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
-    val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decode_default, table)
+    //val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, decode_default, table)
+    val decoder = BoomDecoder(inst, decode_default, table)
     val sigs =
       Seq(legal, fp_val, fp_single, uopc, iq_type, fu_code, dst_type, rs1_type,
           rs2_type, frs3_en, imm_sel, uses_ldq, uses_stq, is_amo,
           is_fence, is_fencei, mem_cmd, wakeup_delay, bypassable,
-          is_br, is_sys_pc2epc, inst_unique, flush_on_commit, csr_cmd)
+          is_br, is_sys_pc2epc, inst_unique, flush_on_commit, csr_cmd,
+          is_rvv, can_be_split, uses_vm, v_ls_ew, vstart_is_zero,
+          allow_vd_is_v0, not_use_vtype, vd_unequal_vs1, vd_unequal_vs2,
+          is_rvm)
       sigs zip decoder map {case(s,d) => s := d}
       rocc := false.B
       this
   }
+
+  val table: Array[(BitPat, List[BitPat])] = null
 }
 
-// scalastyle:off
-/**
- * Decode constants for RV32
- */
-object X32Decode extends DecodeConstants
-{
-            //                                                                  frs3_en                        wakeup_delay
-            //     is val inst?                                                 |  imm sel                     |    bypassable (aka, known/fixed latency)
-            //     |  is fp inst?                                               |  |     uses_ldq              |    |  is_br
-            //     |  |  is single-prec?                        rs1 regtype     |  |     |  uses_stq           |    |  |
-            //     |  |  |  micro-code                          |       rs2 type|  |     |  |  is_amo          |    |  |
-            //     |  |  |  |         iq-type  func unit        |       |       |  |     |  |  |  is_fence     |    |  |
-            //     |  |  |  |         |        |                |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall?
-            //     |  |  |  |         |        |        dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
-            //     |  |  |  |         |        |        regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit
-            //     |  |  |  |         |        |        |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd
-  val table: Array[(BitPat, List[BitPat])] = Array(//   |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |
-  SLLI_RV32-> List(Y, N, X, uopSLLI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SRLI_RV32-> List(Y, N, X, uopSRLI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SRAI_RV32-> List(Y, N, X, uopSRAI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N)
-  )
-}
-
-/**
- * Decode constants for RV64
- */
-object X64Decode extends DecodeConstants
-{
-           //                                                                  frs3_en                        wakeup_delay
-           //     is val inst?                                                 |  imm sel                     |    bypassable (aka, known/fixed latency)
-           //     |  is fp inst?                                               |  |     uses_ldq              |    |  is_br
-           //     |  |  is single-prec?                        rs1 regtype     |  |     |  uses_stq           |    |  |
-           //     |  |  |  micro-code                          |       rs2 type|  |     |  |  is_amo          |    |  |
-           //     |  |  |  |         iq-type  func unit        |       |       |  |     |  |  |  is_fence     |    |  |
-           //     |  |  |  |         |        |                |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall?
-           //     |  |  |  |         |        |        dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
-           //     |  |  |  |         |        |        regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit
-           //     |  |  |  |         |        |        |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd
-  val table: Array[(BitPat, List[BitPat])] = Array(//  |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |
-  LD      -> List(Y, N, X, uopLD   , IQT_MEM, FU_MEM , RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, 3.U, N, N, N, N, N, CSR.N),
-  LWU     -> List(Y, N, X, uopLD   , IQT_MEM, FU_MEM , RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, 3.U, N, N, N, N, N, CSR.N),
-  SD      -> List(Y, N, X, uopSTA  , IQT_MEM, FU_MEM , RT_X  , RT_FIX, RT_FIX, N, IS_S, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N),
-
-  SLLI    -> List(Y, N, X, uopSLLI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SRLI    -> List(Y, N, X, uopSRLI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SRAI    -> List(Y, N, X, uopSRAI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-
-  ADDIW   -> List(Y, N, X, uopADDIW, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SLLIW   -> List(Y, N, X, uopSLLIW, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SRAIW   -> List(Y, N, X, uopSRAIW, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SRLIW   -> List(Y, N, X, uopSRLIW, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-
-  ADDW    -> List(Y, N, X, uopADDW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SUBW    -> List(Y, N, X, uopSUBW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SLLW    -> List(Y, N, X, uopSLLW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SRAW    -> List(Y, N, X, uopSRAW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SRLW    -> List(Y, N, X, uopSRLW , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N)
-  )
-}
-
-/**
- * Overall Decode constants
- */
-object XDecode extends DecodeConstants
-{
-           //                                                                  frs3_en                        wakeup_delay
-           //     is val inst?                                                 |  imm sel                     |    bypassable (aka, known/fixed latency)
-           //     |  is fp inst?                                               |  |     uses_ldq              |    |  is_br
-           //     |  |  is single-prec?                        rs1 regtype     |  |     |  uses_stq           |    |  |
-           //     |  |  |  micro-code                          |       rs2 type|  |     |  |  is_amo          |    |  |
-           //     |  |  |  |         iq-type  func unit        |       |       |  |     |  |  |  is_fence     |    |  |
-           //     |  |  |  |         |        |                |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall?
-           //     |  |  |  |         |        |        dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
-           //     |  |  |  |         |        |        regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit
-           //     |  |  |  |         |        |        |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd
-  val table: Array[(BitPat, List[BitPat])] = Array(//  |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |
-  LW      -> List(Y, N, X, uopLD   , IQT_MEM, FU_MEM , RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, 3.U, N, N, N, N, N, CSR.N),
-  LH      -> List(Y, N, X, uopLD   , IQT_MEM, FU_MEM , RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, 3.U, N, N, N, N, N, CSR.N),
-  LHU     -> List(Y, N, X, uopLD   , IQT_MEM, FU_MEM , RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, 3.U, N, N, N, N, N, CSR.N),
-  LB      -> List(Y, N, X, uopLD   , IQT_MEM, FU_MEM , RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, 3.U, N, N, N, N, N, CSR.N),
-  LBU     -> List(Y, N, X, uopLD   , IQT_MEM, FU_MEM , RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, 3.U, N, N, N, N, N, CSR.N),
-
-  SW      -> List(Y, N, X, uopSTA  , IQT_MEM, FU_MEM , RT_X  , RT_FIX, RT_FIX, N, IS_S, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N),
-  SH      -> List(Y, N, X, uopSTA  , IQT_MEM, FU_MEM , RT_X  , RT_FIX, RT_FIX, N, IS_S, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N),
-  SB      -> List(Y, N, X, uopSTA  , IQT_MEM, FU_MEM , RT_X  , RT_FIX, RT_FIX, N, IS_S, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N),
-
-  LUI     -> List(Y, N, X, uopLUI  , IQT_INT, FU_ALU , RT_FIX, RT_X  , RT_X  , N, IS_U, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-
-  ADDI    -> List(Y, N, X, uopADDI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  ANDI    -> List(Y, N, X, uopANDI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  ORI     -> List(Y, N, X, uopORI  , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  XORI    -> List(Y, N, X, uopXORI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SLTI    -> List(Y, N, X, uopSLTI , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SLTIU   -> List(Y, N, X, uopSLTIU, IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-
-  SLL     -> List(Y, N, X, uopSLL  , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  ADD     -> List(Y, N, X, uopADD  , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SUB     -> List(Y, N, X, uopSUB  , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SLT     -> List(Y, N, X, uopSLT  , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SLTU    -> List(Y, N, X, uopSLTU , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  AND     -> List(Y, N, X, uopAND  , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  OR      -> List(Y, N, X, uopOR   , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  XOR     -> List(Y, N, X, uopXOR  , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SRA     -> List(Y, N, X, uopSRA  , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_I, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-  SRL     -> List(Y, N, X, uopSRL  , IQT_INT, FU_ALU , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 1.U, Y, N, N, N, N, CSR.N),
-
-  MUL     -> List(Y, N, X, uopMUL  , IQT_INT, FU_MUL , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  MULH    -> List(Y, N, X, uopMULH , IQT_INT, FU_MUL , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  MULHU   -> List(Y, N, X, uopMULHU, IQT_INT, FU_MUL , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  MULHSU  -> List(Y, N, X, uopMULHSU,IQT_INT, FU_MUL , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  MULW    -> List(Y, N, X, uopMULW , IQT_INT, FU_MUL , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  DIV     -> List(Y, N, X, uopDIV  , IQT_INT, FU_DIV , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  DIVU    -> List(Y, N, X, uopDIVU , IQT_INT, FU_DIV , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  REM     -> List(Y, N, X, uopREM  , IQT_INT, FU_DIV , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  REMU    -> List(Y, N, X, uopREMU , IQT_INT, FU_DIV , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  DIVW    -> List(Y, N, X, uopDIVW , IQT_INT, FU_DIV , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  DIVUW   -> List(Y, N, X, uopDIVUW, IQT_INT, FU_DIV , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  REMW    -> List(Y, N, X, uopREMW , IQT_INT, FU_DIV , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  REMUW   -> List(Y, N, X, uopREMUW, IQT_INT, FU_DIV , RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  AUIPC   -> List(Y, N, X, uopAUIPC, IQT_INT, FU_JMP , RT_FIX, RT_X  , RT_X  , N, IS_U, N, N, N, N, N, M_X  , 1.U, N, N, N, N, N, CSR.N), // use BRU for the PC read
-  JAL     -> List(Y, N, X, uopJAL  , IQT_INT, FU_JMP , RT_FIX, RT_X  , RT_X  , N, IS_J, N, N, N, N, N, M_X  , 1.U, N, N, N, N, N, CSR.N),
-  JALR    -> List(Y, N, X, uopJALR , IQT_INT, FU_JMP , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 1.U, N, N, N, N, N, CSR.N),
-  BEQ     -> List(Y, N, X, uopBEQ  , IQT_INT, FU_ALU , RT_X  , RT_FIX, RT_FIX, N, IS_B, N, N, N, N, N, M_X  , 0.U, N, Y, N, N, N, CSR.N),
-  BNE     -> List(Y, N, X, uopBNE  , IQT_INT, FU_ALU , RT_X  , RT_FIX, RT_FIX, N, IS_B, N, N, N, N, N, M_X  , 0.U, N, Y, N, N, N, CSR.N),
-  BGE     -> List(Y, N, X, uopBGE  , IQT_INT, FU_ALU , RT_X  , RT_FIX, RT_FIX, N, IS_B, N, N, N, N, N, M_X  , 0.U, N, Y, N, N, N, CSR.N),
-  BGEU    -> List(Y, N, X, uopBGEU , IQT_INT, FU_ALU , RT_X  , RT_FIX, RT_FIX, N, IS_B, N, N, N, N, N, M_X  , 0.U, N, Y, N, N, N, CSR.N),
-  BLT     -> List(Y, N, X, uopBLT  , IQT_INT, FU_ALU , RT_X  , RT_FIX, RT_FIX, N, IS_B, N, N, N, N, N, M_X  , 0.U, N, Y, N, N, N, CSR.N),
-  BLTU    -> List(Y, N, X, uopBLTU , IQT_INT, FU_ALU , RT_X  , RT_FIX, RT_FIX, N, IS_B, N, N, N, N, N, M_X  , 0.U, N, Y, N, N, N, CSR.N),
-
-  // I-type, the immediate12 holds the CSR register.
-  CSRRW   -> List(Y, N, X, uopCSRRW, IQT_INT, FU_CSR , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.W),
-  CSRRS   -> List(Y, N, X, uopCSRRS, IQT_INT, FU_CSR , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.S),
-  CSRRC   -> List(Y, N, X, uopCSRRC, IQT_INT, FU_CSR , RT_FIX, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.C),
-
-  CSRRWI  -> List(Y, N, X, uopCSRRWI,IQT_INT, FU_CSR , RT_FIX, RT_PAS, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.W),
-  CSRRSI  -> List(Y, N, X, uopCSRRSI,IQT_INT, FU_CSR , RT_FIX, RT_PAS, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.S),
-  CSRRCI  -> List(Y, N, X, uopCSRRCI,IQT_INT, FU_CSR , RT_FIX, RT_PAS, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.C),
-
-  SFENCE_VMA->List(Y,N, X, uopSFENCE,IQT_MEM, FU_MEM , RT_X  , RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N,M_SFENCE,0.U,N, N, N, Y, Y, CSR.N),
-  SCALL   -> List(Y, N, X, uopERET  ,IQT_INT, FU_CSR , RT_X  , RT_X  , RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, Y, Y, Y, CSR.I),
-  SBREAK  -> List(Y, N, X, uopERET  ,IQT_INT, FU_CSR , RT_X  , RT_X  , RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, Y, Y, Y, CSR.I),
-  SRET    -> List(Y, N, X, uopERET  ,IQT_INT, FU_CSR , RT_X  , RT_X  , RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.I),
-  MRET    -> List(Y, N, X, uopERET  ,IQT_INT, FU_CSR , RT_X  , RT_X  , RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.I),
-  DRET    -> List(Y, N, X, uopERET  ,IQT_INT, FU_CSR , RT_X  , RT_X  , RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.I),
-
-  WFI     -> List(Y, N, X, uopWFI   ,IQT_INT, FU_CSR , RT_X  , RT_X  , RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, Y, Y, CSR.I),
-
-  FENCE_I -> List(Y, N, X, uopNOP  , IQT_INT, FU_X   , RT_X  , RT_X  , RT_X  , N, IS_X, N, N, N, N, Y, M_X  , 0.U, N, N, N, Y, Y, CSR.N),
-  FENCE   -> List(Y, N, X, uopFENCE, IQT_INT, FU_MEM , RT_X  , RT_X  , RT_X  , N, IS_X, N, Y, N, Y, N, M_X  , 0.U, N, N, N, Y, Y, CSR.N), // TODO PERF make fence higher performance
-                                                                                                                                                       // currently serializes pipeline
-
-           //                                                                  frs3_en                           wakeup_delay
-           //     is val inst?                                                 |  imm sel                        |   bypassable (aka, known/fixed latency)
-           //     |  is fp inst?                                               |  |     uses_ldq                 |   |  is_br
-           //     |  |  is single-prec?                        rs1 regtype     |  |     |  uses_stq              |   |  |
-           //     |  |  |  micro-code                          |       rs2 type|  |     |  |  is_amo             |   |  |
-           //     |  |  |  |          iq-type  func unit       |       |       |  |     |  |  |  is_fence        |   |  |
-           //     |  |  |  |          |        |               |       |       |  |     |  |  |  |  is_fencei    |   |  |  is breakpoint or ecall?
-           //     |  |  |  |          |        |       dst     |       |       |  |     |  |  |  |  |  mem       |   |  |  |  is unique? (clear pipeline for it)
-           //     |  |  |  |          |        |       regtype |       |       |  |     |  |  |  |  |  cmd       |   |  |  |  |  flush on commit
-           //     |  |  |  |          |        |       |       |       |       |  |     |  |  |  |  |  |         |   |  |  |  |  |  csr cmd
-  // A-type       |  |  |  |          |        |       |       |       |       |  |     |  |  |  |  |  |         |   |  |  |  |  |  |
-  AMOADD_W-> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_ADD, 0.U,N, N, N, Y, Y, CSR.N), // TODO make AMOs higherperformance
-  AMOXOR_W-> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_XOR, 0.U,N, N, N, Y, Y, CSR.N),
-  AMOSWAP_W->List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_SWAP,0.U,N, N, N, Y, Y, CSR.N),
-  AMOAND_W-> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_AND, 0.U,N, N, N, Y, Y, CSR.N),
-  AMOOR_W -> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_OR,  0.U,N, N, N, Y, Y, CSR.N),
-  AMOMIN_W-> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_MIN, 0.U,N, N, N, Y, Y, CSR.N),
-  AMOMINU_W->List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_MINU,0.U,N, N, N, Y, Y, CSR.N),
-  AMOMAX_W-> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_MAX, 0.U,N, N, N, Y, Y, CSR.N),
-  AMOMAXU_W->List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_MAXU,0.U,N, N, N, Y, Y, CSR.N),
-
-  AMOADD_D-> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_ADD, 0.U,N, N, N, Y, Y, CSR.N),
-  AMOXOR_D-> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_XOR, 0.U,N, N, N, Y, Y, CSR.N),
-  AMOSWAP_D->List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_SWAP,0.U,N, N, N, Y, Y, CSR.N),
-  AMOAND_D-> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_AND, 0.U,N, N, N, Y, Y, CSR.N),
-  AMOOR_D -> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_OR,  0.U,N, N, N, Y, Y, CSR.N),
-  AMOMIN_D-> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_MIN, 0.U,N, N, N, Y, Y, CSR.N),
-  AMOMINU_D->List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_MINU,0.U,N, N, N, Y, Y, CSR.N),
-  AMOMAX_D-> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_MAX, 0.U,N, N, N, Y, Y, CSR.N),
-  AMOMAXU_D->List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XA_MAXU,0.U,N, N, N, Y, Y, CSR.N),
-
-  LR_W    -> List(Y, N, X, uopLD    , IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XLR   , 0.U,N, N, N, Y, Y, CSR.N),
-  LR_D    -> List(Y, N, X, uopLD    , IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_X  , N, IS_X, Y, N, N, N, N, M_XLR   , 0.U,N, N, N, Y, Y, CSR.N),
-  SC_W    -> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XSC   , 0.U,N, N, N, Y, Y, CSR.N),
-  SC_D    -> List(Y, N, X, uopAMO_AG, IQT_MEM, FU_MEM, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, Y, Y, N, N, M_XSC   , 0.U,N, N, N, Y, Y, CSR.N)
-  )
-}
-
-/**
- * FP Decode constants
- */
-object FDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = Array(
-            //                                                                  frs3_en                        wakeup_delay
-            //                                                                  |  imm sel                     |    bypassable (aka, known/fixed latency)
-            //                                                                  |  |     uses_ldq              |    |  is_br
-            //    is val inst?                                  rs1 regtype     |  |     |  uses_stq           |    |  |
-            //    |  is fp inst?                                |       rs2 type|  |     |  |  is_amo          |    |  |
-            //    |  |  is dst single-prec?                     |       |       |  |     |  |  |  is_fence     |    |  |
-            //    |  |  |  micro-opcode                         |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall
-            //    |  |  |  |           iq_type  func    dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
-            //    |  |  |  |           |        unit    regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit
-            //    |  |  |  |           |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd
-  FLW     -> List(Y, Y, Y, uopLD     , IQT_MEM, FU_MEM, RT_FLT, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N),
-  FLD     -> List(Y, Y, N, uopLD     , IQT_MEM, FU_MEM, RT_FLT, RT_FIX, RT_X  , N, IS_I, Y, N, N, N, N, M_XRD, 0.U, N, N, N, N, N, CSR.N),
-  FSW     -> List(Y, Y, Y, uopSTA    , IQT_MFP,FU_F2IMEM,RT_X , RT_FIX, RT_FLT, N, IS_S, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N), // sort of a lie; broken into two micro-ops
-  FSD     -> List(Y, Y, N, uopSTA    , IQT_MFP,FU_F2IMEM,RT_X , RT_FIX, RT_FLT, N, IS_S, N, Y, N, N, N, M_XWR, 0.U, N, N, N, N, N, CSR.N),
-
-  FCLASS_S-> List(Y, Y, Y, uopFCLASS_S,IQT_FP , FU_F2I, RT_FIX, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCLASS_D-> List(Y, Y, N, uopFCLASS_D,IQT_FP , FU_F2I, RT_FIX, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  FMV_S_X -> List(Y, Y, Y, uopFMV_S_X, IQT_INT, FU_I2F, RT_FLT, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FMV_D_X -> List(Y, Y, N, uopFMV_D_X, IQT_INT, FU_I2F, RT_FLT, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FMV_X_S -> List(Y, Y, Y, uopFMV_X_S, IQT_FP , FU_F2I, RT_FIX, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FMV_X_D -> List(Y, Y, N, uopFMV_X_D, IQT_FP , FU_F2I, RT_FIX, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  FSGNJ_S -> List(Y, Y, Y, uopFSGNJ_S, IQT_FP , FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FSGNJ_D -> List(Y, Y, N, uopFSGNJ_D, IQT_FP , FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FSGNJX_S-> List(Y, Y, Y, uopFSGNJ_S, IQT_FP , FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FSGNJX_D-> List(Y, Y, N, uopFSGNJ_D, IQT_FP , FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FSGNJN_S-> List(Y, Y, Y, uopFSGNJ_S, IQT_FP , FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FSGNJN_D-> List(Y, Y, N, uopFSGNJ_D, IQT_FP , FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  // FP to FP
-  FCVT_S_D-> List(Y, Y, Y, uopFCVT_S_D,IQT_FP , FU_FPU, RT_FLT, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_D_S-> List(Y, Y, N, uopFCVT_D_S,IQT_FP , FU_FPU, RT_FLT, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  // Int to FP
-  FCVT_S_W-> List(Y, Y, Y, uopFCVT_S_X, IQT_INT,FU_I2F, RT_FLT, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_S_WU->List(Y, Y, Y, uopFCVT_S_X, IQT_INT,FU_I2F, RT_FLT, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_S_L-> List(Y, Y, Y, uopFCVT_S_X, IQT_INT,FU_I2F, RT_FLT, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_S_LU->List(Y, Y, Y, uopFCVT_S_X, IQT_INT,FU_I2F, RT_FLT, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  FCVT_D_W-> List(Y, Y, N, uopFCVT_D_X, IQT_INT,FU_I2F, RT_FLT, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_D_WU->List(Y, Y, N, uopFCVT_D_X, IQT_INT,FU_I2F, RT_FLT, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_D_L-> List(Y, Y, N, uopFCVT_D_X, IQT_INT,FU_I2F, RT_FLT, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_D_LU->List(Y, Y, N, uopFCVT_D_X, IQT_INT,FU_I2F, RT_FLT, RT_FIX, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  // FP to Int
-  FCVT_W_S-> List(Y, Y, Y, uopFCVT_X_S, IQT_FP, FU_F2I, RT_FIX, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_WU_S->List(Y, Y, Y, uopFCVT_X_S, IQT_FP, FU_F2I, RT_FIX, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_L_S-> List(Y, Y, Y, uopFCVT_X_S, IQT_FP, FU_F2I, RT_FIX, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_LU_S->List(Y, Y, Y, uopFCVT_X_S, IQT_FP, FU_F2I, RT_FIX, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  FCVT_W_D-> List(Y, Y, N, uopFCVT_X_D, IQT_FP, FU_F2I, RT_FIX, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_WU_D->List(Y, Y, N, uopFCVT_X_D, IQT_FP, FU_F2I, RT_FIX, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_L_D-> List(Y, Y, N, uopFCVT_X_D, IQT_FP, FU_F2I, RT_FIX, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FCVT_LU_D->List(Y, Y, N, uopFCVT_X_D, IQT_FP, FU_F2I, RT_FIX, RT_FLT, RT_X  , N, IS_I, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  // "fp_single" is used for wb_data formatting (and debugging)
-  FEQ_S    ->List(Y, Y, Y, uopCMPR_S , IQT_FP,  FU_F2I, RT_FIX, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FLT_S    ->List(Y, Y, Y, uopCMPR_S , IQT_FP,  FU_F2I, RT_FIX, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FLE_S    ->List(Y, Y, Y, uopCMPR_S , IQT_FP,  FU_F2I, RT_FIX, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  FEQ_D    ->List(Y, Y, N, uopCMPR_D , IQT_FP,  FU_F2I, RT_FIX, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FLT_D    ->List(Y, Y, N, uopCMPR_D , IQT_FP,  FU_F2I, RT_FIX, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FLE_D    ->List(Y, Y, N, uopCMPR_D , IQT_FP,  FU_F2I, RT_FIX, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  FMIN_S   ->List(Y, Y, Y,uopFMINMAX_S,IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FMAX_S   ->List(Y, Y, Y,uopFMINMAX_S,IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FMIN_D   ->List(Y, Y, N,uopFMINMAX_D,IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FMAX_D   ->List(Y, Y, N,uopFMINMAX_D,IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  FADD_S   ->List(Y, Y, Y, uopFADD_S , IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FSUB_S   ->List(Y, Y, Y, uopFSUB_S , IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FMUL_S   ->List(Y, Y, Y, uopFMUL_S , IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FADD_D   ->List(Y, Y, N, uopFADD_D , IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FSUB_D   ->List(Y, Y, N, uopFSUB_D , IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FMUL_D   ->List(Y, Y, N, uopFMUL_D , IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-
-  FMADD_S  ->List(Y, Y, Y, uopFMADD_S, IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FMSUB_S  ->List(Y, Y, Y, uopFMSUB_S, IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FNMADD_S ->List(Y, Y, Y, uopFNMADD_S,IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FNMSUB_S ->List(Y, Y, Y, uopFNMSUB_S,IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FMADD_D  ->List(Y, Y, N, uopFMADD_D, IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FMSUB_D  ->List(Y, Y, N, uopFMSUB_D, IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FNMADD_D ->List(Y, Y, N, uopFNMADD_D,IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FNMSUB_D ->List(Y, Y, N, uopFNMSUB_D,IQT_FP,  FU_FPU, RT_FLT, RT_FLT, RT_FLT, Y, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N)
-  )
-}
-
-/**
- * FP Divide SquareRoot Constants
- */
-object FDivSqrtDecode extends DecodeConstants
-{
-  val table: Array[(BitPat, List[BitPat])] = Array(
-            //                                                                  frs3_en                        wakeup_delay
-            //                                                                  |  imm sel                     |    bypassable (aka, known/fixed latency)
-            //                                                                  |  |     uses_ldq              |    |  is_br
-            //     is val inst?                                 rs1 regtype     |  |     |  uses_stq           |    |  |
-            //     |  is fp inst?                               |       rs2 type|  |     |  |  is_amo          |    |  |
-            //     |  |  is dst single-prec?                    |       |       |  |     |  |  |  is_fence     |    |  |
-            //     |  |  |  micro-opcode                        |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall
-            //     |  |  |  |           iq-type func    dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
-            //     |  |  |  |           |       unit    regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit
-            //     |  |  |  |           |       |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd
-  FDIV_S    ->List(Y, Y, Y, uopFDIV_S , IQT_FP, FU_FDV, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FDIV_D    ->List(Y, Y, N, uopFDIV_D , IQT_FP, FU_FDV, RT_FLT, RT_FLT, RT_FLT, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FSQRT_S   ->List(Y, Y, Y, uopFSQRT_S, IQT_FP, FU_FDV, RT_FLT, RT_FLT, RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-  FSQRT_D   ->List(Y, Y, N, uopFSQRT_D, IQT_FP, FU_FDV, RT_FLT, RT_FLT, RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N)
-  )
-}
-//scalastyle:on
-
-/**
- * RoCC initial decode
- */
-object RoCCDecode extends DecodeConstants
-{
-  // Note: We use FU_CSR since CSR instructions cannot co-execute with RoCC instructions
-                       //                                                                   frs3_en                        wakeup_delay
-                       //     is val inst?                                                  |  imm sel                     |    bypassable (aka, known/fixed latency)
-                       //     |  is fp inst?                                                |  |     uses_ldq              |    |  is_br
-                       //     |  |  is single-prec                          rs1 regtype     |  |     |  uses_stq           |    |  |
-                       //     |  |  |                                       |       rs2 type|  |     |  |  is_amo          |    |  |
-                       //     |  |  |  micro-code           func unit       |       |       |  |     |  |  |  is_fence     |    |  |
-                       //     |  |  |  |           iq-type  |               |       |       |  |     |  |  |  |  is_fencei |    |  |  is breakpoint or ecall?
-                       //     |  |  |  |           |        |       dst     |       |       |  |     |  |  |  |  |  mem    |    |  |  |  is unique? (clear pipeline for it)
-                       //     |  |  |  |           |        |       regtype |       |       |  |     |  |  |  |  |  cmd    |    |  |  |  |  flush on commit
-                       //     |  |  |  |           |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  csr cmd
-                       //     |  |  |  |           |        |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |
-  val table: Array[(BitPat, List[BitPat])] = Array(//       |       |       |       |       |  |     |  |  |  |  |  |      |    |  |  |  |  |  |
-    CUSTOM0            ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_X  , RT_X  , RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM0_RS1        ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_X  , RT_FIX, RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM0_RS1_RS2    ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_X  , RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM0_RD         ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_FIX, RT_X  , RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM0_RD_RS1     ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM0_RD_RS1_RS2 ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM1            ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_X  , RT_X  , RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM1_RS1        ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_X  , RT_FIX, RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM1_RS1_RS2    ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_X  , RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM1_RD         ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_FIX, RT_X  , RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM1_RD_RS1     ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM1_RD_RS1_RS2 ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM2            ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_X  , RT_X  , RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM2_RS1        ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_X  , RT_FIX, RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM2_RS1_RS2    ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_X  , RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM2_RD         ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_FIX, RT_X  , RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM2_RD_RS1     ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM2_RD_RS1_RS2 ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM3            ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_X  , RT_X  , RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM3_RS1        ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_X  , RT_FIX, RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM3_RS1_RS2    ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_X  , RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM3_RD         ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_FIX, RT_X  , RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM3_RD_RS1     ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_X  , N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N),
-    CUSTOM3_RD_RS1_RS2 ->List(Y, N, X, uopROCC   , IQT_INT, FU_CSR, RT_FIX, RT_FIX, RT_FIX, N, IS_X, N, N, N, N, N, M_X  , 0.U, N, N, N, N, N, CSR.N)
-  )
-}
-
-
-
-
+// TODO:
+// 1. make vsetvli and vsetivli not unique, by tagging at Decode stage, with a flop control whether using CSR.vconfig all decoder.vconfig
 
 /**
  * IO bundle for the Decode unit
@@ -454,13 +135,24 @@ object RoCCDecode extends DecodeConstants
 class DecodeUnitIo(implicit p: Parameters) extends BoomBundle
 {
   val enq = new Bundle { val uop = Input(new MicroOp()) }
+  val enq_stall = Output(Bool())
   val deq = new Bundle { val uop = Output(new MicroOp()) }
+  val deq_fire = Input(Bool())
+  val kill = Input(Bool())
 
   // from CSRFile
   val status = Input(new freechips.rocketchip.rocket.MStatus())
   val csr_decode = Flipped(new freechips.rocketchip.rocket.CSRDecodeIO)
+  val csr_vconfig = Input(new VConfig)
+  val csr_vstart = Input(UInt(vLenSz.W))
   val interrupt = Input(Bool())
   val interrupt_cause = Input(UInt(xLen.W))
+
+  val csr_mconfig = Input(new MConfig)
+  val csr_tilem = Input(UInt(xLen.W))
+  val csr_tilek = Input(UInt(xLen.W))
+  val csr_tilen = Input(UInt(xLen.W))
+  val csr_tsidx = Input(UInt(xLen.W))
 }
 
 /**
@@ -474,28 +166,73 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   val uop = Wire(new MicroOp())
   uop := io.enq.uop
 
-  var decode_table = XDecode.table
-  if (usingFPU) decode_table ++= FDecode.table
-  if (usingFPU && usingFDivSqrt) decode_table ++= FDivSqrtDecode.table
-  if (usingRoCC) decode_table ++= RoCCDecode.table
-  decode_table ++= (if (xLen == 64) X64Decode.table else X32Decode.table)
+  val definition: String = "/csv/decode-inst.csv"
+  val preContext: String = s"""
+  |{
+  |  import chisel3._
+  |  import chisel3.util._
+  |  import freechips.rocketchip.rocket.CSR
+  |  import freechips.rocketchip.rocket.Instructions._
+  |  import freechips.rocketchip.util.uintToBitPat
+  |  import boom.common._
+  |  import boom.common.MicroOpcodes._
+  |  import boom.exu.FUConstants._
+  |  object DecoderCSVHelper extends boom.exu.DecodeConstants
+  |  {
+  |    val table: Array[(BitPat, List[BitPat])] = Array(
+  |""".stripMargin
+  val postContext: String = s"""
+  |    )
+  |  }
+  |  val ret: Array[(BitPat, List[BitPat])] = DecoderCSVHelper.table
+  |  ret
+  |}""".stripMargin
+  val xLenISA: String = if (xLen == 64) "X64" else "X32"
+  def getTable(category: String): Array[(BitPat, List[BitPat])] = {
+    DecoderCSVReader(definition, category, preContext, postContext)
+  }
+
+  var decode_table = getTable("XInt")
+  decode_table ++= getTable(xLenISA)
+  if (usingFPU) {
+    decode_table ++= getTable("Float")
+    if (usingFDivSqrt) decode_table ++= getTable("FDivSqrt")
+    if (usingzfhExt) decode_table ++= getTable("zfhExt")
+  }
+  if (usingRoCC) decode_table ++= getTable("RoCC")
+  if (usingVector) {
+    decode_table ++= getTable("VectorCfg")
+    decode_table ++= getTable("VectorMem")
+    decode_table ++= getTable("VectorInt")
+    decode_table ++= getTable("VectorFix")
+    decode_table ++= getTable("VectorFloat")
+    decode_table ++= getTable("VectorReduction")
+    decode_table ++= getTable("VectorMask")
+    decode_table ++= getTable("VectorPerm")
+  }
+  if(usingMatrix) decode_table ++= getTable("Matrix")
 
   val inst = uop.inst
 
   val cs = Wire(new CtrlSigs()).decode(inst, decode_table)
 
   // Exception Handling
-  io.csr_decode.csr := inst(31,20)
-  val csr_en = cs.csr_cmd.isOneOf(CSR.S, CSR.C, CSR.W)
+  val vsetvl = cs.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
+  val mconfig = uop.is_rvm && cs.inst_unique
+  io.csr_decode.csr := Mux(vsetvl | mconfig, 0.U, inst(31,20))
+  val csr_en = cs.csr_cmd.isOneOf(CSR.S, CSR.C, CSR.W) && !vsetvl && !mconfig
   val csr_ren = cs.csr_cmd.isOneOf(CSR.S, CSR.C) && uop.lrs1 === 0.U
   val system_insn = cs.csr_cmd === CSR.I
   val sfence = cs.uopc === uopSFENCE
 
   val cs_legal = cs.legal
 //   dontTouch(cs_legal)
-
+  val illegal_vector_case = if(usingVector) Wire(Bool()) else false.B
+  val illegal_matrix_case = if(usingMatrix) Wire(Bool()) else false.B
   val id_illegal_insn = !cs_legal ||
     cs.fp_val && io.csr_decode.fp_illegal || // TODO check for illegal rm mode: (io.fpu.illegal_rm)
+    cs.is_rvv && (io.csr_decode.vector_illegal || illegal_vector_case) ||
+    cs.is_rvm && (io.csr_decode.matrix_illegal || illegal_matrix_case) ||
     cs.rocc && io.csr_decode.rocc_illegal ||
     cs.is_amo && !io.status.isa('a'-'a')  ||
     (cs.fp_val && !cs.fp_single) && !io.status.isa('d'-'a') ||
@@ -523,16 +260,21 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.uopc       := cs.uopc
   uop.iq_type    := cs.iq_type
   uop.fu_code    := cs.fu_code
+  uop.ctrl.csr_cmd := cs.csr_cmd
 
   // x-registers placed in 0-31, f-registers placed in 32-63.
   // This allows us to straight-up compare register specifiers and not need to
   // verify the rtypes (e.g., bypassing in rename).
-  uop.ldst       := inst(RD_MSB,RD_LSB)
-  uop.lrs1       := inst(RS1_MSB,RS1_LSB)
-  uop.lrs2       := inst(RS2_MSB,RS2_LSB)
-  uop.lrs3       := inst(RS3_MSB,RS3_LSB)
+  val instRD      = inst(RD_MSB,RD_LSB)
+  val instRS1     = inst(RS1_MSB,RS1_LSB)
+  val instRS2     = inst(RS2_MSB,RS2_LSB)
+  val instRS3     = inst(RS3_MSB,RS3_LSB)
+  uop.ldst       := instRD
+  uop.lrs1       := instRS1
+  uop.lrs2       := instRS2
+  uop.lrs3       := instRS3
 
-  uop.ldst_val   := cs.dst_type =/= RT_X && !(uop.ldst === 0.U && uop.dst_rtype === RT_FIX)
+  uop.ldst_val   := isSomeReg(cs.dst_type) && !(uop.ldst === 0.U && uop.rt(RD, isInt)) && Mux(cs.is_rvv || cs.is_rvm, !cs.uses_stq, true.B)
   uop.dst_rtype  := cs.dst_type
   uop.lrs1_rtype := cs.rs1_type
   uop.lrs2_rtype := cs.rs2_type
@@ -540,13 +282,13 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
   uop.ldst_is_rs1 := uop.is_sfb_shadow
   // SFB optimization
-  when (uop.is_sfb_shadow && cs.rs2_type === RT_X) {
+  when (uop.is_sfb_shadow && isNotReg(cs.rs2_type)) {
     uop.lrs2_rtype  := RT_FIX
-    uop.lrs2        := inst(RD_MSB,RD_LSB)
+    uop.lrs2        := instRD
     uop.ldst_is_rs1 := false.B
-  } .elsewhen (uop.is_sfb_shadow && cs.uopc === uopADD && inst(RS1_MSB,RS1_LSB) === 0.U) {
+  } .elsewhen (uop.is_sfb_shadow && cs.uopc === uopADD && instRS1 === 0.U) {
     uop.uopc        := uopMOV
-    uop.lrs1        := inst(RD_MSB, RD_LSB)
+    uop.lrs1        := instRD
     uop.ldst_is_rs1 := true.B
   }
   when (uop.is_sfb_br) {
@@ -566,9 +308,14 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.is_fence   := cs.is_fence
   uop.is_fencei  := cs.is_fencei
   uop.is_sys_pc2epc   := cs.is_sys_pc2epc
-  uop.is_unique  := cs.inst_unique
-  uop.flush_on_commit := cs.flush_on_commit || (csr_en && !csr_ren && io.csr_decode.write_flush)
-
+  //uop.is_unique  := cs.inst_unique || (cs.uopc === uopVSETVLI) && inst(19,15) === 0.U && inst(11,7)  === 0.U
+  uop.is_unique :=  cs.inst_unique ||  vsetvl
+  //uop.flush_on_commit := cs.flush_on_commit || (csr_en && !csr_ren && io.csr_decode.write_flush) || (cs.uopc === uopVSETVLI) && inst(19,15) === 0.U && inst(11,7)  === 0.U
+  uop.flush_on_commit := cs.flush_on_commit ||  vsetvl
+  uop.is_vsetivli := (cs.uopc === uopVSETIVLI)
+  uop.is_vsetvli := (cs.uopc === uopVSETVLI)
+  //uop.vl_ready   := Mux(cs.not_use_vtype, true.B, io.enq.uop.vl_ready)
+  uop.vl_ready   := true.B
   uop.bypassable   := cs.bypassable
 
   //-------------------------------------------------------------
@@ -591,8 +338,280 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   //                       (uop.ldst === RA)
 
   //-------------------------------------------------------------
+  // vector stuff
+  //
+  if (usingVector) {
+    val csr_vsew       = io.csr_vconfig.vtype.vsew
+    val csr_vlmax      = io.csr_vconfig.vtype.vlMax
+    val is_v_ls        = cs.is_rvv & (cs.uses_stq | cs.uses_ldq)
+    val isVMVR         = cs.uopc.isOneOf(uopVMVR)
+    val is_v_ls_index  = cs.uopc.isOneOf(uopVLUX, uopVSUXA, uopVLOX, uopVSOXA)
+    val is_v_mask_ld   = cs.uopc.isOneOf(uopVLM)
+    val is_v_mask_st   = cs.uopc.isOneOf(uopVSMA)
+    val is_v_reg_ls    = cs.uopc.isOneOf(uopVLR, uopVSR)
+    val is_viota_m     = cs.uopc.isOneOf(uopVIOTA)
+    val vmlogic_insn   = cs.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
+    val is_vmask_cnt_m = cs.uopc.isOneOf(uopVPOPC, uopVFIRST)
+    val is_vmask_set_m = cs.uopc.isOneOf(uopVMSOF, uopVMSBF, uopVMSIF)
+    val is_v_mask_insn = vmlogic_insn || is_vmask_cnt_m || is_vmask_set_m
+    val isScalarMove   = cs.uopc.isOneOf(uopVMV_X_S, uopVMV_S_X, uopVFMV_F_S, uopVFMV_S_F)
+    
+    val vseg_nf = inst(NF_MSB, NF_LSB)
+    val is_v_ls_seg = is_v_ls && (vseg_nf =/= 0.U) && !is_v_reg_ls
 
+    val vreg_nf = WireDefault(UInt((NF_MSB - NF_LSB + 2).W), vseg_nf)
+    val vsew = Mux(is_v_reg_ls, cs.v_ls_ew, csr_vsew)
+    val vlmul_sign = io.csr_vconfig.vtype.vlmul_sign
+    val vlmul_mag  = io.csr_vconfig.vtype.vlmul_mag
+    val vlmul = Mux(vlmul_sign, 0.U(2.W), vlmul_mag)
+    val vd_wfactor = Mux(uop.rt(RD,  isWidenV ), 1.U, 0.U)
+    val vd_nfactor = Mux(uop.rt(RD,  isNarrowV), 1.U, 0.U)
+    val vs2_wfactor= Mux(uop.rt(RS2, isWidenV ), 1.U, 0.U)
+    val vs2_nfactor= Mux(uop.uopc === uopVEXT8 , 3.U,
+                     Mux(uop.uopc === uopVEXT4 , 2.U,
+                     Mux(uop.rt(RS2, isNarrowV), 1.U, 0.U))) // uopVEXT2 is included
+    val vd_sew     = Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew,
+                     Mux(is_v_mask_insn, 3.U,
+                     Mux(uop.rt(RD,  isWidenV ), csr_vsew + vd_wfactor,
+                     Mux(uop.rt(RD,  isNarrowV), csr_vsew - vd_nfactor, csr_vsew))))
+    val vs1_sew    = Mux(cs.uopc === uopVRGATHEREI16, 1.U,
+                     Mux(is_v_mask_insn, 3.U,
+                     Mux(uop.rt(RS1, isWidenV ), csr_vsew + vd_wfactor, csr_vsew)))
+    val vs2_sew    = Mux(is_v_ls_index, Cat(0.U(1.W), cs.v_ls_ew),
+                     Mux(is_v_mask_insn, 3.U,
+                     Mux(uop.rt(RS2, isWidenV ), csr_vsew + vs2_wfactor,
+                     Mux(uop.rt(RS2, isNarrowV), csr_vsew - vs2_nfactor, csr_vsew))))
+    val vlmul_value = Mux(is_v_mask_insn, 0.U, Cat(vlmul_sign, vlmul_mag))
+    val vmvr_emul  = Mux(instRS1(2), 3.U, Mux(instRS1(1), 2.U, Mux(instRS1(0), 1.U, 0.U)))
+    val vd_emul    = Mux(isVMVR, vmvr_emul,
+                     Mux(isScalarMove || is_v_mask_ld || vmlogic_insn || uop.is_reduce || uop.rt(RD, isMaskVD) || !uop.rt(RD, isVector), 0.U,
+                     Mux(uop.rt(RD, isWidenV), vlmul_value + vd_wfactor,
+                     Mux(uop.rt(RD, isNarrowV), vlmul_value - vd_nfactor,
+                     Mux(is_v_reg_ls, Log2(vreg_nf + 1.U),
+                     Mux(is_v_ls && !is_v_ls_index, cs.v_ls_ew - vsew + vlmul_value, vlmul_value))))))
+    val vs1_emul   = Mux(cs.uopc === uopVRGATHEREI16, vlmul_value + 1.U - vsew,
+                     Mux(vmlogic_insn || uop.is_reduce || !uop.rt(RS1, isVector), 0.U,
+                     Mux(uop.rt(RS1, isWidenV), vlmul_value + 1.U, vlmul_value)))
+    val vs2_emul   = Mux(isVMVR, vmvr_emul,
+                     Mux(is_v_ls_index, cs.v_ls_ew - vsew + vlmul_value,
+                     Mux(uop.rt(RS2, isWidenV), vlmul_value + vs2_wfactor,
+                     Mux(uop.rt(RS2, isNarrowV), vlmul_value - vs2_nfactor,
+                     Mux(isScalarMove || vmlogic_insn || is_viota_m || !uop.rt(RS2, isVector), 0.U, vlmul_value)))))
+    when (io.deq_fire && cs.is_rvv) {
+      assert(vsew <= 3.U, "Unsupported vsew")
+      //assert(vsew >= vd_nfactor  && vsew + vd_wfactor  <= 3.U, "Unsupported vd_sew")
+      //assert(vsew >= vs2_nfactor && vsew + vs2_wfactor <= 3.U, "Unsupported vs2_sew")
+    }
+
+    val vLen_ecnt  = Mux(!is_v_ls && vs2_sew > vd_sew && !vlmul_sign, vLen.U >> (vs2_sew+3.U), vLen.U >> (vd_sew+3.U))
+    // for store, we can skip inactive locations; otherwise, we have to visit every element
+    // for fractional lmul, we need visit at least one entire vreg
+    // for undisturbing move before reduction, we need visit at most one vreg
+    val total_ecnt = Mux(is_v_mask_ld, vLenb.U,
+                     Mux(is_v_reg_ls, vLenb.U << Log2(vreg_nf + 1.U) >> cs.v_ls_ew,
+                     Mux(cs.uses_stq, Mux(is_v_mask_st, (io.csr_vconfig.vl + 7.U) >> 3.U, io.csr_vconfig.vl),
+                     Mux(isVMVR, vLen_ecnt << vmvr_emul,
+                     Mux(isScalarMove || is_v_mask_insn || vlmul_sign || csr_vlmax < vLen_ecnt, vLen_ecnt, csr_vlmax)))))
+    uop.is_rvv      := cs.is_rvv
+    uop.v_ls_ew     := cs.v_ls_ew
+    when (is_v_ls) {
+      uop.mem_size  := Mux(is_v_ls_index, csr_vsew, cs.v_ls_ew)
+      uop.mem_signed:= false.B
+    }
+    uop.v_unmasked  := !cs.uses_vm || inst(VM_BIT)
+    uop.vxsat       := false.B
+    uop.vconfig     := io.csr_vconfig
+    uop.vconfig.vtype.reserved := DontCare
+    uop.v_eidx      := 0.U // io.csr_vstart
+    //uop.v_eofs      := 0.U
+    uop.v_is_split  := cs.can_be_split
+    //uop.can_be_split  := cs.can_be_split
+    uop.v_split_ecnt:= total_ecnt
+    uop.vconfig.vtype.vsew := Mux(is_v_mask_insn, 3.U, vsew)
+    //when (io.deq_fire && cs.can_be_split) {
+      //assert(cs.is_rvv, "can_be_split applies only to vector instructions.")
+    //}
+    uop.vs1_eew     := vs1_sew
+    uop.vs2_eew     := vs2_sew
+    uop.vd_eew      := vd_sew
+    uop.vs1_emul    := vs1_emul
+    uop.vs2_emul    := vs2_emul
+    if(usingMatrix) {
+      uop.vd_emul := Mux(cs.uopc.isOneOf(uopMQMV_V), 2.U,
+                     Mux(cs.uopc.isOneOf(uopMWMV_V), 1.U, 
+                     Mux(cs.uopc.isOneOf(uopMMV_V),  0.U, vd_emul)))
+    }
+    //when (cs.is_rvv && !uop.v_unmasked) {
+      //when (is_v_ls) {
+        //uop.iq_type := IQT_MVEC
+        //uop.fu_code := FU_MEMV
+      //}
+      //uop.frs3_en := true.B
+    //}
+
+    uop.v_seg_nf     := Mux(is_v_ls_seg, 1.U(4.W) + vseg_nf, 1.U)
+    uop.v_eidx       := 0.U
+
+    when (cs.is_rvv && is_v_mask_ld) {
+      //uop.uopc := uopVL
+      // make elements >= ceil(vl/8) inactive
+      uop.vconfig.vl := (io.csr_vconfig.vl + 7.U) >> 3.U
+    }
+    when (cs.is_rvv && is_v_mask_st) {
+      uop.vconfig.vl := total_ecnt
+    }
+    when (cs.is_rvv && cs.uopc.isOneOf(uopVLR, uopVMVR)) {
+      uop.uopc := Mux(cs.uopc.isOneOf(uopVLR), uopVL, uopVMVR)
+      uop.vconfig.vl := total_ecnt
+      uop.vl_ready := true.B
+    }
+    when (cs.is_rvv && cs.uopc === uopVSR) {
+      uop.uopc := uopVSA
+      uop.vconfig.vl := total_ecnt
+      uop.vl_ready := true.B
+    }
+
+    // vstart control
+    uop.vstart    := 0.U
+    uop.vstartSrc := VSTART_ZERO
+
+    //io.enq_stall := cs.can_be_split && !split_last
+    io.enq_stall := false.B
+
+    /**
+     * vector illegal instruction handler
+     */
+    // reduction, vpopc, vfirst,vmsbf,vmsif,vmsof,viota,vcompress must execute with vstart=0,otherwise illegal
+    val illegal_vstart_not_zero = cs.vstart_is_zero && (io.csr_vstart =/= 0.U)
+    //The destination register cannot overlap the source register
+    val illegal_vd_unequal_vs1 = cs.vd_unequal_vs1 && (uop.ldst === uop.lrs1)
+    val illegal_vd_unequal_vs2 = (cs.vd_unequal_vs2 || cs.uses_ldq && is_v_ls_seg && is_v_ls_index) && (uop.ldst === uop.lrs2)
+    //vadc, vsbc, or a masked instruction(except comparison, reduction) , vd overlap v0 will raise illegal exception
+    val illegal_vd_overlap_v0 = (cs.uopc.isOneOf(uopVADC, uopVSBC) || cs.uses_vm && !inst(VM_BIT) && !cs.allow_vd_is_v0) &&
+                                (uop.ldst === 0.U) && (uop.dst_rtype === RT_VEC)
+
+    //basic SEW and LMUL configuration illegal is judged by CSR module and will set vill
+    //vill and instruction depend on vtype, V-FP sew = 8 but not INT_TO_FP instruction
+    val illegal_vtype_configure = cs.is_rvv && io.csr_vconfig.vtype.vill && !cs.not_use_vtype
+    // illegal floating vsew settings
+    val illegal_vsew_vfloat = cs.is_rvv && cs.fp_val && Mux(cs.uopc === uopVFCVT_I2F, vd_sew  === 0.U,
+                                                        Mux(cs.uopc === uopVFCVT_F2I, vs2_sew === 0.U,
+                                                                                      vs1_sew === 0.U || vs2_sew === 0.U && vd_sew === 0.U))
+    //register EEW > 64
+    val illegal_reg_sew = !cs.not_use_vtype && (vd_sew(2) || vs2_sew(2) || vs1_sew(2))
+    //vd/vs2 EMUL should be illegal
+    val vd_emul_legal = Mux(vd_emul(2), vd_emul(1,0) =/= 0.U && ~vd_emul(1,0) < (3.U - vd_sew), true.B)
+    val vs1_emul_legal = Mux(vs1_emul(2), vs1_emul(1,0) =/= 0.U && ~vs1_emul(1,0) < 3.U - vs1_sew, true.B)
+    val vs2_emul_legal = Mux(vs2_emul(2), vs2_emul(1,0) =/= 0.U && ~vs2_emul(1,0) < 3.U - vs2_sew, true.B)
+    val illegal_reg_emul = !vd_emul_legal || !vs1_emul_legal || !vs2_emul_legal
+
+    //reg_num should be multiple of emul, low bit or reg_num !=0 will raise illegal
+    val illegal_dst_multiple_emul: Bool = Mux(vd_emul(2), false.B, (((rightOR(UIntToOH(vd_emul(1,0))) >> 1.U).asUInt
+                                    & instRD) =/= 0.U) && (uop.dst_rtype === RT_VEC))
+    val illegal_vs2_multiple_emul = Mux(vs2_emul(2), false.B, (((rightOR(UIntToOH(vs2_emul(1,0))) >> 1.U).asUInt
+                                    & instRS2) =/= 0.U) && (uop.lrs2_rtype === RT_VEC))
+    val illegal_vs1_multiple_emul = Mux(vs1_emul(2), false.B, (((rightOR(UIntToOH(vs1_emul(1,0))) >> 1.U).asUInt
+                                    & instRS1) =/= 0.U) && (uop.lrs1_rtype === RT_VEC))
+
+    val illegal_regnum_multiple_emul = illegal_dst_multiple_emul || illegal_vs2_multiple_emul || illegal_vs1_multiple_emul
+
+    val illegal_vs2_overlap_vd_lowpart = (uop.ldst === (uop.lrs2 + vs2_emul(1,0))) && uop.rt(RD, isNarrowV)
+
+    illegal_vector_case :=  !vsetvl && (illegal_vstart_not_zero ||
+                            illegal_vd_unequal_vs1              ||
+                            illegal_vd_unequal_vs2              ||
+                            illegal_vd_overlap_v0               ||
+                            illegal_vtype_configure             ||
+                            illegal_vsew_vfloat                 ||
+                            illegal_reg_sew                     ||
+                            illegal_reg_emul                    ||
+                            illegal_regnum_multiple_emul        ||
+                            illegal_vs2_overlap_vd_lowpart)
+  } // if usingvector
+
+  // matrix stuff
+  if (usingMatrix) {
+    dontTouch(io.csr_mconfig.mtype.msew)
+    val csr_msew = io.csr_mconfig.mtype.msew
+    val csr_tilem = io.csr_tilem
+    val csr_tilen = io.csr_tilen
+    val csr_tilek = io.csr_tilek
+    val csr_tsidx = io.csr_tsidx
+    val csr_mltr = io.csr_mconfig.mtype.mltr
+    val csr_mrtr = io.csr_mconfig.mtype.mrtr
+
+    val is_mls = cs.is_rvm & (cs.uses_ldq | cs.uses_stq)
+    val mslice_tt0 = uop.inst(28).asBool()     //1: col,  0: row
+    val mslice_dim = uop.inst(27,26)
+
+    val slice_cnt_tilem = (mslice_dim === 1.U && !csr_mltr) || (mslice_dim === 0.U)
+    val slice_cnt_tilen = (mslice_dim === 2.U &&  csr_mrtr)
+    val slice_cnt_tilek = (mslice_dim === 1.U &&  csr_mltr) || (mslice_dim === 2.U && !csr_mrtr)
+    val slice_len_tilem = (mslice_dim === 1.U &&  csr_mltr)
+    val slice_len_tilen = (mslice_dim === 2.U && !csr_mrtr) || (mslice_dim === 0.U)
+    val slice_len_tilek = (mslice_dim === 1.U && !csr_mltr) || (mslice_dim === 2.U && csr_mrtr)
+
+    val sel_slice_cnt = Mux(slice_cnt_tilem, csr_tilem,
+                        Mux(slice_cnt_tilen, csr_tilen, csr_tilek))
+    val sel_slice_len = Mux(slice_len_tilem, csr_tilem,
+                        Mux(slice_len_tilen, csr_tilen, csr_tilek))
+
+    val msew = Mux(is_mls, cs.v_ls_ew, csr_msew)
+    val is_mmv  = cs.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V)
+    val is_mopa = cs.uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA)
+    val mqwiden = cs.uopc.isOneOf(uopMQOPA,uopMQMV_T,uopMQMV_V, uopMQADD, uopMQSUB, uopMQRSUB)
+    val mwwiden = cs.uopc.isOneOf(uopMWOPA,uopMWMV_T,uopMWMV_V, uopMWADD, uopMWSUB, uopMWRSUB)
+    val td_mwfactor  = Mux(mqwiden, 2.U, Mux(mwwiden, 1.U, 0.U))
+    val ts1_mwfactor = Mux(mqwiden && is_mmv, 2.U, 
+                       Mux(mwwiden && is_mmv, 1.U,
+                       Mux(cs.uopc === uopMFNCVT, 1.U, 0.U)))
+
+    val ts1_eew = msew + ts1_mwfactor
+    val ts2_eew = msew
+    val td_eew  = msew + td_mwfactor
+    when (io.deq_fire && cs.is_rvm) {
+      assert(msew <= 3.U, "Unsupported msew")
+    }
+
+    when (is_mls) {
+      uop.mem_size   := cs.v_ls_ew
+      uop.mem_signed := false.B
+    }
+
+    uop.m_is_split    := cs.can_be_split
+    uop.m_slice_cnt   := Mux(is_mls,  sel_slice_cnt, 
+                         Mux(is_mopa, csr_tilek, csr_tilem))
+    uop.m_slice_len   := Mux(is_mls, sel_slice_len, 
+                         Mux(is_mmv && mslice_dim === 2.U, csr_tilem,
+                         Mux(is_mmv && mslice_dim === 3.U, csr_tilen, csr_tilek)))
+    uop.m_tilen       := csr_tilen
+    uop.m_sidx        := 0.U
+    uop.ts1_eew       := ts1_eew
+    uop.ts2_eew       := ts2_eew
+    uop.td_eew        := td_eew
+    uop.is_rvm        := cs.is_rvm
+    uop.m_ls_ew       := cs.v_ls_ew
+    uop.mconfig       := io.csr_mconfig
+
+    uop.m_split_first := true.B    //remove split after dispatch
+    uop.m_split_last  := true.B
+    uop.isHSlice      := !mslice_tt0
+    when (cs.is_rvm && cs.uopc.isOneOf(uopMLE)) {
+      uop.dst_rtype  := Mux(uop.inst(29).asBool(), RT_TR, RT_ACC)
+    }
+    when (cs.is_rvm && cs.uopc.isOneOf(uopMMV_V, uopMWMV_V, uopMQMV_V)) {
+      uop.lrs1_rtype := Mux(uop.inst(29).asBool(), RT_TR, RT_ACC)
+      uop.fu_code    := Mux(uop.inst(28).asBool(), FU_VSLICE, FU_HSLICE)
+    }
+
+    //matrix illegal instruction handler
+
+    val illegal_msew = cs.is_rvm && !cs.inst_unique && (td_eew > 2.U || ts1_eew > 2.U || ts2_eew > 2.U)
+    illegal_matrix_case := illegal_msew || cs.is_rvm && io.csr_mconfig.mtype.mill && !cs.inst_unique
+
+  } // if usingMatrix
   io.deq.uop := uop
+  //assert(!id_illegal_insn)
 }
 
 /**
@@ -789,4 +808,180 @@ class BranchMaskGenerationLogic(val pl_width: Int)(implicit p: Parameters) exten
   }
 
   io.debug_branch_mask := branch_mask
+}
+
+class VlWakeupResp(implicit p: Parameters) extends BoomBundle
+{
+  val vcq_idx = UInt(vcqSz.W)
+  val vl = UInt((maxVLMax.log2 + 1).W)
+  val vconfig_tag = UInt(vconfigTagSz.W)
+  val vconfig_mask = UInt(maxVconfigCount.W)
+}
+
+class VconfigDecodeSignals(implicit p: Parameters) extends BoomBundle
+{
+  val vl_ready = Bool()
+  val vconfig    = new VConfig
+}
+
+/**
+ * Track the current "vconfig mask", and give out the vconfig mask to each micro-op in Decode
+ * (each micro-op in the machine has a vconfig mask which says which vconfig it
+ * is being speculated under).
+ *
+ * @param pl_width pipeline width for the processor
+ */
+class VconfigMaskGenerationLogic(val pl_width: Int) (implicit p: Parameters) extends BoomModule
+{
+  val io = IO(new Bundle {
+    // guess if the uop is a vsetvli/vsetivli (we'll catch this later)
+    val is_vconfig = Input(Vec(pl_width, Bool()))
+    // lock in that it's actually a vconfig and will fire, so we update
+    // the vconfig_masks.
+    val will_fire = Input(Vec(pl_width, Bool()))
+
+    // give out tag immediately (needed in rename)
+    // mask can come later in the cycle
+    val vconfig_tag    = Output(Vec(pl_width, UInt(vconfigTagSz.W)))
+    val vconfig_mask   = Output(Vec(pl_width, UInt(maxVconfigCount.W)))
+
+    // tell decoders the vconfig mask has filled up, but on the granularity
+    // of an individual micro-op (so some micro-ops can go through)
+    val is_full   = Output(Vec(pl_width, Bool()))
+
+    //deadallocate the committed vconfig
+    val vconfig_mask_update  = Input(UInt(maxVconfigCount.W))
+    val flush_pipeline = Input(Bool())
+
+    val debug_vconfig_mask = Output(UInt(maxVconfigCount.W))
+  })
+
+  val vconfig_mask = RegInit(0.U(maxVconfigCount.W))
+
+  //-------------------------------------------------------------
+  // Give out the branch tag to each speculative vconfig micro-op
+
+  var allocate_mask = vconfig_mask
+  val update_vtag = (io.is_vconfig zip io.will_fire).map{case(v,w) => v && w}.reduce(_||_)
+  val tag_masks = Wire(Vec(pl_width, UInt(maxVconfigCount.W)))
+  for (w <- 0 until pl_width) {
+    io.is_full(w) := (allocate_mask === ~(0.U(maxVconfigCount.W))) && io.is_vconfig(w)
+
+    // find vconfig_tag and compute next vconfig_mask
+    val new_vconfig_tag = RegInit(0.U(vconfigTagSz.W))
+    //new_vconfig_tag := 0.U
+    tag_masks(w) := 0.U
+
+    for (i <- maxVconfigCount - 1 to 0 by -1) {
+      when(~allocate_mask(i)) {
+        tag_masks(w) := (1.U << i.U)
+        when(update_vtag) {
+          new_vconfig_tag := new_vconfig_tag + 1.U
+        }
+      }
+    }
+
+    io.vconfig_tag(w) := new_vconfig_tag
+    allocate_mask = Mux(io.is_vconfig(w), tag_masks(w) | allocate_mask, allocate_mask)
+  }
+  //-------------------------------------------------------------
+  // Give out the branch mask to each micro-op
+  // (kill off the bits that corresponded to branches that aren't going to fire)
+
+  var curr_mask = vconfig_mask
+  for (w <- 0 until pl_width) {
+    io.vconfig_mask(w) := ~io.vconfig_mask_update & curr_mask
+    curr_mask = Mux(io.will_fire(w), tag_masks(w) | curr_mask, curr_mask)
+  }
+  //-------------------------------------------------------------
+  // Update the current vconfig_mask
+
+  when (io.flush_pipeline) {
+    vconfig_mask := 0.U
+  } .otherwise {
+    vconfig_mask := ~io.vconfig_mask_update & curr_mask
+  }
+
+  io.debug_vconfig_mask := vconfig_mask
+}
+
+case class VcqParameters(
+                          nEntries: Int = 4
+                        )
+
+/**
+ * Queue to store the vconfig info that are inflight in the processor.
+ *
+ * @param num_entries # of entries in the VCQ
+ */
+class VconfigQueue(implicit p: Parameters) extends BoomModule
+  with HasBoomCoreParameters {
+  val num_entries = vcqSz
+  private val idx_sz = log2Ceil(num_entries)
+
+  val io = IO(new BoomBundle {
+    //Enqueue one entry when decode a vconfig instruction.
+    val enq = Flipped(Decoupled(new VconfigDecodeSignals()))
+    val enq_idx = Output(UInt(num_entries.W))
+    val deq   = Input(Bool())
+    val flush = Input(Bool())
+
+    val get_vconfig = Output(new VconfigDecodeSignals())
+    val empty = Output(Bool())
+
+    val update_vl_idx = Input(UInt(num_entries.W))
+    val update_vl = Flipped(Decoupled(new VconfigDecodeSignals()))
+
+    val vcq_Wcsr = Output(new VconfigDecodeSignals())
+  })
+
+  val ram = Reg(Vec(num_entries, new VconfigDecodeSignals()))
+  ram.suggestName("vconfig_table")
+
+  val enq_ptr = RegInit(0.U(num_entries.W))
+  val deq_ptr = RegInit(0.U(num_entries.W))
+  val maybe_full = RegInit(false.B)
+
+  val ptr_match = enq_ptr === deq_ptr
+  val empty = ptr_match && !maybe_full
+  val full = ptr_match && maybe_full
+  val do_enq = WireDefault(io.enq.fire())
+  val do_deq = WireDefault(io.deq)
+
+ /* def inc(ptr: UInt) = {
+    val n = ptr.getWidth
+    Cat(ptr(n-2,0), ptr(n-1))
+  }
+  def dec(ptr: UInt) = {
+    val n = ptr.getWidth
+    Cat(ptr(0), ptr(n-1,1))
+  }
+*/
+  when(do_enq) {
+    ram(enq_ptr) := io.enq.bits
+    enq_ptr := WrapInc(enq_ptr, num_entries)
+  }
+  io.enq_idx := enq_ptr
+
+  when(do_deq && !empty) {
+    deq_ptr := WrapInc(deq_ptr, num_entries)
+    io.vcq_Wcsr := ram(deq_ptr)
+  }
+  when(io.update_vl.valid) {
+    ram(io.update_vl_idx).vconfig.vl := io.update_vl.bits.vconfig.vl
+    ram(io.update_vl_idx).vl_ready := io.update_vl.bits.vl_ready
+  }
+  when(do_enq =/= do_deq) {
+    maybe_full := do_enq
+  }
+  when(io.flush) {
+    enq_ptr := 0.U
+    deq_ptr := 0.U
+    maybe_full := false.B
+  }
+
+  io.enq_idx := enq_ptr
+  io.enq.ready := !full
+  io.get_vconfig := ram(WrapDec(enq_ptr, num_entries))
+  io.empty := empty
 }

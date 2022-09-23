@@ -48,6 +48,11 @@ class FetchBuffer(implicit p: Parameters) extends BoomModule
 
     // Was the pipeline redirected? Clear/reset the fetchbuffer.
     val clear = Input(Bool())
+
+    val perf = Output(new Bundle {
+      val maybe_full  = Bool()
+      val amost_empty = Bool()
+    })
   })
 
   require (numEntries > fetchWidth)
@@ -121,6 +126,7 @@ class FetchBuffer(implicit p: Parameters) extends BoomModule
       in_uops(i).bp_xcpt_if     := io.enq.bits.bp_xcpt_if_oh(i)
 
       in_uops(i).debug_fsrc     := io.enq.bits.fsrc
+      in_uops(i).debug_events   := io.enq.bits.debug_events(i)
     }
   }
 
@@ -195,5 +201,9 @@ class FetchBuffer(implicit p: Parameters) extends BoomModule
   when (reset.toBool) {
     io.deq.bits.uops map { u => u.valid := false.B }
   }
+
+  // perf event
+  io.perf.maybe_full := maybe_full
+  io.perf.amost_empty := will_hit_tail
 
 }

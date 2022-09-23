@@ -18,17 +18,55 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.util.Str
 import freechips.rocketchip.rocket.RVCExpander
 
+
+/**
+ * Mixin indicating the debug flags that can be set for viewing different
+ * debug printf's
+ */
+trait BOOMDebugConstants
+{
+  val DEBUG_PRINTF        = false // use the Chisel printf functionality
+  val COMMIT_LOG_PRINTF   = true // dump commit state, for comparision against ISA sim
+  val MEMTRACE_PRINTF     = false // dump trace of memory accesses to L1D for debugging
+  val O3PIPEVIEW_PRINTF   = false // dump trace for O3PipeView from gem5
+  val O3_CYCLE_TIME       = (1000)// "cycle" time expected by o3pipeview.py
+
+  val DROMAJO_COSIM_ENABLE = false // enable dromajo cosim
+
+  // When enabling DEBUG_PRINTF, the vertical whitespace can be padded out
+  // such that viewing the *.out file in vim can line up veritically to
+  // enable ctrl+f/ctrl+b to advance the *.out file one cycle without
+  // moving the structures.
+  val debugScreenheight  = 79
+
+  // turn off stuff to dramatically reduce Chisel node count
+  val DEBUG_PRINTF_LSU    = true && DEBUG_PRINTF
+  val DEBUG_PRINTF_ROB    = true && DEBUG_PRINTF
+  val DEBUG_PRINTF_TAGE   = true && DEBUG_PRINTF
+  val DEBUG_PRINTF_FTQ    = true && DEBUG_PRINTF
+  val DEBUG_PRINTF_IQ     = true && DEBUG_PRINTF
+
+  if (O3PIPEVIEW_PRINTF) require (!DEBUG_PRINTF && !COMMIT_LOG_PRINTF)
+}
+
 /**
  * Mixin for issue queue types
  */
 trait IQType
 {
-  val IQT_SZ  = 3
-  val IQT_INT = 1.U(IQT_SZ.W)
-  val IQT_MEM = 2.U(IQT_SZ.W)
-  val IQT_FP  = 4.U(IQT_SZ.W)
+  val IQT_SZ    = 5
+  val IQT_INT   = 0x1.U(IQT_SZ.W)
+  val IQT_MEM   = 0x2.U(IQT_SZ.W)
+  val IQT_FP    = 0x4.U(IQT_SZ.W)
+  val IQT_VEC   = 0x8.U(IQT_SZ.W)
+  val IQT_MAT   = 0x10.U(IQT_SZ.W)
 
-  val IQT_MFP = 6.U(IQT_SZ.W)
+  val IQT_MFP   = 0x6.U(IQT_SZ.W)
+  val IQT_IVEC  = 0x9.U(IQT_SZ.W)
+  val IQT_FVEC  = 0xC.U(IQT_SZ.W)
+  val IQT_IMAT  = 0x11.U(IQT_SZ.W)
+  val IQT_MMAT  = 0x12.U(IQT_SZ.W)
+  val IQT_IFMAT = 0x15.U(IQT_SZ.W)
 }
 
 
@@ -40,6 +78,10 @@ trait ScalarOpConstants
   val X = BitPat("b?")
   val Y = BitPat("b1")
   val N = BitPat("b0")
+  val U_0 = 0.U(2.W)
+  val U_1 = 1.U(2.W)
+  val U_2 = 2.U(2.W)
+  val U_3 = 3.U(2.W)
 
   //************************************
   // Extra Constants
@@ -78,10 +120,15 @@ trait ScalarOpConstants
   val BR_JR  = 8.U(4.W)  // Jump Register
 
   // RS1 Operand Select Signal
-  val OP1_RS1 = 0.U(2.W) // Register Source #1
-  val OP1_ZERO= 1.U(2.W)
-  val OP1_PC  = 2.U(2.W)
-  val OP1_X   = BitPat("b??")
+  val OP1_RS1 = 0.U(3.W) // Register Source #1
+  val OP1_ZERO= 1.U(3.W)
+  val OP1_PC  = 2.U(3.W)
+  val OP1_VS2 = 3.U(3.W) // for vector
+  val OP1_INV_VS2 = 4.U(3.W) // for vector mask insn
+  val OP1_TS1 = 5.U(3.W) // for matrix
+  val OP1_ACC = 6.U(3.W) // for matrix
+  val OP1_VS1 = 7.U(3.W) // for matrix
+  val OP1_X   = BitPat("b???")
 
   // RS2 Operand Select Signal
   val OP2_RS2 = 0.U(3.W) // Register Source #2
@@ -89,6 +136,10 @@ trait ScalarOpConstants
   val OP2_ZERO= 2.U(3.W) // constant 0
   val OP2_NEXT= 3.U(3.W) // constant 2/4 (for PC+2/4)
   val OP2_IMMC= 4.U(3.W) // for CSR imm found in RS1
+  val OP2_VL  = 5.U(3.W) // for vset{i}vl{i}
+  val OP2_VS1 = 6.U(3.W) // for vector
+  val OP2_INV_VS1 = 7.U(3.W) // for vector mask insn
+  val OP2_TS2 = 6.U(3.W) // for matrix
   val OP2_X   = BitPat("b???")
 
   // Register File Write Enable Signal
@@ -115,149 +166,56 @@ trait ScalarOpConstants
   val IS_J   = 4.U(3.W)  // UJ-Type (J/JAL)
   val IS_X   = BitPat("b???")
 
+  val RD  = 0.U(2.W)
+  val RS1 = 1.U(2.W)
+  val RS2 = 2.U(2.W)
+  val RS3 = 3.U(2.W)
   // Decode Stage Control Signals
-  val RT_FIX   = 0.U(2.W)
-  val RT_FLT   = 1.U(2.W)
-  val RT_PAS   = 3.U(2.W) // pass-through (prs1 := lrs1, etc)
-  val RT_X     = 2.U(2.W) // not-a-register (but shouldn't get a busy-bit, etc.)
-                             // TODO rename RT_NAR
+  val RT_FIX   = 0x00.U(6.W)
+  val RT_FLT   = 0x01.U(6.W)
+  val RT_VI    = 0x02.U(6.W) // RS1 as simm5 (vop.vi), TODO: move to OP selection
+  val RT_FIXU  = 0x04.U(6.W) // RS1 used as unsigned for vector
+  val RT_VIU   = 0x06.U(6.W) // RS1 as uimm5 (vop.vi), TODO: move to OP selection
+  val RT_X     = 0x07.U(6.W) // not-a-register (but shouldn't get a busy-bit, etc.)
+  val RT_PERM  = 0x0A.U(6.W) // special mark for permutation VADD, aliasing RT_VI
+  val RT_VEC   = 0x10.U(6.W) // vector, signed width vsew
+  val RT_VN    = 0x11.U(6.W) // vector, signed width vsew/2
+  val RT_VW    = 0x12.U(6.W) // vector, signed width vsew*2 (for v*ext, maybe *4 *8)
+  val RT_VF    = 0x13.U(6.W) // vector, ieee FP format, currently not used
+  val RT_VU    = 0x14.U(6.W) // vector, unsigned width vsew
+  val RT_VNU   = 0x15.U(6.W) // vector, unsigned width vsew/2
+  val RT_VWU   = 0x16.U(6.W) // vector, unsigned width vsew*2 (for v*ext, maybe *4 *8)
+  val RT_VM    = 0x17.U(6.W) // VD is mask bit
+  val RT_VRED  = 0x18.U(6.W) // vector, signed reduction VD/VS1 with vsew
+  val RT_VRW   = 0x1A.U(6.W) // vector, signed reduction VD/VS1 with vsew*2
+  val RT_VRU   = 0x1C.U(6.W) // vector, unsigned reduction VD/VS1 with vsew
+  val RT_VRWU  = 0x1E.U(6.W) // vector, unsigned reduction VD/VS1 with vsew*2
+  val RT_MAT   = 0x20.U(6.W) // matrix
+  val RT_TR    = 0x21.U(6.W) // tr_tile, TODO: include more variations
+  val RT_ACC   = 0x22.U(6.W) // acc_tile, TODO: include more variations
 
-  // Micro-op opcodes
-  // TODO change micro-op opcodes into using enum
-  val UOPC_SZ = 7
-  val uopX    = BitPat.dontCare(UOPC_SZ)
-  val uopNOP  =  0.U(UOPC_SZ.W)
-  val uopLD   =  1.U(UOPC_SZ.W)
-  val uopSTA  =  2.U(UOPC_SZ.W)  // store address generation
-  val uopSTD  =  3.U(UOPC_SZ.W)  // store data generation
-  val uopLUI  =  4.U(UOPC_SZ.W)
+  def isInt      (rt: UInt): Bool = (rt === RT_FIX || rt === RT_FIXU)
+  def isIntU     (rt: UInt): Bool = (rt === RT_FIXU)
+  def isNotInt   (rt: UInt): Bool = !isInt(rt)
+  def isFloat    (rt: UInt): Bool = (rt === RT_FLT)
+  def isVector   (rt: UInt): Bool = rt(4)
+  def isWidenV   (rt: UInt): Bool = (rt === RT_VW || rt === RT_VWU || rt === RT_VRW || rt === RT_VRWU)
+  def isNarrowV  (rt: UInt): Bool = (rt === RT_VN || rt === RT_VNU)
+  def isUnsignedV(rt: UInt): Bool = (rt === RT_VU || rt === RT_VWU || rt === RT_VNU || rt === RT_VIU || rt === RT_VRU || rt === RT_VRWU)
+  def isReduceV  (rt: UInt): Bool = (rt(4,3) === 3.U)
+  def isMaskVD   (rt: UInt): Bool = (rt === RT_VM)
+  def isNotReg   (rt: UInt): Bool = (rt === RT_X  || rt === RT_VI  || rt === RT_VIU)
+  def isSomeReg  (rt: UInt): Bool = !isNotReg(rt)
+  def isRvvSImm5 (rt: UInt): Bool = (rt === RT_VI || rt === RT_PERM)
+  def isRvvUImm5 (rt: UInt): Bool = (rt === RT_VIU)
+  def isRvvImm5  (rt: UInt): Bool = (rt === RT_VI || rt === RT_VIU || rt === RT_PERM)
+  def isPermVADD (rt: UInt): Bool = (rt === RT_PERM)
+  def isMatrix   (rt: UInt): Bool = rt(5)
+  def isTrTile   (rt: UInt): Bool = (rt === RT_TR)
+  def isAccTile  (rt: UInt): Bool = (rt === RT_ACC)
+  //def isMaskV    (rt: UInt): Bool = (rt === RT_VM)
 
-  val uopADDI =  5.U(UOPC_SZ.W)
-  val uopANDI =  6.U(UOPC_SZ.W)
-  val uopORI  =  7.U(UOPC_SZ.W)
-  val uopXORI =  8.U(UOPC_SZ.W)
-  val uopSLTI =  9.U(UOPC_SZ.W)
-  val uopSLTIU= 10.U(UOPC_SZ.W)
-  val uopSLLI = 11.U(UOPC_SZ.W)
-  val uopSRAI = 12.U(UOPC_SZ.W)
-  val uopSRLI = 13.U(UOPC_SZ.W)
-
-  val uopSLL  = 14.U(UOPC_SZ.W)
-  val uopADD  = 15.U(UOPC_SZ.W)
-  val uopSUB  = 16.U(UOPC_SZ.W)
-  val uopSLT  = 17.U(UOPC_SZ.W)
-  val uopSLTU = 18.U(UOPC_SZ.W)
-  val uopAND  = 19.U(UOPC_SZ.W)
-  val uopOR   = 20.U(UOPC_SZ.W)
-  val uopXOR  = 21.U(UOPC_SZ.W)
-  val uopSRA  = 22.U(UOPC_SZ.W)
-  val uopSRL  = 23.U(UOPC_SZ.W)
-
-  val uopBEQ  = 24.U(UOPC_SZ.W)
-  val uopBNE  = 25.U(UOPC_SZ.W)
-  val uopBGE  = 26.U(UOPC_SZ.W)
-  val uopBGEU = 27.U(UOPC_SZ.W)
-  val uopBLT  = 28.U(UOPC_SZ.W)
-  val uopBLTU = 29.U(UOPC_SZ.W)
-  val uopCSRRW= 30.U(UOPC_SZ.W)
-  val uopCSRRS= 31.U(UOPC_SZ.W)
-  val uopCSRRC= 32.U(UOPC_SZ.W)
-  val uopCSRRWI=33.U(UOPC_SZ.W)
-  val uopCSRRSI=34.U(UOPC_SZ.W)
-  val uopCSRRCI=35.U(UOPC_SZ.W)
-
-  val uopJ    = 36.U(UOPC_SZ.W)
-  val uopJAL  = 37.U(UOPC_SZ.W)
-  val uopJALR = 38.U(UOPC_SZ.W)
-  val uopAUIPC= 39.U(UOPC_SZ.W)
-
-//val uopSRET = 40.U(UOPC_SZ.W)
-  val uopCFLSH= 41.U(UOPC_SZ.W)
-  val uopFENCE= 42.U(UOPC_SZ.W)
-
-  val uopADDIW= 43.U(UOPC_SZ.W)
-  val uopADDW = 44.U(UOPC_SZ.W)
-  val uopSUBW = 45.U(UOPC_SZ.W)
-  val uopSLLIW= 46.U(UOPC_SZ.W)
-  val uopSLLW = 47.U(UOPC_SZ.W)
-  val uopSRAIW= 48.U(UOPC_SZ.W)
-  val uopSRAW = 49.U(UOPC_SZ.W)
-  val uopSRLIW= 50.U(UOPC_SZ.W)
-  val uopSRLW = 51.U(UOPC_SZ.W)
-  val uopMUL  = 52.U(UOPC_SZ.W)
-  val uopMULH = 53.U(UOPC_SZ.W)
-  val uopMULHU= 54.U(UOPC_SZ.W)
-  val uopMULHSU=55.U(UOPC_SZ.W)
-  val uopMULW = 56.U(UOPC_SZ.W)
-  val uopDIV  = 57.U(UOPC_SZ.W)
-  val uopDIVU = 58.U(UOPC_SZ.W)
-  val uopREM  = 59.U(UOPC_SZ.W)
-  val uopREMU = 60.U(UOPC_SZ.W)
-  val uopDIVW = 61.U(UOPC_SZ.W)
-  val uopDIVUW= 62.U(UOPC_SZ.W)
-  val uopREMW = 63.U(UOPC_SZ.W)
-  val uopREMUW= 64.U(UOPC_SZ.W)
-
-  val uopFENCEI    =  65.U(UOPC_SZ.W)
-  //               =  66.U(UOPC_SZ.W)
-  val uopAMO_AG    =  67.U(UOPC_SZ.W) // AMO-address gen (use normal STD for datagen)
-
-  val uopFMV_S_X   =  68.U(UOPC_SZ.W)
-  val uopFMV_D_X   =  69.U(UOPC_SZ.W)
-  val uopFMV_X_S   =  70.U(UOPC_SZ.W)
-  val uopFMV_X_D   =  71.U(UOPC_SZ.W)
-
-  val uopFSGNJ_S   =  72.U(UOPC_SZ.W)
-  val uopFSGNJ_D   =  73.U(UOPC_SZ.W)
-
-  val uopFCVT_S_D  =  74.U(UOPC_SZ.W)
-  val uopFCVT_D_S  =  75.U(UOPC_SZ.W)
-
-  val uopFCVT_S_X  =  76.U(UOPC_SZ.W)
-  val uopFCVT_D_X  =  77.U(UOPC_SZ.W)
-
-  val uopFCVT_X_S  =  78.U(UOPC_SZ.W)
-  val uopFCVT_X_D  =  79.U(UOPC_SZ.W)
-
-  val uopCMPR_S    =  80.U(UOPC_SZ.W)
-  val uopCMPR_D    =  81.U(UOPC_SZ.W)
-
-  val uopFCLASS_S  =  82.U(UOPC_SZ.W)
-  val uopFCLASS_D  =  83.U(UOPC_SZ.W)
-
-  val uopFMINMAX_S =  84.U(UOPC_SZ.W)
-  val uopFMINMAX_D =  85.U(UOPC_SZ.W)
-
-  //               =  86.U(UOPC_SZ.W)
-  val uopFADD_S    =  87.U(UOPC_SZ.W)
-  val uopFSUB_S    =  88.U(UOPC_SZ.W)
-  val uopFMUL_S    =  89.U(UOPC_SZ.W)
-  val uopFADD_D    =  90.U(UOPC_SZ.W)
-  val uopFSUB_D    =  91.U(UOPC_SZ.W)
-  val uopFMUL_D    =  92.U(UOPC_SZ.W)
-
-  val uopFMADD_S   =  93.U(UOPC_SZ.W)
-  val uopFMSUB_S   =  94.U(UOPC_SZ.W)
-  val uopFNMADD_S  =  95.U(UOPC_SZ.W)
-  val uopFNMSUB_S  =  96.U(UOPC_SZ.W)
-  val uopFMADD_D   =  97.U(UOPC_SZ.W)
-  val uopFMSUB_D   =  98.U(UOPC_SZ.W)
-  val uopFNMADD_D  =  99.U(UOPC_SZ.W)
-  val uopFNMSUB_D  = 100.U(UOPC_SZ.W)
-
-  val uopFDIV_S    = 101.U(UOPC_SZ.W)
-  val uopFDIV_D    = 102.U(UOPC_SZ.W)
-  val uopFSQRT_S   = 103.U(UOPC_SZ.W)
-  val uopFSQRT_D   = 104.U(UOPC_SZ.W)
-
-  val uopWFI       = 105.U(UOPC_SZ.W) // pass uop down the CSR pipeline
-  val uopERET      = 106.U(UOPC_SZ.W) // pass uop down the CSR pipeline, also is ERET
-  val uopSFENCE    = 107.U(UOPC_SZ.W)
-
-  val uopROCC      = 108.U(UOPC_SZ.W)
-
-  val uopMOV       = 109.U(UOPC_SZ.W) // conditional mov decoded from "add rd, x0, rs2"
-
+  val uopX    = BitPat.dontCare(boom.common.MicroOpcodes.UOPC_SZ)
   // The Bubble Instruction (Machine generated NOP)
   // Insert (XOR x0,x0,x0) which is different from software compiler
   // generated NOPs which are (ADDI x0, x0, 0).
@@ -265,15 +223,26 @@ trait ScalarOpConstants
   // between software NOPs and machine-generated Bubbles in the pipeline.
   val BUBBLE  = (0x4033).U(32.W)
 
-  def NullMicroOp()(implicit p: Parameters): boom.common.MicroOp = {
+  def NullMicroOp(usingVector: Boolean = false)(implicit p: Parameters): boom.common.MicroOp = {
     val uop = Wire(new boom.common.MicroOp)
     uop            := DontCare // Overridden in the following lines
-    uop.uopc       := uopNOP // maybe not required, but helps on asserts that try to catch spurious behavior
+    // maybe not required, but helps on asserts that try to catch spurious behavior
+    uop.uopc       := boom.common.MicroOpcodes.uopNOP
     uop.bypassable := false.B
     uop.fp_val     := false.B
     uop.uses_stq   := false.B
     uop.uses_ldq   := false.B
+    uop.is_fence   := false.B
+    uop.is_fencei  := false.B
     uop.pdst       := 0.U
+    uop.prs1       := 0.U
+    uop.prs2       := 0.U
+    uop.prs3       := 0.U
+    uop.vconfig_tag := 0.U
+    uop.vl_ready := false.B
+    if (usingVector) {
+      uop.pvm        := 0.U
+    }
     uop.dst_rtype  := RT_X
 
     val cs = Wire(new boom.common.CtrlSignals())
@@ -303,6 +272,9 @@ trait RISCVConstants
   val RS2_LSB = 20
   val RS3_MSB = 31
   val RS3_LSB = 27
+  val VM_BIT  = 25
+  val NF_MSB  = 31
+  val NF_LSB  = 29
 
   val CSR_ADDR_MSB = 31
   val CSR_ADDR_LSB = 20
@@ -362,4 +334,13 @@ trait ExcCauseConstants
   val MINI_EXCEPTION_MEM_ORDERING = 16.U
 
   require (!freechips.rocketchip.rocket.Causes.all.contains(16))
+}
+
+/**
+ * Mixin for vstart source: CSR or speculative ZERO
+ */
+trait VStartSourceConstants
+{
+  val VSTART_CSR  = 0.U(1.W)
+  val VSTART_ZERO = 1.U(1.W)
 }

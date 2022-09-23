@@ -6,28 +6,25 @@
 package boom.common
 
 import chisel3._
-import chisel3.util.{RRArbiter, Queue}
+import chisel3.util.{Queue, RRArbiter}
 
-import scala.collection.mutable.{ListBuffer}
-
+import scala.collection.mutable.ListBuffer
 import freechips.rocketchip.config._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.diplomaticobjectmodel.logicaltree.{LogicalTreeNode }
+import freechips.rocketchip.diplomaticobjectmodel.logicaltree.LogicalTreeNode
 import freechips.rocketchip.rocket._
-import freechips.rocketchip.subsystem.{RocketCrossingParams}
+import freechips.rocketchip.subsystem.RocketCrossingParams
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.util._
 import freechips.rocketchip.tile._
-
 import testchipip.{ExtendedTracedInstruction, WithExtendedTraceport}
-
 import boom.exu._
 import boom.ifu._
 import boom.lsu._
-import boom.util.{BoomCoreStringPrefix}
+import boom.util.BoomCoreStringPrefix
 import freechips.rocketchip.prci.ClockSinkParameters
 
 
@@ -132,14 +129,20 @@ class BoomTile private(
 
   // DCache
   lazy val dcache: BoomNonBlockingDCache = LazyModule(new BoomNonBlockingDCache(staticIdForMetadataUseOnly))
-  val dCacheTap = TLIdentityNode()
-  tlMasterXbar.node := dCacheTap := dcache.node
+  //val dCacheTap = TLIdentityNode()
+  val dCacheWidget = LazyModule(new TLWidthWidget(tileParams.dcache.get.rowBits/8))
+  tlMasterXbar.node := dCacheWidget.node := dcache.node
 
+  // VecMem
+  lazy val vecmem: VecMem = LazyModule(new VecMem)
+  val vecmemWidget = LazyModule(new TLWidthWidget(p(CacheBlockBytes)))
+  vectorNode := vecmemWidget.node := vecmem.node
 
   // Frontend/ICache
   val frontend = LazyModule(new BoomFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
   frontend.resetVectorSinkNode := resetVectorNexusNode
-  tlMasterXbar.node := frontend.masterNode
+  val frontWidget = LazyModule(new TLWidthWidget(tileParams.icache.get.rowBits/8))
+  tlMasterXbar.node := frontWidget.node := frontend.masterNode
 
   // ROCC
   val roccs = p(BuildRoCC).map(_(p))
@@ -155,7 +158,6 @@ class BoomTile private(
 class BoomTileModuleImp(outer: BoomTile) extends BaseTileModuleImp(outer){
 
   Annotated.params(this, outer.boomParams)
-
   val core = Module(new BoomCore(outer.boomParams.trace)(outer.p))
   val lsu  = Module(new LSU()(outer.p, outer.dcache.module.edge))
 
@@ -237,6 +239,7 @@ class BoomTileModuleImp(outer: BoomTile) extends BaseTileModuleImp(outer){
   hellaCacheArb.io.requestor <> hellaCachePorts
   lsu.io.hellacache <> hellaCacheArb.io.mem
   outer.dcache.module.io.lsu <> lsu.io.dmem
+  outer.vecmem.module.io.lsu <> lsu.io.vmem
 
   // Generate a descriptive string
   val frontendStr = outer.frontend.module.toString
