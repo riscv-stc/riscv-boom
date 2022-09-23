@@ -124,7 +124,11 @@ class FpMacUnit extends Module
   val recAFP16 = recFNFromFN(H.exp, H.sig, io.src1(15, 0))
   val recBFP16 = recFNFromFN(H.exp, H.sig, io.src2(15, 0))
   val recCFP16 = recFNFromFN(H.exp, H.sig, io.src3(15, 0))
+  // convert fp32 A, B and C to recoded format
+  val recAFP32 = recFNFromFN(S.exp, S.sig, io.src1)
+  val recCFP32 = recFNFromFN(S.exp, S.sig, io.src3)
 
+  // convert fp16 to fp32 for float add/sub/rsub
   val recA16ToRec32 = Module(new RecFNToRecFN(H.exp, H.sig, S.exp, S.sig))
   recA16ToRec32.io.in := recAFP16
   recA16ToRec32.io.roundingMode   := io.roundingMode
@@ -134,10 +138,6 @@ class FpMacUnit extends Module
   recC16ToRec32.io.in := recCFP16
   recC16ToRec32.io.roundingMode   := io.roundingMode
   recC16ToRec32.io.detectTininess := io.detectTininess
-
-  // convert fp32 A, B and C to recoded format
-  val recAFP32 = recFNFromFN(S.exp, S.sig, io.src1)
-  val recCFP32 = recFNFromFN(S.exp, S.sig, io.src3)
 
   val recA = Mux(io.srcType === FP32TYPE, recAFP32, recA16ToRec32.io.out)
   val recC = Mux(io.srcType === FP32TYPE, recCFP32, recC16ToRec32.io.out)
@@ -149,57 +149,34 @@ class FpMacUnit extends Module
   recA32ToRec16.io.detectTininess := io.detectTininess
 
   // recoded fp16 * fp16
-  val recMul = Module(new MulRecFNToFullRaw(H.exp, H.sig))
-  recMul.io.a := recAFP16
-  recMul.io.b := recBFP16
-  val recMulOut = Wire(new RawFloat(H.exp, H.sig*2-1))
-  recMulOut.isNaN  := recMul.io.out_isNaN
-  recMulOut.isInf  := recMul.io.out_isInf
-  recMulOut.isZero := recMul.io.out_isZero
-  recMulOut.sign   := recMul.io.out_sign
-  recMulOut.sExp   := recMul.io.out_sExp
-  recMulOut.sig    := recMul.io.out_sig
+  val recMul = Module(new MulFullRawFN(H.exp, H.sig))
+  recMul.io.a := rawFloatFromRecFN(H.exp, H.sig, recAFP16)
+  recMul.io.b := rawFloatFromRecFN(H.exp, H.sig, recBFP16)
 
   // round raw results to recFN(32)
   val anyRawToRec = Module(new RoundAnyRawFNToRecFN(H.exp, H.sig*2-1, S.exp, S.sig, 0))
   anyRawToRec.io.invalidExc     := recMul.io.invalidExc
   anyRawToRec.io.infiniteExc    := false.B
-  anyRawToRec.io.in             := recMulOut
+  anyRawToRec.io.in             := recMul.io.rawOut
   anyRawToRec.io.roundingMode   := io.roundingMode
   anyRawToRec.io.detectTininess := io.detectTininess
 
   // recoded fp32 + fp32
-  val recAdd = Module(new AddRecFNToRaw(S.exp, S.sig))
+  val recAdd = Module(new AddRecFN(S.exp, S.sig))
   recAdd.io.subOp   := io.aluType === SUB
   recAdd.io.a       := Mux(io.aluType(1), recA, anyRawToRec.io.out)
   recAdd.io.b       := recC
-  recAdd.io.roundingMode := io.roundingMode
-  val recAddOut = Wire(new RawFloat(S.exp, S.sig+2))
-  recAddOut.isNaN  := recAdd.io.out_isNaN
-  recAddOut.isInf  := recAdd.io.out_isInf
-  recAddOut.isZero := recAdd.io.out_isZero
-  recAddOut.sign   := recAdd.io.out_sign
-  recAddOut.sExp   := recAdd.io.out_sExp
-  recAddOut.sig    := recAdd.io.out_sig
+  recAdd.io.roundingMode   := io.roundingMode
+  recAdd.io.detectTininess := io.detectTininess
+  val fp32Out = fNFromRecFN(S.exp, S.sig, recAdd.io.out)
 
-  // raw to FP32
-  val rawToRec32 = Module(new RoundRawFNToRecFN(S.exp, S.sig, 0))
-  rawToRec32.io.invalidExc     := recAdd.io.invalidExc
-  rawToRec32.io.infiniteExc    := false.B
-  rawToRec32.io.in             := recAddOut
-  rawToRec32.io.roundingMode   := io.roundingMode
-  rawToRec32.io.detectTininess := io.detectTininess
-  val fp32Out = fNFromRecFN(S.exp, S.sig, rawToRec32.io.out)
-
-  // raw to FP16
-  val rawToRec16 = Module(new RoundAnyRawFNToRecFN(S.exp, S.sig+2, H.exp, H.sig, 0))
-  rawToRec16.io.invalidExc     := recAdd.io.invalidExc
-  rawToRec16.io.infiniteExc    := false.B
-  rawToRec16.io.in             := recAddOut
-  rawToRec16.io.roundingMode   := io.roundingMode
-  rawToRec16.io.detectTininess := io.detectTininess
+  // FP32 to FP16
+  val recAdd32ToRec16 = Module(new RecFNToRecFN(S.exp, S.sig, H.exp, H.sig))
+  recAdd32ToRec16.io.in := recAdd.io.out
+  recAdd32ToRec16.io.roundingMode   := io.roundingMode
+  recAdd32ToRec16.io.detectTininess := io.detectTininess
   val fp16Out = Mux(io.aluType === CVT, fNFromRecFN(H.exp, H.sig, recA32ToRec16.io.out),
-                                        fNFromRecFN(H.exp, H.sig, rawToRec16.io.out))
+                                        fNFromRecFN(H.exp, H.sig, recAdd32ToRec16.io.out))
 
   io.out := Mux(io.outType === FP16TYPE, Cat(0.U(16.W), fp16Out), fp32Out)
   
