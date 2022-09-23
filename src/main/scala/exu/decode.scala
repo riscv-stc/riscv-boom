@@ -561,13 +561,14 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val is_mopa = cs.uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA)
     val mqwiden = cs.uopc.isOneOf(uopMQOPA,uopMQMV_T,uopMQMV_V, uopMQADD, uopMQSUB, uopMQRSUB)
     val mwwiden = cs.uopc.isOneOf(uopMWOPA,uopMWMV_T,uopMWMV_V, uopMWADD, uopMWSUB, uopMWRSUB)
-    val td_mwfactor = Mux(mqwiden, 2.U, Mux(mwwiden, 1.U, 0.U))
-    val td_mnfactor = Mux(cs.uopc === uopMFNCVT, 1.U, 0.U)
-    val ts1_mwfactor = Mux(mqwiden && is_mmv, 2.U, Mux(mwwiden && is_mmv, 1.U, 0.U))
+    val td_mwfactor  = Mux(mqwiden, 2.U, Mux(mwwiden, 1.U, 0.U))
+    val ts1_mwfactor = Mux(mqwiden && is_mmv, 2.U, 
+                       Mux(mwwiden && is_mmv, 1.U,
+                       Mux(cs.uopc === uopMFNCVT, 1.U, 0.U)))
 
     val ts1_eew = msew + ts1_mwfactor
     val ts2_eew = msew
-    val td_eew  = Mux(cs.uopc === uopMFNCVT, msew - td_mnfactor, msew + td_mwfactor)
+    val td_eew  = msew + td_mwfactor
     when (io.deq_fire && cs.is_rvm) {
       assert(msew <= 3.U, "Unsupported msew")
     }

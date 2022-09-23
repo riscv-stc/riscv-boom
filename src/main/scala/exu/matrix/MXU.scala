@@ -31,10 +31,11 @@ object AccTileConstants
   val Q2          = 2.U(2.W)
   val Q3          = 3.U(2.W)
   // alu types
-  val MACC        = 0.U(2.W)
-  val MULT        = 1.U(2.W)
-  val ADD         = 2.U(2.W)
-  val SUB         = 3.U(2.W)
+  val MACC        = 0.U(3.W)
+  val MULT        = 1.U(3.W)
+  val ADD         = 2.U(3.W)
+  val SUB         = 3.U(3.W)
+  val CVT         = 4.U(3.W)
 }
 
 import AccTileConstants._
@@ -46,7 +47,7 @@ class MacCtrls(val numAccTiles: Int = 2) extends Bundle
   val dstRidx  = UInt(log2Ceil(numAccTiles).W)
   val srcType  = UInt(3.W)
   val outType  = UInt(3.W)
-  val aluType  = UInt(2.W)
+  val aluType  = UInt(3.W)
   val rm       = UInt(3.W)                      // rounding mode
 }
 
@@ -69,7 +70,7 @@ class IntMacUnit extends Module
     val src3    = Input(UInt(32.W))
     val srcType = Input(UInt(3.W))
     val outType = Input(UInt(3.W))
-    val aluType = Input(UInt(2.W))
+    val aluType = Input(UInt(3.W))
     val out     = Output(UInt(32.W))
   })
 
@@ -112,7 +113,7 @@ class FpMacUnit extends Module
     val src3           = Input(UInt(32.W))
     val srcType        = Input(UInt(3.W))
     val outType        = Input(UInt(3.W))
-    val aluType        = Input(UInt(2.W))
+    val aluType        = Input(UInt(3.W))
     val roundingMode   = Input(UInt(3.W))
     val detectTininess = Input(UInt(1.W))
     val out            = Output(UInt(32.W))
@@ -140,6 +141,12 @@ class FpMacUnit extends Module
 
   val recA = Mux(io.srcType === FP32TYPE, recAFP32, recA16ToRec32.io.out)
   val recC = Mux(io.srcType === FP32TYPE, recCFP32, recC16ToRec32.io.out)
+
+  // FNCVT: convert fp32 to fp16 recoded format
+  val recA32ToRec16 = Module(new RecFNToRecFN(S.exp, S.sig, H.exp, H.sig))
+  recA32ToRec16.io.in := recAFP32
+  recA32ToRec16.io.roundingMode   := io.roundingMode
+  recA32ToRec16.io.detectTininess := io.detectTininess
 
   // recoded fp16 * fp16
   val recMul = Module(new MulRecFNToFullRaw(H.exp, H.sig))
@@ -191,7 +198,8 @@ class FpMacUnit extends Module
   rawToRec16.io.in             := recAddOut
   rawToRec16.io.roundingMode   := io.roundingMode
   rawToRec16.io.detectTininess := io.detectTininess
-  val fp16Out = fNFromRecFN(H.exp, H.sig, rawToRec16.io.out)
+  val fp16Out = Mux(io.aluType === CVT, fNFromRecFN(H.exp, H.sig, recA32ToRec16.io.out),
+                                        fNFromRecFN(H.exp, H.sig, rawToRec16.io.out))
 
   io.out := Mux(io.outType === FP16TYPE, Cat(0.U(16.W), fp16Out), fp32Out)
   
