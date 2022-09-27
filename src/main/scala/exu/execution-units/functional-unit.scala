@@ -1766,6 +1766,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   val ured_ph1_prgrs  = nrVecGroup(uop.vs2_emul) << uop.rt(RD, isWidenV).asUInt
   val ured_ph2_prgrs  = (vLenSz-3).U - uop.vd_eew //+ uop.rt(RD, isWidenV).asUInt - 1.U
 
+  // Instruction types.
   val is_perm         = !uop.is_reduce
   val is_slideup      = uop.uopc === uopVSLIDEUP
   val is_slidedn      = uop.uopc === uopVSLIDEDOWN
@@ -1859,6 +1860,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     ret
   }
 
+  // Buffer source, destination & mask operators, and PR addresses.
   when (io.exreq.valid && !working) {
     when (v1buf_of === 0.U) {
       v1buf(v1buf_wp) := io.exreq.bits.rs1_data
@@ -1875,6 +1877,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     }
   }
 
+  // Calc prestart & tail bitmaps.
   val pres_upper = WireInit(0.U(eLen.W))
   val input_step = WireInit(0.U(eLen.W))
   when(io.exreq.valid && !working) {
@@ -1897,6 +1900,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     v1buf_s := io.exreq.bits.rs1_data
   }*/
 
+  // Register counters for filling & working.
   val fill_rcnt = Wire(UInt(4.W))
   val perm_rcnt = Wire(UInt(4.W))
   fill_rcnt := Mux(!is_vrgatherei16, nrVecGroup(uop.vs2_emul),
@@ -1906,6 +1910,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   dontTouch(fill_rcnt)
   dontTouch(perm_rcnt)
 
+  // FSM.
   switch(state) {
     is (s_idle) {
       when (io.exreq.valid) {
@@ -1992,11 +1997,13 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   }
 
   when (is_perm && (uop.fu_code & FU_FPU).orR()) {
+    // There's no difference between ALU & FPU for permutation transparent writeback, so send to ALU for both.
     io.fbreq.bits.uop.fu_code       := (uop.fu_code ^ (FU_ALU | FU_FPU)) & (~FU_VRP)
   } .elsewhen ((uop.is_reduce && is_last) || is_perm) {
     io.fbreq.bits.uop.fu_code       := uop.fu_code & (~FU_VRP)
   }
 
+  // Data output for reduction instructions.
   val v1uredmux = Mux1H(Seq(
     (uop.vd_eew(1,0) === 0.U) -> // assert(!uop.rt(RD, isWidenV))
       Mux(is_last, Cat(0.U((vLen-8).W), v1buf_s(7, 0)),
@@ -2069,9 +2076,29 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     (uop.vs2_eew(1,0) === 3.U) -> Cat(0.U((vLen-64).W), v2buf((progress>>1.U)(2,0))>>Cat(progress(0),0.U(6.W)))
   ))
 
+  /**
+    * Filter single vector element with prestart, tail, active and inactive definitions.
+    * @param u Micro-OP
+    * @param p Prestart bit.
+    * @param t Tail bit.
+    * @param m Mask bit.
+    * @param src Source element.
+    * @param dst Destination element.
+    * @return Element after filter.
+    */
   def filter_element(u: MicroOp, p: Bool, t: Bool, m: Bool, src: UInt, dst: UInt): UInt =
     Mux((!p) && (!t) && (u.v_unmasked || m), src, dst)
 
+  /**
+    * Filter single vector register with prestart, tail, active and inactive definitions.
+    * @param u Micro-OP.
+    * @param p Prestart list.
+    * @param t Tail list.
+    * @param m Mask list.
+    * @param src Source register.
+    * @param dst Destination register.
+    * @return register after filter.
+    */
   def filter_register(u: MicroOp, p: UInt, t: UInt, m: UInt, src: UInt, dst: UInt): UInt =
     Mux1H(Seq(
       (u.vd_eew(1, 0) === 0.U) -> Cat((0 until vLen / 8).map(i =>
@@ -2100,11 +2127,13 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
 
   def calc_slide_src_index(r: UInt, i: UInt, eew: UInt): UInt = ((r << vLenbSz.U) >> eew(1, 0)) + i
 
+  // Declare permutation results.
   val unmasked_data = WireInit(0.U(vLen.W))
   val perm_result = WireInit(0.U(vLen.W))
   dontTouch(unmasked_data)
   dontTouch(perm_result)
 
+  // Declare common permutation wires.
   val perm_curr_over = WireInit(false.B)
   val perm_prev_over = WireInit(false.B)
   val perm_next_over = WireInit(false.B)
@@ -2133,15 +2162,16 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   dontTouch(slided_bits)
   dontTouch(differ_bits)
 
+  // To index continuous output micro-ops.
   when(is_idle && io.exreq.valid) {
     eidx := 0.U
   }.elsewhen(working && io.fbreq.fire && (!uop.is_reduce)) {
     eidx := eidx + vlen_ecnt
   }
 
+  // Buffer VLMAX value as a register, only for vslidedown.
   when(is_idle && io.exreq.valid && (io.exreq.bits.uop.uopc === uopVSLIDEDOWN)) {
     val tmp_ecnt = WireInit(0.U((vLenbSz + 4).W))
-    dontTouch(tmp_ecnt)
     tmp_ecnt := vLenb.U >> io.exreq.bits.uop.vd_eew
     vlmax := Mux(io.exreq.bits.uop.vd_emul(2),
       tmp_ecnt >> (4.U(3.W) - io.exreq.bits.uop.vd_emul(1, 0)),
@@ -2149,6 +2179,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     )
   }
 
+  // State output for permutation instructions.
   when (working) {
     when (is_slideup) {
       slided_step     := Mux1H(Seq(
@@ -2312,6 +2343,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     }
   }
 
+  // Output data.
   io.fbreq.bits.rs1_data := Mux(uop.is_ureduce, v1uredmux,
                             Mux(uop.is_oreduce, v1oredmux,
                             0.U(vLen.W)))
@@ -2319,6 +2351,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
                             Mux(uop.is_oreduce, v2oredmux, perm_result))
   io.fbreq.bits.rs3_data := Mux(uop.is_reduce,  vdbuf(0),  vdbuf(progress))
 
+  // Output status.
   io.busy  := !is_idle
   io.stall := working
   //io.stall := (!is_idle && uop.is_reduce) || working

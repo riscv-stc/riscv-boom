@@ -142,43 +142,57 @@ class RegisterRead(
       if (numReadPorts > 3) { // only for vec pipe, skip for vmx pipe
         //val vrp_iss = io.iss_valids(w) && (io.iss_uops(w).fu_code & FU_VRP).orR && vs2_nr > 1.U
         val vrp_iss = io.iss_valids(w) && (io.iss_uops(w).fu_code & FU_VRP).orR &&
-          (io.iss_uops(w).uopc === uopVRGATHEREI16) &&
-          (io.iss_uops(w).vs1_emul.asSInt() > io.iss_uops(w).vs2_emul.asSInt())
-        val vrp_val = RegInit(false.B)
-        val vrp_last = Wire(Bool())
-        val vrp_uop = Reg(new MicroOp())
-        val vlen_ecnt = Wire(UInt((vLen/8).W))
+          (
+            (io.iss_uops(w).uopc === uopVRGATHEREI16) &&
+            (io.iss_uops(w).vs1_emul.asSInt() > io.iss_uops(w).vs2_emul.asSInt()) ||
+            (io.iss_uops(w).is_reduce) && (vs2_nr > 1.U)
+          )
+        val vrp_val  = RegInit(false.B)
+        val vs1_last = WireInit(false.B)
+        val vs2_last = WireInit(false.B)
+        val vrp_last = WireInit(false.B)
+        val vrp_uop  = Reg(new MicroOp())
+        val vs1_ecnt = Wire(UInt((vLen/8).W))
+        val vs2_ecnt = Wire(UInt((vLen/8).W))
+        val vsr_ecnt = Wire(UInt((vLen/8).W))
 
         dontTouch(vrp_iss)
         dontTouch(vrp_val)
         dontTouch(vrp_last)
-        dontTouch(vlen_ecnt)
+        dontTouch(vs1_ecnt)
+        dontTouch(vs2_ecnt)
+        dontTouch(vsr_ecnt)
 
-        vrp_last := false.B
         when (vrp_val) {
           val rs1_sel = VRegSel(vrp_uop.v_eidx, vrp_uop.vs1_eew, eLenSelSz)
-          //val rs2_sel = VRegSel(vrp_uop.v_eidx, vrp_uop.vs2_eew, eLenSelSz)
+          val rs2_sel = VRegSel(vrp_uop.v_eidx, vrp_uop.vs2_eew, eLenSelSz)
           dontTouch(rs1_sel)
-          //vlen_ecnt := ((vLen/8).U >> vrp_uop.vs2_eew)
-          vlen_ecnt := ((vLen/8).U >> vrp_uop.vs1_eew)
-          //vrp_last := (rs2_sel +& 1.U === nrVecGroup(vrp_uop.vs2_emul))
-          //vrp_last := (rs1_sel +& 1.U === nrVecGroup(vrp_uop.vs1_emul - vrp_uop.vs2_emul))
-          vrp_last := Mux((vrp_uop.vs1_emul.asSInt() - vrp_uop.vs2_emul.asSInt()) === 1.S, rs1_sel(0) === 1.U,
+          dontTouch(rs2_sel)
+
+          vs1_ecnt := (vLen/8).U >> vrp_uop.vs1_eew
+          vs2_ecnt := (vLen/8).U >> vrp_uop.vs2_eew
+          vsr_ecnt := Mux(vrp_uop.is_reduce, vs2_ecnt, vs1_ecnt)
+
+          vs1_last := Mux((vrp_uop.vs1_emul.asSInt() - vrp_uop.vs2_emul.asSInt()) === 1.S, rs1_sel(0) === 1.U,
             Mux((vrp_uop.vs1_emul.asSInt() - vrp_uop.vs2_emul.asSInt()) === 2.S, rs1_sel(1, 0) === 3.U, true.B))
+          vs2_last := (rs2_sel +& 1.U === nrVecGroup(vrp_uop.vs2_emul))
+          vrp_last := Mux(vrp_uop.is_reduce, vs2_last, vs1_last)
           when (vrp_last) {
             vrp_val := false.B
           }
-          vrp_uop.v_eidx := vrp_uop.v_eidx + vlen_ecnt
+
+          vrp_uop.v_eidx := vrp_uop.v_eidx + vsr_ecnt
           // loop on vrp_uop
           iss_uop := vrp_uop
           iss_uop.v_split_last := vrp_last
         } .otherwise {
-          //vlen_ecnt := ((vLen/8).U >> io.iss_uops(w).vs2_eew)
-          vlen_ecnt := ((vLen/8).U >> io.iss_uops(w).vs1_eew)
+          vs1_ecnt := (vLen/8).U >> io.iss_uops(w).vs1_eew
+          vs2_ecnt := (vLen/8).U >> io.iss_uops(w).vs2_eew
+          vsr_ecnt := Mux(io.iss_uops(w).is_reduce, vs2_ecnt, vs1_ecnt)
           vrp_val := vrp_iss
           when(vrp_iss) {
             vrp_uop := io.iss_uops(w)
-            vrp_uop.v_eidx := io.iss_uops(w).v_eidx + vlen_ecnt
+            vrp_uop.v_eidx := io.iss_uops(w).v_eidx + vsr_ecnt
           }
         }
         when (vrp_iss) {
@@ -188,7 +202,7 @@ class RegisterRead(
         rrd_decode_unit.io.iss_valid := io.iss_valids(w) | vrp_val
         rrd_decode_unit.io.iss_uop   := Mux(vrp_val, vrp_uop, io.iss_uops(w))
         when (vrp_val || vrp_iss) {
-          rrd_decode_unit.io.iss_uop.v_split_ecnt := vlen_ecnt
+          rrd_decode_unit.io.iss_uop.v_split_ecnt := vsr_ecnt
         }
       }
       val rs1_sel = Mux(vs1_nr === 1.U, 0.U, VRegSel(iss_uop.v_eidx, iss_uop.vs1_eew, eLenSelSz))
