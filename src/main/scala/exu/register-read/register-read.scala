@@ -140,16 +140,31 @@ class RegisterRead(
       val vs2_nr  = nrVecGroup(iss_uop.vs2_emul)
       val vd_nr   = nrVecGroup(iss_uop.vd_emul)
       if (numReadPorts > 3) { // only for vec pipe, skip for vmx pipe
-        val vrp_iss = io.iss_valids(w) && (io.iss_uops(w).fu_code & FU_VRP).orR && vs2_nr > 1.U
+        //val vrp_iss = io.iss_valids(w) && (io.iss_uops(w).fu_code & FU_VRP).orR && vs2_nr > 1.U
+        val vrp_iss = io.iss_valids(w) && (io.iss_uops(w).fu_code & FU_VRP).orR &&
+          (io.iss_uops(w).uopc === uopVRGATHEREI16) &&
+          (io.iss_uops(w).vs1_emul.asSInt() > io.iss_uops(w).vs2_emul.asSInt())
         val vrp_val = RegInit(false.B)
         val vrp_last = Wire(Bool())
         val vrp_uop = Reg(new MicroOp())
         val vlen_ecnt = Wire(UInt((vLen/8).W))
+
+        dontTouch(vrp_iss)
+        dontTouch(vrp_val)
+        dontTouch(vrp_last)
+        dontTouch(vlen_ecnt)
+
         vrp_last := false.B
         when (vrp_val) {
-          val rs2_sel = VRegSel(vrp_uop.v_eidx, vrp_uop.vs2_eew, eLenSelSz)
-          vlen_ecnt := ((vLen/8).U >> vrp_uop.vs2_eew)
-          vrp_last := (rs2_sel +& 1.U === nrVecGroup(vrp_uop.vs2_emul))
+          val rs1_sel = VRegSel(vrp_uop.v_eidx, vrp_uop.vs1_eew, eLenSelSz)
+          //val rs2_sel = VRegSel(vrp_uop.v_eidx, vrp_uop.vs2_eew, eLenSelSz)
+          dontTouch(rs1_sel)
+          //vlen_ecnt := ((vLen/8).U >> vrp_uop.vs2_eew)
+          vlen_ecnt := ((vLen/8).U >> vrp_uop.vs1_eew)
+          //vrp_last := (rs2_sel +& 1.U === nrVecGroup(vrp_uop.vs2_emul))
+          //vrp_last := (rs1_sel +& 1.U === nrVecGroup(vrp_uop.vs1_emul - vrp_uop.vs2_emul))
+          vrp_last := Mux((vrp_uop.vs1_emul.asSInt() - vrp_uop.vs2_emul.asSInt()) === 1.S, rs1_sel(0) === 1.U,
+            Mux((vrp_uop.vs1_emul.asSInt() - vrp_uop.vs2_emul.asSInt()) === 2.S, rs1_sel(1, 0) === 3.U, true.B))
           when (vrp_last) {
             vrp_val := false.B
           }
@@ -158,7 +173,8 @@ class RegisterRead(
           iss_uop := vrp_uop
           iss_uop.v_split_last := vrp_last
         } .otherwise {
-          vlen_ecnt := ((vLen/8).U >> io.iss_uops(w).vs2_eew)
+          //vlen_ecnt := ((vLen/8).U >> io.iss_uops(w).vs2_eew)
+          vlen_ecnt := ((vLen/8).U >> io.iss_uops(w).vs1_eew)
           vrp_val := vrp_iss
           when(vrp_iss) {
             vrp_uop := io.iss_uops(w)

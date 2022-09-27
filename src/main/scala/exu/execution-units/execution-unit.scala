@@ -673,21 +673,22 @@ class VecExeUnit(
   //val vmx_busy  = WireInit(false.B)
   val fdiv_busy = WireInit(false.B)
   val vrp_busy  = WireInit(false.B)
+  val vrp_stall = WireInit(false.B)
 
   // The Functional Units --------------------
   val vec_fu_units   = ArrayBuffer[FunctionalUnit]()
   //val vresp_fu_units = ArrayBuffer[FunctionalUnit]()
 
-  io.fu_types := Mux(!vrp_busy && hasAlu.B,   FU_ALU, 0.U) |
+  io.fu_types := Mux(!vrp_stall && hasAlu.B,  FU_ALU, 0.U) |
                  Mux(hasMacc.B,               FU_MAC, 0.U) |
                  Mux(hasVMaskUnit.B,          FU_VMASKU, 0.U) |
                  Mux(!div_busy && hasDiv.B,   FU_DIV, 0.U) |
                  Mux(hasIfpu.B,               FU_I2F, 0.U) |
-                 Mux(!vrp_busy && hasFpu.B,   FU_FPU | FU_F2I, 0.U) |
+                 Mux(!vrp_stall && hasFpu.B,  FU_FPU | FU_F2I, 0.U) |
                  //Mux(!vmx_busy && hasVMX.B,   FU_VMX, 0.U) |
                  Mux(!fdiv_busy && hasFdiv.B, FU_FDV, 0.U) |
                  Mux(hasFdiv.B,               FU_FR7, 0.U) |
-                 Mux(!vrp_busy && hasAlu.B,   FU_VRP, 0.U)
+                 Mux(!vrp_stall && hasAlu.B,  FU_VRP, 0.U)
 
   // ALU Unit -------------------------------
   var valu: VecALUUnit = null
@@ -898,6 +899,7 @@ class VecExeUnit(
     vrp.io.fbrsp.bits     := Mux(vfpu_resp_vrp, vfpu.io.resp.bits, valu.io.resp.bits)
     vrp.io.brupdate       := io.brupdate
     vrp_busy              := vrp.io.busy
+    vrp_stall             := vrp.io.stall
 
     val valu_exreq_valid = io.req.valid &&
                            (io.req.bits.uop.fu_code & FU_ALU).orR &&
@@ -924,7 +926,7 @@ class VecExeUnit(
 
   // Outputs (Write Port #0)  ---------------
   if (writesVrf) {
-    io.vresp.valid     := vec_fu_units.map(f => 
+    io.vresp.valid     := vec_fu_units.map(f =>
       f.io.resp.valid && !(f.io.resp.bits.uop.fu_code & FU_VRP).orR && !f.io.resp.bits.uop.uopc.isOneOf(uopVPOPC, uopVFIRST, uopVFMV_F_S, uopVMV_X_S)).reduce(_||_)
     io.vresp.bits.uop  := PriorityMux(vec_fu_units.map(f =>
       (f.io.resp.valid, f.io.resp.bits.uop)))

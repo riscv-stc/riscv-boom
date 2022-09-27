@@ -787,6 +787,15 @@ object VRegSel {
   }
 }
 
+object VRegOff {
+  /**
+   * Get element offset from v_eidx
+   */
+  def apply(v_eidx: UInt, vsew: UInt, vLenbSz: Int, vLenSz: Int): UInt = {
+    Cat(Fill(vLenSz - vLenbSz, 0.U(1.W)), (((v_eidx << vsew)(vLenbSz - 1, 0)) >> vsew)(vLenbSz - 1, 0))
+  }
+}
+
 object VDataFill {
   def apply(data: UInt, vsew: UInt, elen: Int): UInt = {
     val ret = Mux1H(UIntToOH(vsew(1,0)), Seq(Fill(8,data(elen/8-1,0)),
