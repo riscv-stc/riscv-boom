@@ -1788,6 +1788,8 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   dontTouch(is_last)
   dontTouch(vlen_ecnt)
   dontTouch(vlmax)
+  dontTouch(ured_ph1_prgrs)
+  dontTouch(ured_ph2_prgrs)
 
   dontTouch(is_slideup)
   dontTouch(is_slidedn)
@@ -2004,77 +2006,225 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   }
 
   // Data output for reduction instructions.
+  val v1ured_v2m = WireInit(0.U(vLen.W))
+  val v2ured_v2m = WireInit(0.U(vLen.W))
+  dontTouch(v1ured_v2m)
+  dontTouch(v2ured_v2m)
   val v1uredmux = Mux1H(Seq(
-    (uop.vd_eew(1,0) === 0.U) -> // assert(!uop.rt(RD, isWidenV))
-      Mux(is_last, Cat(0.U((vLen-8).W), v1buf_s(7, 0)),
-      Mux(progress === 1.U && ured_ph1_prgrs === 1.U, Cat(0.U((vLen/2).W),  Cat((0 until vLen/16).map(i => v2buf(0)(i*16+15, i*16+8)).reverse)),
-      Mux(progress < ured_ph1_prgrs, v2buf(progress), Cat(0.U((vLen/2).W),  Cat((0 until vLen/16).map(i => io.fbrsp.bits.data(i*16+15, i*16+8)).reverse))))),
-    (uop.vd_eew(1,0) === 1.U) -> {
-      val v2m = v2buf(progress >> 3.U)
-      Mux(is_last, Cat(0.U((vLen-16).W), v1buf_s(15,0)),
-      Mux(progress === 1.U && ured_ph1_prgrs === 1.U, Cat(0.U((vLen/2).W),  Cat((0 until vLen/32).map(i => v2buf(0)(i*32+31, i*32+16)).reverse)),
-      Mux(progress < ured_ph1_prgrs, Mux(uop.rt(RD, isWidenV), Cat((0 until vLen/16).map(i => Cext(Mux(progress(0), v2m(vLen/2+i*8+7, vLen/2+i*8), v2m(i*8+7, i*8)), uop.rt(RD, isUnsignedV), 16)).reverse),
-                                                               v2buf(progress)),
-                                     Cat(0.U((vLen/2).W),  Cat((0 until vLen/32).map(i => io.fbrsp.bits.data(i*32+31, i*32+16)).reverse)))))
+    (uop.vd_eew(1, 0) === 0.U) -> // assert(!uop.rt(RD, isWidenV))
+      Mux(is_last, Cat(0.U((vLen - 8).W), v1buf_s(7, 0)),
+        Mux(progress === 1.U && ured_ph1_prgrs === 1.U,
+          Cat(
+            0.U((vLen / 2).W),
+            Cat((0 until vLen / 16).map(i => v2buf(0)(i * 16 + 15, i * 16 + 8)).reverse)
+          ),
+          Mux(progress < ured_ph1_prgrs, v2buf(progress),
+            Cat(
+              0.U((vLen / 2).W),
+              Cat((0 until vLen / 16).map(i => io.fbrsp.bits.data(i * 16 + 15, i * 16 + 8)).reverse)
+            )
+          )
+        )
+      ),
+    (uop.vd_eew(1, 0) === 1.U) -> {
+      v1ured_v2m := v2buf(progress >> 1.U)
+      Mux(is_last, Cat(0.U((vLen - 16).W), v1buf_s(15, 0)),
+        Mux(progress === 1.U && ured_ph1_prgrs === 1.U,
+          Cat(
+            0.U((vLen / 2).W),
+            Cat((0 until vLen / 32).map(i => v2buf(0)(i * 32 + 31, i * 32 + 16)).reverse)
+          ),
+          Mux(progress < ured_ph1_prgrs,
+            Mux(uop.rt(RD, isWidenV),
+              Cat((0 until vLen / 16).map(i => Cext(
+                Mux(progress(0), v1ured_v2m(vLen / 2 + i * 8 + 7, vLen / 2 + i * 8), v1ured_v2m(i * 8 + 7, i * 8)),
+                uop.rt(RD, isUnsignedV), 16)).reverse
+              ),
+              v2buf(progress)
+            ),
+            Cat(
+              0.U((vLen / 2).W),
+              Cat((0 until vLen / 32).map(i => io.fbrsp.bits.data(i * 32 + 31, i * 32 + 16)).reverse)
+            )
+          )
+        )
+      )
     },
-    (uop.vd_eew(1,0) === 2.U) -> {
-      val v2m = v2buf(progress >> 2.U)
-      Mux(is_last, Cat(0.U((vLen-32).W), v1buf_s(31, 0)),
-      Mux(progress === 1.U && ured_ph1_prgrs === 1.U, Cat(0.U((vLen/2).W),  Cat((0 until vLen/64).map(i => v2buf(0)(i*64+63, i*64+32)).reverse)),
-      Mux(progress < ured_ph1_prgrs, Mux(uop.rt(RD, isWidenV), Mux(!uop.fp_val, Cat((0 until vLen/32).map(i => Cext(Mux(progress(0), v2m(vLen/2+i*16+15, vLen/2+i*16), v2m(i*16+15, i*16)), uop.rt(RD, isUnsignedV), 32)).reverse),
-                                                                                Cat(0.U((vLen/2).W), Cat((0 until vLen/32).map(i => Mux(progress(0), v2m(vLen/2+i*16+15, vLen/2+i*16), v2m(i*16+15, i*16))).reverse))),
-                                                               v2buf(progress)),
-                                     Cat(0.U((vLen/2).W),  Cat((0 until vLen/64).map(i => io.fbrsp.bits.data(i*64+63, i*64+32)).reverse)))))
+    (uop.vd_eew(1, 0) === 2.U) -> {
+      v1ured_v2m := v2buf(progress >> 1.U)
+      Mux(is_last, Cat(0.U((vLen - 32).W), v1buf_s(31, 0)),
+        Mux(progress === 1.U && ured_ph1_prgrs === 1.U,
+          Cat(0.U((vLen / 2).W),
+            Cat((0 until vLen / 64).map(i => v2buf(0)(i * 64 + 63, i * 64 + 32)).reverse)
+          ),
+          Mux(progress < ured_ph1_prgrs,
+            Mux(uop.rt(RD, isWidenV),
+              Mux(!uop.fp_val,
+                Cat((0 until vLen / 32).map(i => Cext(
+                  Mux(progress(0), v1ured_v2m(vLen / 2 + i * 16 + 15, vLen / 2 + i * 16), v1ured_v2m(i * 16 + 15, i * 16)),
+                  uop.rt(RD, isUnsignedV), 32)).reverse
+                ),
+                Cat(
+                  0.U((vLen / 2).W),
+                  Cat((0 until vLen / 32).map(i =>
+                    Mux(progress(0), v1ured_v2m(vLen / 2 + i * 16 + 15, vLen / 2 + i * 16), v1ured_v2m(i * 16 + 15, i * 16))
+                  ).reverse)
+                )
+              ),
+              v2buf(progress)
+            ),
+            Cat(
+              0.U((vLen / 2).W),
+              Cat((0 until vLen / 64).map(i => io.fbrsp.bits.data(i * 64 + 63, i * 64 + 32)).reverse)
+            )
+          )
+        )
+      )
     },
-    (uop.vd_eew(1,0) === 3.U) -> {
-      val v2m = v2buf(progress >> 1.U)
-      Mux(is_last, Cat(0.U((vLen-64).W), v1buf_s(63, 0)),
-      Mux(progress === 1.U && ured_ph1_prgrs === 1.U, Cat(0.U((vLen/2).W),  Cat((0 until vLen/128).map(i => v2buf(0)(i*128+127, i*128+64)).reverse)),
-      Mux(progress < ured_ph1_prgrs, Mux(uop.rt(RD, isWidenV), Mux(!uop.fp_val, Cat((0 until vLen/64).map(i => Cext(Mux(progress(0), v2m(vLen/2+i*32+31, vLen/2+i*32), v2m(i*32+31, i*32)), uop.rt(RD, isUnsignedV), 64)).reverse),
-                                                                                Cat(0.U((vLen/2).W), Cat((0 until vLen/64).map(i => Mux(progress(0), v2m(vLen/2+i*32+31, vLen/2+i*32), v2m(i*32+31, i*32))).reverse))),
-                                                               v2buf(progress)),
-                                     Cat(0.U((vLen/2).W),  Cat((0 until vLen/128).map(i => io.fbrsp.bits.data(i*128+127, i*128+64)).reverse)))))
+    (uop.vd_eew(1, 0) === 3.U) -> {
+      v1ured_v2m := v2buf(progress >> 1.U)
+      Mux(is_last, Cat(0.U((vLen - 64).W), v1buf_s(63, 0)),
+        Mux(progress === 1.U && ured_ph1_prgrs === 1.U,
+          Cat(0.U((vLen / 2).W), Cat((0 until vLen / 128).map(i => v2buf(0)(i * 128 + 127, i * 128 + 64)).reverse)),
+          Mux(progress < ured_ph1_prgrs,
+            Mux(uop.rt(RD, isWidenV),
+              Mux(!uop.fp_val,
+                Cat((0 until vLen / 64).map(i => Cext(
+                  Mux(progress(0), v1ured_v2m(vLen / 2 + i * 32 + 31, vLen / 2 + i * 32), v1ured_v2m(i * 32 + 31, i * 32)),
+                  uop.rt(RD, isUnsignedV), 64)).reverse
+                ),
+                Cat(
+                  0.U((vLen / 2).W),
+                  Cat((0 until vLen / 64).map(i =>
+                    Mux(progress(0), v1ured_v2m(vLen / 2 + i * 32 + 31, vLen / 2 + i * 32), v1ured_v2m(i * 32 + 31, i * 32))).reverse)
+                )
+              ),
+              v2buf(progress)
+            ),
+            Cat(
+              0.U((vLen / 2).W),
+              Cat((0 until vLen / 128).map(i => io.fbrsp.bits.data(i * 128 + 127, i * 128 + 64)).reverse)
+            )
+          )
+        )
+      )
     }
   ))
+
   val v2uredmux = Mux1H(Seq(
-    (uop.vd_eew(1,0) === 0.U) ->
-      Mux(progress === 1.U, Mux(ured_ph1_prgrs === 1.U, Cat(0.U((vLen/2).W), Cat((0 until vLen/16).map(i => v2buf(0)(i*16+7, i*16)).reverse)), v2buf(0)),
-      Mux(progress < ured_ph1_prgrs,  io.fbrsp.bits.data,
-      Cat(0.U((vLen/2).W),  Cat((0 until vLen/16).map(i => io.fbrsp.bits.data(i*16+7, i*16)).reverse)))),
-    (uop.vd_eew(1,0) === 1.U) -> {
-      val v2m = v2buf(0.U)
-      Mux(progress === 1.U, Mux(uop.rt(RD, isWidenV), Cat((0 until vLen/16).map(i => Cext(v2m(i*8+7, i*8), uop.rt(RD, isUnsignedV), 16)).reverse),
-                            Mux(ured_ph1_prgrs === 1.U, Cat(0.U((vLen/2).W), Cat((0 until vLen/32).map(i => v2buf(0)(i*32+15, i*32)).reverse)), v2buf(0))),
-      Mux(progress < ured_ph1_prgrs, io.fbrsp.bits.data,
-      Cat(0.U((vLen/2).W),  Cat((0 until vLen/32).map(i => io.fbrsp.bits.data(i*32+15, i*32)).reverse))))
+    (uop.vd_eew(1, 0) === 0.U) ->
+      Mux(progress === 1.U,
+        Mux(ured_ph1_prgrs === 1.U,
+          Cat(0.U((vLen / 2).W), Cat((0 until vLen / 16).map(i => v2buf(0)(i * 16 + 7, i * 16)).reverse)),
+          v2buf(0)
+        ),
+        Mux(progress < ured_ph1_prgrs, io.fbrsp.bits.data,
+          Cat(
+            0.U((vLen / 2).W),
+            Cat((0 until vLen / 16).map(i => io.fbrsp.bits.data(i * 16 + 7, i * 16)).reverse)
+          )
+        )
+      ),
+    (uop.vd_eew(1, 0) === 1.U) -> {
+      v2ured_v2m := v2buf(0.U)
+      Mux(progress === 1.U,
+        Mux(uop.rt(RD, isWidenV),
+          Cat((0 until vLen / 16).map(i => Cext(v2ured_v2m(i * 8 + 7, i * 8), uop.rt(RD, isUnsignedV), 16)).reverse),
+          Mux(ured_ph1_prgrs === 1.U,
+            Cat(
+              0.U((vLen / 2).W),
+              Cat((0 until vLen / 32).map(i => v2buf(0)(i * 32 + 15, i * 32)).reverse)
+            ),
+            v2buf(0)
+          )
+        ),
+        Mux(progress < ured_ph1_prgrs, io.fbrsp.bits.data,
+          Cat(
+            0.U((vLen / 2).W),
+            Cat((0 until vLen / 32).map(i => io.fbrsp.bits.data(i * 32 + 15, i * 32)).reverse)
+          )
+        )
+      )
     },
-    (uop.vd_eew(1,0) === 2.U) -> {
-      val v2m = v2buf(0.U)
-      Mux(progress === 1.U, Mux(uop.rt(RD, isWidenV), Mux(!uop.fp_val, Cat((0 until vLen/32).map(i => Cext(v2m(i*16+15, i*16), uop.rt(RD, isUnsignedV), 32)).reverse),
-                                                                       Cat(0.U((vLen/2).W), Cat((0 until vLen/32).map(i => v2m(i*16+15, i*16)).reverse))),
-                            Mux(ured_ph1_prgrs === 1.U, Cat(0.U((vLen/2).W), Cat((0 until vLen/64).map(i => v2buf(0)(i*64+31, i*64)).reverse)), v2buf(0))),
-      Mux(progress < ured_ph1_prgrs, io.fbrsp.bits.data,
-      Cat(0.U((vLen/2).W),  Cat((0 until vLen/64).map(i => io.fbrsp.bits.data(i*64+31, i*64)).reverse))))
+    (uop.vd_eew(1, 0) === 2.U) -> {
+      v2ured_v2m := v2buf(0.U)
+      Mux(progress === 1.U,
+        Mux(uop.rt(RD, isWidenV),
+          Mux(!uop.fp_val,
+            Cat((0 until vLen / 32).map(i => Cext(v2ured_v2m(i * 16 + 15, i * 16), uop.rt(RD, isUnsignedV), 32)).reverse),
+            Cat(
+              0.U((vLen / 2).W),
+              Cat((0 until vLen / 32).map(i => v2ured_v2m(i * 16 + 15, i * 16)).reverse)
+            )
+          ),
+          Mux(ured_ph1_prgrs === 1.U,
+            Cat(
+              0.U((vLen / 2).W),
+              Cat((0 until vLen / 64).map(i => v2buf(0)(i * 64 + 31, i * 64)).reverse)
+            ),
+            v2buf(0)
+          )
+        ),
+        Mux(progress < ured_ph1_prgrs, io.fbrsp.bits.data,
+          Cat(
+            0.U((vLen / 2).W),
+            Cat((0 until vLen / 64).map(i => io.fbrsp.bits.data(i * 64 + 31, i * 64)).reverse)
+          )
+        )
+      )
     },
-    (uop.vd_eew(1,0) === 3.U) -> {
-      val v2m = v2buf(0.U)
-      Mux(progress === 1.U, Mux(uop.rt(RD, isWidenV), Mux(!uop.fp_val, Cat((0 until vLen/64).map(i => Cext(v2m(i*32+31, i*32), uop.rt(RD, isUnsignedV), 64)).reverse),
-                                                                       Cat(0.U((vLen/2).W), Cat((0 until vLen/64).map(i => v2m(i*32+31, i*32)).reverse))),
-                            Mux(ured_ph1_prgrs === 1.U, Cat(0.U((vLen/2).W), Cat((0 until vLen/128).map(i => v2buf(0)(i*128+63, i*128)).reverse)), v2buf(0))),
-      Mux(progress < ured_ph1_prgrs, io.fbrsp.bits.data,
-      Cat(0.U((vLen/2).W),  Cat((0 until vLen/128).map(i => io.fbrsp.bits.data(i*128+63, i*128)).reverse))))
+    (uop.vd_eew(1, 0) === 3.U) -> {
+      v2ured_v2m := v2buf(0.U)
+      Mux(progress === 1.U,
+        Mux(uop.rt(RD, isWidenV),
+          Mux(!uop.fp_val,
+            Cat((0 until vLen / 64).map(i => Cext(v2ured_v2m(i * 32 + 31, i * 32), uop.rt(RD, isUnsignedV), 64)).reverse),
+            Cat(
+              0.U((vLen / 2).W),
+              Cat((0 until vLen / 64).map(i => v2ured_v2m(i * 32 + 31, i * 32)).reverse)
+            )
+          ),
+          Mux(ured_ph1_prgrs === 1.U,
+            Cat(
+              0.U((vLen / 2).W),
+              Cat((0 until vLen / 128).map(i => v2buf(0)(i * 128 + 63, i * 128)).reverse)
+            ),
+            v2buf(0)
+          )
+        ),
+        Mux(progress < ured_ph1_prgrs, io.fbrsp.bits.data,
+          Cat(
+            0.U((vLen / 2).W),
+            Cat((0 until vLen / 128).map(i => io.fbrsp.bits.data(i * 128 + 63, i * 128)).reverse)
+          )
+        )
+      )
     }
   ))
+
   val v1oredmux = Mux1H(Seq(
-    (uop.vd_eew(1,0) === 1.U) -> Cat(0.U((vLen-16).W), Mux(progress === 0.U, v1buf_s(15, 0), io.fbrsp.bits.data(15, 0))),
-    (uop.vd_eew(1,0) === 2.U) -> Cat(0.U((vLen-32).W), Mux(progress === 0.U, v1buf_s(31, 0), io.fbrsp.bits.data(31, 0))),
-    (uop.vd_eew(1,0) === 3.U) -> Cat(0.U((vLen-64).W), Mux(progress === 0.U, v1buf_s(63, 0), io.fbrsp.bits.data(63, 0)))
+    (uop.vd_eew(1, 0) === 1.U) -> Cat(0.U((vLen - 16).W), Mux(progress === 0.U, v1buf_s(15, 0), io.fbrsp.bits.data(15, 0))),
+    (uop.vd_eew(1, 0) === 2.U) -> Cat(0.U((vLen - 32).W), Mux(progress === 0.U, v1buf_s(31, 0), io.fbrsp.bits.data(31, 0))),
+    (uop.vd_eew(1, 0) === 3.U) -> Cat(0.U((vLen - 64).W), Mux(progress === 0.U, v1buf_s(63, 0), io.fbrsp.bits.data(63, 0)))
   ))
+
   val v2oredmux = Mux1H(Seq(
-    (uop.vs2_eew(1,0) === 1.U) -> Cat(0.U((vLen-16).W), v2buf((progress>>3.U)(2,0))>>Cat(progress(2,0),0.U(4.W))),
-    (uop.vs2_eew(1,0) === 2.U) -> Cat(0.U((vLen-32).W), v2buf((progress>>2.U)(2,0))>>Cat(progress(1,0),0.U(5.W))),
-    (uop.vs2_eew(1,0) === 3.U) -> Cat(0.U((vLen-64).W), v2buf((progress>>1.U)(2,0))>>Cat(progress(0),0.U(6.W)))
+    (uop.vs2_eew(1, 0) === 1.U) -> Cat(0.U((vLen - 16).W), v2buf((progress >> 3.U) (2, 0)) >> Cat(progress(2, 0), 0.U(4.W))),
+    (uop.vs2_eew(1, 0) === 2.U) -> Cat(0.U((vLen - 32).W), v2buf((progress >> 2.U) (2, 0)) >> Cat(progress(1, 0), 0.U(5.W))),
+    (uop.vs2_eew(1, 0) === 3.U) -> Cat(0.U((vLen - 64).W), v2buf((progress >> 1.U) (2, 0)) >> Cat(progress(0), 0.U(6.W)))
   ))
+
+  // For debug.
+  val is_reduce  = uop.is_reduce
+  val is_ureduce = uop.is_ureduce
+  val is_oreduce = uop.is_oreduce
+  dontTouch(is_reduce)
+  dontTouch(is_ureduce)
+  dontTouch(is_oreduce)
+  dontTouch(v1uredmux)
+  dontTouch(v2uredmux)
+  dontTouch(v1oredmux)
+  dontTouch(v2oredmux)
 
   /**
     * Filter single vector element with prestart, tail, active and inactive definitions.
@@ -2353,9 +2503,8 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
 
   // Output status.
   io.busy  := !is_idle
-  io.stall := working
-  //io.stall := (!is_idle && uop.is_reduce) || working
-  //io.stall := (!is_idle && uop.is_reduce) || (working && !is_vrgatherei16)
+  //io.stall := working
+  io.stall := (!is_idle && uop.is_reduce) || working
 }
 
 /**
