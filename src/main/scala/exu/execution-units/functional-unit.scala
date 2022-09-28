@@ -1752,7 +1752,9 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   val uop_v       = RegInit(false.B)
   val uop         = Reg(new MicroOp)
   val vlmax       = RegInit(0.U((vLenbSz + 4).W))
+  val vlen_ecnt   = vLenb.U >> uop.vd_eew
 
+  // States.
   val s_idle :: s_fill :: s_work :: Nil = Enum(3)
   val state       = RegInit(s_idle)
   val is_idle     = (state === s_idle)
@@ -1760,7 +1762,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   val working     = (state === s_work)
   val is_first    = WireInit(false.B)
   val is_last     = WireInit(false.B)
-  val vlen_ecnt   = vLenb.U >> uop.vd_eew
+
   // unordered reduce phase1: compress between vreg: v2buf[]
   // unordered reduce phase2: compress within vreg: fbrsp
   val ured_ph1_prgrs  = nrVecGroup(uop.vs2_emul) << uop.rt(RD, isWidenV).asUInt
@@ -1778,7 +1780,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   val is_vcompress    = uop.uopc === uopVCOMPRESS
 
   // For debug.
-  dontTouch(v1buf_wp)
+  /*dontTouch(v1buf_wp)
   dontTouch(v1buf_of)
   dontTouch(v2buf_wp)
   dontTouch(v2buf_of)
@@ -1798,7 +1800,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   dontTouch(is_vrgather)
   dontTouch(is_vrgatherei16)
   dontTouch(is_gather)
-  dontTouch(is_vcompress)
+  dontTouch(is_vcompress)*/
 
   def v2red_masked(u: MicroOp, vm: UInt, data: UInt): UInt = {
     val ret = Wire(UInt(vLen.W))
@@ -1909,8 +1911,8 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     nrVecGroup(Mux(uop.vs1_emul.asSInt() > uop.vs2_emul.asSInt(), uop.vs1_emul, uop.vs2_emul)))
   //perm_rcnt := (((uop.vconfig.vl - 1.U) << uop.vd_eew) >> vLenbSz.U) + 1.U
   perm_rcnt := nrVecGroup(uop.vd_emul)
-  dontTouch(fill_rcnt)
-  dontTouch(perm_rcnt)
+  //dontTouch(fill_rcnt)
+  //dontTouch(perm_rcnt)
 
   // FSM.
   switch(state) {
@@ -1964,15 +1966,15 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   val perm_out = working && (!uop.is_reduce)
   val reduce_out = working && (uop.is_ureduce && (io.fbrsp.valid || progress === 1.U) ||
     uop.is_oreduce && (io.fbrsp.valid || progress === 0.U))
-  dontTouch(perm_out)
-  dontTouch(reduce_out)
+  //dontTouch(perm_out)
+  //dontTouch(reduce_out)
 
   is_first := is_perm && working && (progress === 0.U)
   io.exreq.ready := true.B
   io.fbrsp.ready := true.B
   io.fbreq.valid := reduce_out || perm_out
   io.fbreq.bits.uop := uop
-  io.fbreq.bits.uop.v_split_first := is_first
+  //io.fbreq.bits.uop.v_split_first := is_first
   io.fbreq.bits.uop.v_split_last  := is_last
   when (uop.is_ureduce) {
     io.fbreq.bits.uop.vs1_eew       := Mux(uop.rt(RD, isWidenV) && uop.fp_val && progress < ured_ph1_prgrs, uop.vs2_eew, uop.vs1_eew)
@@ -2008,8 +2010,9 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   // Data output for reduction instructions.
   val v1ured_v2m = WireInit(0.U(vLen.W))
   val v2ured_v2m = WireInit(0.U(vLen.W))
-  dontTouch(v1ured_v2m)
-  dontTouch(v2ured_v2m)
+  //dontTouch(v1ured_v2m)
+  //dontTouch(v2ured_v2m)
+
   val v1uredmux = Mux1H(Seq(
     (uop.vd_eew(1, 0) === 0.U) -> // assert(!uop.rt(RD, isWidenV))
       Mux(is_last, Cat(0.U((vLen - 8).W), v1buf_s(7, 0)),
@@ -2214,18 +2217,6 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     (uop.vs2_eew(1, 0) === 3.U) -> Cat(0.U((vLen - 64).W), v2buf((progress >> 1.U) (2, 0)) >> Cat(progress(0), 0.U(6.W)))
   ))
 
-  // For debug.
-  val is_reduce  = uop.is_reduce
-  val is_ureduce = uop.is_ureduce
-  val is_oreduce = uop.is_oreduce
-  dontTouch(is_reduce)
-  dontTouch(is_ureduce)
-  dontTouch(is_oreduce)
-  dontTouch(v1uredmux)
-  dontTouch(v2uredmux)
-  dontTouch(v1oredmux)
-  dontTouch(v2oredmux)
-
   /**
     * Filter single vector element with prestart, tail, active and inactive definitions.
     * @param u Micro-OP
@@ -2280,8 +2271,6 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   // Declare permutation results.
   val unmasked_data = WireInit(0.U(vLen.W))
   val perm_result = WireInit(0.U(vLen.W))
-  dontTouch(unmasked_data)
-  dontTouch(perm_result)
 
   // Declare common permutation wires.
   val perm_curr_over = WireInit(false.B)
@@ -2298,6 +2287,8 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   val slided_bits    = WireInit(0.U((vLenSz + 4).W))
   val differ_bits    = WireInit(0.U((vLenSz + 4).W))
 
+  /*dontTouch(unmasked_data)
+  dontTouch(perm_result)
   dontTouch(perm_curr_over)
   dontTouch(perm_prev_over)
   dontTouch(perm_next_over)
@@ -2310,7 +2301,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   dontTouch(slided_step)
   dontTouch(slided_regs)
   dontTouch(slided_bits)
-  dontTouch(differ_bits)
+  dontTouch(differ_bits)*/
 
   // To index continuous output micro-ops.
   when(is_idle && io.exreq.valid) {
@@ -2329,7 +2320,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     )
   }
 
-  // State output for permutation instructions.
+  // Main logic for permutation instructions.
   when (working) {
     when (is_slideup) {
       slided_step     := Mux1H(Seq(
