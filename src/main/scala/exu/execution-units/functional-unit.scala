@@ -2238,7 +2238,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     * @param m Mask list.
     * @param src Source register.
     * @param dst Destination register.
-    * @return register after filter.
+    * @return Register after filter.
     */
   def filter_register(u: MicroOp, p: UInt, t: UInt, m: UInt, src: UInt, dst: UInt): UInt =
     Mux1H(Seq(
@@ -2345,7 +2345,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
         presbuf(progress), tailbuf(progress), vmbuf(progress), unmasked_data, vdbuf(progress))
     } .elsewhen (is_slidedn) {
       val slided_result = WireInit(0.U(vLen.W))
-      dontTouch(slided_result)
+      //dontTouch(slided_result)
 
       slided_step     := Mux1H(Seq(
         (uop.vs1_eew(1, 0) === 0.U) -> Cat(0.U((eLen - 8).W), v1buf(0)(7, 0)),
@@ -2388,8 +2388,8 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     } .elsewhen (is_slide1up) {
       val v1buf_masked = WireInit(0.U(eLen.W))
       val v2rem_masked = WireInit(0.U(eLen.W))
-      dontTouch(v1buf_masked)
-      dontTouch(v2rem_masked)
+      //dontTouch(v1buf_masked)
+      //dontTouch(v2rem_masked)
 
       slided_bits     := 8.U((vLenSz + 4).W) << uop.vd_eew(1, 0)
       perm_prev_over  := progress === 0.U
@@ -2425,13 +2425,13 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
       val last_offset  = WireInit(0.U((vLenbSz + 4).W))
       val last_diff_e  = WireInit(0.U((vLenbSz + 4).W))
       val last_diff_b  = WireInit(0.U((vLenbSz + 7).W))
-      dontTouch(v2sft_masked)
-      dontTouch(v1buf_masked)
-      dontTouch(v2buf_slided)
-      dontTouch(last_index)
-      dontTouch(last_offset)
-      dontTouch(last_diff_e)
-      dontTouch(last_diff_b)
+      //dontTouch(v2sft_masked)
+      //dontTouch(v1buf_masked)
+      //dontTouch(v2buf_slided)
+      //dontTouch(last_index)
+      //dontTouch(last_offset)
+      //dontTouch(last_diff_e)
+      //dontTouch(last_diff_b)
 
       slided_bits     := 8.U((vLenSz + 4).W) << uop.vd_eew(1, 0)
       last_index      := Mux(uop.vconfig.vl === 0.U, 0.U, uop.vconfig.vl - 1.U)
@@ -2486,8 +2486,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
 
   // Output data.
   io.fbreq.bits.rs1_data := Mux(uop.is_ureduce, v1uredmux,
-                            Mux(uop.is_oreduce, v1oredmux,
-                            0.U(vLen.W)))
+                            Mux(uop.is_oreduce, v1oredmux, 0.U(vLen.W)))
   io.fbreq.bits.rs2_data := Mux(uop.is_ureduce, v2uredmux,
                             Mux(uop.is_oreduce, v2oredmux, perm_result))
   io.fbreq.bits.rs3_data := Mux(uop.is_reduce,  vdbuf(0),  vdbuf(progress))
