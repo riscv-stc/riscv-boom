@@ -1327,10 +1327,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   rob.io.debug_tsc := debug_tsc_reg
   rob.io.csr_stall := csr.io.csr_stall
 
-  rob.io.vbusy_status    := v_rename_stage.io.vbusy_status
-  rob.io.tr_busy_status  := m_rename_stage.io.tr_busy_status
-  rob.io.acc_busy_status := m_rename_stage.io.acc_busy_status
-
   // Minor hack: ecall and breaks need to increment the FTQ deq ptr earlier than commit, since
   // they write their PC into the CSR the cycle before they commit.
   // Since these are also unique, increment the FTQ ptr when they are dispatched
@@ -1843,12 +1839,16 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     io.lsu.dis_uops(w).valid := dis_fire(w)
     io.lsu.dis_uops(w).bits  := dis_uops(w)
   }
-  io.lsu.vbusy_status := v_rename_stage.io.vbusy_status
+  if (usingVector) {
+    io.lsu.vbusy_status := v_rename_stage.io.vbusy_status
+  }
+  if (usingMatrix) {
+    io.lsu.tr_busy_status  := m_rename_stage.io.tr_busy_status
+    io.lsu.acc_busy_status := m_rename_stage.io.acc_busy_status
+  }
 
   // tell LSU about committing loads and stores to clear entries
   io.lsu.commit    := rob.io.commit
-
-  io.lsu.commit_vs := rob.io.commit_vs
 
   // tell LSU that it should fire a load that waits for the rob to clear
   io.lsu.commit_load_at_rob_head := rob.io.com_load_is_at_rob_head
@@ -1946,10 +1946,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
     io.lsu.vrf_rport        <> v_pipeline.io.lsu_vrf_rport
     io.lsu.tile_rport       <> m_pipeline.io.lsu_tile_rport
+    m_pipeline.io.lsu_acc_rreq        := io.lsu.acc_rreq
     m_pipeline.io.lsu_tile_wbk.bits   := io.lsu.tile_wbk.bits
     m_pipeline.io.lsu_tile_wbk.valid  := io.lsu.tile_wbk.valid
     io.lsu.tile_wbk.ready             := true.B
-
+    io.lsu.acc_rresp                  := m_pipeline.io.lsu_acc_rresp
   } else if (usingVector) {
     fp_pipeline.io.fromVec <> v_pipeline.io.to_fp
     Seq.tabulate(vecWidth)(i => i).foreach { i =>
@@ -2096,7 +2097,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // LSU <> ROB
   rob.io.lsu_clr_bsy    := io.lsu.clr_bsy
   rob.io.lsu_clr_unsafe := io.lsu.clr_unsafe
-  rob.io.lsu_clr_retire := io.lsu.clr_retire
   rob.io.lsu_update_ls := io.lsu.update_ls
   rob.io.lxcpt          <> io.lsu.lxcpt
 
