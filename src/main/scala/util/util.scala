@@ -821,6 +821,52 @@ object VDataSel {
   }
 }
 
+object VFilter {
+  /**
+    * Filter single vector element with prestart, tail, active and inactive definitions.
+    *
+    * @param u   Micro-OP
+    * @param p   Prestart bit.
+    * @param t   Tail bit.
+    * @param m   Mask bit.
+    * @param src Source element.
+    * @param dst Destination element.
+    * @return Element after filter.
+    */
+  def filter_element(u: MicroOp, p: Bool, t: Bool, m: Bool, src: UInt, dst: UInt): UInt =
+    Mux((!p) && (!t) && (u.v_unmasked || m), src, dst)
+
+  /**
+    * Filter single vector register with prestart, tail, active and inactive definitions.
+    *
+    * @param u   Micro-OP.
+    * @param p   Prestart list.
+    * @param t   Tail list.
+    * @param m   Mask list.
+    * @param src Source register.
+    * @param dst Destination register.
+    * @return Register after filter.
+    */
+  def filter_register(u: MicroOp, p: UInt, t: UInt, m: UInt, src: UInt, dst: UInt, vLen: Int): UInt =
+    Mux1H(Seq(
+      (u.vd_eew(1, 0) === 0.U) -> Cat((0 until vLen / 8).map(i =>
+        filter_element(u, p(i).asBool(), t(i).asBool(), m(i).asBool(),
+          src(i * 8 + 7, i * 8), dst(i * 8 + 7, i * 8))).reverse),
+      (u.vd_eew(1, 0) === 1.U) -> Cat((0 until vLen / 16).map(i =>
+        filter_element(u, p(i).asBool(), t(i).asBool(), m(i).asBool(),
+          src(i * 16 + 15, i * 16), dst(i * 16 + 15, i * 16))).reverse),
+      (u.vd_eew(1, 0) === 2.U) -> Cat((0 until vLen / 32).map(i =>
+        filter_element(u, p(i).asBool(), t(i).asBool(), m(i).asBool(),
+          src(i * 32 + 31, i * 32), dst(i * 32 + 31, i * 32))).reverse),
+      (u.vd_eew(1, 0) === 3.U) -> Cat((0 until vLen / 64).map(i =>
+        filter_element(u, p(i).asBool(), t(i).asBool(), m(i).asBool(),
+          src(i * 64 + 63, i * 64), dst(i * 64 + 63, i * 64))).reverse)
+    ))
+
+  def apply(u: MicroOp, p: UInt, t: UInt, m: UInt, src: UInt, dst: UInt, vLen: Int): UInt =
+    filter_register(u, p, t, m, src, dst, vLen)
+}
+
 /**
  * Object to check if MicroOp was killed due to an inactive vector mask
  */

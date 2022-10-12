@@ -1719,7 +1719,9 @@ class VecFPUUnit(dataWidth: Int)(implicit p: Parameters)
 
 }
 
-// Vector Reduction-Permutation Assist
+/**
+  * Top module of Vector Reduction-Permutation Assist.
+  */
 class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   val io = IO(new Bundle {
     val brupdate = Input(new BrUpdateInfo())
@@ -1729,26 +1731,24 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
     val busy  = Output(Bool())
     val stall = Output(Bool())
   })
+
   val v1buf       = Reg(Vec(8, UInt(vLen.W)))
-  val v1buf_s     = v1buf(0)
   val v1buf_wp    = VRegSel(io.exreq.bits.uop.v_eidx, io.exreq.bits.uop.vs1_eew, eLenSelSz)
   val v1buf_of    = VRegOff(io.exreq.bits.uop.v_eidx, io.exreq.bits.uop.vs1_eew, vLenbSz, vLenSz)
+
   val v2buf       = Reg(Vec(8, UInt(vLen.W)))
   val v2buf_wp    = VRegSel(io.exreq.bits.uop.v_eidx, io.exreq.bits.uop.vs2_eew, eLenSelSz)
   val v2buf_of    = VRegOff(io.exreq.bits.uop.v_eidx, io.exreq.bits.uop.vs2_eew, vLenbSz, vLenSz)
-  //val v2bufvld    = RegInit(Vec(0.U(8.W).asBools))
+
   val vdbuf       = Reg(Vec(8, UInt(vLen.W)))
   val vpdst       = Reg(Vec(8, UInt(maxPregSz.W)))
   val vdbuf_wp    = VRegSel(io.exreq.bits.uop.v_eidx, io.exreq.bits.uop.vd_eew, eLenSelSz)
   val vdbuf_of    = VRegOff(io.exreq.bits.uop.v_eidx, io.exreq.bits.uop.vd_eew, vLenbSz, vLenSz)
-  //val vdbufvld    = RegInit(Vec(0.U(8.W).asBools))
-  //val vdmux       = Wire(Vec(vLenb, UInt(8.W)))
-  //val vdmux_sel   = Wire(Vec(vLenb, UInt(vLen.W)))
+
   val vmbuf       = Reg(Vec(8, UInt(vLenb.W)))
   val presbuf     = Reg(Vec(8, UInt(vLenb.W)))
   val tailbuf     = Reg(Vec(8, UInt(vLenb.W)))
-  val progress    = RegInit(0.U((vLenSz+1).W))
-  val eidx        = RegInit(0.U(vLenSz.W))
+
   val uop_v       = RegInit(false.B)
   val uop         = Reg(new MicroOp)
   val vlmax       = RegInit(0.U((vLenbSz + 4).W))
@@ -1760,48 +1760,52 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   val is_idle     = (state === s_idle)
   val filling     = (state === s_fill)
   val working     = (state === s_work)
-  val is_first    = WireInit(false.B)
-  val is_last     = WireInit(false.B)
-
-  // unordered reduce phase1: compress between vreg: v2buf[]
-  // unordered reduce phase2: compress within vreg: fbrsp
-  val ured_ph1_prgrs  = nrVecGroup(uop.vs2_emul) << uop.rt(RD, isWidenV).asUInt
-  val ured_ph2_prgrs  = (vLenSz-3).U - uop.vd_eew //+ uop.rt(RD, isWidenV).asUInt - 1.U
 
   // Instruction types.
-  val is_perm         = !uop.is_reduce
+  val ex_slideup      = io.exreq.bits.uop.uopc === uopVSLIDEUP
+  val ex_slidedn      = io.exreq.bits.uop.uopc === uopVSLIDEDOWN
+  val ex_slide1up     = io.exreq.bits.uop.uopc === uopVSLIDE1UP
+  val ex_slide1dn     = io.exreq.bits.uop.uopc === uopVSLIDE1DOWN
+  val ex_vrgatherei16 = io.exreq.bits.uop.uopc === uopVRGATHEREI16
+  val ex_vcompress    = io.exreq.bits.uop.uopc === uopVCOMPRESS
+
+  val ex_red          = io.exreq.bits.uop.is_reduce
+  val ex_gather       = io.exreq.bits.uop.uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16)
+  val ex_slide        = io.exreq.bits.uop.uopc.isOneOf(uopVSLIDEUP, uopVSLIDEDOWN, uopVSLIDE1UP, uopVSLIDE1DOWN)
+
   val is_slideup      = uop.uopc === uopVSLIDEUP
   val is_slidedn      = uop.uopc === uopVSLIDEDOWN
   val is_slide1up     = uop.uopc === uopVSLIDE1UP
   val is_slide1dn     = uop.uopc === uopVSLIDE1DOWN
   val is_vrgather     = uop.uopc === uopVRGATHER
   val is_vrgatherei16 = uop.uopc === uopVRGATHEREI16
-  val is_gather       = is_vrgather || is_vrgatherei16
   val is_vcompress    = uop.uopc === uopVCOMPRESS
 
-  // For debug.
-  /*dontTouch(v1buf_wp)
-  dontTouch(v1buf_of)
-  dontTouch(v2buf_wp)
-  dontTouch(v2buf_of)
-  dontTouch(vdbuf_wp)
-  dontTouch(vdbuf_of)
-  dontTouch(is_first)
-  dontTouch(is_last)
-  dontTouch(vlen_ecnt)
-  dontTouch(vlmax)
-  dontTouch(ured_ph1_prgrs)
-  dontTouch(ured_ph2_prgrs)
+  val is_red          = uop.is_reduce
+  val is_gather       = uop.uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16)
+  val is_slide        = uop.uopc.isOneOf(uopVSLIDEUP, uopVSLIDEDOWN, uopVSLIDE1UP, uopVSLIDE1DOWN)
 
-  dontTouch(is_slideup)
-  dontTouch(is_slidedn)
-  dontTouch(is_slide1up)
-  dontTouch(is_slide1dn)
-  dontTouch(is_vrgather)
-  dontTouch(is_vrgatherei16)
-  dontTouch(is_gather)
-  dontTouch(is_vcompress)*/
+  // Submodule control & status.
+  val red_start       = WireInit(false.B)
+  val slide_start     = WireInit(false.B)
+  val gather_start    = WireInit(false.B)
+  val compress_start  = WireInit(false.B)
 
+  val red_done        = Wire(Bool())
+  val slide_done      = Wire(Bool())
+  val gather_done     = Wire(Bool())
+  val compress_done   = Wire(Bool())
+  val vrp_done        = WireInit(false.B)
+
+  val red_fbreq       = Wire(DecoupledIO(new FuncUnitReq(vLen)))
+  val slide_fbreq     = Wire(DecoupledIO(new FuncUnitReq(vLen)))
+  val gather_fbreq    = Wire(DecoupledIO(new FuncUnitReq(vLen)))
+  val compress_fbreq  = Wire(DecoupledIO(new FuncUnitReq(vLen)))
+
+  val sub_uop         = Mux(is_idle && io.exreq.valid, io.exreq.bits.uop, uop)
+  val brkill          = WireInit(false.B)
+
+  // Mask reduction operands.
   def v2red_masked(u: MicroOp, vm: UInt, data: UInt): UInt = {
     val ret = Wire(UInt(vLen.W))
     val p = VRegSel(u.v_eidx, u.vs2_eew, eLenSelSz)
@@ -1865,16 +1869,16 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   }
 
   // Buffer source, destination & mask operators, and PR addresses.
-  when (io.exreq.valid && !working) {
-    when (v1buf_of === 0.U) {
+  when(io.exreq.valid && !working) {
+    when(v1buf_of === 0.U) {
       v1buf(v1buf_wp) := io.exreq.bits.rs1_data
     }
-    when (v2buf_of === 0.U) {
+    when(v2buf_of === 0.U) {
       v2buf(v2buf_wp) := Mux(io.exreq.bits.uop.is_reduce,
-          v2red_masked(io.exreq.bits.uop, io.exreq.bits.rvm_data, io.exreq.bits.rs2_data),
-          io.exreq.bits.rs2_data)
+        v2red_masked(io.exreq.bits.uop, io.exreq.bits.rvm_data, io.exreq.bits.rs2_data),
+        io.exreq.bits.rs2_data)
     }
-    when (vdbuf_of === 0.U) {
+    when(vdbuf_of === 0.U) {
       vmbuf(vdbuf_wp) := io.exreq.bits.rvm_data
       vdbuf(vdbuf_wp) := io.exreq.bits.rs3_data
       vpdst(vdbuf_wp) := io.exreq.bits.uop.pdst
@@ -1892,7 +1896,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
       (io.exreq.bits.uop.vs1_eew(1, 0) === 3.U) ->
         (if (eLen > 64) Cat(0.U((eLen - 64).W), io.exreq.bits.rs1_data(63, 0)) else io.exreq.bits.rs1_data(63, 0))
     ))
-    pres_upper := Mux((io.exreq.bits.uop.uopc === uopVSLIDEUP) && (io.exreq.bits.uop.vstart < input_step),
+    pres_upper := Mux(ex_slideup && (io.exreq.bits.uop.vstart < input_step),
       input_step, Cat(0.U((eLen - vLenSz).W), io.exreq.bits.uop.vstart))
     presbuf(v2buf_wp) := Cat((0 until vLenb).map(b =>
       io.exreq.bits.uop.v_eidx + b.U < pres_upper).reverse)
@@ -1900,111 +1904,219 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
       io.exreq.bits.uop.v_eidx + b.U >= io.exreq.bits.uop.vconfig.vl).reverse)
   }
 
-  /*when (io.exreq.valid && is_idle) {
-    v1buf_s := io.exreq.bits.rs1_data
-  }*/
-
   // Register counters for filling & working.
   val fill_rcnt = Wire(UInt(4.W))
-  val perm_rcnt = Wire(UInt(4.W))
   fill_rcnt := Mux(!is_vrgatherei16, nrVecGroup(uop.vs2_emul),
     nrVecGroup(Mux(uop.vs1_emul.asSInt() > uop.vs2_emul.asSInt(), uop.vs1_emul, uop.vs2_emul)))
-  //perm_rcnt := (((uop.vconfig.vl - 1.U) << uop.vd_eew) >> vLenbSz.U) + 1.U
-  perm_rcnt := nrVecGroup(uop.vd_emul)
-  //dontTouch(fill_rcnt)
-  //dontTouch(perm_rcnt)
 
   // FSM.
   switch(state) {
-    is (s_idle) {
-      when (io.exreq.valid) {
-        val emul_to_fill = Mux((io.exreq.bits.uop.uopc === uopVRGATHEREI16) &&
+    is(s_idle) {
+      when(io.exreq.valid) {
+        val emul_to_fill = Mux(ex_vrgatherei16 &&
           (io.exreq.bits.uop.vs1_emul.asSInt() > io.exreq.bits.uop.vs2_emul.asSInt()),
           io.exreq.bits.uop.vs1_emul, io.exreq.bits.uop.vs2_emul)
         //dontTouch(emul_to_fill)
-        state     := Mux(nrVecGroup(emul_to_fill) > 1.U, s_fill, s_work)
-        uop_v     := true.B
-        uop       := io.exreq.bits.uop
-        progress  := Mux(io.exreq.bits.uop.is_ureduce, 1.U, 0.U)
+        state := Mux(nrVecGroup(emul_to_fill) > 1.U, s_fill, s_work)
+        uop_v := true.B
+        uop := io.exreq.bits.uop
+        when(nrVecGroup(emul_to_fill) === 1.U) {
+          red_start := ex_red
+          slide_start := ex_slide
+          gather_start := ex_gather
+          compress_start := ex_vcompress
+        }
       }
     }
-    is (s_fill) {
-      when (io.exreq.valid) {
+    is(s_fill) {
+      when(io.exreq.valid) {
         val rcnt_to_work = Mux(is_vrgatherei16 &&
           (uop.vs1_emul.asSInt() > uop.vs2_emul.asSInt()), v1buf_wp, v2buf_wp)
         //dontTouch(rcnt_to_work)
-        when (rcnt_to_work +& 1.U === fill_rcnt) {
+        when(rcnt_to_work +& 1.U === fill_rcnt) {
           state := s_work
+          red_start := is_red
+          slide_start := is_slide
+          gather_start := is_gather
+          compress_start := is_vcompress
         }
       }
     }
-    is (s_work) {
-      when (io.fbreq.fire) {
-        is_last := Mux(uop.is_ureduce, ured_ph1_prgrs + ured_ph2_prgrs === progress,
-                   Mux(uop.is_oreduce, uop.vconfig.vl <= progress + 1.U, perm_rcnt === progress + 1.U))
-        when (is_last) {
-          state := s_idle
-        }
-        progress := progress + 1.U
+    is(s_work) {
+      vrp_done := (is_red && red_done) || (is_slide && slide_done) ||
+        (is_gather && gather_done) || (is_vcompress && compress_done)
+      when(vrp_done) {
+        state := s_idle
       }
     }
   }
 
-  when ((IsKilledByBranch(io.brupdate, io.exreq.bits.uop) ||
-         IsKilledByBranch(io.brupdate, io.fbrsp.bits.uop) ||
-         IsKilledByBranch(io.brupdate, uop) ||
-         io.exreq.bits.kill) && uop_v) {
+  when((IsKilledByBranch(io.brupdate, io.exreq.bits.uop) ||
+    IsKilledByBranch(io.brupdate, io.fbrsp.bits.uop) ||
+    IsKilledByBranch(io.brupdate, uop) ||
+    io.exreq.bits.kill) && uop_v) {
     state := s_idle
     uop_v := false.B
+    brkill := true.B
   }
 
-  when (uop_v) {
+  when(uop_v) {
     uop.br_mask := GetNewBrMask(io.brupdate, uop)
   }
 
-  //val perm_out = !uop.is_reduce && (progress >= 1.U)
-  val perm_out = working && (!uop.is_reduce)
-  val reduce_out = working && (uop.is_ureduce && (io.fbrsp.valid || progress === 1.U) ||
-    uop.is_oreduce && (io.fbrsp.valid || progress === 0.U))
-  //dontTouch(perm_out)
-  //dontTouch(reduce_out)
-
-  is_first := is_perm && working && (progress === 0.U)
-  io.exreq.ready := true.B
-  io.fbrsp.ready := true.B
-  io.fbreq.valid := reduce_out || perm_out
-  io.fbreq.bits.uop := uop
-  //io.fbreq.bits.uop.v_split_first := is_first
-  io.fbreq.bits.uop.v_split_last  := is_last
-  when (uop.is_ureduce) {
-    io.fbreq.bits.uop.vs1_eew       := Mux(uop.rt(RD, isWidenV) && uop.fp_val && progress < ured_ph1_prgrs, uop.vs2_eew, uop.vs1_eew)
-    io.fbreq.bits.uop.vs2_eew       := Mux(uop.rt(RD, isWidenV) && uop.fp_val && progress === 1.U, uop.vs2_eew, uop.vd_eew)
-    io.fbreq.bits.uop.lrs1_rtype    := Mux(uop.rt(RD, isWidenV) && uop.fp_val && progress < ured_ph1_prgrs, uop.lrs2_rtype, uop.lrs1_rtype)
-    io.fbreq.bits.uop.lrs2_rtype    := Mux(uop.rt(RD, isWidenV) && uop.fp_val && progress === 1.U, uop.lrs2_rtype, uop.dst_rtype)
-    io.fbreq.bits.uop.v_unmasked    := true.B // treat unordered REDops as unmasked
-    io.fbreq.bits.uop.v_eidx        := 0.U
-    io.fbreq.bits.uop.vconfig.vl    := Mux(progress < ured_ph1_prgrs, vlen_ecnt,
-                                       Mux(is_last, Mux(uop.vconfig.vl === 0.U, 0.U, 1.U), vlen_ecnt >> (1.U + progress - ured_ph1_prgrs)))
-    io.fbreq.bits.uop.v_split_ecnt  := vlen_ecnt
-  } .elsewhen (uop.is_oreduce) {
-    io.fbreq.bits.uop.v_unmasked    := true.B // treat ordered REDops as unmasked
-    io.fbreq.bits.uop.v_eidx        := 0.U
-    io.fbreq.bits.uop.vconfig.vl    := Mux(uop.vconfig.vl === 0.U, 0.U, 1.U)
-    io.fbreq.bits.uop.v_split_ecnt  := vlen_ecnt
-  } .elsewhen (is_perm) {
-    io.fbreq.bits.uop.vstart        := 0.U
-    io.fbreq.bits.uop.v_unmasked    := true.B
-    io.fbreq.bits.uop.v_eidx        := eidx
-    //io.fbreq.bits.uop.vconfig.vl    := vlen_ecnt
-    io.fbreq.bits.uop.v_split_ecnt  := vlen_ecnt
-    io.fbreq.bits.uop.pdst          := vpdst(progress)
+  // Buffer VLMAX value as a register, only for vslidedown.
+  when(is_idle && io.exreq.valid && ex_slidedn) {
+    val tmp_ecnt = WireInit(0.U((vLenbSz + 4).W))
+    tmp_ecnt := vLenb.U >> io.exreq.bits.uop.vd_eew
+    vlmax := Mux(io.exreq.bits.uop.vd_emul(2),
+      tmp_ecnt >> (4.U(3.W) - io.exreq.bits.uop.vd_emul(1, 0)),
+      tmp_ecnt << io.exreq.bits.uop.vd_emul(1, 0)
+    )
   }
 
-  when (is_perm && (uop.fu_code & FU_FPU).orR()) {
-    // There's no difference between ALU & FPU for permutation transparent writeback, so send to ALU for both.
-    io.fbreq.bits.uop.fu_code       := (uop.fu_code ^ (FU_ALU | FU_FPU)) & (~FU_VRP)
-  } .elsewhen ((uop.is_reduce && is_last) || is_perm) {
-    io.fbreq.bits.uop.fu_code       := uop.fu_code & (~FU_VRP)
+  // Output request.
+  red_fbreq.ready := io.fbreq.ready
+  slide_fbreq.ready := io.fbreq.ready
+  gather_fbreq.ready := io.fbreq.ready
+  compress_fbreq.ready := io.fbreq.ready
+
+  io.fbreq.valid := Mux1H(Seq(
+    is_red -> red_fbreq.valid,
+    is_slide -> slide_fbreq.valid,
+    is_gather -> gather_fbreq.valid,
+    is_vcompress -> compress_fbreq.valid
+  ))
+
+  io.fbreq.bits := Mux1H(Seq(
+    is_red -> red_fbreq.bits,
+    is_slide -> slide_fbreq.bits,
+    is_gather -> gather_fbreq.bits,
+    is_vcompress -> compress_fbreq.bits
+  ))
+
+  // Output status.
+  io.busy := !is_idle
+  //io.stall := working
+  io.stall := (!is_idle && uop.is_reduce) || working
+
+  // Instantiate submodules.
+  val red_unit      = Module(new VecRedUnit)
+  val slide_unit    = Module(new VecSlideUnit)
+  val gather_unit   = Module(new VecGatherUnit)
+  val compress_unit = Module(new VecCompressUnit)
+
+  // Connection.
+  red_unit.io.start := red_start
+  red_unit.io.uop := sub_uop
+  red_unit.io.v1buf := v1buf(0)
+  red_unit.io.v2buf := v2buf
+  red_unit.io.vdbuf := vdbuf(0)
+  red_unit.io.brkill := brkill
+  red_unit.io.fbrsp <> io.fbrsp
+  red_fbreq <> red_unit.io.fbreq
+  red_done := red_unit.io.done
+
+  slide_unit.io.start := slide_start
+  slide_unit.io.uop := sub_uop
+  slide_unit.io.vlmax := vlmax
+  slide_unit.io.v1buf := v1buf(0)
+  slide_unit.io.v2buf := v2buf
+  slide_unit.io.vdbuf := vdbuf
+  slide_unit.io.vpdst := vpdst
+  slide_unit.io.vmbuf := vmbuf
+  slide_unit.io.presbuf := presbuf
+  slide_unit.io.tailbuf := tailbuf
+  slide_unit.io.brkill := brkill
+  slide_fbreq <> slide_unit.io.fbreq
+  slide_done := slide_unit.io.done
+
+  gather_unit.io.start := gather_start
+  gather_unit.io.uop := sub_uop
+  gather_unit.io.v1buf := v1buf
+  gather_unit.io.v2buf := v2buf
+  gather_unit.io.vdbuf := vdbuf
+  gather_unit.io.vpdst := vpdst
+  gather_unit.io.vmbuf := vmbuf
+  gather_unit.io.presbuf := presbuf
+  gather_unit.io.tailbuf := tailbuf
+  gather_unit.io.brkill := brkill
+  gather_fbreq <> gather_unit.io.fbreq
+  gather_done := gather_unit.io.done
+
+  compress_unit.io.start := compress_start
+  compress_unit.io.uop := sub_uop
+  compress_unit.io.v1buf := v1buf(0)
+  compress_unit.io.v2buf := v2buf
+  compress_unit.io.vdbuf := vdbuf
+  compress_unit.io.vmbuf := vmbuf
+  compress_unit.io.brkill := brkill
+  compress_fbreq <> compress_unit.io.fbreq
+  compress_done := compress_unit.io.done
+}
+
+/**
+  * Function unit for reduction instructions.
+  * @param None
+  */
+class VecRedUnit()(implicit p: Parameters) extends BoomModule {
+  val io = IO(new Bundle {
+    val start = Input(Bool())
+    val done = Output(Bool())
+    val uop = Input(new MicroOp)
+    val v1buf = Input(UInt(vLen.W))
+    val v2buf = Input(Vec(8, UInt(vLen.W)))
+    val vdbuf = Input(UInt(vLen.W))
+    val brkill = Input(Bool())
+    val fbreq = DecoupledIO(new FuncUnitReq(vLen))
+    val fbrsp = Flipped(DecoupledIO(new FuncUnitResp(vLen)))
+  })
+
+  // Declare states.
+  val s_idle :: s_calc :: Nil = Enum(2)
+  val cur_state = RegInit(s_idle)
+  val nxt_state = WireInit(s_idle)
+
+  val in_idle_state = cur_state === s_idle
+  val in_calc_state = cur_state === s_calc
+  val in_work_state = !in_idle_state
+
+  // Declare data progress.
+  val progress   = RegInit(0.U((vLenSz + 1).W))
+  val red_out    = WireInit(false.B)
+  val red_done   = WireInit(false.B)
+  val is_last    = WireInit(false.B)
+  val vlen_ecnt  = vLenb.U >> io.uop.vd_eew
+  val uop        = io.uop
+
+  // unordered reduce phase1: compress between vreg: v2buf[]
+  // unordered reduce phase2: compress within vreg: fbrsp
+  val ured_ph1_prgrs = (nrVecGroup(io.uop.vs2_emul) << io.uop.rt(RD, isWidenV).asUInt).asUInt()
+  val ured_ph2_prgrs = (vLenSz - 3).U - io.uop.vd_eew //+ uop.rt(RD, isWidenV).asUInt - 1.U
+
+  // FSM.
+  cur_state := nxt_state
+  when(io.brkill) {
+    nxt_state := s_idle
+  }.elsewhen(in_idle_state) {
+    nxt_state := Mux(io.start, s_calc, s_idle)
+  }.elsewhen(in_calc_state) {
+    nxt_state := Mux(is_last, s_idle, s_calc)
+  }
+
+  // Progressing.
+  red_out := in_work_state && (io.uop.is_ureduce && (io.fbrsp.valid || progress === 1.U) ||
+    io.uop.is_oreduce && (io.fbrsp.valid || progress === 0.U))
+  red_done := is_last
+
+  when(in_idle_state && io.start) {
+    progress := Mux(io.uop.is_ureduce, 1.U, 0.U)
+  }.elsewhen(in_calc_state && io.fbreq.fire) {
+    progress := progress + 1.U
+  }
+
+  when(in_calc_state && io.fbreq.fire) {
+    is_last := Mux(uop.is_ureduce, ured_ph1_prgrs + ured_ph2_prgrs === progress,
+      Mux(uop.is_oreduce, uop.vconfig.vl <= progress + 1.U, false.B))
   }
 
   // Data output for reduction instructions.
@@ -2014,14 +2126,14 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   //dontTouch(v2ured_v2m)
 
   val v1uredmux = Mux1H(Seq(
-    (uop.vd_eew(1, 0) === 0.U) -> // assert(!uop.rt(RD, isWidenV))
-      Mux(is_last, Cat(0.U((vLen - 8).W), v1buf_s(7, 0)),
+    (io.uop.vd_eew(1, 0) === 0.U) -> // assert(!uop.rt(RD, isWidenV))
+      Mux(is_last, Cat(0.U((vLen - 8).W), io.v1buf(7, 0)),
         Mux(progress === 1.U && ured_ph1_prgrs === 1.U,
           Cat(
             0.U((vLen / 2).W),
-            Cat((0 until vLen / 16).map(i => v2buf(0)(i * 16 + 15, i * 16 + 8)).reverse)
+            Cat((0 until vLen / 16).map(i => io.v2buf(0)(i * 16 + 15, i * 16 + 8)).reverse)
           ),
-          Mux(progress < ured_ph1_prgrs, v2buf(progress),
+          Mux(progress < ured_ph1_prgrs, io.v2buf(progress),
             Cat(
               0.U((vLen / 2).W),
               Cat((0 until vLen / 16).map(i => io.fbrsp.bits.data(i * 16 + 15, i * 16 + 8)).reverse)
@@ -2029,21 +2141,21 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
           )
         )
       ),
-    (uop.vd_eew(1, 0) === 1.U) -> {
-      v1ured_v2m := v2buf(progress >> 1.U)
-      Mux(is_last, Cat(0.U((vLen - 16).W), v1buf_s(15, 0)),
+    (io.uop.vd_eew(1, 0) === 1.U) -> {
+      v1ured_v2m := io.v2buf((progress >> 1.U)(2, 0))
+      Mux(is_last, Cat(0.U((vLen - 16).W), io.v1buf(15, 0)),
         Mux(progress === 1.U && ured_ph1_prgrs === 1.U,
           Cat(
             0.U((vLen / 2).W),
-            Cat((0 until vLen / 32).map(i => v2buf(0)(i * 32 + 31, i * 32 + 16)).reverse)
+            Cat((0 until vLen / 32).map(i => io.v2buf(0)(i * 32 + 31, i * 32 + 16)).reverse)
           ),
           Mux(progress < ured_ph1_prgrs,
-            Mux(uop.rt(RD, isWidenV),
+            Mux(io.uop.rt(RD, isWidenV),
               Cat((0 until vLen / 16).map(i => Cext(
                 Mux(progress(0), v1ured_v2m(vLen / 2 + i * 8 + 7, vLen / 2 + i * 8), v1ured_v2m(i * 8 + 7, i * 8)),
-                uop.rt(RD, isUnsignedV), 16)).reverse
+                io.uop.rt(RD, isUnsignedV), 16)).reverse
               ),
-              v2buf(progress)
+              io.v2buf(progress)
             ),
             Cat(
               0.U((vLen / 2).W),
@@ -2053,19 +2165,19 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
         )
       )
     },
-    (uop.vd_eew(1, 0) === 2.U) -> {
-      v1ured_v2m := v2buf(progress >> 1.U)
-      Mux(is_last, Cat(0.U((vLen - 32).W), v1buf_s(31, 0)),
+    (io.uop.vd_eew(1, 0) === 2.U) -> {
+      v1ured_v2m := io.v2buf((progress >> 1.U)(2, 0))
+      Mux(is_last, Cat(0.U((vLen - 32).W), io.v1buf(31, 0)),
         Mux(progress === 1.U && ured_ph1_prgrs === 1.U,
           Cat(0.U((vLen / 2).W),
-            Cat((0 until vLen / 64).map(i => v2buf(0)(i * 64 + 63, i * 64 + 32)).reverse)
+            Cat((0 until vLen / 64).map(i => io.v2buf(0)(i * 64 + 63, i * 64 + 32)).reverse)
           ),
           Mux(progress < ured_ph1_prgrs,
-            Mux(uop.rt(RD, isWidenV),
-              Mux(!uop.fp_val,
+            Mux(io.uop.rt(RD, isWidenV),
+              Mux(!io.uop.fp_val,
                 Cat((0 until vLen / 32).map(i => Cext(
                   Mux(progress(0), v1ured_v2m(vLen / 2 + i * 16 + 15, vLen / 2 + i * 16), v1ured_v2m(i * 16 + 15, i * 16)),
-                  uop.rt(RD, isUnsignedV), 32)).reverse
+                  io.uop.rt(RD, isUnsignedV), 32)).reverse
                 ),
                 Cat(
                   0.U((vLen / 2).W),
@@ -2074,7 +2186,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
                   ).reverse)
                 )
               ),
-              v2buf(progress)
+              io.v2buf(progress)
             ),
             Cat(
               0.U((vLen / 2).W),
@@ -2084,17 +2196,17 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
         )
       )
     },
-    (uop.vd_eew(1, 0) === 3.U) -> {
-      v1ured_v2m := v2buf(progress >> 1.U)
-      Mux(is_last, Cat(0.U((vLen - 64).W), v1buf_s(63, 0)),
+    (io.uop.vd_eew(1, 0) === 3.U) -> {
+      v1ured_v2m := io.v2buf((progress >> 1.U)(2, 0))
+      Mux(is_last, Cat(0.U((vLen - 64).W), io.v1buf(63, 0)),
         Mux(progress === 1.U && ured_ph1_prgrs === 1.U,
-          Cat(0.U((vLen / 2).W), Cat((0 until vLen / 128).map(i => v2buf(0)(i * 128 + 127, i * 128 + 64)).reverse)),
+          Cat(0.U((vLen / 2).W), Cat((0 until vLen / 128).map(i => io.v2buf(0)(i * 128 + 127, i * 128 + 64)).reverse)),
           Mux(progress < ured_ph1_prgrs,
-            Mux(uop.rt(RD, isWidenV),
-              Mux(!uop.fp_val,
+            Mux(io.uop.rt(RD, isWidenV),
+              Mux(!io.uop.fp_val,
                 Cat((0 until vLen / 64).map(i => Cext(
                   Mux(progress(0), v1ured_v2m(vLen / 2 + i * 32 + 31, vLen / 2 + i * 32), v1ured_v2m(i * 32 + 31, i * 32)),
-                  uop.rt(RD, isUnsignedV), 64)).reverse
+                  io.uop.rt(RD, isUnsignedV), 64)).reverse
                 ),
                 Cat(
                   0.U((vLen / 2).W),
@@ -2102,7 +2214,7 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
                     Mux(progress(0), v1ured_v2m(vLen / 2 + i * 32 + 31, vLen / 2 + i * 32), v1ured_v2m(i * 32 + 31, i * 32))).reverse)
                 )
               ),
-              v2buf(progress)
+              io.v2buf(progress)
             ),
             Cat(
               0.U((vLen / 2).W),
@@ -2115,11 +2227,11 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   ))
 
   val v2uredmux = Mux1H(Seq(
-    (uop.vd_eew(1, 0) === 0.U) ->
+    (io.uop.vd_eew(1, 0) === 0.U) ->
       Mux(progress === 1.U,
         Mux(ured_ph1_prgrs === 1.U,
-          Cat(0.U((vLen / 2).W), Cat((0 until vLen / 16).map(i => v2buf(0)(i * 16 + 7, i * 16)).reverse)),
-          v2buf(0)
+          Cat(0.U((vLen / 2).W), Cat((0 until vLen / 16).map(i => io.v2buf(0)(i * 16 + 7, i * 16)).reverse)),
+          io.v2buf(0)
         ),
         Mux(progress < ured_ph1_prgrs, io.fbrsp.bits.data,
           Cat(
@@ -2128,17 +2240,17 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
           )
         )
       ),
-    (uop.vd_eew(1, 0) === 1.U) -> {
-      v2ured_v2m := v2buf(0.U)
+    (io.uop.vd_eew(1, 0) === 1.U) -> {
+      v2ured_v2m := io.v2buf(0.U)
       Mux(progress === 1.U,
-        Mux(uop.rt(RD, isWidenV),
-          Cat((0 until vLen / 16).map(i => Cext(v2ured_v2m(i * 8 + 7, i * 8), uop.rt(RD, isUnsignedV), 16)).reverse),
+        Mux(io.uop.rt(RD, isWidenV),
+          Cat((0 until vLen / 16).map(i => Cext(v2ured_v2m(i * 8 + 7, i * 8), io.uop.rt(RD, isUnsignedV), 16)).reverse),
           Mux(ured_ph1_prgrs === 1.U,
             Cat(
               0.U((vLen / 2).W),
-              Cat((0 until vLen / 32).map(i => v2buf(0)(i * 32 + 15, i * 32)).reverse)
+              Cat((0 until vLen / 32).map(i => io.v2buf(0)(i * 32 + 15, i * 32)).reverse)
             ),
-            v2buf(0)
+            io.v2buf(0)
           )
         ),
         Mux(progress < ured_ph1_prgrs, io.fbrsp.bits.data,
@@ -2149,12 +2261,12 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
         )
       )
     },
-    (uop.vd_eew(1, 0) === 2.U) -> {
-      v2ured_v2m := v2buf(0.U)
+    (io.uop.vd_eew(1, 0) === 2.U) -> {
+      v2ured_v2m := io.v2buf(0.U)
       Mux(progress === 1.U,
-        Mux(uop.rt(RD, isWidenV),
-          Mux(!uop.fp_val,
-            Cat((0 until vLen / 32).map(i => Cext(v2ured_v2m(i * 16 + 15, i * 16), uop.rt(RD, isUnsignedV), 32)).reverse),
+        Mux(io.uop.rt(RD, isWidenV),
+          Mux(!io.uop.fp_val,
+            Cat((0 until vLen / 32).map(i => Cext(v2ured_v2m(i * 16 + 15, i * 16), io.uop.rt(RD, isUnsignedV), 32)).reverse),
             Cat(
               0.U((vLen / 2).W),
               Cat((0 until vLen / 32).map(i => v2ured_v2m(i * 16 + 15, i * 16)).reverse)
@@ -2163,9 +2275,9 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
           Mux(ured_ph1_prgrs === 1.U,
             Cat(
               0.U((vLen / 2).W),
-              Cat((0 until vLen / 64).map(i => v2buf(0)(i * 64 + 31, i * 64)).reverse)
+              Cat((0 until vLen / 64).map(i => io.v2buf(0)(i * 64 + 31, i * 64)).reverse)
             ),
-            v2buf(0)
+            io.v2buf(0)
           )
         ),
         Mux(progress < ured_ph1_prgrs, io.fbrsp.bits.data,
@@ -2176,12 +2288,12 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
         )
       )
     },
-    (uop.vd_eew(1, 0) === 3.U) -> {
-      v2ured_v2m := v2buf(0.U)
+    (io.uop.vd_eew(1, 0) === 3.U) -> {
+      v2ured_v2m := io.v2buf(0.U)
       Mux(progress === 1.U,
-        Mux(uop.rt(RD, isWidenV),
-          Mux(!uop.fp_val,
-            Cat((0 until vLen / 64).map(i => Cext(v2ured_v2m(i * 32 + 31, i * 32), uop.rt(RD, isUnsignedV), 64)).reverse),
+        Mux(io.uop.rt(RD, isWidenV),
+          Mux(!io.uop.fp_val,
+            Cat((0 until vLen / 64).map(i => Cext(v2ured_v2m(i * 32 + 31, i * 32), io.uop.rt(RD, isUnsignedV), 64)).reverse),
             Cat(
               0.U((vLen / 2).W),
               Cat((0 until vLen / 64).map(i => v2ured_v2m(i * 32 + 31, i * 32)).reverse)
@@ -2190,9 +2302,9 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
           Mux(ured_ph1_prgrs === 1.U,
             Cat(
               0.U((vLen / 2).W),
-              Cat((0 until vLen / 128).map(i => v2buf(0)(i * 128 + 63, i * 128)).reverse)
+              Cat((0 until vLen / 128).map(i => io.v2buf(0)(i * 128 + 63, i * 128)).reverse)
             ),
-            v2buf(0)
+            io.v2buf(0)
           )
         ),
         Mux(progress < ured_ph1_prgrs, io.fbrsp.bits.data,
@@ -2206,295 +2318,557 @@ class VecRPAssist()(implicit p: Parameters) extends BoomModule {
   ))
 
   val v1oredmux = Mux1H(Seq(
-    (uop.vd_eew(1, 0) === 1.U) -> Cat(0.U((vLen - 16).W), Mux(progress === 0.U, v1buf_s(15, 0), io.fbrsp.bits.data(15, 0))),
-    (uop.vd_eew(1, 0) === 2.U) -> Cat(0.U((vLen - 32).W), Mux(progress === 0.U, v1buf_s(31, 0), io.fbrsp.bits.data(31, 0))),
-    (uop.vd_eew(1, 0) === 3.U) -> Cat(0.U((vLen - 64).W), Mux(progress === 0.U, v1buf_s(63, 0), io.fbrsp.bits.data(63, 0)))
+    (io.uop.vd_eew(1, 0) === 1.U) -> Cat(0.U((vLen - 16).W), Mux(progress === 0.U, io.v1buf(15, 0), io.fbrsp.bits.data(15, 0))),
+    (io.uop.vd_eew(1, 0) === 2.U) -> Cat(0.U((vLen - 32).W), Mux(progress === 0.U, io.v1buf(31, 0), io.fbrsp.bits.data(31, 0))),
+    (io.uop.vd_eew(1, 0) === 3.U) -> Cat(0.U((vLen - 64).W), Mux(progress === 0.U, io.v1buf(63, 0), io.fbrsp.bits.data(63, 0)))
   ))
 
   val v2oredmux = Mux1H(Seq(
-    (uop.vs2_eew(1, 0) === 1.U) -> Cat(0.U((vLen - 16).W), v2buf((progress >> 3.U) (2, 0)) >> Cat(progress(2, 0), 0.U(4.W))),
-    (uop.vs2_eew(1, 0) === 2.U) -> Cat(0.U((vLen - 32).W), v2buf((progress >> 2.U) (2, 0)) >> Cat(progress(1, 0), 0.U(5.W))),
-    (uop.vs2_eew(1, 0) === 3.U) -> Cat(0.U((vLen - 64).W), v2buf((progress >> 1.U) (2, 0)) >> Cat(progress(0), 0.U(6.W)))
+    (io.uop.vs2_eew(1, 0) === 1.U) -> Cat(0.U((vLen - 16).W), io.v2buf((progress >> 3.U) (2, 0)) >> Cat(progress(2, 0), 0.U(4.W))),
+    (io.uop.vs2_eew(1, 0) === 2.U) -> Cat(0.U((vLen - 32).W), io.v2buf((progress >> 2.U) (2, 0)) >> Cat(progress(1, 0), 0.U(5.W))),
+    (io.uop.vs2_eew(1, 0) === 3.U) -> Cat(0.U((vLen - 64).W), io.v2buf((progress >> 1.U) (2, 0)) >> Cat(progress(0), 0.U(6.W)))
   ))
 
-  /**
-    * Filter single vector element with prestart, tail, active and inactive definitions.
-    * @param u Micro-OP
-    * @param p Prestart bit.
-    * @param t Tail bit.
-    * @param m Mask bit.
-    * @param src Source element.
-    * @param dst Destination element.
-    * @return Element after filter.
-    */
-  def filter_element(u: MicroOp, p: Bool, t: Bool, m: Bool, src: UInt, dst: UInt): UInt =
-    Mux((!p) && (!t) && (u.v_unmasked || m), src, dst)
-
-  /**
-    * Filter single vector register with prestart, tail, active and inactive definitions.
-    * @param u Micro-OP.
-    * @param p Prestart list.
-    * @param t Tail list.
-    * @param m Mask list.
-    * @param src Source register.
-    * @param dst Destination register.
-    * @return Register after filter.
-    */
-  def filter_register(u: MicroOp, p: UInt, t: UInt, m: UInt, src: UInt, dst: UInt): UInt =
-    Mux1H(Seq(
-      (u.vd_eew(1, 0) === 0.U) -> Cat((0 until vLen / 8).map(i =>
-        filter_element(u, p(i).asBool(), t(i).asBool(), m(i).asBool(),
-          src(i * 8 + 7, i * 8), dst(i * 8 + 7, i * 8))).reverse),
-      (u.vd_eew(1, 0) === 1.U) -> Cat((0 until vLen / 16).map(i =>
-        filter_element(u, p(i).asBool(), t(i).asBool(), m(i).asBool(),
-          src(i * 16 + 15, i * 16), dst(i * 16 + 15, i * 16))).reverse),
-      (u.vd_eew(1, 0) === 2.U) -> Cat((0 until vLen / 32).map(i =>
-        filter_element(u, p(i).asBool(), t(i).asBool(), m(i).asBool(),
-          src(i * 32 + 31, i * 32), dst(i * 32 + 31, i * 32))).reverse),
-      (u.vd_eew(1, 0) === 3.U) -> Cat((0 until vLen / 64).map(i =>
-        filter_element(u, p(i).asBool(), t(i).asBool(), m(i).asBool(),
-          src(i * 64 + 63, i * 64), dst(i * 64 + 63, i * 64))).reverse)
-    ))
-
-  def gather_element(idx: UInt, iew: UInt) = {
-    val idx_reg = VRegSel(idx, iew, eLenSelSz)
-    val idx_off = VRegOff(idx, iew, vLenbSz, vLenSz)
-    val idx_dat = VDataSel(v1buf(idx_reg), iew, idx_off, vLen, eLen)
-    val src_reg = VRegSel(idx_dat, uop.vs2_eew, eLenSelSz)
-    val src_off = VRegOff(idx_dat, uop.vs2_eew, vLenbSz, vLenSz)
-    val src_dat = VDataSel(v2buf(src_reg), uop.vs2_eew, src_off, vLen, eLen)
-    src_dat
+  // Output request.
+  io.fbrsp.ready := true.B
+  io.fbreq.valid := red_out
+  io.fbreq.bits.uop := io.uop
+  io.fbreq.bits.uop.v_split_last := is_last
+  when(io.uop.is_ureduce) {
+    io.fbreq.bits.uop.vs1_eew := Mux(
+      uop.rt(RD, isWidenV) && uop.fp_val && progress < ured_ph1_prgrs,
+      uop.vs2_eew, uop.vs1_eew
+    )
+    io.fbreq.bits.uop.vs2_eew := Mux(
+      uop.rt(RD, isWidenV) && uop.fp_val && progress === 1.U,
+      uop.vs2_eew, uop.vd_eew
+    )
+    io.fbreq.bits.uop.lrs1_rtype := Mux(
+      uop.rt(RD, isWidenV) && uop.fp_val && progress < ured_ph1_prgrs,
+      uop.lrs2_rtype, uop.lrs1_rtype
+    )
+    io.fbreq.bits.uop.lrs2_rtype := Mux(
+      uop.rt(RD, isWidenV) && uop.fp_val && progress === 1.U,
+      uop.lrs2_rtype, uop.dst_rtype
+    )
+    io.fbreq.bits.uop.v_unmasked := true.B // treat unordered REDops as unmasked
+    io.fbreq.bits.uop.v_eidx := 0.U
+    io.fbreq.bits.uop.vconfig.vl := Mux(
+      progress < ured_ph1_prgrs, vlen_ecnt,
+      Mux(
+        is_last, Mux(io.uop.vconfig.vl === 0.U, 0.U, 1.U),
+        vlen_ecnt >> (1.U + progress - ured_ph1_prgrs)
+      )
+    )
+    io.fbreq.bits.uop.v_split_ecnt := vlen_ecnt
+  }.elsewhen(io.uop.is_oreduce) {
+    io.fbreq.bits.uop.v_unmasked := true.B // treat ordered REDops as unmasked
+    io.fbreq.bits.uop.v_eidx := 0.U
+    io.fbreq.bits.uop.vconfig.vl := Mux(io.uop.vconfig.vl === 0.U, 0.U, 1.U)
+    io.fbreq.bits.uop.v_split_ecnt := vlen_ecnt
   }
 
-  def calc_slide_src_index(r: UInt, i: UInt, eew: UInt): UInt = ((r << vLenbSz.U) >> eew(1, 0)) + i
+  when(io.uop.is_reduce && is_last) {
+    io.fbreq.bits.uop.fu_code := io.uop.fu_code & ((~FU_VRP).asUInt())
+  }
+
+  // Output data.
+  io.fbreq.bits.rs1_data := Mux(io.uop.is_ureduce, v1uredmux, v1oredmux)
+  io.fbreq.bits.rs2_data := Mux(io.uop.is_ureduce, v2uredmux, v2oredmux)
+  io.fbreq.bits.rs3_data := io.vdbuf
+
+  // Output status.
+  io.done := red_done
+}
+
+/**
+  * Function unit for slide-type permutation instructions.
+  * @param None
+  */
+class VecSlideUnit()(implicit p: Parameters) extends BoomModule {
+  val io = IO(new Bundle {
+    val start = Input(Bool())
+    val done = Output(Bool())
+    val uop = Input(new MicroOp)
+    val vlmax = Input(UInt((vLenbSz + 4).W))
+    val v1buf = Input(UInt(vLen.W))
+    val v2buf = Input(Vec(8, UInt(vLen.W)))
+    val vdbuf = Input(Vec(8, UInt(vLen.W)))
+    val vpdst = Input(Vec(8, UInt(maxPregSz.W)))
+    val vmbuf = Input(Vec(8, UInt(vLenb.W)))
+    val presbuf = Input(Vec(8, UInt(vLenb.W)))
+    val tailbuf = Input(Vec(8, UInt(vLenb.W)))
+    val brkill = Input(Bool())
+    val fbreq = DecoupledIO(new FuncUnitReq(vLen))
+  })
+
+  // Instruction types.
+  val is_slideup  = io.uop.uopc === uopVSLIDEUP
+  val is_slidedn  = io.uop.uopc === uopVSLIDEDOWN
+  val is_slide1up = io.uop.uopc === uopVSLIDE1UP
+  val is_slide1dn = io.uop.uopc === uopVSLIDE1DOWN
+  val is_slideany = io.uop.uopc.isOneOf(uopVSLIDEUP, uopVSLIDEDOWN)
+  val is_slideone = io.uop.uopc.isOneOf(uopVSLIDE1UP, uopVSLIDE1DOWN)
+
+  // Declare states.
+  val s_idle :: s_cond :: s_data :: s_filt :: Nil = Enum(4)
+  val cur_state = RegInit(s_idle)
+  val nxt_state = WireInit(s_idle)
+
+  val in_idle_state = cur_state === s_idle
+  val in_cond_state = cur_state === s_cond
+  val in_data_state = cur_state === s_data
+  val in_filt_state = cur_state === s_filt
+  val in_work_state = !in_idle_state
+
+  // Declare data progress.
+  val progress  = RegInit(0.U((vLenSz+1).W))
+  val prog_p    = RegInit(0.U((vLenSz+1).W))
+  val perm_rcnt = Wire(UInt(4.W))
+  val perm_last = WireInit(false.B)
+  val perm_done = RegInit(false.B)
+  val perm_out  = RegInit(false.B)
+
+  val eidx      = RegInit(0.U(vLenSz.W))
+  val eidx_p    = RegInit(0.U(vLenSz.W))
+  val vlen_ecnt = vLenb.U >> io.uop.vd_eew
 
   // Declare permutation results.
-  val unmasked_data = WireInit(0.U(vLen.W))
-  val perm_result = WireInit(0.U(vLen.W))
+  val unmasked_data  = RegInit(0.U(vLen.W))
+  val perm_result    = RegInit(0.U(vLen.W))
 
   // Declare common permutation wires.
-  val perm_curr_over = WireInit(false.B)
-  val perm_prev_over = WireInit(false.B)
-  val perm_next_over = WireInit(false.B)
+  val perm_curr_over = RegInit(false.B)
+  val perm_prev_over = RegInit(false.B)
+  val perm_next_over = RegInit(false.B)
   val perm_curr_ridx = WireInit(0.U(4.W))
   val perm_prev_ridx = WireInit(0.U(4.W))
   val perm_next_ridx = WireInit(0.U(4.W))
   val perm_curr_data = WireInit(0.U(vLen.W))
   val perm_prev_data = WireInit(0.U(vLen.W))
   val perm_next_data = WireInit(0.U(vLen.W))
-  val slided_step    = WireInit(0.U(eLen.W))
-  val slided_regs    = WireInit(0.U(4.W))
-  val slided_bits    = WireInit(0.U((vLenSz + 4).W))
-  val differ_bits    = WireInit(0.U((vLenSz + 4).W))
 
-  /*dontTouch(unmasked_data)
-  dontTouch(perm_result)
-  dontTouch(perm_curr_over)
-  dontTouch(perm_prev_over)
-  dontTouch(perm_next_over)
-  dontTouch(perm_curr_ridx)
-  dontTouch(perm_prev_ridx)
-  dontTouch(perm_next_ridx)
-  dontTouch(perm_curr_data)
-  dontTouch(perm_prev_data)
-  dontTouch(perm_next_data)
-  dontTouch(slided_step)
-  dontTouch(slided_regs)
-  dontTouch(slided_bits)
-  dontTouch(differ_bits)*/
+  val slided_step    = RegInit(0.U(eLen.W))
+  val slided_regs    = RegInit(0.U(4.W))
+  val slided_bits    = RegInit(0.U((vLenSz + 4).W))
+  val differ_bits    = RegInit(0.U((vLenSz + 4).W))
 
-  // To index continuous output micro-ops.
-  when(is_idle && io.exreq.valid) {
-    eidx := 0.U
-  }.elsewhen(working && io.fbreq.fire && (!uop.is_reduce)) {
-    eidx := eidx + vlen_ecnt
+  // For slidedown only.
+  val preslide_data  = WireInit(0.U(vLen.W))
+
+  // For slideone only.
+  val v1buf_masked_u = RegInit(0.U(eLen.W))
+  val v2rem_masked_u = RegInit(0.U(eLen.W))
+
+  val v2sft_masked_d = RegInit(0.U(vLen.W))
+  val v1buf_masked_d = RegInit(0.U(vLen.W))
+  val v2buf_slided_d = RegInit(0.U(vLen.W))
+  val last_idx_r     = RegInit(0.U((vLenbSz + 4).W))
+  val last_off_r     = RegInit(0.U((vLenbSz + 4).W))
+  val last_dif_r     = RegInit(0.U((vLenbSz + 7).W))
+
+  def calc_slide_src_index(r: UInt, i: UInt, eew: UInt): UInt = ((r << vLenbSz.U) >> eew(1, 0)) + i
+
+  // FSM.
+  cur_state := nxt_state
+  when(io.brkill) {
+    nxt_state := s_idle
+  }.elsewhen(in_idle_state) {
+    nxt_state := Mux(io.start, s_cond, s_idle)
+  }.elsewhen(in_cond_state) {
+    nxt_state := s_data
+  }.elsewhen(in_data_state) {
+    nxt_state := s_filt
+  }.elsewhen(in_filt_state) {
+    nxt_state := Mux(perm_last, s_idle, s_cond)
   }
 
-  // Buffer VLMAX value as a register, only for vslidedown.
-  when(is_idle && io.exreq.valid && (io.exreq.bits.uop.uopc === uopVSLIDEDOWN)) {
-    val tmp_ecnt = WireInit(0.U((vLenbSz + 4).W))
-    tmp_ecnt := vLenb.U >> io.exreq.bits.uop.vd_eew
-    vlmax := Mux(io.exreq.bits.uop.vd_emul(2),
-      tmp_ecnt >> (4.U(3.W) - io.exreq.bits.uop.vd_emul(1, 0)),
-      tmp_ecnt << io.exreq.bits.uop.vd_emul(1, 0)
-    )
-  }
+  // Progressing.
+  perm_rcnt := nrVecGroup(io.uop.vd_emul)
+  perm_last := perm_rcnt === progress + 1.U
+  perm_done := in_filt_state && perm_last
+  perm_out  := in_filt_state
 
-  // Main logic for permutation instructions.
-  when (working) {
-    when (is_slideup) {
-      slided_step     := Mux1H(Seq(
-        (uop.vs1_eew(1, 0) === 0.U) -> Cat(0.U((eLen - 8).W), v1buf(0)(7, 0)),
-        (uop.vs1_eew(1, 0) === 1.U) -> Cat(0.U((eLen - 16).W), v1buf(0)(15, 0)),
-        (uop.vs1_eew(1, 0) === 2.U) -> Cat(0.U((eLen - 32).W), v1buf(0)(31, 0)),
-        (uop.vs1_eew(1, 0) === 3.U) ->
-          (if (eLen > 64) Cat(0.U((eLen - 64).W), v1buf(0)(63, 0)) else v1buf(0)(63, 0))
-      ))
-      slided_regs     := VRegSel(slided_step, uop.vd_eew(1, 0), eLenSelSz)
-      slided_bits     := VRegOff(slided_step, uop.vd_eew(1, 0), vLenbSz, vLenSz) << uop.vd_eew(1, 0) << 3.U
-      differ_bits     := vLen.U - slided_bits
-
-      perm_curr_over  := progress < slided_regs
-      perm_prev_over  := progress < slided_regs + 1.U
-      perm_curr_ridx  := Mux(perm_curr_over, 0.U, progress - slided_regs)
-      perm_prev_ridx  := Mux(perm_prev_over, 0.U, perm_curr_ridx - 1.U)
-      perm_curr_data  := Mux(perm_curr_over, 0.U, v2buf(perm_curr_ridx) << slided_bits)
-      perm_prev_data  := Mux(perm_prev_over, 0.U, v2buf(perm_prev_ridx) >> differ_bits)
-      unmasked_data   := perm_curr_data | perm_prev_data
-      perm_result     := filter_register(uop,
-        presbuf(progress), tailbuf(progress), vmbuf(progress), unmasked_data, vdbuf(progress))
-    } .elsewhen (is_slidedn) {
-      val slided_result = WireInit(0.U(vLen.W))
-      //dontTouch(slided_result)
-
-      slided_step     := Mux1H(Seq(
-        (uop.vs1_eew(1, 0) === 0.U) -> Cat(0.U((eLen - 8).W), v1buf(0)(7, 0)),
-        (uop.vs1_eew(1, 0) === 1.U) -> Cat(0.U((eLen - 16).W), v1buf(0)(15, 0)),
-        (uop.vs1_eew(1, 0) === 2.U) -> Cat(0.U((eLen - 32).W), v1buf(0)(31, 0)),
-        (uop.vs1_eew(1, 0) === 3.U) ->
-          (if (eLen > 64) Cat(0.U((eLen - 64).W), v1buf(0)(63, 0)) else v1buf(0)(63, 0))
-      ))
-      slided_regs     := VRegSel(slided_step, uop.vd_eew(1, 0), eLenSelSz)
-      slided_bits     := VRegOff(slided_step, uop.vd_eew(1, 0), vLenbSz, vLenSz) << uop.vd_eew(1, 0) << 3.U
-      differ_bits     := vLen.U - slided_bits
-
-      perm_curr_over  := progress + slided_regs > perm_rcnt
-      perm_next_over  := progress + slided_regs + 1.U > perm_rcnt
-      perm_curr_ridx  := Mux(perm_curr_over, 0.U, progress + slided_regs)
-      perm_next_ridx  := Mux(perm_next_over, 0.U, perm_curr_ridx + 1.U)
-      perm_curr_data  := Mux(perm_curr_over, 0.U, v2buf(perm_curr_ridx) >> slided_bits)
-      perm_next_data  := Mux(perm_next_over, 0.U, v2buf(perm_next_ridx) << differ_bits)
-      unmasked_data   := perm_curr_data | perm_next_data
-      slided_result   := Mux1H(Seq(
-        (uop.vd_eew(1, 0) === 0.U) -> Cat((0 until vLen / 8).map { i =>
-          Mux((calc_slide_src_index(progress, i.U, uop.vd_eew) + slided_step) >= vlmax, 0.U,
-            unmasked_data(i * 8 + 7, i * 8))
-        }.reverse),
-        (uop.vd_eew(1, 0) === 1.U) -> Cat((0 until vLen / 16).map { i =>
-          Mux((calc_slide_src_index(progress, i.U, uop.vd_eew) + slided_step) >= vlmax, 0.U,
-            unmasked_data(i * 16 + 15, i * 16))
-        }.reverse),
-        (uop.vd_eew(1, 0) === 2.U) -> Cat((0 until vLen / 32).map { i =>
-          Mux((calc_slide_src_index(progress, i.U, uop.vd_eew) + slided_step) >= vlmax, 0.U,
-            unmasked_data(i * 32 + 31, i * 32))
-        }.reverse),
-        (uop.vd_eew(1, 0) === 3.U) -> Cat((0 until vLen / 64).map { i =>
-          Mux((calc_slide_src_index(progress, i.U, uop.vd_eew) + slided_step) >= vlmax, 0.U,
-            unmasked_data(i * 64 + 63, i * 64))
-        }.reverse),
-      ))
-      perm_result     := filter_register(uop,
-        presbuf(progress), tailbuf(progress), vmbuf(progress), slided_result, vdbuf(progress))
-    } .elsewhen (is_slide1up) {
-      val v1buf_masked = WireInit(0.U(eLen.W))
-      val v2rem_masked = WireInit(0.U(eLen.W))
-      //dontTouch(v1buf_masked)
-      //dontTouch(v2rem_masked)
-
-      slided_bits     := 8.U((vLenSz + 4).W) << uop.vd_eew(1, 0)
-      perm_prev_over  := progress === 0.U
-      perm_prev_ridx  := Mux(perm_prev_over, 0.U, progress - 1.U)
-      v1buf_masked    := Mux1H(Seq(
-        (uop.vd_eew(1, 0) === 0.U) -> Cat(0.U((eLen - 8).W), v1buf(0)(7, 0)),
-        (uop.vd_eew(1, 0) === 1.U) -> Cat(0.U((eLen - 16).W), v1buf(0)(15, 0)),
-        (uop.vd_eew(1, 0) === 2.U) -> Cat(0.U((eLen - 32).W), v1buf(0)(31, 0)),
-        (uop.vd_eew(1, 0) === 3.U) -> (if (eLen > 64) Cat(0.U((eLen - 64).W), v1buf(0)(63, 0)) else v1buf(0)(63, 0))
-      ))
-      v2rem_masked    := Mux1H(Seq(
-        (uop.vd_eew(1, 0) === 0.U) -> Cat(0.U((eLen - 8).W), v2buf(perm_prev_ridx)(vLen - 1, vLen - 8)),
-        (uop.vd_eew(1, 0) === 1.U) -> Cat(0.U((eLen - 16).W), v2buf(perm_prev_ridx)(vLen - 1, vLen - 16)),
-        (uop.vd_eew(1, 0) === 2.U) -> Cat(0.U((eLen - 32).W), v2buf(perm_prev_ridx)(vLen - 1, vLen - 32)),
-        (uop.vd_eew(1, 0) === 3.U) -> {
-          if (eLen > 64) {
-            Cat(0.U((eLen - 64).W), v2buf(perm_prev_ridx)(vLen - 1, vLen - 64))
-          } else {
-            v2buf(perm_prev_ridx)(vLen - 1, vLen - 64)
-          }
-        }
-      ))
-      perm_prev_data  := Mux(perm_prev_over, v1buf_masked, v2rem_masked)
-      perm_curr_data  := v2buf(progress) << slided_bits
-      unmasked_data   := perm_curr_data | perm_prev_data
-      perm_result     := filter_register(uop,
-        presbuf(progress), tailbuf(progress), vmbuf(progress), unmasked_data, vdbuf(progress))
-    } .elsewhen (is_slide1dn) {
-      val v2sft_masked = WireInit(0.U(vLen.W))
-      val v1buf_masked = WireInit(0.U(vLen.W))
-      val v2buf_slided = WireInit(0.U(vLen.W))
-      val last_index   = WireInit(0.U((vLenbSz + 4).W))
-      val last_offset  = WireInit(0.U((vLenbSz + 4).W))
-      val last_diff_e  = WireInit(0.U((vLenbSz + 4).W))
-      val last_diff_b  = WireInit(0.U((vLenbSz + 7).W))
-      //dontTouch(v2sft_masked)
-      //dontTouch(v1buf_masked)
-      //dontTouch(v2buf_slided)
-      //dontTouch(last_index)
-      //dontTouch(last_offset)
-      //dontTouch(last_diff_e)
-      //dontTouch(last_diff_b)
-
-      slided_bits     := 8.U((vLenSz + 4).W) << uop.vd_eew(1, 0)
-      last_index      := Mux(uop.vconfig.vl === 0.U, 0.U, uop.vconfig.vl - 1.U)
-      last_offset     := VRegOff(last_index, uop.vd_eew(1, 0), vLenbSz, vLenSz)
-      last_diff_e     := vlen_ecnt(vLenbSz, 0) - last_offset
-      last_diff_b     := last_diff_e << uop.vd_eew(1, 0) << 3.U
-      perm_next_over  := progress === ((last_index << uop.vd_eew(1, 0)) >> vLenbSz.U)(vLenbSz, 0)
-      perm_next_ridx  := Mux(perm_next_over, 0.U, progress + 1.U)
-      v2sft_masked    := Mux1H(Seq(
-        (uop.vd_eew(1, 0) === 0.U) -> Cat(v2buf(perm_next_ridx)(7, 0), 0.U((vLen - 8).W)),
-        (uop.vd_eew(1, 0) === 1.U) -> Cat(v2buf(perm_next_ridx)(15, 0), 0.U((vLen - 16).W)),
-        (uop.vd_eew(1, 0) === 2.U) -> Cat(v2buf(perm_next_ridx)(31, 0), 0.U((vLen - 32).W)),
-        (uop.vd_eew(1, 0) === 3.U) -> Cat(v2buf(perm_next_ridx)(63, 0), 0.U((vLen - 64).W))
-      ))
-      v1buf_masked    := Mux1H(Seq(
-        (uop.vd_eew(1, 0) === 0.U) -> Cat(0.U((vLen - 8).W), v1buf(0)(7, 0)),
-        (uop.vd_eew(1, 0) === 1.U) -> Cat(0.U((vLen - 16).W), v1buf(0)(15, 0)),
-        (uop.vd_eew(1, 0) === 2.U) -> Cat(0.U((vLen - 32).W), v1buf(0)(31, 0)),
-        (uop.vd_eew(1, 0) === 3.U) -> Cat(0.U((vLen - 64).W), v1buf(0)(63, 0))
-      )) << (last_offset << uop.vd_eew(1, 0) << 3.U)
-      v2buf_slided    := v2buf(progress) >> slided_bits
-      perm_curr_data  := Mux(perm_next_over, v2buf_slided &
-        ((Fill(vLen, 1.U(1.W)) >> last_diff_b)(vLen - 1, 0)), v2buf_slided)
-      perm_next_data  := Mux(perm_next_over, v1buf_masked, v2sft_masked)
-      unmasked_data   := perm_curr_data | perm_next_data
-      perm_result     := filter_register(uop,
-        presbuf(progress), tailbuf(progress), vmbuf(progress), unmasked_data, vdbuf(progress))
-    } .elsewhen (is_gather) {
-      val idx_eew = Mux(is_vrgatherei16, 1.U(2.W), uop.vs1_eew(1, 0))
-      perm_result := Mux1H(Seq(
-        (uop.vd_eew(1, 0) === 0.U) -> Cat((0 until vLen / 8).map { i =>
-          filter_element(uop, presbuf(progress)(i).asBool(), tailbuf(progress)(i).asBool(), vmbuf(progress)(i).asBool(),
-            gather_element(eidx + i.U, idx_eew)(7, 0), vdbuf(progress)(i * 8 + 7, i * 8))
-        }.reverse),
-        (uop.vd_eew(1, 0) === 1.U) -> Cat((0 until vLen / 16).map { i =>
-          filter_element(uop, presbuf(progress)(i).asBool(), tailbuf(progress)(i).asBool(), vmbuf(progress)(i).asBool(),
-            gather_element(eidx + i.U, idx_eew)(15, 0), vdbuf(progress)(i * 16 + 15, i * 16))
-        }.reverse),
-        (uop.vd_eew(1, 0) === 2.U) -> Cat((0 until vLen / 32).map { i =>
-          filter_element(uop, presbuf(progress)(i).asBool(), tailbuf(progress)(i).asBool(), vmbuf(progress)(i).asBool(),
-            gather_element(eidx + i.U, idx_eew)(31, 0), vdbuf(progress)(i * 32 + 31, i * 32))
-        }.reverse),
-        (uop.vd_eew(1, 0) === 3.U) -> Cat((0 until vLen / 64).map { i =>
-          filter_element(uop, presbuf(progress)(i).asBool(), tailbuf(progress)(i).asBool(), vmbuf(progress)(i).asBool(),
-            gather_element(eidx + i.U, idx_eew)(63, 0), vdbuf(progress)(i * 64 + 63, i * 64))
-        }.reverse),
-      ))
-    } .elsewhen (is_vcompress) {
-      // TODO
+  when(in_idle_state && io.start) {
+    progress := 0.U
+  }.elsewhen(in_filt_state) {
+    prog_p := progress
+    when(!perm_last) {
+      progress := progress + 1.U
     }
   }
 
+  // To index continuous output micro-ops.
+  when(in_idle_state && io.start) {
+    eidx := 0.U
+  }.elsewhen(in_filt_state) {
+    eidx_p := eidx
+    when(!perm_last) {
+      eidx := eidx + vlen_ecnt
+    }
+  }
+
+  // Main logic for slide instructions.
+  when(in_idle_state && io.start) {
+    when(is_slideone) {
+      slided_bits := 8.U((vLenSz + 4).W) << io.uop.vd_eew(1, 0)
+      when(is_slide1dn) {
+        val last_idx   = WireInit(0.U((vLenbSz + 4).W))
+        val last_off   = WireInit(0.U((vLenbSz + 4).W))
+        val last_dif_e = WireInit(0.U((vLenbSz + 4).W))
+
+        last_idx   := Mux(io.uop.vconfig.vl === 0.U, 0.U, io.uop.vconfig.vl - 1.U)
+        last_off   := VRegOff(last_idx, io.uop.vd_eew(1, 0), vLenbSz, vLenSz)
+        last_dif_e := vlen_ecnt(vLenbSz, 0) - last_off
+        last_idx_r := last_idx
+        last_off_r := last_off
+        last_dif_r := last_dif_e << io.uop.vd_eew(1, 0) << 3.U
+      }
+    }
+  }.elsewhen(in_cond_state) {
+    when(is_slideany) {
+      val s_step = WireInit(0.U(eLen.W))
+      val s_regs = WireInit(0.U(4.W))
+      val s_bits = WireInit(0.U((vLenSz + 4).W))
+      val d_bits = WireInit(0.U((vLenSz + 4).W))
+
+      s_step := Mux1H(Seq(
+        (io.uop.vs1_eew(1, 0) === 0.U) -> Cat(0.U((eLen - 8).W), io.v1buf(7, 0)),
+        (io.uop.vs1_eew(1, 0) === 1.U) -> Cat(0.U((eLen - 16).W), io.v1buf(15, 0)),
+        (io.uop.vs1_eew(1, 0) === 2.U) -> Cat(0.U((eLen - 32).W), io.v1buf(31, 0)),
+        (io.uop.vs1_eew(1, 0) === 3.U) ->
+          (if (eLen > 64) Cat(0.U((eLen - 64).W), io.v1buf(63, 0)) else io.v1buf(63, 0))
+      ))
+      s_regs := VRegSel(s_step, io.uop.vd_eew(1, 0), eLenSelSz)
+      s_bits := VRegOff(s_step, io.uop.vd_eew(1, 0), vLenbSz, vLenSz) << io.uop.vd_eew(1, 0) << 3.U
+      d_bits := vLen.U - s_bits
+
+      slided_step := s_step
+      slided_regs := s_regs
+      slided_bits := s_bits
+      differ_bits := d_bits
+
+      when(is_slideup) {
+        perm_curr_over := progress < s_regs
+        perm_prev_over := progress < s_regs + 1.U
+      }.elsewhen(is_slidedn) {
+        perm_curr_over := progress + s_regs > perm_rcnt
+        perm_next_over := progress + s_regs + 1.U > perm_rcnt
+      }
+    }.elsewhen(is_slide1up) {
+      val prev_over = progress === 0.U
+      perm_prev_over := prev_over
+      perm_prev_ridx := Mux(prev_over, 0.U, progress - 1.U)
+      v1buf_masked_u := Mux1H(Seq(
+        (io.uop.vd_eew(1, 0) === 0.U) -> Cat(0.U((eLen - 8).W), io.v1buf(7, 0)),
+        (io.uop.vd_eew(1, 0) === 1.U) -> Cat(0.U((eLen - 16).W), io.v1buf(15, 0)),
+        (io.uop.vd_eew(1, 0) === 2.U) -> Cat(0.U((eLen - 32).W), io.v1buf(31, 0)),
+        (io.uop.vd_eew(1, 0) === 3.U) -> (if (eLen > 64) Cat(0.U((eLen - 64).W), io.v1buf(63, 0)) else io.v1buf(63, 0))
+      ))
+      v2rem_masked_u := Mux1H(Seq(
+        (io.uop.vd_eew(1, 0) === 0.U) -> Cat(0.U((eLen - 8).W), io.v2buf(perm_prev_ridx)(vLen - 1, vLen - 8)),
+        (io.uop.vd_eew(1, 0) === 1.U) -> Cat(0.U((eLen - 16).W), io.v2buf(perm_prev_ridx)(vLen - 1, vLen - 16)),
+        (io.uop.vd_eew(1, 0) === 2.U) -> Cat(0.U((eLen - 32).W), io.v2buf(perm_prev_ridx)(vLen - 1, vLen - 32)),
+        (io.uop.vd_eew(1, 0) === 3.U) -> {
+          if (eLen > 64) {
+            Cat(0.U((eLen - 64).W), io.v2buf(perm_prev_ridx)(vLen - 1, vLen - 64))
+          } else {
+            io.v2buf(perm_prev_ridx)(vLen - 1, vLen - 64)
+          }
+        }
+      ))
+    }.elsewhen(is_slide1dn) {
+      val next_over = progress === ((last_idx_r << io.uop.vd_eew(1, 0)) >> vLenbSz.U) (vLenbSz, 0)
+      perm_next_over := next_over
+      perm_next_ridx := Mux(next_over, 0.U, progress + 1.U)
+      v2sft_masked_d := Mux1H(Seq(
+        (io.uop.vd_eew(1, 0) === 0.U) -> Cat(io.v2buf(perm_next_ridx)(7, 0), 0.U((vLen - 8).W)),
+        (io.uop.vd_eew(1, 0) === 1.U) -> Cat(io.v2buf(perm_next_ridx)(15, 0), 0.U((vLen - 16).W)),
+        (io.uop.vd_eew(1, 0) === 2.U) -> Cat(io.v2buf(perm_next_ridx)(31, 0), 0.U((vLen - 32).W)),
+        (io.uop.vd_eew(1, 0) === 3.U) -> Cat(io.v2buf(perm_next_ridx)(63, 0), 0.U((vLen - 64).W))
+      ))
+      v1buf_masked_d := Mux1H(Seq(
+        (io.uop.vd_eew(1, 0) === 0.U) -> Cat(0.U((vLen - 8).W), io.v1buf(7, 0)),
+        (io.uop.vd_eew(1, 0) === 1.U) -> Cat(0.U((vLen - 16).W), io.v1buf(15, 0)),
+        (io.uop.vd_eew(1, 0) === 2.U) -> Cat(0.U((vLen - 32).W), io.v1buf(31, 0)),
+        (io.uop.vd_eew(1, 0) === 3.U) -> Cat(0.U((vLen - 64).W), io.v1buf(63, 0))
+      )) << (last_off_r << io.uop.vd_eew(1, 0) << 3.U)
+      v2buf_slided_d := io.v2buf(progress) >> slided_bits
+    }
+  }.elsewhen(in_data_state) {
+    when(is_slideup) {
+      perm_curr_ridx := Mux(perm_curr_over, 0.U, progress - slided_regs)
+      perm_prev_ridx := Mux(perm_prev_over, 0.U, perm_curr_ridx - 1.U)
+      perm_curr_data := Mux(perm_curr_over, 0.U, io.v2buf(perm_curr_ridx) << slided_bits)
+      perm_prev_data := Mux(perm_prev_over, 0.U, io.v2buf(perm_prev_ridx) >> differ_bits)
+      unmasked_data  := perm_curr_data | perm_prev_data
+    }.elsewhen(is_slidedn) {
+      perm_curr_ridx := Mux(perm_curr_over, 0.U, progress + slided_regs)
+      perm_next_ridx := Mux(perm_next_over, 0.U, perm_curr_ridx + 1.U)
+      perm_curr_data := Mux(perm_curr_over, 0.U, io.v2buf(perm_curr_ridx) >> slided_bits)
+      perm_next_data := Mux(perm_next_over, 0.U, io.v2buf(perm_next_ridx) << differ_bits)
+      preslide_data  := perm_curr_data | perm_next_data
+      unmasked_data  := Mux1H(Seq(
+        (io.uop.vd_eew(1, 0) === 0.U) -> Cat((0 until vLen / 8).map { i =>
+          Mux((calc_slide_src_index(progress, i.U, io.uop.vd_eew) + slided_step) >= io.vlmax, 0.U,
+            preslide_data(i * 8 + 7, i * 8))
+        }.reverse),
+        (io.uop.vd_eew(1, 0) === 1.U) -> Cat((0 until vLen / 16).map { i =>
+          Mux((calc_slide_src_index(progress, i.U, io.uop.vd_eew) + slided_step) >= io.vlmax, 0.U,
+            preslide_data(i * 16 + 15, i * 16))
+        }.reverse),
+        (io.uop.vd_eew(1, 0) === 2.U) -> Cat((0 until vLen / 32).map { i =>
+          Mux((calc_slide_src_index(progress, i.U, io.uop.vd_eew) + slided_step) >= io.vlmax, 0.U,
+            preslide_data(i * 32 + 31, i * 32))
+        }.reverse),
+        (io.uop.vd_eew(1, 0) === 3.U) -> Cat((0 until vLen / 64).map { i =>
+          Mux((calc_slide_src_index(progress, i.U, io.uop.vd_eew) + slided_step) >= io.vlmax, 0.U,
+            preslide_data(i * 64 + 63, i * 64))
+        }.reverse),
+      ))
+    }.elsewhen(is_slide1up) {
+      perm_prev_data := Mux(perm_prev_over, v1buf_masked_u, v2rem_masked_u)
+      perm_curr_data := io.v2buf(progress) << slided_bits
+      unmasked_data := perm_curr_data | perm_prev_data
+    }.elsewhen(is_slide1dn) {
+      perm_curr_data := Mux(perm_next_over, v2buf_slided_d &
+        ((Fill(vLen, 1.U(1.W)) >> last_dif_r) (vLen - 1, 0)), v2buf_slided_d)
+      perm_next_data := Mux(perm_next_over, v1buf_masked_d, v2sft_masked_d)
+      unmasked_data := perm_curr_data | perm_next_data
+    }
+  }.elsewhen(in_filt_state) {
+    perm_result := VFilter(io.uop, io.presbuf(progress), io.tailbuf(progress),
+      io.vmbuf(progress), unmasked_data, io.vdbuf(progress), vLen)
+  }
+
+  // Output request.
+  io.fbreq.valid := perm_out
+  io.fbreq.bits.uop := io.uop
+  io.fbreq.bits.uop.v_split_last := perm_done
+
+  io.fbreq.bits.uop.vstart := 0.U
+  io.fbreq.bits.uop.v_unmasked := true.B
+  io.fbreq.bits.uop.v_eidx := eidx_p
+  io.fbreq.bits.uop.v_split_ecnt := vlen_ecnt
+  io.fbreq.bits.uop.pdst := io.vpdst(prog_p)
+
+  when((io.uop.fu_code & FU_FPU).orR()) {
+    // There's no difference between ALU & FPU for permutation transparent writeback, so send to ALU for both.
+    io.fbreq.bits.uop.fu_code := (io.uop.fu_code ^ (FU_ALU | FU_FPU)) & ((~FU_VRP).asUInt())
+  }.otherwise {
+    io.fbreq.bits.uop.fu_code := io.uop.fu_code & ((~FU_VRP).asUInt())
+  }
+
   // Output data.
-  io.fbreq.bits.rs1_data := Mux(uop.is_ureduce, v1uredmux,
-                            Mux(uop.is_oreduce, v1oredmux, 0.U(vLen.W)))
-  io.fbreq.bits.rs2_data := Mux(uop.is_ureduce, v2uredmux,
-                            Mux(uop.is_oreduce, v2oredmux, perm_result))
-  io.fbreq.bits.rs3_data := Mux(uop.is_reduce,  vdbuf(0),  vdbuf(progress))
+  io.fbreq.bits.rs1_data := 0.U(vLen.W)
+  io.fbreq.bits.rs2_data := perm_result
+  io.fbreq.bits.rs3_data := io.vdbuf(prog_p)
 
   // Output status.
-  io.busy  := !is_idle
-  //io.stall := working
-  io.stall := (!is_idle && uop.is_reduce) || working
+  io.done := perm_done
+}
+
+/**
+  * Function unit for gather-type permutation instructions.
+  * @param None
+  */
+class VecGatherUnit()(implicit p: Parameters) extends BoomModule {
+  val io = IO(new Bundle {
+    val start = Input(Bool())
+    val done = Output(Bool())
+    val uop = Input(new MicroOp)
+    val v1buf = Input(Vec(8, UInt(vLen.W)))
+    val v2buf = Input(Vec(8, UInt(vLen.W)))
+    val vdbuf = Input(Vec(8, UInt(vLen.W)))
+    val vpdst = Input(Vec(8, UInt(maxPregSz.W)))
+    val vmbuf = Input(Vec(8, UInt(vLenb.W)))
+    val presbuf = Input(Vec(8, UInt(vLenb.W)))
+    val tailbuf = Input(Vec(8, UInt(vLenb.W)))
+    val brkill = Input(Bool())
+    val fbreq = DecoupledIO(new FuncUnitReq(vLen))
+  })
+
+  // Instruction types.
+  val is_vrgatherei16 = io.uop.uopc === uopVRGATHEREI16
+  val is_vrgather = io.uop.uopc === uopVRGATHER
+  val is_gather = io.uop.uopc.isOneOf(uopVRGATHER, uopVRGATHEREI16)
+
+  // Declare states.
+  val s_idle :: s_indx :: s_data :: s_filt :: Nil = Enum(4)
+  val cur_state = RegInit(s_idle)
+  val nxt_state = WireInit(s_idle)
+
+  val in_idle_state = cur_state === s_idle
+  val in_indx_state = cur_state === s_indx
+  val in_data_state = cur_state === s_data
+  val in_filt_state = cur_state === s_filt
+  val in_work_state = !in_idle_state
+
+  // Declare data progress.
+  val progress  = RegInit(0.U((vLenSz + 1).W))
+  val prog_p    = RegInit(0.U((vLenSz + 1).W))
+  val perm_rcnt = Wire(UInt(4.W))
+  val perm_last = WireInit(false.B)
+  val perm_done = RegInit(false.B)
+  val perm_out  = RegInit(false.B)
+
+  val eidx      = RegInit(0.U(vLenSz.W))
+  val eidx_p    = RegInit(0.U(vLenSz.W))
+  val vlen_ecnt = vLenb.U >> io.uop.vd_eew
+  val idx_eew   = RegInit(0.U(2.W))
+
+  // Declare permutation results.
+  val indexed_data  = RegInit(0.U((vLen / 8 * 16).W))
+  val unmasked_data = RegInit(0.U(vLen.W))
+  val perm_result   = RegInit(0.U(vLen.W))
+
+  def gather_index(idx: UInt, iew: UInt): UInt = {
+    val idx_reg = VRegSel(idx, iew, eLenSelSz)
+    val idx_off = VRegOff(idx, iew, vLenbSz, vLenSz)
+    val idx_dat = VDataSel(io.v1buf(idx_reg), iew, idx_off, vLen, eLen)
+    idx_dat
+  }
+
+  def gather_source(idx_dat: UInt): UInt = {
+    val src_reg = VRegSel(idx_dat, io.uop.vs2_eew, eLenSelSz)
+    val src_off = VRegOff(idx_dat, io.uop.vs2_eew, vLenbSz, vLenSz)
+    val src_dat = VDataSel(io.v2buf(src_reg), io.uop.vs2_eew, src_off, vLen, eLen)
+    src_dat
+  }
+
+  def gather_element(idx: UInt, iew: UInt): UInt = {
+    val idx_reg = VRegSel(idx, iew, eLenSelSz)
+    val idx_off = VRegOff(idx, iew, vLenbSz, vLenSz)
+    val idx_dat = VDataSel(io.v1buf(idx_reg), iew, idx_off, vLen, eLen)
+    val src_reg = VRegSel(idx_dat, io.uop.vs2_eew, eLenSelSz)
+    val src_off = VRegOff(idx_dat, io.uop.vs2_eew, vLenbSz, vLenSz)
+    val src_dat = VDataSel(io.v2buf(src_reg), io.uop.vs2_eew, src_off, vLen, eLen)
+    src_dat
+  }
+
+  // FSM.
+  cur_state := nxt_state
+  when(io.brkill) {
+    nxt_state := s_idle
+  }.elsewhen(in_idle_state) {
+    nxt_state := Mux(io.start, s_indx, s_idle)
+  }.elsewhen(in_indx_state) {
+    nxt_state := s_data
+  }.elsewhen(in_data_state) {
+    nxt_state := s_filt
+  }.elsewhen(in_filt_state) {
+    nxt_state := Mux(perm_last, s_idle, s_indx)
+  }
+
+  // Progressing.
+  perm_rcnt := nrVecGroup(io.uop.vd_emul)
+  perm_last := perm_rcnt === progress + 1.U
+  perm_done := in_filt_state && perm_last
+  perm_out  := in_filt_state
+
+  when(in_idle_state && io.start) {
+    progress := 0.U
+  }.elsewhen(in_filt_state) {
+    prog_p := progress
+    when(!perm_last) {
+      progress := progress + 1.U
+    }
+  }
+
+  // To index continuous output micro-ops & registers.
+  when(in_idle_state && io.start) {
+    eidx := 0.U
+  }.elsewhen(in_filt_state) {
+    eidx_p := eidx
+    when(!perm_last) {
+      eidx := eidx + vlen_ecnt
+    }
+  }
+
+  // Main logic for slide instructions.
+  when(in_idle_state && io.start) {
+    idx_eew := Mux(is_vrgatherei16, 1.U(2.W), io.uop.vs1_eew(1, 0))
+  }.elsewhen(in_indx_state) {
+    indexed_data := Mux1H(Seq(
+      (io.uop.vd_eew(1, 0) === 0.U) -> Cat((0 until vLen / 8).map { i =>
+        gather_index(eidx + i.U, idx_eew)(15, 0)
+      }.reverse),
+      (io.uop.vd_eew(1, 0) === 1.U) -> Cat((0 until vLen / 16).map { i =>
+        gather_index(eidx + i.U, idx_eew)(15, 0)
+      }.reverse),
+      (io.uop.vd_eew(1, 0) === 2.U) -> Cat((0 until vLen / 32).map { i =>
+        gather_index(eidx + i.U, idx_eew)(15, 0)
+      }.reverse),
+      (io.uop.vd_eew(1, 0) === 3.U) -> Cat((0 until vLen / 64).map { i =>
+        gather_index(eidx + i.U, idx_eew)(15, 0)
+      }.reverse)
+    ))
+  }.elsewhen(in_data_state) {
+    unmasked_data := Mux1H(Seq(
+      (io.uop.vd_eew(1, 0) === 0.U) -> Cat((0 until vLen / 8).map { i =>
+        gather_source(indexed_data(i * 16 + 15, i * 16))(7, 0)
+      }.reverse),
+      (io.uop.vd_eew(1, 0) === 1.U) -> Cat((0 until vLen / 16).map { i =>
+        gather_source(indexed_data(i * 16 + 15, i * 16))(15, 0)
+      }.reverse),
+      (io.uop.vd_eew(1, 0) === 2.U) -> Cat((0 until vLen / 32).map { i =>
+        gather_source(indexed_data(i * 16 + 15, i * 16))(31, 0)
+      }.reverse),
+      (io.uop.vd_eew(1, 0) === 3.U) -> Cat((0 until vLen / 64).map { i =>
+        gather_source(indexed_data(i * 16 + 15, i * 16))(63, 0)
+      }.reverse)
+    ))
+  }.elsewhen(in_filt_state) {
+    perm_result := VFilter(io.uop, io.presbuf(progress), io.tailbuf(progress),
+      io.vmbuf(progress), unmasked_data, io.vdbuf(progress), vLen)
+  }
+
+  // Output request.
+  io.fbreq.valid := perm_out
+  io.fbreq.bits.uop := io.uop
+  io.fbreq.bits.uop.v_split_last := perm_done
+
+  io.fbreq.bits.uop.vstart := 0.U
+  io.fbreq.bits.uop.v_unmasked := true.B
+  io.fbreq.bits.uop.v_eidx := eidx_p
+  io.fbreq.bits.uop.v_split_ecnt := vlen_ecnt
+  io.fbreq.bits.uop.pdst := io.vpdst(prog_p)
+
+  when((io.uop.fu_code & FU_FPU).orR()) {
+    // There's no difference between ALU & FPU for permutation transparent writeback, so send to ALU for both.
+    io.fbreq.bits.uop.fu_code := (io.uop.fu_code ^ (FU_ALU | FU_FPU)) & ((~FU_VRP).asUInt())
+  }.otherwise {
+    io.fbreq.bits.uop.fu_code := io.uop.fu_code & ((~FU_VRP).asUInt())
+  }
+
+  // Output data.
+  io.fbreq.bits.rs1_data := 0.U(vLen.W)
+  io.fbreq.bits.rs2_data := perm_result
+  io.fbreq.bits.rs3_data := io.vdbuf(prog_p)
+
+  // Output status.
+  io.done := perm_done
+}
+
+/**
+  * Function unit for compress instruction.
+  * @param None
+  */
+class VecCompressUnit()(implicit p: Parameters) extends BoomModule {
+  val io = IO(new Bundle {
+    val start = Input(Bool())
+    val done = Output(Bool())
+    val uop = Input(new MicroOp)
+    val v1buf = Input(UInt(vLen.W))
+    val v2buf = Input(Vec(8, UInt(vLen.W)))
+    val vdbuf = Input(Vec(8, UInt(vLen.W)))
+    val vmbuf = Input(Vec(8, UInt(vLenb.W)))
+    val brkill = Input(Bool())
+    val fbreq = DecoupledIO(new FuncUnitReq(vLen))
+  })
+
+  io.done := false.B
+  io.fbreq.valid := false.B
 }
 
 /**
