@@ -120,9 +120,9 @@ class IssueSlot(
   val vrg_has_vupd = slot_uop.rt(RS1, isVector) && slot_uop.uopc === uopVRGATHER || slot_uop.uopc === uopVRGATHEREI16
   val next_uop_has_vupd = next_uop.rt(RS1, isVector) && next_uop.uopc === uopVRGATHER || next_uop.uopc.isOneOf(uopVRGATHEREI16, uopVCOMPRESS)
   val next_uop_vcompress = next_uop.uopc === uopVCOMPRESS
-  val next_uop_mopa       = if (matrix) next_uop.uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA) else null
-  val next_uop_ts1_hslice = if (matrix) Mux(next_uop_mopa, false.B, next_uop.isHSlice) else null
-  val next_uop_ts2_hslice = if (matrix) Mux(next_uop_mopa, true.B,  next_uop.isHSlice) else null
+  val next_uop_mma        = if (matrix) next_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA) else null
+  val next_uop_ts1_hslice = if (matrix) Mux(next_uop_mma, false.B, next_uop.isHSlice) else null
+  val next_uop_ts2_hslice = if (matrix) Mux(next_uop_mma, true.B,  next_uop.isHSlice) else null
 
   val last_check: Bool = {
     val ret = Wire(Bool())
@@ -481,7 +481,7 @@ class IssueSlot(
     io.out_uop.m_sidx    := sidx
     io.out_uop.m_scalar_busy := ~ps
     io.uop.m_sidx        := sidx
-    when(io.request && io.grant && next_uop_mopa) {
+    when(io.request && io.grant && next_uop_mma) {
       io.uop.m_split_first := slot_uop.m_sidx === 0.U
       io.uop.m_split_last  := slot_uop.m_sidx === slot_uop.m_tilek - 1.U
       io.uop.m_sidx        := slot_uop.m_sidx

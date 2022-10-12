@@ -1135,12 +1135,12 @@ object MicroOpcodes extends Enumeration {
   //marith
   val uopMCLRACC_enum     = Value
   val uopMCLRACC          = uopMCLRACC_enum.id.U(UOPC_SZ.W)
-  val uopMOPA_enum        = Value
-  val uopMOPA             = uopMOPA_enum.id.U(UOPC_SZ.W)
-  val uopMWOPA_enum       = Value
-  val uopMWOPA            = uopMWOPA_enum.id.U(UOPC_SZ.W)
-  val uopMQOPA_enum       = Value
-  val uopMQOPA            = uopMQOPA_enum.id.U(UOPC_SZ.W)
+  val uopMMA_enum         = Value
+  val uopMMA              = uopMMA_enum.id.U(UOPC_SZ.W)
+  val uopMWMA_enum        = Value
+  val uopMWMA             = uopMWMA_enum.id.U(UOPC_SZ.W)
+  val uopMQMA_enum        = Value
+  val uopMQMA             = uopMQMA_enum.id.U(UOPC_SZ.W)
   val uopMADD_enum        = Value
   val uopMADD             = uopMADD_enum.id.U(UOPC_SZ.W)
   val uopMWADD_enum       = Value

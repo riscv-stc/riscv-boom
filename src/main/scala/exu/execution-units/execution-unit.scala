@@ -1385,7 +1385,7 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.macReq.bits.srcType   := Cat(io.req.bits.uop.fp_val.asUInt, io.req.bits.uop.ts1_eew)
   mxu.io.macReq.bits.outType   := Cat(io.req.bits.uop.fp_val.asUInt, io.req.bits.uop.td_eew)
   mxu.io.macReq.bits.aluType   := Mux(io.req.bits.uop.uopc.isOneOf(uopMFNCVT), CVT,
-                                  Mux(io.req.bits.uop.uopc.isOneOf(uopMOPA, uopMWOPA, uopMQOPA), MACC,
+                                  Mux(io.req.bits.uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), MACC,
                                   Mux(io.req.bits.uop.uopc.isOneOf(uopMADD, uopMWADD, uopMQADD), ADD, SUB)))
   mxu.io.macReq.bits.rm        := io.fcsr_rm
   mxu.io.macReqSrcA            := io.req.bits.rs1_data
