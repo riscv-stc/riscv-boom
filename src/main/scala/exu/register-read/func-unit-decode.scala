@@ -314,13 +314,10 @@ object CsrRRdDecode extends RRdDecodeConstants
          BitPat(uopMSETTILEMI) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_ZERO  , IS_I, REN_1, CSR.N),
          BitPat(uopMSETTILEKI) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_ZERO  , IS_I, REN_1, CSR.N),
          BitPat(uopMSETTILENI) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_ZERO  , IS_I, REN_1, CSR.N),
-         BitPat(uopMSETTSIDXI) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_ZERO, OP2_ZERO  , IS_I, REN_1, CSR.N),
          BitPat(uopMSETTYPE)  -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1, OP2_ZERO  , IS_I, REN_1, CSR.N),
          BitPat(uopMSETTILEM) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1, OP2_ZERO  , IS_I, REN_1, CSR.N),
          BitPat(uopMSETTILEK) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1, OP2_ZERO  , IS_I, REN_1, CSR.N),
          BitPat(uopMSETTILEN) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1, OP2_ZERO  , IS_I, REN_1, CSR.N),
-         BitPat(uopMSETTSIDX) -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1, OP2_ZERO  , IS_I, REN_1, CSR.N),
-
 
          BitPat(uopCSRRW)   -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.W),
          BitPat(uopCSRRS)   -> List(BR_N , Y, N, N, FN_ADD , DW_XPR, OP1_RS1 , OP2_ZERO, IS_I, REN_1, CSR.S),
