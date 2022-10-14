@@ -380,8 +380,8 @@ class ALUUnit(
     op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data,
                Mux(uop.ctrl.op1_sel.asUInt === OP1_PC  , Sext(uop_pc, xLen), 0.U))
   } else if(usingMatrix && isCsrUnit) {
-    val msetr    = uop.uopc.isOneOf(uopMSETTYPE, uopMSETTILEM, uopMSETTILEK, uopMSETTILEN, uopMSETTSIDXI)
-    val mseti    = uop.uopc.isOneOf(uopMSETTYPEI, uopMSETTILEMI, uopMSETTILEKI, uopMSETTILENI, uopMSETTSIDXI)
+    val msetr    = uop.uopc.isOneOf(uopMSETTYPE, uopMSETTILEM, uopMSETTILEK, uopMSETTILEN)
+    val mseti    = uop.uopc.isOneOf(uopMSETTYPEI, uopMSETTILEMI, uopMSETTILEKI, uopMSETTILENI)
     val mset     = msetr | mseti
     val msettype = uop.uopc.isOneOf(uopMSETTYPE,  uopMSETTYPEI)
     val msetm    = uop.uopc.isOneOf(uopMSETTILEM, uopMSETTILEMI)

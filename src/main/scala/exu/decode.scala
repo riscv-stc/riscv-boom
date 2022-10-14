@@ -152,7 +152,6 @@ class DecodeUnitIo(implicit p: Parameters) extends BoomBundle
   val csr_tilem = Input(UInt(xLen.W))
   val csr_tilek = Input(UInt(xLen.W))
   val csr_tilen = Input(UInt(xLen.W))
-  val csr_tsidx = Input(UInt(xLen.W))
 }
 
 /**
@@ -536,20 +535,17 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val csr_tilem = io.csr_tilem
     val csr_tilen = io.csr_tilen
     val csr_tilek = io.csr_tilek
-    val csr_tsidx = io.csr_tsidx
-    val csr_mltr = io.csr_mconfig.mtype.mltr
-    val csr_mrtr = io.csr_mconfig.mtype.mrtr
 
     val is_mls = cs.is_rvm & (cs.uses_ldq | cs.uses_stq)
-    val mslice_tt0 = uop.inst(28).asBool()     //1: col,  0: row
     val mslice_dim = uop.inst(27,26)
+    val transposed = uop.inst(28).asBool()     // 0, row, normal; 1, col, transposed
 
-    val slice_cnt_tilem = (mslice_dim === 1.U && !csr_mltr) || (mslice_dim === 0.U)
-    val slice_cnt_tilen = (mslice_dim === 2.U &&  csr_mrtr)
-    val slice_cnt_tilek = (mslice_dim === 1.U &&  csr_mltr) || (mslice_dim === 2.U && !csr_mrtr)
-    val slice_len_tilem = (mslice_dim === 1.U &&  csr_mltr)
-    val slice_len_tilen = (mslice_dim === 2.U && !csr_mrtr) || (mslice_dim === 0.U)
-    val slice_len_tilek = (mslice_dim === 1.U && !csr_mltr) || (mslice_dim === 2.U && csr_mrtr)
+    val slice_cnt_tilem = (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed)
+    val slice_cnt_tilen = (mslice_dim === 2.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
+    val slice_cnt_tilek = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 2.U && !transposed)
+    val slice_len_tilem = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
+    val slice_len_tilen = (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed)
+    val slice_len_tilek = (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U &&  transposed)
 
     val sel_slice_cnt = Mux(slice_cnt_tilem, csr_tilem,
                         Mux(slice_cnt_tilen, csr_tilen, csr_tilek))
@@ -595,8 +591,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     uop.m_split_first := true.B    //remove split after dispatch
     uop.m_split_last  := true.B
-    uop.isHSlice      := !mslice_tt0
-    when (cs.is_rvm && cs.uopc.isOneOf(uopMLE)) {
+    uop.isHSlice      := !transposed
+    when (cs.is_rvm && cs.uopc.isOneOf(uopMLE, uopMSE)) {
       uop.dst_rtype  := Mux(uop.inst(29).asBool(), RT_TR, RT_ACC)
     }
     when (cs.is_rvm && cs.uopc.isOneOf(uopMMV_V, uopMWMV_V, uopMQMV_V)) {

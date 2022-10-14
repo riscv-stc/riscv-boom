@@ -393,20 +393,25 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   }
 
   io.ptw <> dtlb.io.ptw
-  io.core.perf.tlbMiss := io.ptw.req.fire()
-  io.core.perf.acquire := io.dmem.perf.acquire
-  io.core.perf.release := io.dmem.perf.release
-  io.core.perf.mshrs_has_busy := io.dmem.perf.mshrs_has_busy
-  io.core.perf.mshrs_all_busy := io.dmem.perf.mshrs_all_busy
-  io.core.perf.mshrs_reuse := io.dmem.perf.mshrs_reuse
-  io.core.perf.mshrs_load_establish := io.dmem.perf.mshrs_load_establish
-  io.core.perf.mshrs_load_reuse := io.dmem.perf.mshrs_load_reuse
+  io.core.perf.tlbMiss               := io.ptw.req.fire()
+  io.core.perf.acquire               := io.dmem.perf.acquire
+  io.core.perf.release               := io.dmem.perf.release
+  io.core.perf.mshrs_has_busy        := io.dmem.perf.mshrs_has_busy
+  io.core.perf.mshrs_all_busy        := io.dmem.perf.mshrs_all_busy
+  io.core.perf.mshrs_reuse           := io.dmem.perf.mshrs_reuse
+  io.core.perf.mshrs_load_establish  := io.dmem.perf.mshrs_load_establish
+  io.core.perf.mshrs_load_reuse      := io.dmem.perf.mshrs_load_reuse
   io.core.perf.mshrs_store_establish := io.dmem.perf.mshrs_store_establish
-  io.core.perf.mshrs_store_reuse := io.dmem.perf.mshrs_store_reuse
-  io.core.perf.iomshrs_has_busy := io.dmem.perf.iomshrs_has_busy
-  io.core.perf.iomshrs_all_busy := io.dmem.perf.iomshrs_all_busy
-  io.core.perf.in_flight_load := (0 until numLdqEntries).map(i => ldq(i).valid && ldq(i).bits.executed &&
-                                !ldq(i).bits.succeeded).reduce(_ || _)
+  io.core.perf.mshrs_store_reuse     := io.dmem.perf.mshrs_store_reuse
+  io.core.perf.iomshrs_has_busy      := io.dmem.perf.iomshrs_has_busy
+  io.core.perf.iomshrs_all_busy      := io.dmem.perf.iomshrs_all_busy
+  val ldq_in_flight  = (0 until numLdqEntries).map(i => ldq(i).valid && ldq(i).bits.executed && 
+                                                       !ldq(i).bits.succeeded).reduce(_ || _)
+  val vldq_in_flight = (0 until numVLdqEntries).map(i => vldq(i).valid && vldq(i).bits.executed && 
+                                                       !vldq(i).bits.succeeded).reduce(_ || _)
+  val vlxq_in_flight = (0 until numVLxqEntries).map(i => vlxq(i).valid && vlxq(i).bits.executed && 
+                                                       !vlxq(i).bits.succeeded).reduce(_ || _)
+  io.core.perf.in_flight_load := ldq_in_flight || vldq_in_flight || vlxq_in_flight
 
   val clear_store     = WireInit(false.B)
   val live_store_mask = RegInit(0.U(numStqEntries.W))
@@ -1771,7 +1776,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     io.core.tile_rport.tt             := vsagu.io.tile_rreq.bits.tt
     io.core.tile_rport.msew           := vsagu.io.tile_rreq.bits.sew
     // read acc register
-    io.core.acc_rreq.valid            := vsagu.io.tile_rreq.valid
+    io.core.acc_rreq.valid            := vsagu.io.tile_rreq.valid && !vsagu.io.tile_rreq.bits.tt(1).asBool
     io.core.acc_rreq.bits.sCtrls.ridx := vsagu.io.tile_rreq.bits.ridx
     io.core.acc_rreq.bits.sCtrls.sidx := vsagu.io.tile_rreq.bits.sidx
     io.core.acc_rreq.bits.sCtrls.sew  := vsagu.io.tile_rreq.bits.sew

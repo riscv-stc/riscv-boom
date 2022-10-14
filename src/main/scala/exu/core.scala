@@ -362,38 +362,38 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   for (w <- 0 until coreWidth) {
     val isInsRvv = rob.io.commit.valids(w) && rob.io.commit.uops(w).is_rvv
-    val isInsFp = rob.io.commit.valids(w) && !rob.io.commit.uops(w).is_rvv && rob.io.commit.uops(w).fp_val
+    val isInsFp  = rob.io.commit.valids(w) && !rob.io.commit.uops(w).is_rvv && rob.io.commit.uops(w).fp_val
     val isInsInt = rob.io.commit.valids(w) && !rob.io.commit.uops(w).is_rvv && !rob.io.commit.uops(w).fp_val
     // retired scalar int instructions
-    retired_int(w) := isInsInt
-    retired_load(w) := isInsInt && rob.io.commit.uops(w).uses_ldq
-    retired_amo(w) := isInsInt && rob.io.commit.uops(w).is_amo
-    retired_system(w) := isInsInt && (rob.io.commit.uops(w).ctrl.csr_cmd =/= freechips.rocketchip.rocket.CSR.N)
-    retired_fence(w) := isInsInt && rob.io.commit.uops(w).is_fence
-    retired_fencei(w) := isInsInt && rob.io.commit.uops(w).is_fencei
-    retired_store(w) := isInsInt && rob.io.commit.uops(w).uses_stq && !rob.io.commit.uops(w).is_amo && !rob.io.commit.uops(w).is_fence
-    retired_branch(w) := isInsInt && rob.io.commit.uops(w).is_br
-    retired_jal(w) := isInsInt && rob.io.commit.uops(w).is_jal
-    retired_jalr(w) := isInsInt && rob.io.commit.uops(w).is_jalr
-    retired_alu(w) := isInsInt && rob.io.commit.uops(w).fu_code.isOneOf(FU_ALU) && !rob.io.commit.uops(w).is_br
-    retired_mul(w) := isInsInt && rob.io.commit.uops(w).fu_code.isOneOf(FU_MUL)
-    retired_div(w) := isInsInt && rob.io.commit.uops(w).fu_code.isOneOf(FU_DIV)
+    retired_int(w)       := isInsInt
+    retired_load(w)      := isInsInt && rob.io.commit.uops(w).uses_ldq
+    retired_amo(w)       := isInsInt && rob.io.commit.uops(w).is_amo
+    retired_system(w)    := isInsInt && (rob.io.commit.uops(w).ctrl.csr_cmd =/= freechips.rocketchip.rocket.CSR.N)
+    retired_fence(w)     := isInsInt && rob.io.commit.uops(w).is_fence
+    retired_fencei(w)    := isInsInt && rob.io.commit.uops(w).is_fencei
+    retired_store(w)     := isInsInt && rob.io.commit.uops(w).uses_stq && !rob.io.commit.uops(w).is_amo && !rob.io.commit.uops(w).is_fence
+    retired_branch(w)    := isInsInt && rob.io.commit.uops(w).is_br
+    retired_jal(w)       := isInsInt && rob.io.commit.uops(w).is_jal
+    retired_jalr(w)      := isInsInt && rob.io.commit.uops(w).is_jalr
+    retired_alu(w)       := isInsInt && rob.io.commit.uops(w).fu_code.isOneOf(FU_ALU) && !rob.io.commit.uops(w).is_br
+    retired_mul(w)       := isInsInt && rob.io.commit.uops(w).fu_code.isOneOf(FU_MUL)
+    retired_div(w)       := isInsInt && rob.io.commit.uops(w).fu_code.isOneOf(FU_DIV)
     // retired scalar float instructions
-    retired_fp(w) := isInsFp
-    retired_fp_load(w) := isInsFp && rob.io.commit.uops(w).uses_ldq
-    retired_fp_store(w) := isInsFp && rob.io.commit.uops(w).uses_stq
-    retired_fp_fpu(w) := isInsFp && rob.io.commit.uops(w).fu_code.isOneOf(FU_FPU, FU_F2I, FU_I2F)
-    retired_fp_div(w) := isInsFp && rob.io.commit.uops(w).fu_code.isOneOf(FU_FDV)
+    retired_fp(w)        := isInsFp
+    retired_fp_load(w)   := isInsFp && rob.io.commit.uops(w).uses_ldq
+    retired_fp_store(w)  := isInsFp && rob.io.commit.uops(w).uses_stq
+    retired_fp_fpu(w)    := isInsFp && rob.io.commit.uops(w).fu_code.isOneOf(FU_FPU, FU_F2I, FU_I2F)
+    retired_fp_div(w)    := isInsFp && rob.io.commit.uops(w).fu_code.isOneOf(FU_FDV)
     // retired vector instructions
-    retired_rvv(w) := isInsRvv
-    retired_rvv_vset(w) := retired_rvv(w) && rob.io.commit.uops(w).uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
-    retired_rvv_load(w) := retired_rvv(w) && rob.io.commit.uops(w).uses_ldq
+    retired_rvv(w)       := isInsRvv
+    retired_rvv_vset(w)  := retired_rvv(w) && rob.io.commit.uops(w).uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
+    retired_rvv_load(w)  := retired_rvv(w) && rob.io.commit.uops(w).uses_ldq
     retired_rvv_store(w) := retired_rvv(w) && rob.io.commit.uops(w).uses_stq
-    retired_rvv_int(w) := retired_rvv(w) && !rob.io.commit.uops(w).fp_val && !rob.io.commit.uops(w).uses_ldq && !rob.io.commit.uops(w).uses_stq && !rob.io.commit.uops(w).uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
+    retired_rvv_int(w)   := retired_rvv(w) && !rob.io.commit.uops(w).fp_val && !rob.io.commit.uops(w).uses_ldq && !rob.io.commit.uops(w).uses_stq && !rob.io.commit.uops(w).uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
     retired_rvv_float(w) := retired_rvv(w) && rob.io.commit.uops(w).fp_val
-    retired_rvv_div(w) := retired_rvv_int(w) && rob.io.commit.uops(w).fu_code.isOneOf(FU_DIV)
-    retired_rvv_fdiv(w) := retired_rvv_float(w) && rob.io.commit.uops(w).fu_code.isOneOf(FU_FDV)
-    retired_rvv_red(w) := retired_rvv(w) && rob.io.commit.uops(w).fu_code.isOneOf(FU_IVRP, FU_FVRP)
+    retired_rvv_div(w)   := retired_rvv_int(w) && rob.io.commit.uops(w).fu_code.isOneOf(FU_DIV)
+    retired_rvv_fdiv(w)  := retired_rvv_float(w) && rob.io.commit.uops(w).fu_code.isOneOf(FU_FDV)
+    retired_rvv_red(w)   := retired_rvv(w) && rob.io.commit.uops(w).fu_code.isOneOf(FU_IVRP, FU_FVRP)
 
     when(retired_branch(w).asBool) {
       branch_cnt := branch_cnt + 1.U
@@ -432,31 +432,31 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   val insnCommitBaseEvents = (0 until coreWidth).map(w => new EventSet((mask, hits) => (mask & hits).orR, Seq(
-    ("int total", () => retired_int(w)),
-    ("int load", () => retired_load(w)),
-    ("int store", () => retired_store(w)),
-    ("int amo", () => retired_amo(w)),
-    ("int system", () => retired_system(w)),
-    ("int fence", () => retired_fence(w)),
-    ("int fencei", () => retired_fencei(w)),
-    ("int branch", () => retired_branch(w)),
-    ("int jal", () => retired_jal(w)),
-    ("int jalr", () => retired_jalr(w)),
-    ("int alu", () => retired_alu(w)),
-    ("int mul", () => retired_mul(w)),
-    ("int div", () => retired_div(w)))
+    ("int total",    () => retired_int(w)),
+    ("int load",     () => retired_load(w)),
+    ("int store",    () => retired_store(w)),
+    ("int amo",      () => retired_amo(w)),
+    ("int system",   () => retired_system(w)),
+    ("int fence",    () => retired_fence(w)),
+    ("int fencei",   () => retired_fencei(w)),
+    ("int branch",   () => retired_branch(w)),
+    ("int jal",      () => retired_jal(w)),
+    ("int jalr",     () => retired_jalr(w)),
+    ("int alu",      () => retired_alu(w)),
+    ("int mul",      () => retired_mul(w)),
+    ("int div",      () => retired_div(w)))
     ++ (if (!usingFPU) Seq() else Seq(
-    ("fp total", () => retired_fp(w)),
-    ("fp load", () => retired_fp_load(w)),
-    ("fp store", () => retired_fp_store(w)),
-    ("fp fpu", () => retired_fp_fpu(w)),
-    ("fp div", () => retired_fp_div(w))))
+    ("fp total",     () => retired_fp(w)),
+    ("fp load",      () => retired_fp_load(w)),
+    ("fp store",     () => retired_fp_store(w)),
+    ("fp fpu",       () => retired_fp_fpu(w)),
+    ("fp div",       () => retired_fp_div(w))))
     ++ (if (!usingVector) Seq() else Seq(
     ("vector total", () => retired_rvv(w)),
-    ("vector vset", () => retired_rvv_vset(w)),
-    ("vector load", () => retired_rvv_load(w)),
+    ("vector vset",  () => retired_rvv_vset(w)),
+    ("vector load",  () => retired_rvv_load(w)),
     ("vector store", () => retired_rvv_store(w)),
-    ("vector int", () => retired_rvv_int(w)),
+    ("vector int",   () => retired_rvv_int(w)),
     ("vector float", () => retired_rvv_float(w))))
   ))
 
@@ -552,11 +552,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   val mem_iss_valids = mem_iss_unit.io.iss_valids
   val int_iss_valids = int_iss_unit.io.iss_valids
-  val fp_iss_valids = fp_pipeline.io.perf.iss_valids
+  val fp_iss_valids  = fp_pipeline.io.perf.iss_valids
   val vec_iss_valids = v_pipeline.io.perf.vec_iss_valids
-  //val vmx_iss_valids = v_pipeline.io.perf.vmx_iss_valids
+  // val mat_iss_valids = m_pipeline.io.perf.mat_iss_valids
 
-  val uopsIssued_valids  = mem_iss_valids ++ int_iss_valids ++ fp_iss_valids ++ vec_iss_valids //++ vmx_iss_valids
+  val uopsIssued_valids  = mem_iss_valids ++ int_iss_valids ++ fp_iss_valids ++ vec_iss_valids
   val issueWidthSum      = issueParams.map(_.issueWidth).sum
   val uopsIssued_sum_leN = Wire(Vec(issueWidthSum, Bool()))
   val uopsIssued_sum = PopCount(uopsIssued_valids)
@@ -564,7 +564,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val uopsIssued_le_events: Seq[(String, () => Bool)] = uopsIssued_sum_leN.zipWithIndex.map { case (v, i) => ("less than or equal to $i uops issued", () => v) }
 
   val uopsIssued_stall = uopsIssued_sum_leN(1)
-  val uopsIssued_stall_on_loads = uopsIssued_stall && io.lsu.perf.in_flight_load
+  val uopsIssued_stall_on_loads  = uopsIssued_stall && io.lsu.perf.in_flight_load
   val uopsIssued_stall_on_stores = uopsIssued_stall && !io.lsu.perf.in_flight_load && io.lsu.perf.stq_full
   //val uopsIssued_stall_on_loads   = uopsIssued_stall && io.lsu.perf.ldq_nonempty && rob.io.perf.com_load_is_at_rob_head
   //val uopsIssued_stall_on_stores  = uopsIssued_stall && io.lsu.perf.stq_full && (!io.lsu.perf.ldq_nonempty || !rob.io.perf.com_load_is_at_rob_head)
@@ -974,7 +974,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       decode_units(w).io.csr_tilem := csr.io.matrix.get.tilem
       decode_units(w).io.csr_tilek := csr.io.matrix.get.tilek
       decode_units(w).io.csr_tilen := csr.io.matrix.get.tilen
-      decode_units(w).io.csr_tsidx := csr.io.matrix.get.tsidx
     }
 
     dec_uops(w) := decode_units(w).io.deq.uop
@@ -1755,11 +1754,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     csr.io.matrix.get.set_tilem.valid   := csr_vld && msettilem && !useCurrentVal
     csr.io.matrix.get.set_tilen.valid   := csr_vld && msettilen && !useCurrentVal
     csr.io.matrix.get.set_tilek.valid   := csr_vld && msettilek && !useCurrentVal
-    csr.io.matrix.get.set_tsidx.valid   := csr_vld && msettsidx
     csr.io.matrix.get.set_tilem.bits    := csr_exe_unit.io.iresp.bits.data
     csr.io.matrix.get.set_tilen.bits    := csr_exe_unit.io.iresp.bits.data
     csr.io.matrix.get.set_tilek.bits    := csr_exe_unit.io.iresp.bits.data
-    csr.io.matrix.get.set_tsidx.bits    := csr_exe_unit.io.iresp.bits.data
 
     csr_exe_unit.io.mconfig := csr.io.matrix.get.mconfig
     csr.io.matrix.get.set_ms_dirty := cmt_rvm
