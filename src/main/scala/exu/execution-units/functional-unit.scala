@@ -2867,8 +2867,144 @@ class VecCompressUnit()(implicit p: Parameters) extends BoomModule {
     val fbreq = DecoupledIO(new FuncUnitReq(vLen))
   })
 
-  io.done := false.B
-  io.fbreq.valid := false.B
+    val eidx      = RegInit(0.U(vLenSz.W))
+    val progress    = RegInit(0.U((vLenSz+1).W))
+    val vlen_ecnt = vLenb.U >> io.uop.vd_eew
+    val maxOff = ((vLen/8).U >> io.uop.vs2_eew) >> (4.U - io.uop.vs2_emul(1,0))
+    val vl = Mux(io.uop.vd_emul(2).asBool, Mux(
+                (maxOff) > io.uop.vconfig.vl,
+                io.uop.vconfig.vl, maxOff), io.uop.vconfig.vl)
+    // STATE 
+    val s_idle :: s_fill ::s_cal :: s_work :: Nil = Enum(4)
+    val cur_state = RegInit(s_idle)
+    val in_work_state = cur_state === s_work
+    
+
+    val elem_wp       = RegInit(0.U(5.W))
+    val elem_count       = RegInit(0.U(8.W))
+    val elem_rp       = RegInit(0.U(vLen.W))
+    val vdbuf_wp       = RegInit(0.U(vLen.W))
+    val v2buf_rp       = RegInit(0.U(vLen.W))
+    val mid_buf = Reg(Vec(16,UInt(eLen.W)))
+    val vdbuf = Reg(Vec(8, UInt(vLen.W)))
+
+    cur_state := Mux(io.brkill, s_idle, cur_state)
+
+
+    switch(cur_state) {
+      is(s_idle) {
+        cur_state   := Mux(io.start, s_fill, s_idle)
+        progress    := 0.U
+        eidx        := 0.U
+        elem_rp     := 0.U
+        elem_count  := 0.U
+        v2buf_rp    := 0.U
+        vdbuf_wp    := 0.U
+        elem_wp     := 0.U
+      }
+      is(s_fill) {
+        vdbuf := io.vdbuf;
+        cur_state := s_cal;
+      }
+      is(s_cal) {
+        when(elem_wp < ((vLen/8).U >> io.uop.vs2_eew)){
+          when(io.vmbuf(v2buf_rp)(elem_rp).asBool){
+            mid_buf(elem_wp) := ((io.v2buf(v2buf_rp) >> ((elem_rp << 3.U) << io.uop.vs2_eew)) & Mux1H(Seq(
+                                                                          (io.uop.vs2_eew(1,0) === 0.U) -> (0xFFL.U(vLen.W)),
+                                                                          (io.uop.vs2_eew(1,0) === 1.U) -> (0xFFFFL.U(vLen.W)),
+                                                                          (io.uop.vs2_eew(1,0) === 2.U) -> (0xFFFFFFFFL.U(vLen.W)),
+                                                                          (io.uop.vs2_eew(1,0) === 3.U) -> (BigInt("FFFFFFFFFFFFFFFF",16).U(vLen.W))
+                                                                          )))(eLen-1,0)
+            elem_wp := elem_wp + 1.U
+          }
+          elem_rp := elem_rp + 1.U
+          elem_count := elem_count + 1.U
+          when(elem_rp === ((vLen/8).U >> io.uop.vs2_eew) - 1.U) {
+            elem_rp := 0.U
+            v2buf_rp := v2buf_rp + 1.U
+          }
+        }
+        when((elem_wp === ((vLen/8).U >> io.uop.vs2_eew)) || (v2buf_rp === nrVecGroup(io.uop.vs2_emul)) || (elem_count === vl)){
+            vdbuf(vdbuf_wp):= Mux1H(Seq(
+              (elem_wp === 0.U) -> vdbuf(vdbuf_wp),
+              (elem_wp === 1.U) -> Mux1H(Seq(
+                                (io.uop.vs2_eew(1,0) === 0.U) -> Cat(vdbuf(vdbuf_wp)(127,8),Cat((0 until 1).map(mid_buf(_)(7,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 1.U) -> Cat(vdbuf(vdbuf_wp)(127,16),Cat((0 until 1).map(mid_buf(_)(15,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 2.U) -> Cat(vdbuf(vdbuf_wp)(127,32),Cat((0 until 1).map(mid_buf(_)(31,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 3.U) -> Cat(vdbuf(vdbuf_wp)(127,64),Cat((0 until 1).map(mid_buf(_)(63,0)).reverse)),
+                              )),
+              (elem_wp === 2.U) -> Mux1H(Seq(
+                                (io.uop.vs2_eew(1,0) === 0.U) -> Cat(vdbuf(vdbuf_wp)(127,16),Cat((0 until 2).map(mid_buf(_)(7,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 1.U) -> Cat(vdbuf(vdbuf_wp)(127,32),Cat((0 until 2).map(mid_buf(_)(15,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 2.U) -> Cat(vdbuf(vdbuf_wp)(127,64),Cat((0 until 2).map(mid_buf(_)(31,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 3.U) -> Cat((0 until 2).map(mid_buf(_)(63,0)).reverse),
+                              )),
+              (elem_wp === 3.U) -> Mux1H(Seq(
+                                (io.uop.vs2_eew(1,0) === 0.U) -> Cat(vdbuf(vdbuf_wp)(127,24),Cat((0 until 3).map(mid_buf(_)(7,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 1.U) -> Cat(vdbuf(vdbuf_wp)(127,48),Cat((0 until 3).map(mid_buf(_)(15,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 2.U) -> Cat(vdbuf(vdbuf_wp)(127,96),Cat((0 until 3).map(mid_buf(_)(31,0)).reverse)),
+                              )),
+              (elem_wp === 4.U) -> Mux1H(Seq(
+                                (io.uop.vs2_eew(1,0) === 0.U) -> Cat(vdbuf(vdbuf_wp)(127,32),Cat((0 until 4).map(mid_buf(_)(7,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 1.U) -> Cat(vdbuf(vdbuf_wp)(127,64),Cat((0 until 4).map(mid_buf(_)(15,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 2.U) -> Cat((0 until 4).map(mid_buf(_)(31,0)).reverse),
+                              )),
+              (elem_wp === 5.U) -> Mux1H(Seq(
+                                (io.uop.vs2_eew(1,0) === 0.U) -> Cat(vdbuf(vdbuf_wp)(127,40),Cat((0 until 5).map(mid_buf(_)(7,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 1.U) -> Cat(vdbuf(vdbuf_wp)(127,80),Cat((0 until 5).map(mid_buf(_)(15,0)).reverse)),
+                              )),
+              (elem_wp === 6.U) -> Mux1H(Seq(
+                                (io.uop.vs2_eew(1,0) === 0.U) -> Cat(vdbuf(vdbuf_wp)(127,48),Cat((0 until 6).map(mid_buf(_)(7,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 1.U) -> Cat(vdbuf(vdbuf_wp)(127,96),Cat((0 until 6).map(mid_buf(_)(15,0)).reverse)),
+                              )),
+              (elem_wp === 7.U) -> Mux1H(Seq(
+                                (io.uop.vs2_eew(1,0) === 0.U) -> Cat(vdbuf(vdbuf_wp)(127,56),Cat((0 until 7).map(mid_buf(_)(7,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 1.U) -> Cat(vdbuf(vdbuf_wp)(127,112),Cat((0 until 7).map(mid_buf(_)(15,0)).reverse)),
+                              )),
+              (elem_wp === 8.U) -> Mux1H(Seq(
+                                (io.uop.vs2_eew(1,0) === 0.U) -> Cat(vdbuf(vdbuf_wp)(127,64),Cat((0 until 8).map(mid_buf(_)(7,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 1.U) -> Cat((0 until 8).map(mid_buf(_)(15,0)).reverse),
+                              )),
+              (elem_wp === 9.U) -> Cat(vdbuf(vdbuf_wp)(127,72),Cat((0 until 9).map(mid_buf(_)(7,0)).reverse)),
+              (elem_wp === 10.U) -> Cat(vdbuf(vdbuf_wp)(127,80),Cat((0 until 10).map(mid_buf(_)(7,0)).reverse)),
+              (elem_wp === 11.U) -> Cat(vdbuf(vdbuf_wp)(127,88),Cat((0 until 11).map(mid_buf(_)(7,0)).reverse)),
+              (elem_wp === 12.U) -> Cat(vdbuf(vdbuf_wp)(127,96),Cat((0 until 12).map(mid_buf(_)(7,0)).reverse)),
+              (elem_wp === 13.U) -> Cat(vdbuf(vdbuf_wp)(127,104),Cat((0 until 13).map(mid_buf(_)(7,0)).reverse)),
+              (elem_wp === 14.U) -> Cat(vdbuf(vdbuf_wp)(127,112),Cat((0 until 14).map(mid_buf(_)(7,0)).reverse)),
+              (elem_wp === 15.U) -> Cat(vdbuf(vdbuf_wp)(127,120),Cat((0 until 15).map(mid_buf(_)(7,0)).reverse)),
+              (elem_wp === 16.U) -> Cat((0 until 16).map(mid_buf(_)(7,0)).reverse)
+            ))
+          elem_wp := 0.U
+          vdbuf_wp := vdbuf_wp + 1.U
+        }
+        when((v2buf_rp === nrVecGroup(io.uop.vs2_emul)) ||(elem_count === vl)){
+          cur_state := s_work
+        }
+      }
+      is(s_work){
+        when((nrVecGroup(io.uop.vd_emul) === (progress + 1.U))) {
+          cur_state := s_idle
+        }
+        eidx := eidx + vlen_ecnt
+        progress := progress + 1.U
+      }
+    }
+
+  io.done := in_work_state && (nrVecGroup(io.uop.vd_emul) === (progress + 1.U))
+  // Output data.
+  io.fbreq.valid := in_work_state
+  io.fbreq.bits.uop := io.uop
+  io.fbreq.bits.uop.pdst := io.uop.pvd(progress).bits
+  io.fbreq.bits.uop.vstart := 0.U
+  io.fbreq.bits.uop.v_unmasked := false.B
+  io.fbreq.bits.uop.fu_code       := io.uop.fu_code & (~FU_VRP)
+  io.fbreq.bits.rs1_data := io.v1buf
+  io.fbreq.bits.rs2_data := io.v2buf(progress)
+  io.fbreq.bits.rs3_data := vdbuf(progress)
+  io.fbreq.bits.uop.v_split_last := in_work_state && (nrVecGroup(io.uop.vd_emul) === (progress + 1.U))
+  io.fbreq.bits.uop.v_eidx := eidx
+  io.fbreq.bits.uop.v_split_ecnt := vlen_ecnt
+  
 }
 
 /**

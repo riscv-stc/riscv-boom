@@ -141,11 +141,15 @@ class RegisterRead(
       val vd_nr   = nrVecGroup(iss_uop.vd_emul)
       if (numReadPorts > 3) { // only for vec pipe, skip for vmx pipe
         //val vrp_iss = io.iss_valids(w) && (io.iss_uops(w).fu_code & FU_VRP).orR && vs2_nr > 1.U
-        val vrp_iss = io.iss_valids(w) && (io.iss_uops(w).fu_code & FU_VRP).orR &&
+        val vrp_iss = io.iss_valids(w) && (io.iss_uops(w).fu_code & FU_VRP).orR && (
           (
             (io.iss_uops(w).uopc === uopVRGATHEREI16) &&
             (io.iss_uops(w).vs1_emul.asSInt() > io.iss_uops(w).vs2_emul.asSInt()) ||
             (io.iss_uops(w).is_reduce) && (vs2_nr > 1.U)
+          ) || (
+            (io.iss_uops(w).uopc === uopVCOMPRESS)) &&
+            (io.iss_uops(w).vd_emul(2).asBool =/= true.B) &&
+            (vs2_nr > 1.U)
           )
         val vrp_val  = RegInit(false.B)
         val vs1_last = WireInit(false.B)
@@ -176,7 +180,7 @@ class RegisterRead(
           vs1_last := Mux((vrp_uop.vs1_emul.asSInt() - vrp_uop.vs2_emul.asSInt()) === 1.S, rs1_sel(0) === 1.U,
             Mux((vrp_uop.vs1_emul.asSInt() - vrp_uop.vs2_emul.asSInt()) === 2.S, rs1_sel(1, 0) === 3.U, true.B))
           vs2_last := (rs2_sel +& 1.U === nrVecGroup(vrp_uop.vs2_emul))
-          vrp_last := Mux(vrp_uop.is_reduce, vs2_last, vs1_last)
+          vrp_last := Mux(vrp_uop.is_reduce || (vrp_uop.uopc === uopVCOMPRESS) , vs2_last, vs1_last)
           when (vrp_last) {
             vrp_val := false.B
           }

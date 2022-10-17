@@ -127,7 +127,7 @@ class IssueSlot(
   val last_check: Bool = {
     val ret = Wire(Bool())
     if (vector) {
-      ret := io.uop.v_split_last || io.uop.is_reduce
+      ret := io.uop.v_split_last || io.uop.is_reduce || vcompress
     } else if(matrix) {
       ret := io.uop.m_split_last
     } else {
@@ -140,11 +140,21 @@ class IssueSlot(
     val ret = Wire(Bool())
     val uop = slot_uop
     if (vector) {
+      val vsew   = uop.vs1_eew
+      val vLen_ecnt   = vLenb.U >> vsew
       val v_eidx = Mux(uop.is_reduce, 0.U, uop.v_eidx)
-      val rsel   = VRegSel(v_eidx, uop.vs1_eew, eLenSelSz)
-      val pvs1   = uop.pvs1(rsel).bits
-      ret       := Mux(uop.rt(RS1, isVector), !io.vbusy_status(pvs1),
-                   Mux(uop.uses_scalar, ps, true.B))
+      when(vcompress) {  
+        ret := (0 until 8).toList.map(i => {
+          val rsel   = VRegSel(v_eidx+& vLen_ecnt*i.U, uop.vs1_eew, eLenSelSz)
+          val pvs1   = uop.pvs1(rsel).bits
+          !io.vbusy_status(pvs1)
+        }).reduceLeft(_&_)
+      }.otherwise {
+        val rsel   = VRegSel(v_eidx, uop.vs1_eew, eLenSelSz)
+        val pvs1   = uop.pvs1(rsel).bits
+        ret       := Mux(uop.rt(RS1, isVector), !io.vbusy_status(pvs1),
+                     Mux(uop.uses_scalar, ps, true.B))
+      }
     } else if(matrix) {
       ret := Mux(uop.rt(RS1, isMatrix) && uop.m_scalar_busy, false.B,
              Mux(uop.rt(RS1, isTrTile), p1(uop.m_sidx),
@@ -160,12 +170,22 @@ class IssueSlot(
     val ret = Wire(Bool())
     val uop = slot_uop
     if (vector) {
-      val v_eidx = Mux(uop.uopc === uopVIOTA, 0.U, uop.v_eidx)
-      val eew    = Mux(uop.uses_v_ls_ew, uop.v_ls_ew, uop.vs2_eew)
-      val rsel   = VRegSel(v_eidx, eew, eLenSelSz)
-      val pvs2   = uop.pvs2(rsel).bits
-      val reduce_busy = uop.pvs2.map(pvs2 => pvs2.valid && io.vbusy_status(pvs2.bits)).reduce(_ || _)
-      ret       := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))
+      val vsew   = uop.vs2_eew
+      val vLen_ecnt   = vLenb.U >> vsew
+      when(vcompress) {
+        ret := (0 until 8).toList.map(i => {
+          val rsel   = VRegSel(uop.v_eidx +& vLen_ecnt*i.U, uop.vs1_eew, eLenSelSz)
+          val pvs2   = uop.pvs2(rsel).bits
+          !io.vbusy_status(pvs2)
+        }).reduceLeft(_&_)
+      }.otherwise {
+        val v_eidx = Mux(uop.uopc === uopVIOTA, 0.U, uop.v_eidx)
+        val eew    = Mux(uop.uses_v_ls_ew, uop.v_ls_ew, uop.vs2_eew)
+        val rsel   = VRegSel(v_eidx, eew, eLenSelSz)
+        val pvs2   = uop.pvs2(rsel).bits
+        val reduce_busy = uop.pvs2.map(pvs2 => pvs2.valid && io.vbusy_status(pvs2.bits)).reduce(_ || _)
+        ret       := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))
+      }
     } else if(matrix) {
       ret := Mux(uop.rt(RS2, isMatrix), p2(uop.m_sidx),
              Mux(uop.rt(RS2, isInt),    ps, true.B))
@@ -179,10 +199,20 @@ class IssueSlot(
     val ret = Wire(Bool())
     val uop = slot_uop
     if (vector) {
-      val v_eidx    = Mux(uop.rt(RS1, isMaskVD), 0.U, uop.v_eidx)
-      val rsel      = VRegSel(v_eidx, uop.vd_eew, eLenSelSz)
-      val stale_pvd = uop.stale_pvd(rsel).bits
-      ret          := !uop.rt(RD, isVector) || !io.vbusy_status(stale_pvd)
+      val vsew        = uop.vs2_eew
+      val vLen_ecnt   = vLenb.U >> vsew
+      when(vcompress) {
+        ret := (0 until 8).toList.map(i => {
+          val rsel      = VRegSel(uop.v_eidx +& vLen_ecnt*i.U, uop.vs1_eew, eLenSelSz)
+          val stale_pvd = uop.stale_pvd(rsel).bits
+          !io.vbusy_status(stale_pvd)
+        }).reduceLeft(_&_)
+      }.otherwise {
+          val v_eidx    = Mux(uop.rt(RS1, isMaskVD), 0.U, uop.v_eidx)
+          val rsel      = VRegSel(v_eidx, uop.vd_eew, eLenSelSz)
+          val stale_pvd = uop.stale_pvd(rsel).bits
+          ret          := !uop.rt(RD, isVector) || !io.vbusy_status(stale_pvd)
+      }
     } else if(matrix) {
       ret := Mux(!uop.rt(RD, isAccTile), true.B,
              Mux(uop.fu_code === FU_GEMM, p3.andR, p3(uop.m_sidx)))
