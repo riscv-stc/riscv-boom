@@ -571,11 +571,12 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               vMemDataBits = 64,
               numVecPhysRegisters = 65,
               useMatrix = true,
-              mLen = 1024, //vLen * 8
+              rLen = 128,  
+              mLen = 1024, // rLen * 8
               numMatTrRegisters = 12,
               numMatAccRegisters = 4,
-              mxuTileRows = 4,
-              mxuTileCols = 4
+              mxuTileRows = 4,              // 1 mxu tile contains $mxuTileRows rows of PEs
+              mxuTileCols = 4               // 1 mxu tile contains $mxuTileCols cols of (fp16) PEs or 2*$mxuTileCols cols of (int8) PEs
             ),
             dcache = Some(
               DCacheParams(rowBits = 128, nSets=32, nWays=8, nMSHRs=8, nTLBWays=16, blockBytes=site(CacheBlockBytes))

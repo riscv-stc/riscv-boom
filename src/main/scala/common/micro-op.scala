@@ -183,18 +183,18 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val vstartSrc        = if (usingVector) UInt(1.W) else false.B      // vstart source: CSR or speculative zero
   // matrix extension
   val is_rvm           = if (usingMatrix) Bool()          else false.B
-  val pts1_busy        = if (usingMatrix) UInt(vLenb.W)   else null
-  val pts2_busy        = if (usingMatrix) UInt(vLenb.W)   else null
-  val pts3_busy        = if (usingMatrix) UInt(vLenb.W)   else null
+  val pts1_busy        = if (usingMatrix) UInt(rLenb.W)   else null
+  val pts2_busy        = if (usingMatrix) UInt(rLenb.W)   else null
+  val pts3_busy        = if (usingMatrix) UInt(rLenb.W)   else null
   val m_scalar_busy    = if (usingMatrix) Bool()          else null
-  val m_sidx           = if (usingMatrix) UInt((vLenbSz+1).W)  else null   // slice index
+  val m_sidx           = if (usingMatrix) UInt((rLenbSz+1).W)  else null   // slice index
   val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null   // eew encoded in load/store instructions
   val m_is_split       = if (usingMatrix) Bool()          else null
   val m_split_first    = if (usingMatrix) Bool()          else null
   val m_split_last     = if (usingMatrix) Bool()          else null
-  val m_slice_cnt      = if (usingMatrix) UInt((vLenbSz+1).W)  else null   // tilem in mopa instructions
-  val m_slice_len      = if (usingMatrix) UInt((vLenbSz+1).W)  else null   // tilek in mopa instructions
-  val m_tilen          = if (usingMatrix) UInt((vLenbSz+1).W)  else null   // tilen in mopa instructions
+  val m_slice_cnt      = if (usingMatrix) UInt((rLenbSz+1).W)  else null   // tilem in mopa instructions
+  val m_slice_len      = if (usingMatrix) UInt((rLenbSz+1).W)  else null   // tilek in mopa instructions
+  val m_tilen          = if (usingMatrix) UInt((rLenbSz+1).W)  else null   // tilen in mopa instructions
   val m_slice_quad     = if (usingMatrix) UInt(2.W)       else null
   val ts1_eew          = if (usingMatrix) UInt(2.W)       else null
   val ts2_eew          = if (usingMatrix) UInt(2.W)       else null
@@ -1135,12 +1135,12 @@ object MicroOpcodes extends Enumeration {
   //marith
   val uopMCLRACC_enum     = Value
   val uopMCLRACC          = uopMCLRACC_enum.id.U(UOPC_SZ.W)
-  val uopMOPA_enum        = Value
-  val uopMOPA             = uopMOPA_enum.id.U(UOPC_SZ.W)
-  val uopMWOPA_enum       = Value
-  val uopMWOPA            = uopMWOPA_enum.id.U(UOPC_SZ.W)
-  val uopMQOPA_enum       = Value
-  val uopMQOPA            = uopMQOPA_enum.id.U(UOPC_SZ.W)
+  val uopMMA_enum         = Value
+  val uopMMA              = uopMMA_enum.id.U(UOPC_SZ.W)
+  val uopMWMA_enum        = Value
+  val uopMWMA             = uopMWMA_enum.id.U(UOPC_SZ.W)
+  val uopMQMA_enum        = Value
+  val uopMQMA             = uopMQMA_enum.id.U(UOPC_SZ.W)
   val uopMADD_enum        = Value
   val uopMADD             = uopMADD_enum.id.U(UOPC_SZ.W)
   val uopMWADD_enum       = Value

@@ -50,6 +50,8 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
     val lsu_tile_rport   = new TrTileRegReadPortIO()
     val lsu_tile_wbk     = Flipped(Decoupled(new ExeUnitResp(vLen)))
+    val lsu_acc_rreq     = Flipped(ValidIO(new AccReadReq()))
+    val lsu_acc_rresp    = ValidIO(new AccReadResp())
     // mset_wakeup, vsetvl related wakeup
     // val mset_wakeup        = Input(Valid(new MlWakeupResp()))  // TODO: msettype/msettile speculation optimization
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units
@@ -174,8 +176,10 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 
   exe_units.withFilter(_.writesAccTile).map(eu => {
     eu.io.mlsuWbk.valid := io.lsu_tile_wbk.valid && lsuWbkBits.uop.rt(RD, isAccTile)
-    eu.io.mlsuWbk.bits  := io.lsu_tile_wbk.bits }
-  )
+    eu.io.mlsuWbk.bits  := io.lsu_tile_wbk.bits 
+    eu.io.accReadReq    := io.lsu_acc_rreq
+    io.lsu_acc_rresp    := eu.io.accReadResp
+  })
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Commit Stage ****

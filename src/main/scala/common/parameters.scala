@@ -112,6 +112,7 @@ case class BoomCoreParams(
    /* matrix extension */
   override val useMatrix: Boolean = false,
   override val mLen: Int = 0,
+  override val rLen: Int = 0,
   override val mxuTileRows: Int = 0,
   override val mxuTileCols: Int = 0,
 
@@ -309,12 +310,18 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
 
   // matrix stuff
   require (issueParams.count(_.iqType == IQT_MAT.litValue) == 1 || !usingMatrix)
+  def rLenb = rLen/8
+  def rLenSz  = if (usingMatrix) log2Ceil(rLen) else 0
+  def rLenbSz = if (usingMatrix) log2Ceil(rLenb) else 0
   val numMatTrPhysRegs  = if (usingMatrix) boomParams.numMatTrRegisters else 0
   val numMatAccPhysRegs = if (usingMatrix) boomParams.numMatAccRegisters else 0
-  def maxTrTileCols = vLenb
-  def numTrTileRows = mLen/vLen
-  def mxuMeshRows = mLen/(vLen*mxuTileRows)
-  def mxuMeshCols = vLen/(16*mxuTileCols)
+  def maxTrTileCols = rLenb
+  def numTrTileRows = mLen/rLen
+  def mxuMeshRows = mLen/(rLen*mxuTileRows)     // number of tile rows in a mesh
+  def mxuMeshCols = rLen/(16*mxuTileCols)       // number of tile cols in a mesh
+  def numAccTiles = numMatAccPhysRegs
+  def mxuPERows   = numTrTileRows               // number of PE rows in mxu
+  def mxuPECols   = maxTrTileCols               // number of (int8) PE cols in mxu (fp16 PEs are half of int8 PEs)
 
 
   //************************************
