@@ -106,6 +106,7 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
           val writeColDataSel = Wire(UInt(rLen.W))
           val writeColShift = Wire(UInt(rLenSz.W))
           val writeColRowMask = Wire(UInt((rLen + 1).W))
+		  val writeRowNumMask = WireInit(false.B)
           val writeColRowData = Wire(UInt(rLen.W))
           writeColShift := (writeindex(w) << (writemsew(w) +& 3.U))
           writeColRowMask := Mux1H(UIntToOH(writemsew(w)), Seq(Cat(Fill(rLen - 8, 0.U), Fill(8, 1.U)) << writeColShift,
@@ -113,8 +114,10 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
             Cat(Fill(rLen - 32, 0.U), Fill(32, 1.U)) << writeColShift,
             Cat(Fill(rLen - 63, 0.U), Fill(64, 1.U)) << writeColShift
           ))
+		  writeRowNumMask := writebtyemask(w)(row.asUInt << writemsew(w))
           writeColRowData := writeColData << writeColShift
-          writeColDataSel := Cat((0 until rLen).map(i => Mux(writeColRowMask(i), writeColRowData(i), oldData(i))).reverse)
+		  writeColDataSel := Mux(writeRowNumMask, Cat((0 until rLen).map(i => Mux(writeColRowMask(i), writeColRowData(i), oldData(i))).reverse), oldData)
+
           trtile(io.writePorts(w).bits.addr)(row) := writeColDataSel
         }
       }
