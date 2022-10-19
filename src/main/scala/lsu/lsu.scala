@@ -813,13 +813,15 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val can_fire_vstq_commit   = widthMap(w =>
                                  ( (w == memWidth-1).B                                   &&
                                    vstq_commit_e.valid                                   &&
-                                   vstq_commit_e.bits.committed                          &&
                                    vstq_commit_e.bits.data.valid                         &&
                                   !mem_xcpt_valid                                        &&
                                   !vstq_commit_e.bits.uop.exception                      &&
                                    io.vmem.req.ready                                     &&
                                    io.vmem.vsdq_ready                                    &&
-                                   vstq_commit_e.bits.uop.stq_idx === stq_head
+                                   vstq_commit_e.bits.uop.stq_idx === stq_head           &&
+                                  (vstq_commit_e.bits.committed                       ||
+                                   (vstq_commit_e.bits.uop.is_rvm && 
+                                    vstq_commit_e.bits.uop.rob_idx === io.core.rob_head_idx))
                                  ))
   
   // Can we fire a vlxq lookup
@@ -1551,6 +1553,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     when (vstq_lkup_sel(i) && will_fire_vstq_lookup(memWidth-1)) {
       when (!exe_tlb_miss(memWidth-1)) {
         vstq(i).bits.addr.bits := exe_tlb_paddr(memWidth-1)
+        when(vstq(i).bits.uop.is_rvm) { vstq(i).bits.committed := true.B}
       }
       vstq(i).bits.addr_is_virtual := exe_tlb_miss(memWidth-1)
       when (pf_st(memWidth-1) || ae_st(memWidth-1)) {
@@ -2442,6 +2445,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       {
         vstq(i).valid           := false.B
         vstq(i).bits.addr.valid := false.B
+        vstq(i).bits.data.valid := false.B
         vstq(i).bits.killed     := true.B        // us
       }
     }
@@ -2470,6 +2474,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       {
         vsxq(i).valid           := false.B
         vsxq(i).bits.addr.valid := false.B
+        vstq(i).bits.data.valid := false.B
         vsxq(i).bits.killed     := true.B
       }
     }
@@ -2718,6 +2723,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       {
         vstq(i).valid           := false.B
         vstq(i).bits.addr.valid := false.B
+        vstq(i).bits.data.valid := false.B
         vstq(i).bits.committed  := false.B
         vstq(i).bits.executed   := false.B
         vstq(i).bits.succeeded  := false.B
@@ -2732,6 +2738,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       {
         vsxq(i).valid           := false.B
         vsxq(i).bits.addr.valid := false.B
+        vsxq(i).bits.data.valid := false.B
         vsxq(i).bits.committed  := false.B
         vsxq(i).bits.executed   := false.B
         vsxq(i).bits.succeeded  := false.B
@@ -2759,6 +2766,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         {
           vstq(i).valid           := false.B
           vstq(i).bits.addr.valid := false.B
+          vstq(i).bits.data.valid := false.B
           vstq(i).bits.committed  := false.B
           vstq(i).bits.executed   := false.B
           vstq(i).bits.succeeded  := false.B
@@ -2772,6 +2780,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         {
           vsxq(i).valid           := false.B
           vsxq(i).bits.addr.valid := false.B
+          vsxq(i).bits.data.valid := false.B
           vsxq(i).bits.committed  := false.B
           vsxq(i).bits.executed   := false.B
           vsxq(i).bits.succeeded  := false.B
