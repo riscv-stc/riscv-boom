@@ -1738,7 +1738,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     val msettilem = csr_uop.uopc === uopMSETTILEM || csr_uop.uopc === uopMSETTILEMI
     val msettilen = csr_uop.uopc === uopMSETTILEN || csr_uop.uopc === uopMSETTILENI
     val msettilek = csr_uop.uopc === uopMSETTILEK || csr_uop.uopc === uopMSETTILEKI
-    val msettsidx = csr_uop.uopc === uopMSETTSIDX || csr_uop.uopc === uopMSETTSIDXI
+
     val cmt_rvm = (0 until coreParams.retireWidth).map{i =>
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvm}.reduce(_ || _)
     val cmt_archlast_rvm = (0 until coreParams.retireWidth).map{i =>

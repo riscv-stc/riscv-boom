@@ -10,9 +10,10 @@ import freechips.rocketchip.util._
 class TrTileRegReadPortIO(implicit p: Parameters) extends BoomBundle {
   val addr: UInt = Input(UInt(log2Ceil(numMatTrPhysRegs).W)) // value of td num
   val data: UInt = Output(UInt(rLen.W))
-  val index: UInt = Input(UInt(32.W)) //index slice number, value is rs2
-  val tt: UInt = Input(UInt(2.W)) //2: tr_r, 3: tr_c
+  val index: UInt = Input(UInt(32.W))       //index slice number, value is rs2
+  val tt: UInt = Input(UInt(2.W))           //2: tr_r, 3: tr_c
   val msew: UInt = Input(UInt(2.W))
+  val quad     = Input(UInt(2.W))           // tr may support duoble-width access in Col
 }
 
 class TrTileRegWritePortIO(implicit p: Parameters) extends BoomBundle {
@@ -22,6 +23,7 @@ class TrTileRegWritePortIO(implicit p: Parameters) extends BoomBundle {
   val tt: UInt = UInt(2.W) //2: tr_r, 3: tr_c
   val msew: UInt = UInt(2.W)
   val byteMask: UInt = UInt(rLenb.W)
+  val quad     = UInt(2.W)          // tr may support duoble-width access in Col
 }
 
 class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Parameters)  extends BoomModule {
@@ -40,11 +42,14 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
   val readmsew = Wire(Vec(numReadPorts, UInt(2.W)))
   val readindex = Wire(Vec(numReadPorts, UInt(32.W)))
   val readaddr = Wire(Vec(numReadPorts, UInt(log2Ceil(numMatTrPhysRegs).W)))
+  val readquad = Wire(Vec(numReadPorts, UInt(2.W)))
+
   val writedircol = Wire(Vec(numWritePorts, Bool()))
   val writedirrow = Wire(Vec(numWritePorts, Bool()))
   val writemsew = Wire(Vec(numWritePorts, UInt(2.W)))
   val writeindex = Wire(Vec(numWritePorts, UInt(32.W)))
   val writebtyemask = Wire(Vec(numWritePorts, UInt(rLenb.W)))
+  val writequad        = Wire(Vec(numWritePorts, UInt(2.W)))
 
   for (i <- 0 until numReadPorts) {
     readdircol(i) := RegNext(io.readPorts(i).tt === 3.U)
@@ -52,6 +57,7 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
     readmsew(i)   := RegNext(io.readPorts(i).msew)
     readindex(i)  := RegNext(io.readPorts(i).index)
     readaddr(i)   := RegNext(io.readPorts(i).addr)
+    readquad(i)   := RegNext(io.readPorts(i).quad)
   }
   for (i <- 0 until numWritePorts) {
     writedircol(i)   := io.writePorts(i).bits.tt === 3.U
@@ -59,6 +65,7 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
     writemsew(i)     := io.writePorts(i).bits.msew
     writeindex(i)    := io.writePorts(i).bits.index
     writebtyemask(i) := io.writePorts(i).bits.byteMask
+    writequad(i)     := io.writePorts(i).bits.quad
   }
 
   val trtile = Mem(numMatTrPhysRegs, Vec(rowlen, UInt(rLen.W))) //trNums = 8
@@ -79,9 +86,8 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
       }.elsewhen(readmsew(w) === 1.U) {
         io.readPorts(w).data := Cat((0 until rowlen).map(r => readColData(r)(15, 0)).reverse)
       }.elsewhen(readmsew(w) === 2.U) {
-        io.readPorts(w).data := Cat((0 until rowlen).map(r => readColData(r)(31, 0)).reverse)
-      }.elsewhen(readmsew(w) === 1.U) {
-        io.readPorts(w).data := Cat((0 until rowlen).map(r => readColData(r)(63, 0)).reverse)
+        io.readPorts(w).data := Mux(readquad(w)===1.U, Cat((4 until rowlen).map(r => readColData(r)(31, 0)).reverse),
+                                                  Cat((0 until 4).map(r => readColData(r)(31, 0)).reverse))
       }
     }
   }
@@ -106,17 +112,17 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
           val writeColDataSel = Wire(UInt(rLen.W))
           val writeColShift = Wire(UInt(rLenSz.W))
           val writeColRowMask = Wire(UInt((rLen + 1).W))
-		  val writeRowNumMask = WireInit(false.B)
+		      val writeRowNumMask = WireInit(false.B)
           val writeColRowData = Wire(UInt(rLen.W))
           writeColShift := (writeindex(w) << (writemsew(w) +& 3.U))
           writeColRowMask := Mux1H(UIntToOH(writemsew(w)), Seq(Cat(Fill(rLen - 8, 0.U), Fill(8, 1.U)) << writeColShift,
             Cat(Fill(rLen - 16, 0.U), Fill(16, 1.U)) << writeColShift,
-            Cat(Fill(rLen - 32, 0.U), Fill(32, 1.U)) << writeColShift,
-            Cat(Fill(rLen - 63, 0.U), Fill(64, 1.U)) << writeColShift
+            Cat(Fill(rLen - 32, 0.U), Fill(32, 1.U)) << writeColShift
           ))
-		  writeRowNumMask := writebtyemask(w)(row.asUInt << writemsew(w))
+		      writeRowNumMask := Mux(writequad(w)===1.U, Cat(writebtyemask(w), 0.U(rLenb.W))(row.asUInt << writemsew(w)), 
+                                                                  writebtyemask(w)(row.asUInt << writemsew(w)))
           writeColRowData := writeColData << writeColShift
-		  writeColDataSel := Mux(writeRowNumMask, Cat((0 until rLen).map(i => Mux(writeColRowMask(i), writeColRowData(i), oldData(i))).reverse), oldData)
+		      writeColDataSel := Mux(writeRowNumMask, Cat((0 until rLen).map(i => Mux(writeColRowMask(i), writeColRowData(i), oldData(i))).reverse), oldData)
 
           trtile(io.writePorts(w).bits.addr)(row) := writeColDataSel
         }

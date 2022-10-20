@@ -1775,6 +1775,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     io.core.tile_rport.index          := vsagu.io.tile_rreq.bits.sidx
     io.core.tile_rport.tt             := vsagu.io.tile_rreq.bits.tt
     io.core.tile_rport.msew           := vsagu.io.tile_rreq.bits.sew
+    io.core.tile_rport.quad           := vsagu.io.tile_rreq.bits.quad
     // read acc register
     io.core.acc_rreq.valid            := vsagu.io.tile_rreq.valid && !vsagu.io.tile_rreq.bits.tt(1).asBool
     io.core.acc_rreq.bits.sCtrls.ridx := vsagu.io.tile_rreq.bits.ridx

@@ -173,6 +173,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   trtileReg.io.writePorts(0).bits.index     := lsuWbkBits.uop.m_sidx
   trtileReg.io.writePorts(0).bits.data      := lsuWbkBits.data
   trtileReg.io.writePorts(0).bits.byteMask  := lsuWbkBits.vmask
+  trtileReg.io.writePorts(0).bits.quad      := lsuWbkBits.uop.m_slice_quad
 
   exe_units.withFilter(_.writesAccTile).map(eu => {
     eu.io.mlsuWbk.valid := io.lsu_tile_wbk.valid && lsuWbkBits.uop.rt(RD, isAccTile)
