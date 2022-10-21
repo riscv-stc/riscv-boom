@@ -312,6 +312,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   if (usingMatrix) {
     m_pipeline.io.brupdate := brupdate
+    m_pipeline.io.vl_wakeup := vl_wakeup
     // m_pipeline.io.ml_wakeup
   }
 

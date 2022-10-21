@@ -55,6 +55,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     // mset_wakeup, vsetvl related wakeup
     // val mset_wakeup        = Input(Valid(new MlWakeupResp()))  // TODO: msettype/msettile speculation optimization
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units
+    val vl_wakeup        = Input(Valid(new VlWakeupResp()))
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
     val debug_wb_wdata   = Output(Vec(numWakeupPorts, UInt((vLen).W)))
@@ -121,8 +122,9 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   }
   issue_unit.io.pred_wakeup_port.valid := false.B
   issue_unit.io.pred_wakeup_port.bits  := DontCare
-  issue_unit.io.vl_wakeup.valid        := false.B
-  issue_unit.io.vl_wakeup.bits         := DontCare
+  //issue_unit.io.vl_wakeup.valid        := false.B
+  //issue_unit.io.vl_wakeup.bits         := DontCare
+  issue_unit.io.vl_wakeup := io.vl_wakeup
 
   //-------------------------------------------------------------
   // **** Register Read Stage ****
