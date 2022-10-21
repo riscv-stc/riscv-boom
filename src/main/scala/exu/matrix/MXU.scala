@@ -995,7 +995,7 @@ class MXU(implicit p: Parameters) extends BoomModule
       } .otherwise {
         (0 until mxuMeshRows*mxuTileRows/2).foreach { i => 
           colWriteDataAggr(mxuMeshRows*mxuTileRows/2+i) := io.colWriteData(32*i+31, 32*i)
-          colWriteDataAggr(mxuMeshRows*mxuTileRows/2+i) := io.colWriteMask(4*i)
+          colWriteMaskAggr(mxuMeshRows*mxuTileRows/2+i) := io.colWriteMask(4*i)
         }
       }
       assert(colWriteCtrls.sew === 2.U, "INT64 and FP64 not supported\n")

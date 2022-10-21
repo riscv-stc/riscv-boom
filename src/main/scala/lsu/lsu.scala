@@ -1867,6 +1867,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   when (vstq_done(vstq_head)) {
     vstq_head := WrapInc(vstq_head, numVStqEntries)
     vstq(vstq_head).valid := false.B
+    vstq(vstq_head).bits.addr.valid := false.B
+    vstq(vstq_head).bits.data.valid := false.B
     when ((vstq(vstq_head).bits.uop.is_rvv && vstq(vstq_head).bits.uop.v_split_last) ||
           (vstq(vstq_head).bits.uop.is_rvm && vstq(vstq_head).bits.uop.m_split_last)) {
       val stq_idx = vstq(vstq_head).bits.uop.stq_idx
@@ -1892,6 +1894,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   when (vsxq_done(vsxq_head)) {
     vsxq_head := WrapInc(vsxq_head, numVSxqEntries)
     vsxq(vsxq_head).valid := false.B
+    vsxq(vsxq_head).bits.addr.valid := false.B
+    vsxq(vsxq_head).bits.data.valid := false.B
     when (vsxq(vsxq_head).bits.uop.v_split_last) {
       val stq_idx = vsxq(vsxq_head).bits.uop.stq_idx
       stq(stq_idx).bits.succeeded := true.B
