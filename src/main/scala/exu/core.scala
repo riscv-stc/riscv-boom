@@ -1224,8 +1224,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         dis_uops(w).prs1_busy := Mux1H(Seq((dis_uops(w).rt(RS1, isInt   ), i_uop.prs1_busy),
                                            (dis_uops(w).rt(RS1, isFloat ), f_uop.prs1_busy),
                                            (dis_uops(w).rt(RS1, isVector ), v_uop.prs1_busy)))
-        dis_uops(w).pts1_busy := m_uop.pts1_busy
-        dis_uops(w).pts2_busy := m_uop.pts2_busy
+        dis_uops(w).pts1_busy    := m_uop.pts1_busy
+        dis_uops(w).pts1DirCross := m_uop.pts1DirCross
+        dis_uops(w).pts2_busy    := m_uop.pts2_busy
+        dis_uops(w).pts2DirCross := m_uop.pts2DirCross
         dis_uops(w).pts3_busy := Mux(dis_uops(w).rt(RD,  isAccTile), m_uop.pts3_busy, 0.U)
         dis_uops(w).pdst := Mux(dis_uops(w).rt(RD, isFloat ), f_uop.pdst,
                             Mux(dis_uops(w).rt(RD, isInt   ), i_uop.pdst,

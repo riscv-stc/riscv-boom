@@ -190,17 +190,19 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val m_sidx           = if (usingMatrix) UInt((rLenbSz+1).W)  else null   // slice index
   val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null   // eew encoded in load/store instructions
   val m_is_split       = if (usingMatrix) Bool()          else null
-  val m_split_first    = if (usingMatrix) Bool()          else null
   val m_split_last     = if (usingMatrix) Bool()          else null
   val m_slice_cnt      = if (usingMatrix) UInt((rLenbSz+1).W)  else null   // tilem in mopa instructions
   val m_slice_len      = if (usingMatrix) UInt((rLenbSz+1).W)  else null   // tilek in mopa instructions
   val m_tilen          = if (usingMatrix) UInt((rLenbSz+1).W)  else null   // tilen in mopa instructions
   val m_slice_quad     = if (usingMatrix) UInt(2.W)       else null
+  val m_slice_done     = if (usingMatrix) Bool()          else null
   val ts1_eew          = if (usingMatrix) UInt(2.W)       else null
   val ts2_eew          = if (usingMatrix) UInt(2.W)       else null
   val td_eew           = if (usingMatrix) UInt(2.W)       else null
   val mconfig          = if (usingMatrix) new MConfig     else null
   val isHSlice         = if (usingMatrix) Bool()          else null
+  val pts1DirCross     = if (usingMatrix) Bool()          else null
+  val pts2DirCross     = if (usingMatrix) Bool()          else null
   // purely debug information
   val debug_wdata      = UInt(xLen.W)
   val debug_events     = new DebugStageEvents

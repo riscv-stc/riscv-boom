@@ -958,12 +958,12 @@ class MatRenameStage(
     accbusytable.io.rebusy_reqs(w) := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_ACC
   }
   trbusytable.io.ren_uops  := ren2_uops  // expects pdst to be set up.
-  trbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_TR)
+  trbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_TR && Mux(x.bits.uop.uses_ldq, x.bits.uop.m_slice_done, true.B))
   trbusytable.io.wb_pdsts  := io.wakeups.map(_.bits.uop.pdst)
   trbusytable.io.wb_bits   := io.wakeups.map(w => UIntToOH(w.bits.uop.m_sidx))
 
   accbusytable.io.ren_uops  := ren2_uops  // expects pdst to be set up.
-  accbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_ACC)
+  accbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_ACC && Mux(x.bits.uop.uses_ldq, x.bits.uop.m_slice_done, true.B))
   accbusytable.io.wb_pdsts  := io.wakeups.map(_.bits.uop.pdst)
   accbusytable.io.wb_bits   := io.wakeups.map(w => Mux(w.bits.uop.m_is_split, UIntToOH(w.bits.uop.m_sidx), Fill(vLenb, 1.U(1.W))))
 
@@ -976,40 +976,22 @@ class MatRenameStage(
     val accbusy = accbusytable.io.busy_resps(w)
 
     when(uop.lrs1_rtype === RT_TR) {
-      when(uop.isHSlice =/= trbusy.prs1_busy(vLenb) && trbusy.prs1_busy(vLenb-1, 0).orR()) {
-        uop.pts1_busy := Fill(vLenb, 1.U(1.W))
-      }.otherwise {
-        uop.pts1_busy := trbusy.prs1_busy
-      }
+      uop.pts1_busy    := trbusy.prs1_busy
+      uop.pts1DirCross := uop.isHSlice =/= trbusy.prs1_busy(vLenb)
     } .elsewhen(uop.lrs1_rtype === RT_ACC) {
-      when(uop.fu_code =/= FU_GEMM && uop.isHSlice =/= accbusy.prs1_busy(vLenb) && accbusy.prs1_busy(vLenb-1, 0).orR()) {
-        uop.pts1_busy := Fill(vLenb, 1.U(1.W))
-      }.otherwise {
-        uop.pts1_busy := accbusy.prs1_busy
-      }
+      uop.pts1_busy    := accbusy.prs1_busy
+      uop.pts1DirCross := uop.isHSlice =/= accbusy.prs1_busy(vLenb)
     }
 
     when(uop.lrs2_rtype === RT_TR) {
-      when(uop.isHSlice =/= trbusy.prs2_busy(vLenb) && trbusy.prs2_busy(vLenb-1, 0).orR()) {
-        uop.pts2_busy := Fill(vLenb, 1.U(1.W))
-      }.otherwise {
-        uop.pts2_busy := trbusy.prs2_busy
-      }
+      uop.pts2_busy    := trbusy.prs2_busy
+      uop.pts2DirCross := uop.isHSlice =/= trbusy.prs2_busy(vLenb)
     } .elsewhen(uop.lrs2_rtype === RT_ACC) {
-      when(uop.fu_code =/= FU_GEMM && uop.isHSlice =/= accbusy.prs2_busy(vLenb) && accbusy.prs2_busy(vLenb-1, 0).orR()) {
-        uop.pts2_busy := Fill(vLenb, 1.U(1.W))
-      }.otherwise {
-        uop.pts2_busy := accbusy.prs2_busy
-      }
+      uop.pts2_busy    := accbusy.prs2_busy
+      uop.pts2DirCross := uop.isHSlice =/= accbusy.prs2_busy(vLenb)
     }
     
-    when(uop.dst_rtype === RT_TR) {
-      when(uop.isHSlice =/= trbusy.prs3_busy(vLenb) && trbusy.prs3_busy(vLenb-1, 0).orR()) {
-        uop.pts3_busy := Fill(vLenb, 1.U(1.W))
-      }.otherwise {
-        uop.pts3_busy := trbusy.prs3_busy
-      }
-    } .elsewhen(uop.dst_rtype === RT_ACC) {
+    when(uop.dst_rtype === RT_ACC) {
       uop.pts3_busy := accbusy.prs3_busy
     }
 

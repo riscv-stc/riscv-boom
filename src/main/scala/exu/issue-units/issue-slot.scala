@@ -156,10 +156,10 @@ class IssueSlot(
                      Mux(uop.uses_scalar, ps, true.B))
       }
     } else if(matrix) {
-      ret := Mux(uop.rt(RS1, isMatrix) && uop.m_scalar_busy, false.B,
-             Mux(uop.rt(RS1, isTrTile), p1(uop.m_sidx),
+      ret := Mux(uop.rt(RS1, isTrTile) && uop.pts1DirCross, p1.andR, 
+             Mux(uop.rt(RS1, isTrTile),   p1(uop.m_sidx),
              Mux(uop.fu_code === FU_GEMM, p1.andR,
-             Mux(uop.rt(RS1, isAccTile), p1(uop.m_sidx), true.B))))
+             Mux(uop.rt(RS1, isAccTile),  p1(uop.m_sidx), true.B))))
     } else {
       ret := p1(0)
     }
@@ -187,8 +187,9 @@ class IssueSlot(
         ret       := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))
       }
     } else if(matrix) {
-      ret := Mux(uop.rt(RS2, isMatrix), p2(uop.m_sidx),
-             Mux(uop.rt(RS2, isInt),    ps, true.B))
+      ret := Mux(uop.rt(RS2, isTrTile) && uop.pts2DirCross, p2.andR,
+             Mux(uop.rt(RS2, isTrTile), p2(uop.m_sidx),
+             Mux(uop.rt(RS2, isInt),    ps, true.B)))
     } else {
       ret := p2(0)
     }
@@ -359,15 +360,16 @@ class IssueSlot(
     val wk_pdst  = io.wakeup_ports(i).bits.pdst
     if (matrix) {
       val wk_uop = io.wakeup_ports(i).bits.uop
-      val wk_ts1 = wk_valid && (wk_pdst === next_uop.prs1) && (wk_uop.dst_rtype === next_uop.lrs1_rtype)
-      val wk_ts2 = wk_valid && (wk_pdst === next_uop.prs2) && (wk_uop.dst_rtype === next_uop.lrs2_rtype)
-      val wk_ts3 = wk_valid && (wk_pdst === next_uop.prs3) &&  wk_uop.rt(RD, isAccTile)
-      wake_p1(i) := Mux(next_uop.rt(RS1, isAccTile) && wk_uop.m_is_split, wk_ts1 << wk_uop.m_sidx,
-                    Mux(next_uop.rt(RS1, isTrTile)  && wk_uop.isHSlice === next_uop_ts1_hslice, wk_ts1 << wk_uop.m_sidx,
+      val wk_ts1 = wk_valid && (wk_pdst === next_uop.prs1) && (wk_uop.dst_rtype === next_uop.lrs1_rtype) && Mux(wk_uop.uses_ldq, wk_uop.m_slice_done, true.B)
+      val wk_ts2 = wk_valid && (wk_pdst === next_uop.prs2) && (wk_uop.dst_rtype === next_uop.lrs2_rtype) && Mux(wk_uop.uses_ldq, wk_uop.m_slice_done, true.B)
+      val wk_ts3 = wk_valid && (wk_pdst === next_uop.prs3) &&  wk_uop.rt(RD, isAccTile) && Mux(wk_uop.uses_ldq, wk_uop.m_slice_done, true.B)
+      wake_p1(i) := Mux(next_uop.rt(RS1, isAccTile) && wk_uop.uses_ldq, wk_ts1 << wk_uop.m_sidx,
+                    Mux(next_uop.rt(RS1, isTrTile), wk_ts1 << wk_uop.m_sidx,
                     Mux(wk_uop.m_split_last, Fill(vLenb, wk_ts1), 0.U)))
-      wake_p2(i) := Mux(next_uop.rt(RS2, isTrTile)  && wk_uop.isHSlice === next_uop_ts2_hslice, wk_ts2 << wk_uop.m_sidx,
-                    Mux(wk_uop.m_split_last, Fill(vLenb, wk_ts2), 0.U))
-      wake_p3(i) := Mux(next_uop.rt(RS1, isAccTile) && wk_uop.m_is_split, wk_ts3 << wk_uop.m_sidx,
+      wake_p2(i) := Mux(next_uop.rt(RS2, isAccTile) && wk_uop.uses_ldq, wk_ts2 << wk_uop.m_sidx,
+                    Mux(next_uop.rt(RS2, isTrTile), wk_ts2 << wk_uop.m_sidx,
+                    Mux(wk_uop.m_split_last, Fill(vLenb, wk_ts2), 0.U)))
+      wake_p3(i) := Mux(next_uop.rt(RD, isAccTile) && wk_uop.uses_ldq, wk_ts3 << wk_uop.m_sidx,
                     Mux(wk_uop.m_split_last, Fill(vLenb, wk_ts3), 0.U))
     } else {
       when (wk_valid && (wk_pdst === next_uop.prs1)) {
@@ -512,7 +514,6 @@ class IssueSlot(
     io.out_uop.m_scalar_busy := ~ps
     io.uop.m_sidx        := sidx
     when(io.request && io.grant && next_uop_mma) {
-      io.uop.m_split_first := slot_uop.m_sidx === 0.U
       io.uop.m_split_last  := slot_uop.m_sidx === slot_uop.m_tilek - 1.U
       io.uop.m_sidx        := slot_uop.m_sidx
       io.out_uop.m_sidx    := slot_uop.m_sidx + 1.U
