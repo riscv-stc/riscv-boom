@@ -355,6 +355,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val retired_rvv_div = Wire(Vec(coreWidth, Bool()))
   val retired_rvv_fdiv = Wire(Vec(coreWidth, Bool()))
   val retired_rvv_red = Wire(Vec(coreWidth, Bool()))
+  // matrix instructions
+  val retired_rvm = Wire(Vec(coreWidth, Bool()))
+  val retired_rvm_mset  = Wire(Vec(coreWidth, Bool()))
+  val retired_rvm_load  = Wire(Vec(coreWidth, Bool()))
+  val retired_rvm_store = Wire(Vec(coreWidth, Bool()))
+  val retired_rvm_int   = Wire(Vec(coreWidth, Bool()))
+  val retired_rvm_float = Wire(Vec(coreWidth, Bool()))
 
   val branch_cnt = RegInit(0.U(64.W))
   val store_cnt = RegInit(0.U(64.W))
@@ -362,9 +369,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val retire_cnt = RegInit(0.U(64.W))
 
   for (w <- 0 until coreWidth) {
+    val isInsRvm = rob.io.commit.valids(w) && rob.io.commit.uops(w).is_rvm
     val isInsRvv = rob.io.commit.valids(w) && rob.io.commit.uops(w).is_rvv
-    val isInsFp  = rob.io.commit.valids(w) && !rob.io.commit.uops(w).is_rvv && rob.io.commit.uops(w).fp_val
-    val isInsInt = rob.io.commit.valids(w) && !rob.io.commit.uops(w).is_rvv && !rob.io.commit.uops(w).fp_val
+    val isInsFp  = rob.io.commit.valids(w) && !rob.io.commit.uops(w).is_vm_ext &&  rob.io.commit.uops(w).fp_val
+    val isInsInt = rob.io.commit.valids(w) && !rob.io.commit.uops(w).is_vm_ext && !rob.io.commit.uops(w).fp_val
     // retired scalar int instructions
     retired_int(w)       := isInsInt
     retired_load(w)      := isInsInt && rob.io.commit.uops(w).uses_ldq
@@ -395,6 +403,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     retired_rvv_div(w)   := retired_rvv_int(w) && rob.io.commit.uops(w).fu_code.isOneOf(FU_DIV)
     retired_rvv_fdiv(w)  := retired_rvv_float(w) && rob.io.commit.uops(w).fu_code.isOneOf(FU_FDV)
     retired_rvv_red(w)   := retired_rvv(w) && rob.io.commit.uops(w).fu_code.isOneOf(FU_IVRP, FU_FVRP)
+    // retired matrix instructions
+    retired_rvm(w)       := isInsRvm
+    retired_rvm_mset(w)  := retired_rvm(w) && rob.io.commit.uops(w).fu_code.isOneOf(FU_CSR)
+    retired_rvm_load(w)  := retired_rvm(w) && rob.io.commit.uops(w).uses_ldq
+    retired_rvm_store(w) := retired_rvm(w) && rob.io.commit.uops(w).uses_stq
+    retired_rvm_int(w)   := retired_rvm(w) && !rob.io.commit.uops(w).fp_val && !rob.io.commit.uops(w).uses_ldq && !rob.io.commit.uops(w).uses_stq && !rob.io.commit.uops(w).fu_code.isOneOf(FU_CSR)
+    retired_rvm_float(w) := retired_rvm(w) && rob.io.commit.uops(w).fp_val
 
     when(retired_branch(w).asBool) {
       branch_cnt := branch_cnt + 1.U
@@ -459,6 +474,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     ("vector store", () => retired_rvv_store(w)),
     ("vector int",   () => retired_rvv_int(w)),
     ("vector float", () => retired_rvv_float(w))))
+    ++ (if (!usingMatrix) Seq() else Seq(
+    ("matrix total", () => retired_rvm(w)),
+    ("matrix mset",  () => retired_rvm_mset(w)),
+    ("matrix load",  () => retired_rvm_load(w)),
+    ("matrix store", () => retired_rvm_store(w)),
+    ("matrix int",   () => retired_rvm_int(w)),
+    ("matrix float", () => retired_rvm_float(w))))
   ))
 
   val micrArchEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
@@ -472,9 +494,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val intIssueSlotsEmpty = int_iss_unit.io.perf.empty
   val memIssueSlotsEmpty = mem_iss_unit.io.perf.empty
   val fpIssueSlotsEmpty = fp_pipeline.io.perf.iss_slots_empty
-  val vecIssueSlotsEmpty = v_pipeline.io.perf.vec_iss_slots_empty
-  //val vmxIssueSlotsEmpty = v_pipeline.io.perf.vmx_iss_slots_empty
-  val allIssueSlotsEmpty = intIssueSlotsEmpty && memIssueSlotsEmpty && fpIssueSlotsEmpty && vecIssueSlotsEmpty //&& vmxIssueSlotsEmpty
+  val vecIssueSlotsEmpty = v_pipeline.io.perf.iss_slots_empty
+  val matIssueSlotsEmpty = m_pipeline.io.perf.iss_slots_empty
+  val allIssueSlotsEmpty = intIssueSlotsEmpty && memIssueSlotsEmpty && fpIssueSlotsEmpty && vecIssueSlotsEmpty && matIssueSlotsEmpty
 
   val resourceEvents = new EventSet((mask, hits) => (mask & hits).orR, Seq(
     ("frontend fb full",                  () => io.ifu.perf.fb_full),
@@ -554,13 +576,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val mem_iss_valids = mem_iss_unit.io.iss_valids
   val int_iss_valids = int_iss_unit.io.iss_valids
   val fp_iss_valids  = fp_pipeline.io.perf.iss_valids
-  val vec_iss_valids = v_pipeline.io.perf.vec_iss_valids
-  // val mat_iss_valids = m_pipeline.io.perf.mat_iss_valids
+  val vec_iss_valids = v_pipeline.io.perf.iss_valids
+  val mat_iss_valids = m_pipeline.io.perf.iss_valids
 
-  val uopsIssued_valids  = mem_iss_valids ++ int_iss_valids ++ fp_iss_valids ++ vec_iss_valids
+  val uopsIssued_valids  = mem_iss_valids ++ int_iss_valids ++ fp_iss_valids ++ vec_iss_valids ++ mat_iss_valids
   val issueWidthSum      = issueParams.map(_.issueWidth).sum
   val uopsIssued_sum_leN = Wire(Vec(issueWidthSum, Bool()))
-  val uopsIssued_sum = PopCount(uopsIssued_valids)
+  val uopsIssued_sum     = PopCount(uopsIssued_valids)
   (0 until issueWidthSum).map(n => uopsIssued_sum_leN(n) := (uopsIssued_sum <= n.U) && ~allIssueSlotsEmpty)
   val uopsIssued_le_events: Seq[(String, () => Bool)] = uopsIssued_sum_leN.zipWithIndex.map { case (v, i) => ("less than or equal to $i uops issued", () => v) }
 
@@ -570,8 +592,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //val uopsIssued_stall_on_loads   = uopsIssued_stall && io.lsu.perf.ldq_nonempty && rob.io.perf.com_load_is_at_rob_head
   //val uopsIssued_stall_on_stores  = uopsIssued_stall && io.lsu.perf.stq_full && (!io.lsu.perf.ldq_nonempty || !rob.io.perf.com_load_is_at_rob_head)
 
-  val uopsExeActive_valids = if(usingVector) {
-        exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids ++ v_pipeline.io.perf.vec_req_valids //++ v_pipeline.io.perf.vmx_req_valids
+  val uopsExeActive_valids = if(usingMatrix) {
+        exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids ++ v_pipeline.io.perf.req_valids ++ m_pipeline.io.perf.req_valids
+      } else if(usingVector) {
+        exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids ++ v_pipeline.io.perf.req_valids
       } else if (usingFPU) {
         exe_units.map(u => u.io.req.valid) ++ fp_pipeline.io.perf.exe_units_req_valids
       } else {
@@ -684,13 +708,13 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   ))
 
   val topDownCyclesEvents1 = new EventSet((mask, hits) => (mask & hits).orR,
-    uopsDelivered_le_events // coreWidth
-      ++ uopsIssued_le_events // exu num
-      ++ uopsExeActive_events // exu num
-      ++ divider_active_events // divider busy
+    uopsDelivered_le_events     // coreWidth
+      ++ uopsIssued_le_events   // exu num
+      ++ uopsExeActive_events   // exu num
+      ++ divider_active_events  // divider busy
       ++ uopsExecuted_le_events // rob.numWakeupPorts
       ++ uopsExecuted_ge_events // rob.numWakeupPorts
-      ++ uopsRetired_le_events // rob.retireWidth
+      ++ uopsRetired_le_events  // rob.retireWidth
   )
 
   val perfEvents = new SuperscalarEventSets(Seq(
@@ -1371,7 +1395,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // Backpressure through dispatcher if necessary
   for (i <- 0 until issueParams.size) {
     if (issueParams(i).iqType == IQT_VEC.litValue) {
-      v_pipeline.io.vec_dis_uops <> dispatcher.io.dis_uops(i)
+      v_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
     } else if (issueParams(i).iqType == IQT_FP.litValue) {
       fp_pipeline.io.dis_uops <> dispatcher.io.dis_uops(i)
     } else if(issueParams(i).iqType == IQT_MAT.litValue) {
@@ -1558,13 +1582,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   if (usingMatrix) {
     // v_pipeline
-    v_pipeline.io.intupdate             := iregister_read.io.intupdate
-    v_pipeline.io.fpupdate              := fp_pipeline.io.fpupdate
+    v_pipeline.io.intupdate := iregister_read.io.intupdate
+    v_pipeline.io.fpupdate  := fp_pipeline.io.fpupdate
     // m_pipeline
-    m_pipeline.io.intupdate             := iregister_read.io.intupdate
+    m_pipeline.io.intupdate := iregister_read.io.intupdate
+    m_pipeline.io.fpupdate  := fp_pipeline.io.fpupdate
   } else if (usingVector) {
     v_pipeline.io.intupdate := iregister_read.io.intupdate
-    v_pipeline.io.fpupdate := fp_pipeline.io.fpupdate
+    v_pipeline.io.fpupdate  := fp_pipeline.io.fpupdate
   }
 
   // Load-hit Misspeculations

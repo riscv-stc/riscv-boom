@@ -65,8 +65,7 @@ trait IQType
   val IQT_IVEC  = 0x9.U(IQT_SZ.W)
   val IQT_FVEC  = 0xC.U(IQT_SZ.W)
   val IQT_IMAT  = 0x11.U(IQT_SZ.W)
-  val IQT_MMAT  = 0x12.U(IQT_SZ.W)
-  val IQT_IFMAT = 0x15.U(IQT_SZ.W)
+  val IQT_FMAT  = 0x14.U(IQT_SZ.W)
 }
 
 

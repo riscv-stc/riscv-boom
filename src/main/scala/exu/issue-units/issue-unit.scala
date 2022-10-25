@@ -91,7 +91,7 @@ class IssueUnitIO(
 
   val brupdate         = Input(new BrUpdateInfo())
   val intupdate        = if (vector || matrix) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
-  val fpupdate         = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val fpupdate         = if (vector || matrix) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   val vbusy_status     = if (vector) Input(UInt(numVecPhysRegs.W)) else null
   val flush_pipeline   = Input(Bool())
   val ld_miss          = Input(Bool())
@@ -234,6 +234,7 @@ abstract class IssueUnit(
     issue_slots(i).vl_wakeup   := io.vl_wakeup
     if (usingMatrix && matrix) {
       issue_slots(i).intupdate      := io.intupdate
+      issue_slots(i).fpupdate       := io.fpupdate
     } else if (usingVector) {
       if (vector) {
         issue_slots(i).vbusy_status   := io.vbusy_status

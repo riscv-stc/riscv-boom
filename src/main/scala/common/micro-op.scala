@@ -187,8 +187,9 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val pts2_busy        = if (usingMatrix) UInt(rLenb.W)   else null
   val pts3_busy        = if (usingMatrix) UInt(rLenb.W)   else null
   val m_scalar_busy    = if (usingMatrix) Bool()          else null
+  val m_scalar_data    = if (usingMatrix) UInt(xLen.W)    else null        // scalar value for matrix pipe
   val m_sidx           = if (usingMatrix) UInt((rLenbSz+1).W)  else null   // slice index
-  val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null   // eew encoded in load/store instructions
+  val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null        // eew encoded in load/store instructions
   val m_is_split       = if (usingMatrix) Bool()          else null
   val m_split_last     = if (usingMatrix) Bool()          else null
   val m_slice_cnt      = if (usingMatrix) UInt((rLenbSz+1).W)  else null   // tilem in mopa instructions
@@ -1158,6 +1159,12 @@ object MicroOpcodes extends Enumeration {
   val uopMWRSUB           = uopMWRSUB_enum.id.U(UOPC_SZ.W)
   val uopMQRSUB_enum      = Value
   val uopMQRSUB           = uopMQRSUB_enum.id.U(UOPC_SZ.W)
+  val uopMEMUL_enum       = Value
+  val uopMEMUL            = uopMEMUL_enum.id.U(UOPC_SZ.W)
+  val uopMWEMUL_enum      = Value
+  val uopMWEMUL           = uopMWEMUL_enum.id.U(UOPC_SZ.W)
+  val uopMQEMUL_enum      = Value
+  val uopMQEMUL           = uopMQEMUL_enum.id.U(UOPC_SZ.W)
   val uopMFNCVT_enum      = Value
   val uopMFNCVT           = uopMFNCVT_enum.id.U(UOPC_SZ.W)
   //mmov

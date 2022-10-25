@@ -39,7 +39,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val vxrm             = Input(UInt(2.W))
     val status           = Input(new MStatus())
 
-    val vec_dis_uops     = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
+    val dis_uops         = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
     val vbusy_status     = Input(UInt(numVecPhysRegs.W))
 
     val fromMat          = if (usingMatrix) Vec(matWidth, Flipped(Decoupled(new ExeUnitResp(vLen)))) else null
@@ -57,25 +57,24 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val debug_wb_wdata   = Output(Vec(numWakeupPorts, UInt((eLen).W)))
 
     val perf = Output(new Bundle {
-      val vec_iss_valids      = Vec(vecIssueParams.issueWidth, Bool())
-      val vec_req_valids      = Vec(vecIssueParams.issueWidth, Bool())
-      val vec_iss_slots_empty = Bool()
-      val vec_iss_slots_full  = Bool()
-      val div_busy            = Vec(vecIssueParams.issueWidth, Bool())
-      val fdiv_busy           = Vec(vecIssueParams.issueWidth, Bool())
+      val iss_valids      = Vec(vecIssueParams.issueWidth, Bool())
+      val req_valids      = Vec(vecIssueParams.issueWidth, Bool())
+      val iss_slots_empty = Bool()
+      val iss_slots_full  = Bool()
+      val div_busy        = Vec(vecIssueParams.issueWidth, Bool())
+      val fdiv_busy       = Vec(vecIssueParams.issueWidth, Bool())
     })
   })
 
   //**********************************
   // construct all of the modules
 
-  val exe_units      = new boom.exu.ExecutionUnits(fpu=false, vector=true)
-  val vec_issue_unit = Module(new IssueUnitCollapsing(
+  val exe_units  = new boom.exu.ExecutionUnits(fpu=false, vector=true)
+  val issue_unit = Module(new IssueUnitCollapsing(
                          vecIssueParams,
                          numWakeupPorts, vector = true))
-  vec_issue_unit.suggestName("vec_issue_unit")
+  issue_unit.suggestName("vec_issue_unit")
 
-  val viu = Seq(vec_issue_unit) //vmx_issue_unit
   val vregfile       = Module(new RegisterFileSynthesizable(numVecPhysRegs,
                          exe_units.numVrfReadPorts + memWidth,
                          exe_units.numVrfWritePorts + memWidth,
@@ -102,19 +101,19 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   val iss_valids = Wire(Vec(exe_units.numVrfReaders, Bool()))
   val iss_uops   = Wire(Vec(exe_units.numVrfReaders, new MicroOp()))
 
-  viu.map(_.io.vbusy_status := io.vbusy_status)
-  viu.map(_.io.tsc_reg := io.debug_tsc_reg)
-  viu.map(_.io.brupdate := io.brupdate)
-  viu.map(_.io.flush_pipeline := io.flush_pipeline)
-  viu.map(_.io.intupdate := io.intupdate)
-  viu.map(_.io.fpupdate  := io.fpupdate)
-  viu.map(_.io.vl_wakeup := io.vl_wakeup)
+  issue_unit.io.vbusy_status   := io.vbusy_status
+  issue_unit.io.tsc_reg        := io.debug_tsc_reg
+  issue_unit.io.brupdate       := io.brupdate
+  issue_unit.io.flush_pipeline := io.flush_pipeline
+  issue_unit.io.intupdate      := io.intupdate
+  issue_unit.io.fpupdate       := io.fpupdate
+  issue_unit.io.vl_wakeup      := io.vl_wakeup
   // Don't support ld-hit speculation to VEC window.
   for (w <- 0 until memWidth) {
-    viu.map(_.io.spec_ld_wakeup(w).valid := false.B)
-    viu.map(_.io.spec_ld_wakeup(w).bits := 0.U)
+    issue_unit.io.spec_ld_wakeup(w).valid := false.B
+    issue_unit.io.spec_ld_wakeup(w).bits  := 0.U
   }
-  viu.map(_.io.ld_miss := false.B)
+  issue_unit.io.ld_miss := false.B
 
   require (exe_units.numTotalBypassPorts == 0)
 
@@ -124,45 +123,43 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   // Input (Dispatch)
   for (w <- 0 until dispatchWidth) {
-    vec_issue_unit.io.dis_uops(w) <> io.vec_dis_uops(w)
+    issue_unit.io.dis_uops(w) <> io.dis_uops(w)
   }
 
   //-------------------------------------------------------------
   // **** Issue Stage ****
   //-------------------------------------------------------------
-  io.perf.vec_iss_valids := vec_issue_unit.io.iss_valids
-  io.perf.vec_req_valids := (0 until vecWidth).map(i => exe_units(i).io.req.valid)
-  io.perf.vec_iss_slots_empty := vec_issue_unit.io.perf.empty
-  io.perf.vec_iss_slots_full  := vec_issue_unit.io.perf.full
-  io.perf.div_busy  := (0 until vecWidth).map(i => if(exe_units(i).hasDiv)  exe_units(i).io.perf.div_busy  else false.B)
-  io.perf.fdiv_busy := (0 until vecWidth).map(i => if(exe_units(i).hasFdiv) exe_units(i).io.perf.fdiv_busy else false.B)
+  io.perf.iss_valids      := issue_unit.io.iss_valids
+  io.perf.req_valids      := (0 until vecWidth).map(i => exe_units(i).io.req.valid)
+  io.perf.iss_slots_empty := issue_unit.io.perf.empty
+  io.perf.iss_slots_full  := issue_unit.io.perf.full
+  io.perf.div_busy        := (0 until vecWidth).map(i => if(exe_units(i).hasDiv)  exe_units(i).io.perf.div_busy  else false.B)
+  io.perf.fdiv_busy       := (0 until vecWidth).map(i => if(exe_units(i).hasFdiv) exe_units(i).io.perf.fdiv_busy else false.B)
 
   // Output (Issue)
   for (i <- 0 until vecWidth) {
-    iss_valids(i) := vec_issue_unit.io.iss_valids(i)
-    iss_uops(i) := vec_issue_unit.io.iss_uops(i)
+    iss_valids(i) := issue_unit.io.iss_valids(i)
+    iss_uops(i) := issue_unit.io.iss_uops(i)
 
     var fu_types = exe_units(i).io.fu_types
     if (exe_units(i).supportedFuncUnits.fdiv) {
       val fdiv_issued = iss_valids(i) && iss_uops(i).fu_code_is(FU_FDV)
       fu_types = fu_types & RegNext(~Mux(fdiv_issued, FU_FDV, 0.U))
     }
-    vec_issue_unit.io.fu_types(i) := fu_types & ~Fill(FUC_SZ, vregister_read.io.rrd_stall.asUInt)
+    issue_unit.io.fu_types(i) := fu_types & ~Fill(FUC_SZ, vregister_read.io.rrd_stall.asUInt)
 
     require (exe_units(i).readsVrf)
   }
 
   // Wakeup
-  viu.map(iu => {
-    for ((writeback, issue_wakeup) <- io.wakeups zip iu.io.wakeup_ports) {
-      issue_wakeup.valid          := writeback.valid
-      issue_wakeup.bits.pdst      := writeback.bits.uop.pdst
-      issue_wakeup.bits.poisoned  := false.B
-      issue_wakeup.bits.uop       := writeback.bits.uop
-    }
-    iu.io.pred_wakeup_port.valid  := false.B
-    iu.io.pred_wakeup_port.bits   := DontCare
-  })
+  for ((writeback, issue_wakeup) <- io.wakeups zip issue_unit.io.wakeup_ports) {
+    issue_wakeup.valid          := writeback.valid
+    issue_wakeup.bits.pdst      := writeback.bits.uop.pdst
+    issue_wakeup.bits.poisoned  := false.B
+    issue_wakeup.bits.uop       := writeback.bits.uop
+  }
+  issue_unit.io.pred_wakeup_port.valid  := false.B
+  issue_unit.io.pred_wakeup_port.bits   := DontCare
 
 
   //-------------------------------------------------------------

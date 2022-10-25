@@ -52,7 +52,7 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false, val matr
   val out_uop       = Output(new MicroOp()) // the updated slot uop; will be shifted upwards in a collasping queue.
   val uop           = Output(new MicroOp()) // the current Slot's uop. Sent down the pipeline when issued.
   val intupdate     = if (vector || matrix) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
-  val fpupdate      = if (vector) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
+  val fpupdate      = if (vector || matrix) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
   val vbusy_status  = if (vector) Input(UInt(numVecPhysRegs.W)) else null
 
   val debug = {
@@ -100,7 +100,7 @@ class IssueSlot(
   val p2    = if(matrix) RegInit(0.U(vLenb.W)) else RegInit(false.B)
   val p3    = if(matrix) RegInit(0.U(vLenb.W)) else RegInit(false.B)
   val ps    = if(vector || matrix) RegInit(false.B) else null
-  val sdata = if(vector) RegInit(0.U(eLen.W)) else null
+  val sdata = if(vector || matrix) RegInit(0.U(eLen.W)) else null
   val sidx  = if(matrix) RegInit(0.U(vLenSz.W)) else null
   val ppred = RegInit(false.B)
   val slot_uop = RegInit(NullMicroOp(usingVector))
@@ -189,7 +189,7 @@ class IssueSlot(
     } else if(matrix) {
       ret := Mux(uop.rt(RS2, isTrTile) && uop.pts2DirCross, p2.andR,
              Mux(uop.rt(RS2, isTrTile), p2(uop.m_sidx),
-             Mux(uop.rt(RS2, isInt),    ps, true.B)))
+             Mux(uop.rt(RS2, isInt) || uop.rt(RS2, isFloat), ps, true.B)))
     } else {
       ret := p2(0)
     }
@@ -317,6 +317,7 @@ class IssueSlot(
       in_p2 := ~io.in_uop.bits.pts2_busy
       in_p3 := ~io.in_uop.bits.pts3_busy
       ps    := ~io.in_uop.bits.m_scalar_busy
+      sdata :=  io.in_uop.bits.m_scalar_data
       sidx  :=  io.in_uop.bits.m_sidx
     } else if (usingVector) {
       if(vector) {
@@ -441,9 +442,15 @@ class IssueSlot(
     when (io.intupdate.map(_.valid).reduce(_||_)) {
       val int_sel  = io.intupdate.map(u => u.valid && u.bits.uop.prs2 === next_uop.prs2 && next_uop.rt(RS2, isInt))
       val int_data = io.intupdate.map(u => u.bits.data)
+      val fp_sel   = io.fpupdate.map(u => u.valid && u.bits.uop.prs2 === next_uop.prs2 && next_uop.rt(RS2, isFloat))
+      val fp_data  = io.fpupdate.map(_.bits.data)
       when(int_sel.asUInt.orR) {
-        ps   := true.B
-        sidx := Mux1H(int_sel, int_data)
+        ps    := true.B
+        sidx  := Mux1H(int_sel, int_data)
+        sdata := Mux1H(int_sel, int_data)
+      } .elsewhen(fp_sel.asUInt.orR) {
+        ps    := true.B
+        sdata := Mux1H(fp_sel, fp_data)
       }
       assert(PopCount(int_sel) <= 1.U, "Multiple drivers to matrix intupdate")
     }
@@ -507,12 +514,14 @@ class IssueSlot(
   io.out_uop.lrs2_rtype := next_lrs2_rtype
   io.out_uop.br_mask    := next_br_mask
   if(usingMatrix && matrix) {
-    io.out_uop.pts1_busy := ~p1
-    io.out_uop.pts2_busy := ~p2
-    io.out_uop.pts3_busy := ~p3
-    io.out_uop.m_sidx    := sidx
+    io.out_uop.pts1_busy     := ~p1
+    io.out_uop.pts2_busy     := ~p2
+    io.out_uop.pts3_busy     := ~p3
+    io.out_uop.m_sidx        := sidx
     io.out_uop.m_scalar_busy := ~ps
-    io.uop.m_sidx        := sidx
+    io.out_uop.m_scalar_data := sdata
+    io.uop.m_sidx            := sidx
+    io.uop.m_scalar_data     := sdata
     when(io.request && io.grant && next_uop_mma) {
       io.uop.m_split_last  := slot_uop.m_sidx === slot_uop.m_tilek - 1.U
       io.uop.m_sidx        := slot_uop.m_sidx
@@ -529,14 +538,14 @@ class IssueSlot(
     if (vector) {
       // value to next slot should be current latched version
       // ignore element busy masking, we keep busy status for entire v-register (i.e. p1,p2,p3)
-      io.out_uop.prs1_busy  := ~p1 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
-      io.out_uop.prs2_busy  := ~p2 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
-      io.out_uop.prs3_busy  := ~p3 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
+      io.out_uop.prs1_busy     := ~p1 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
+      io.out_uop.prs2_busy     := ~p2 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
+      io.out_uop.prs3_busy     := ~p3 //& (slot_mask << Cat(slot_rsel, 0.U(3.W)))
       io.out_uop.v_scalar_busy := ~ps
       io.out_uop.v_scalar_data := sdata
-      io.out_uop.v_perm_busy := false.B //!perm_ready || perm_ready_vrg_bsy
-      io.out_uop.v_perm_wait := false.B //perm_wait || perm_wait_vrg_set
-      io.out_uop.v_perm_idx  := 0.U //perm_idx
+      io.out_uop.v_perm_busy   := false.B //!perm_ready || perm_ready_vrg_bsy
+      io.out_uop.v_perm_wait   := false.B //perm_wait || perm_wait_vrg_set
+      io.out_uop.v_perm_idx    := 0.U //perm_idx
       // handle VOP_VI, prs1 records the value of lrpwdls
       // s1, and is used as simm5
       io.uop.v_scalar_data  := Mux(io.uop.rt(RS1, isRvvSImm5), Cat(Fill(eLen-5, io.uop.prs1(4).asUInt), io.uop.prs1(4,0)),

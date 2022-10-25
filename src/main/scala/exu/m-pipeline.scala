@@ -48,6 +48,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     val toVec            = Vec(matWidth, Decoupled(new ExeUnitResp(vLen)))
     // scalar pipeline related
     val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
+    val fpupdate         = Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen))))
     val lsu_tile_rport   = new TrTileRegReadPortIO()
     val lsu_tile_wbk     = Flipped(Decoupled(new ExeUnitResp(vLen)))
     val lsu_acc_rreq     = Flipped(ValidIO(new AccReadReq()))
@@ -59,6 +60,13 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
     val debug_wb_wdata   = Output(Vec(numWakeupPorts, UInt((vLen).W)))
+
+    val perf = Output(new Bundle {
+      val iss_valids      = Vec(matIssueParam.issueWidth, Bool())
+      val req_valids      = Vec(matIssueParam.issueWidth, Bool())
+      val iss_slots_empty = Bool()
+      val iss_slots_full  = Bool()
+    })
   })
 
   //**********************************
@@ -84,6 +92,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   issue_unit.io.brupdate := io.brupdate
   issue_unit.io.flush_pipeline := io.flush_pipeline
   issue_unit.io.intupdate := io.intupdate
+  issue_unit.io.fpupdate  := io.fpupdate
 
   for (w <- 0 until memWidth) {
     issue_unit.io.spec_ld_wakeup(w).valid := false.B
@@ -105,6 +114,11 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
   // **** Issue Stage ****
   //-------------------------------------------------------------
+  io.perf.iss_valids      := issue_unit.io.iss_valids
+  io.perf.req_valids      := (0 until matWidth).map(i => exe_units(i).io.req.valid)
+  io.perf.iss_slots_empty := issue_unit.io.perf.empty
+  io.perf.iss_slots_full  := issue_unit.io.perf.full
+
   // Output (Issue)
   for (i <- 0 until matWidth) {
     iss_valids(i) := issue_unit.io.iss_valids(i)
