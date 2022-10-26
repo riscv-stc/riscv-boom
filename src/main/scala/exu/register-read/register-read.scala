@@ -383,10 +383,10 @@ class RegisterRead(
           io.intupdate(w - memWidth).bits.data := Mux(exe_reg_uops(w).is_rvv, exe_reg_rs1_data(w), exe_reg_rs2_data(w))
         }
       } else if (float) {
-        io.exe_reqs(w).valid := exe_reg_valids(w) && !exe_reg_uops(w).is_rvv
-        io.fpupdate(w).valid := exe_reg_valids(w) && exe_reg_uops(w).is_rvv
-        io.fpupdate(w).bits.uop := exe_reg_uops(w)
-        io.fpupdate(w).bits.data := ieee(exe_reg_rs1_data(w))
+        io.exe_reqs(w).valid := exe_reg_valids(w) && !exe_reg_uops(w).is_vm_ext
+        io.fpupdate(w).valid := exe_reg_valids(w) && exe_reg_uops(w).is_vm_ext
+        io.fpupdate(w).bits.uop  := exe_reg_uops(w)
+        io.fpupdate(w).bits.data := Mux(exe_reg_uops(w).is_rvv, ieee(exe_reg_rs1_data(w)), ieee(exe_reg_rs2_data(w)))
       } else if (vector) {
         io.exe_reqs(w).valid    := exe_reg_valids(w) //&& (!is_sta || is_active)
         

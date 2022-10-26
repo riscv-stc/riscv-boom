@@ -191,9 +191,9 @@ abstract class IssueUnit(
       if (usingVector) {
         //dis_uops(w).prvm_busy := 0.U
         when (dis_uops(w).rt(RS2, isVector)) { dis_uops(w).prs2_busy := 0.U }
-        when (dis_uops(w).is_rvv )           { dis_uops(w).prs3_busy := 0.U }
+        when (dis_uops(w).is_vm_ext )        { dis_uops(w).prs3_busy := 0.U }
         // hack fu_code if the instruction is merge.
-        when (dis_uops(w).is_rvv && dis_uops(w).uopc.isOneOf(uopMERGE)){
+        when (dis_uops(w).is_rvm || (dis_uops(w).is_rvv && dis_uops(w).uopc.isOneOf(uopMERGE))){
           dis_uops(w).fu_code := FU_FPU
         }
       }

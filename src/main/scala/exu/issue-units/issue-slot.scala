@@ -439,7 +439,7 @@ class IssueSlot(
 
   if (matrix) {
     // when intupdate, we need to tell if data is really we need.
-    when (io.intupdate.map(_.valid).reduce(_||_)) {
+    when (io.intupdate.map(_.valid).reduce(_||_) || io.fpupdate.map(_.valid).reduce(_||_)) {
       val int_sel  = io.intupdate.map(u => u.valid && u.bits.uop.prs2 === next_uop.prs2 && next_uop.rt(RS2, isInt))
       val int_data = io.intupdate.map(u => u.bits.data)
       val fp_sel   = io.fpupdate.map(u => u.valid && u.bits.uop.prs2 === next_uop.prs2 && next_uop.rt(RS2, isFloat))

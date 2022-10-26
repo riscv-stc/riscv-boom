@@ -192,6 +192,7 @@ trait ScalarOpConstants
   val RT_MAT   = 0x20.U(6.W) // matrix
   val RT_TR    = 0x21.U(6.W) // tr_tile, TODO: include more variations
   val RT_ACC   = 0x22.U(6.W) // acc_tile, TODO: include more variations
+  val RT_MI    = 0x23.U(6.W) // RS2 as simm5
 
   def isInt      (rt: UInt): Bool = (rt === RT_FIX || rt === RT_FIXU)
   def isIntU     (rt: UInt): Bool = (rt === RT_FIXU)
@@ -212,6 +213,7 @@ trait ScalarOpConstants
   def isMatrix   (rt: UInt): Bool = rt(5)
   def isTrTile   (rt: UInt): Bool = (rt === RT_TR)
   def isAccTile  (rt: UInt): Bool = (rt === RT_ACC)
+  def isRvmSImm5 (rt: UInt): Bool = (rt === RT_MI)
   //def isMaskV    (rt: UInt): Bool = (rt === RT_VM)
 
   val uopX    = BitPat.dontCare(boom.common.MicroOpcodes.UOPC_SZ)

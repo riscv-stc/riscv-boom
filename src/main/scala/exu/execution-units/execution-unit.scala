@@ -1384,11 +1384,11 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.macReq.bits.src1Ridx  := Mux(io.req.bits.uop.uopc.isOneOf(uopMSUB, uopMWSUB, uopMQSUB), io.req.bits.uop.prs3, io.req.bits.uop.prs1)
   mxu.io.macReq.bits.src2Ridx  := Mux(io.req.bits.uop.uopc.isOneOf(uopMSUB, uopMWSUB, uopMQSUB), io.req.bits.uop.prs1, io.req.bits.uop.prs3)
   mxu.io.macReq.bits.dstRidx   := io.req.bits.uop.pdst
-  mxu.io.macReq.bits.srcType   := Cat(io.req.bits.uop.fp_val.asUInt, io.req.bits.uop.ts1_eew)
+  mxu.io.macReq.bits.srcType   := Cat(io.req.bits.uop.fp_val.asUInt, Mux(io.req.bits.uop.rt(RS1, isAccTile), io.req.bits.uop.td_eew, io.req.bits.uop.ts1_eew))
   mxu.io.macReq.bits.outType   := Cat(io.req.bits.uop.fp_val.asUInt, io.req.bits.uop.td_eew)
   mxu.io.macReq.bits.aluType   := Mux(io.req.bits.uop.uopc.isOneOf(uopMFNCVT), CVT,
                                   Mux(io.req.bits.uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), MACC,
-                                  Mux(io.req.bits.uop.uopc.isOneOf(uopMEMUL, uopMWEMUL, uopMQEMUL), MULT,
+                                  Mux(io.req.bits.uop.uopc.isOneOf(uopMEMUL), MULT,
                                   Mux(io.req.bits.uop.uopc.isOneOf(uopMADD, uopMWADD, uopMQADD), ADD, SUB))))
   mxu.io.macReq.bits.rm        := io.fcsr_rm
   mxu.io.macReqSrcA            := io.req.bits.rs1_data
