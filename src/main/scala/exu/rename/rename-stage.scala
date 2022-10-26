@@ -977,7 +977,7 @@ class MatRenameStage(
 
     when(uop.lrs1_rtype === RT_TR) {
       uop.pts1_busy    := trbusy.prs1_busy
-      uop.pts1DirCross := uop.isHSlice =/= trbusy.prs1_busy(vLenb)
+      uop.pts1DirCross := Mux(uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), trbusy.prs1_busy(vLenb), uop.isHSlice =/= trbusy.prs1_busy(vLenb))
     } .elsewhen(uop.lrs1_rtype === RT_ACC) {
       uop.pts1_busy    := accbusy.prs1_busy
       uop.pts1DirCross := uop.isHSlice =/= accbusy.prs1_busy(vLenb)
@@ -985,7 +985,7 @@ class MatRenameStage(
 
     when(uop.lrs2_rtype === RT_TR) {
       uop.pts2_busy    := trbusy.prs2_busy
-      uop.pts2DirCross := uop.isHSlice =/= trbusy.prs2_busy(vLenb)
+      uop.pts2DirCross := Mux(uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), !trbusy.prs2_busy(vLenb), uop.isHSlice =/= trbusy.prs2_busy(vLenb))
     } .elsewhen(uop.lrs2_rtype === RT_ACC) {
       uop.pts2_busy    := accbusy.prs2_busy
       uop.pts2DirCross := uop.isHSlice =/= accbusy.prs2_busy(vLenb)
