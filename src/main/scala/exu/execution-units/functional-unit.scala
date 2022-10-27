@@ -1214,12 +1214,14 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
 
   val respUop = io.resp.bits.uop
   val isNarrowOdd = respUop.rt(RS2, isWidenV) && (respUop.v_eidx((vLenbSz - 1).U - respUop.vd_eew) === 1.U)
+  val isNarrowEven = respUop.rt(RS2, isWidenV) && (respUop.v_eidx((vLenbSz - 1).U - respUop.vd_eew) === 0.U)
   val alu_out = Mux1H(UIntToOH(respUop.vd_eew),
     Seq(e8Out.asUInt, e16Out.asUInt, e32Out.asUInt, e64Out.asUInt))
 
   io.resp.bits.uop.vxsat := vxsatOut.orR
   io.resp.bits.data :=  Mux(isNarrowOdd, alu_out << (vLen / 2), alu_out)
-  io.resp.bits.vmask := Mux(isNarrowOdd, Fill(vLenb / 2, 1.U(1.W)) ## Fill(vLenb / 2, 0.U(1.W)), Fill(vLenb, 1.U(1.W)))
+  io.resp.bits.vmask := Mux(isNarrowOdd, Fill(vLenb / 2, 1.U(1.W)) ## Fill(vLenb / 2, 0.U(1.W)), 
+                        Mux(isNarrowEven, Fill(vLenb / 2, 0.U(1.W)) ## Fill(vLenb / 2, 1.U(1.W)), Fill(vLenb, 1.U(1.W))))
 }
 
 /**
@@ -1652,12 +1654,14 @@ class VecALUUnit(
                                 Seq(e8_adder_out.asUInt, e16_adder_out.asUInt, e32_adder_out.asUInt,e64_adder_out.asUInt))))
 
   val isNarrowOdd = uop.rt(RS2, isWidenV) && uop.v_eidx((vLenbSz-1).U-uop.vd_eew) === 1.U
+  val isNarrowEven = uop.rt(RS2, isWidenV) && uop.v_eidx((vLenbSz-1).U-uop.vd_eew) === 0.U
   r_val (0) := io.req.valid && !killed
   r_data(0) := Mux(isVMask,              rs3_data & bitInactive | alu_out & ~bitInactive,
                Mux(uop.rt(RD, isMaskVD), rs3_data & Cat(Fill(vLen-vLenb, 1.U(1.W)), inactive) | alu_out & ~inactive,
                Mux(isNarrowOdd,          Cat((0 until vLenb/2).map(b => Mux(byteInactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse) ## Fill(vLen/2, 0.U(1.W)),
                                          Cat((0 until vLenb).map(b => Mux(byteInactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse))))
-  r_mask(0) := Mux(isNarrowOdd, Fill(vLenb/2, 1.U(1.W)) ## Fill(vLenb/2, 0.U(1.W)), Fill(vLenb, 1.U(1.W)))
+  r_mask(0) := Mux(isNarrowOdd, Fill(vLenb/2, 1.U(1.W)) ## Fill(vLenb/2, 0.U(1.W)), 
+               Mux(isNarrowEven, Fill(vLenb / 2, 0.U(1.W)) ## Fill(vLenb / 2, 1.U(1.W)), Fill(vLenb, 1.U(1.W))))
   r_pred(0) := uop.is_sfb_shadow && io.req.bits.pred_data
   for (i <- 1 until numStages) {
     r_val(i)  := r_val(i-1)
@@ -1709,12 +1713,14 @@ class VecFPUUnit(dataWidth: Int)(implicit p: Parameters)
   fpu.io.req.bits.fcsr_rm  := io.fcsr_rm
 
   val isNarrowOdd = io.resp.bits.uop.rt(RS2, isWidenV) && (io.resp.bits.uop.v_eidx((vLenbSz - 1).U - io.resp.bits.uop.vd_eew) === 1.U)
+  val isNarrowEven = io.resp.bits.uop.rt(RS2, isWidenV) && (io.resp.bits.uop.v_eidx((vLenbSz - 1).U - io.resp.bits.uop.vd_eew) === 0.U)
 
   io.resp.bits.data              := Mux(isNarrowOdd, fpu.io.resp.bits.data << (vLen / 2),fpu.io.resp.bits.data)
   io.resp.bits.fflags.valid      := fpu.io.resp.bits.fflags.valid
   io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
   io.resp.bits.fflags.bits.flags := fpu.io.resp.bits.fflags.bits.flags
-  io.resp.bits.vmask := Mux(isNarrowOdd, Fill(vLenb / 2, 1.U(1.W)) ## Fill(vLenb / 2, 0.U(1.W)), Fill(vLenb, 1.U(1.W)))
+  io.resp.bits.vmask := Mux(isNarrowOdd, Fill(vLenb / 2, 1.U(1.W)) ## Fill(vLenb / 2, 0.U(1.W)), 
+                        Mux(isNarrowEven,Fill(vLenb / 2, 0.U(1.W)) ## Fill(vLenb / 2, 1.U(1.W)), Fill(vLenb, 1.U(1.W))))
 
 
 }
@@ -3445,9 +3451,11 @@ class VecIntToFPUnit(dataWidth: Int, latency: Int)(implicit p: Parameters)
     e16FlagOut(e) := Mux(outInactive(e), 0.U, ifpu.io.out.bits.exc)
   }
   val isNarrowOdd = io.resp.bits.uop.rt(RS2, isWidenV) && (io.resp.bits.uop.v_eidx((vLenbSz - 1).U - io.resp.bits.uop.vd_eew) === 1.U)
+  val isNarrowEven = io.resp.bits.uop.rt(RS2, isWidenV) && (io.resp.bits.uop.v_eidx((vLenbSz - 1).U - io.resp.bits.uop.vd_eew) === 0.U)
   val resp_data = Mux1H(UIntToOH(io.resp.bits.uop.vd_eew), Seq(0.U, e16DataOut.asUInt, e32DataOut.asUInt, e64DataOut.asUInt))
   io.resp.bits.data :=  Mux(isNarrowOdd, resp_data << (vLen / 2), resp_data)
-  io.resp.bits.vmask :=  Mux(isNarrowOdd, Fill(vLenb / 2, 1.U(1.W)) ## Fill(vLenb / 2, 0.U(1.W)), Fill(vLenb, 1.U(1.W)))
+  io.resp.bits.vmask :=  Mux(isNarrowOdd, Fill(vLenb / 2, 1.U(1.W)) ## Fill(vLenb / 2, 0.U(1.W)), 
+                         Mux(isNarrowEven, Fill(vLenb / 2, 0.U(1.W)) ## Fill(vLenb / 2, 1.U(1.W)), Fill(vLenb, 1.U(1.W))))
   io.resp.bits.fflags.valid      := io.resp.valid
   io.resp.bits.fflags.bits.uop   := io.resp.bits.uop
   val resp_flag = Mux1H(UIntToOH(io.resp.bits.uop.vd_eew),
