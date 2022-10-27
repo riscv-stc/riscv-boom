@@ -779,7 +779,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   !vldq_lkup_e.bits.executed                             &&
                                   !vldq_lkup_e.bits.order_fail                           &&
                                   !vldq_lkup_e.bits.uop.exception                        &&
-                                  !vldq_lkup_e.bits.st_dep_mask(stq_head)                &&
+                                  !vldq_lkup_e.bits.st_dep_mask.orR                      &&
                                    io.vmem.req.ready))
 
   // Can we fire a vldq exception report
@@ -846,7 +846,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   !vlxq_lkup_e.bits.order_fail                            &&
                                   !vlxq_lkup_e.bits.uop.exception                         &&
                                    vlxq_lkup_e.bits.uop.rob_idx === io.core.rob_head_idx  &&
-                                  !vlxq_lkup_e.bits.st_dep_mask(stq_head)                 &&
+                                  !vlxq_lkup_e.bits.st_dep_mask.orR                       &&
                                    io.vmem.req.ready))
 
   // can we fire a vlxq exception report
