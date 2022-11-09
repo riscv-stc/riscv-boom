@@ -1,13 +1,14 @@
 // See README.md for license details.
 package boom.exu
 
+import Chisel.Pipe
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tile.FType
 import freechips.rocketchip.config.Parameters
 import hardfloat._
-
 import boom.common._
+import freechips.rocketchip.util.ShouldBeRetimed
 
 // acc buffer related command
 object AccTileConstants {
@@ -123,8 +124,9 @@ class IntMacUnit extends Module {
 }
 
 // may use blackbox hardfloat modules
-class FpMacUnit(val fpMultiCycles: Boolean = true) extends Module {
+class FpMacUnit(val fpLatency: Int = 3) extends Module with ShouldBeRetimed {
   val io = IO(new Bundle {
+    val validin = Input(Bool())
     val src1 = Input(UInt(32.W))
     val src2 = Input(UInt(16.W))
     val src3 = Input(UInt(32.W))
@@ -133,30 +135,63 @@ class FpMacUnit(val fpMultiCycles: Boolean = true) extends Module {
     val aluType = Input(UInt(3.W))
     val roundingMode = Input(UInt(3.W))
     val detectTininess = Input(UInt(1.W))
+    val validout = Output(Bool())
     val out = Output(UInt(32.W))
   })
+
+  require(fpLatency > 0)
 
   val H = new FType(5, 11)
   val S = new FType(8, 24)
 
-  // convert fp16 A, B, and C to recoded format
+  // Pipe stages.
+  val pipeValid0 = Wire(Bool())
+  val pipeValid1 = Wire(Bool())
+  val pipeValid2 = Wire(Bool())
+
+  val pipeOutType0 = Wire(UInt(3.W))
+  val pipeOutType1 = Wire(UInt(3.W))
+  val pipeOutType2 = Wire(UInt(3.W))
+
+  val pipeAluType0 = Wire(UInt(3.W))
+  val pipeAluType1 = Wire(UInt(3.W))
+  val pipeAluType2 = Wire(UInt(3.W))
+
+  val pipeRoundingMode0 = Wire(UInt(3.W))
+  val pipeRoundingMode1 = Wire(UInt(3.W))
+  val pipeRoundingMode2 = Wire(UInt(3.W))
+
+  val pipeDetectTininess0 = Wire(UInt(1.W))
+  val pipeDetectTininess1 = Wire(UInt(1.W))
+  val pipeDetectTininess2 = Wire(UInt(1.W))
+
+  val pipeLatency = if (fpLatency >= 3) 1 else 0
+
+  // ----------------- Pipeline Stage 0. -----------------
+  pipeValid0 := io.validin
+  pipeOutType0 := io.outType
+  pipeAluType0 := io.aluType
+  pipeRoundingMode0 := io.roundingMode
+  pipeDetectTininess0 := io.detectTininess
+
+  // Convert fp16 A, B, and C to recoded format
   val recAFP16 = recFNFromFN(H.exp, H.sig, io.src1(15, 0))
   val recBFP16 = recFNFromFN(H.exp, H.sig, io.src2(15, 0))
   val recCFP16 = recFNFromFN(H.exp, H.sig, io.src3(15, 0))
-  // convert fp32 A, B and C to recoded format
+  // Convert fp32 A, B and C to recoded format
   val recAFP32 = recFNFromFN(S.exp, S.sig, io.src1)
   val recCFP32 = recFNFromFN(S.exp, S.sig, io.src3)
 
-  // convert fp16 to fp32 for float add/sub/rsub
+  // Convert fp16 to fp32 for float add/sub/rsub
   val recA16ToRec32 = Module(new RecFNToRecFN(H.exp, H.sig, S.exp, S.sig))
   recA16ToRec32.io.in := recAFP16
-  recA16ToRec32.io.roundingMode := io.roundingMode
-  recA16ToRec32.io.detectTininess := io.detectTininess
+  recA16ToRec32.io.roundingMode := pipeRoundingMode0
+  recA16ToRec32.io.detectTininess := pipeDetectTininess0
 
   val recC16ToRec32 = Module(new RecFNToRecFN(H.exp, H.sig, S.exp, S.sig))
   recC16ToRec32.io.in := recCFP16
-  recC16ToRec32.io.roundingMode := io.roundingMode
-  recC16ToRec32.io.detectTininess := io.detectTininess
+  recC16ToRec32.io.roundingMode := pipeRoundingMode0
+  recC16ToRec32.io.detectTininess := pipeDetectTininess0
 
   val recA = Mux(io.srcType === FP32TYPE, recAFP32, recA16ToRec32.io.out)
   val recC = Mux(io.srcType === FP32TYPE, recCFP32, recC16ToRec32.io.out)
@@ -164,46 +199,71 @@ class FpMacUnit(val fpMultiCycles: Boolean = true) extends Module {
   // FNCVT: convert fp32 to fp16 recoded format
   val recA32ToRec16 = Module(new RecFNToRecFN(S.exp, S.sig, H.exp, H.sig))
   recA32ToRec16.io.in := recAFP32
-  recA32ToRec16.io.roundingMode := io.roundingMode
-  recA32ToRec16.io.detectTininess := io.detectTininess
+  recA32ToRec16.io.roundingMode := pipeRoundingMode0
+  recA32ToRec16.io.detectTininess := pipeDetectTininess0
+  val pipeSrc32To16_0 = recA32ToRec16.io.out
 
-  // recoded fp16 * fp16
+  // Recoded fp16 * fp16
   val mulRawFN = Module(new MulFullRawFN(H.exp, H.sig))
   mulRawFN.io.a := rawFloatFromRecFN(H.exp, H.sig, recAFP16)
   mulRawFN.io.b := rawFloatFromRecFN(H.exp, H.sig, recBFP16)
 
-  // round raw results to recFN(32)
+  // Round raw results to recFN(32)
   val mulRawToRec = Module(new RoundAnyRawFNToRecFN(H.exp, H.sig * 2 - 1, S.exp, S.sig, 0))
   mulRawToRec.io.invalidExc := mulRawFN.io.invalidExc
   mulRawToRec.io.infiniteExc := false.B
   mulRawToRec.io.in := mulRawFN.io.rawOut
-  mulRawToRec.io.roundingMode := io.roundingMode
-  mulRawToRec.io.detectTininess := io.detectTininess
+  mulRawToRec.io.roundingMode := pipeRoundingMode0
+  mulRawToRec.io.detectTininess := pipeDetectTininess0
 
-  // recoded fp32 + fp32
+  // ----------------- Pipeline Stage 1. -----------------
+  // Recoded fp32 + fp32
+  pipeValid1 := Pipe(pipeValid0, false.B, pipeLatency).valid
+  pipeOutType1 := Pipe(pipeValid0, pipeOutType0, pipeLatency).bits
+  pipeAluType1 := Pipe(pipeValid0, pipeAluType0, pipeLatency).bits
+  pipeRoundingMode1 := Pipe(pipeValid0, pipeRoundingMode0, pipeLatency).bits
+  pipeDetectTininess1 := Pipe(pipeValid0, pipeDetectTininess0, pipeLatency).bits
+  val pipeSrc32To16_1 = Pipe(pipeValid0, pipeSrc32To16_0, pipeLatency).bits
+
   val addRawFN = Module(new AddRawFN(S.exp, S.sig))
-  addRawFN.io.subOp := io.aluType === SUB
-  addRawFN.io.a := rawFloatFromRecFN(S.exp, S.sig, Mux(io.aluType(1), recA, mulRawToRec.io.out))
-  addRawFN.io.b := rawFloatFromRecFN(S.exp, S.sig, recC)
-  addRawFN.io.roundingMode := io.roundingMode
+  val mulOutA = Pipe(pipeValid0, Mux(pipeAluType0(1), recA, mulRawToRec.io.out), pipeLatency).bits
+  val mulOutB = Pipe(pipeValid0, recC, pipeLatency).bits
+  addRawFN.io.a := rawFloatFromRecFN(S.exp, S.sig, mulOutA)
+  addRawFN.io.b := rawFloatFromRecFN(S.exp, S.sig, mulOutB)
+  addRawFN.io.subOp := pipeAluType1 === SUB
+  addRawFN.io.roundingMode := pipeRoundingMode1
+
+  // ----------------- Pipeline Stage 2. -----------------
+  pipeValid2 := Pipe(pipeValid1, false.B, pipeLatency).valid
+  pipeOutType2 := Pipe(pipeValid1, pipeOutType1, pipeLatency).bits
+  pipeAluType2 := Pipe(pipeValid1, pipeAluType1, pipeLatency).bits
+  pipeRoundingMode2 := Pipe(pipeValid1, pipeRoundingMode1, pipeLatency).bits
+  pipeDetectTininess2 := Pipe(pipeValid1, pipeDetectTininess1, pipeLatency).bits
+  val pipeSrc32To16_2 = Pipe(pipeValid0, pipeSrc32To16_1, pipeLatency).bits
 
   val addRawToRec = Module(new RoundRawFNToRecFN(S.exp, S.sig, 0))
-  addRawToRec.io.invalidExc := addRawFN.io.invalidExc
+  addRawToRec.io.invalidExc := Pipe(pipeValid1, addRawFN.io.invalidExc, pipeLatency).bits
   addRawToRec.io.infiniteExc := false.B
-  addRawToRec.io.in := addRawFN.io.rawOut
-  addRawToRec.io.roundingMode := io.roundingMode
-  addRawToRec.io.detectTininess := io.detectTininess
-  val fp32Out = fNFromRecFN(S.exp, S.sig, addRawToRec.io.out)
+  addRawToRec.io.in := Pipe(pipeValid1, addRawFN.io.rawOut, pipeLatency).bits
+  addRawToRec.io.roundingMode := pipeRoundingMode2
+  addRawToRec.io.detectTininess := pipeDetectTininess2
+
+  val addRawOut = addRawToRec.io.out
+  val fp32Out = fNFromRecFN(S.exp, S.sig, addRawOut)
 
   // FP32 to FP16
   val recAdd32ToRec16 = Module(new RecFNToRecFN(S.exp, S.sig, H.exp, H.sig))
-  recAdd32ToRec16.io.in := addRawToRec.io.out
-  recAdd32ToRec16.io.roundingMode := io.roundingMode
-  recAdd32ToRec16.io.detectTininess := io.detectTininess
-  val fp16Out = Mux(io.aluType === CVT, fNFromRecFN(H.exp, H.sig, recA32ToRec16.io.out),
+  recAdd32ToRec16.io.in := addRawOut
+  recAdd32ToRec16.io.roundingMode := pipeRoundingMode2
+  recAdd32ToRec16.io.detectTininess := pipeDetectTininess2
+  val fp16Out = Mux(pipeAluType2 === CVT, fNFromRecFN(H.exp, H.sig, pipeSrc32To16_2),
     fNFromRecFN(H.exp, H.sig, recAdd32ToRec16.io.out))
 
-  io.out := Mux(io.outType === FP16TYPE, Cat(0.U(16.W), fp16Out), fp32Out)
+  // Output pipeline
+  val outLatency = if (fpLatency >= 3) (fpLatency - 3) else if (fpLatency >= 1) (fpLatency - 1) else 0
+  val fpOut = Mux(pipeOutType2 === FP16TYPE, Cat(0.U(16.W), fp16Out), fp32Out)
+  io.validout := Pipe(pipeValid2, false.B, outLatency).valid
+  io.out := Pipe(pipeValid2, fpOut, outLatency).bits
 }
 
 /**
@@ -216,7 +276,7 @@ class PE(
           val rowIndex: Int,
           val colIndex: Int,
           val numReadPorts: Int = 1,
-          val fpMultiCycles: Boolean = true
+          val fpLatency: Int = 3
         )(implicit p: Parameters) extends BoomModule {
   val io = IO(new Bundle {
     // matrix multiplication related: mutiply-accumulate
@@ -265,7 +325,8 @@ class PE(
   val macReqValid = io.macReqIn.valid
   val macReqCtrls = io.macReqIn.bits
   // fp16*fp16+fp32
-  val fpMac = Module(new FpMacUnit())
+  val fpMac = Module(new FpMacUnit(1))
+  fpMac.io.validin := false.B
   fpMac.io.src1 := Mux(macReqCtrls.aluType === MACC, io.macReqSrcA, c0(macReqCtrls.src1Ridx))
   fpMac.io.src2 := io.macReqSrcB
   fpMac.io.src3 := Mux(macReqCtrls.aluType === MULT, 0.U, c0(macReqCtrls.src2Ridx))
