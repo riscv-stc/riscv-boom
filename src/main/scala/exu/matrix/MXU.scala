@@ -226,12 +226,17 @@ class FpMacUnit(val fpLatency: Int = 3) extends Module with ShouldBeRetimed {
   val pipeSrc32To16_1 = Pipe(pipeValid0, pipeSrc32To16_0, pipeLatency).bits
 
   val addRawFN = Module(new AddRawFN(S.exp, S.sig))
-  val mulOutA = Pipe(pipeValid0, Mux(pipeAluType0(1), recA, mulRawToRec.io.out), pipeLatency).bits
-  val mulOutB = Pipe(pipeValid0, recC, pipeLatency).bits
-  addRawFN.io.a := rawFloatFromRecFN(S.exp, S.sig, mulOutA)
-  addRawFN.io.b := rawFloatFromRecFN(S.exp, S.sig, mulOutB)
+  val addSrcA = Pipe(pipeValid0, Mux(pipeAluType0(1), recA, mulRawToRec.io.out), pipeLatency).bits
+  val addSrcB = Pipe(pipeValid0, recC, pipeLatency).bits
+  addRawFN.io.a := rawFloatFromRecFN(S.exp, S.sig, addSrcA)
+  addRawFN.io.b := rawFloatFromRecFN(S.exp, S.sig, addSrcB)
   addRawFN.io.subOp := pipeAluType1 === SUB
   addRawFN.io.roundingMode := pipeRoundingMode1
+
+  val addRawOut = addRawFN.io.rawOut
+  val addRawInB = rawFloatFromRecFN(S.exp, S.sig, addSrcB)
+  dontTouch(addRawOut)
+  dontTouch(addRawInB)
 
   // ----------------- Pipeline Stage 2. -----------------
   pipeValid2 := Pipe(pipeValid1, false.B, pipeLatency).valid
@@ -248,12 +253,15 @@ class FpMacUnit(val fpLatency: Int = 3) extends Module with ShouldBeRetimed {
   addRawToRec.io.roundingMode := pipeRoundingMode2
   addRawToRec.io.detectTininess := pipeDetectTininess2
 
-  val addRawOut = addRawToRec.io.out
-  val fp32Out = fNFromRecFN(S.exp, S.sig, addRawOut)
+  val addRecOut = addRawToRec.io.out
+  val fp32Out = fNFromRecFN(S.exp, S.sig, addRecOut)
+
+  val addRecOutToRaw = rawFloatFromRecFN(S.exp, S.sig, addRecOut)
+  dontTouch(addRecOutToRaw)
 
   // FP32 to FP16
   val recAdd32ToRec16 = Module(new RecFNToRecFN(S.exp, S.sig, H.exp, H.sig))
-  recAdd32ToRec16.io.in := addRawOut
+  recAdd32ToRec16.io.in := addRecOut
   recAdd32ToRec16.io.roundingMode := pipeRoundingMode2
   recAdd32ToRec16.io.detectTininess := pipeDetectTininess2
   val fp16Out = Mux(pipeAluType2 === CVT, fNFromRecFN(H.exp, H.sig, pipeSrc32To16_2),
@@ -275,8 +283,7 @@ class FpMacUnit(val fpLatency: Int = 3) extends Module with ShouldBeRetimed {
 class PE(
           val rowIndex: Int,
           val colIndex: Int,
-          val numReadPorts: Int = 1,
-          val fpLatency: Int = 3
+          val numReadPorts: Int = 1
         )(implicit p: Parameters) extends BoomModule {
   val io = IO(new Bundle {
     // matrix multiplication related: mutiply-accumulate
@@ -324,9 +331,10 @@ class PE(
   // -----------------------------------------------------------------------------------
   val macReqValid = io.macReqIn.valid
   val macReqCtrls = io.macReqIn.bits
+  val fpMacValid = io.macReqIn.valid && macReqCtrls.srcType(2)
   // fp16*fp16+fp32
   val fpMac = Module(new FpMacUnit(1))
-  fpMac.io.validin := false.B
+  fpMac.io.validin := fpMacValid
   fpMac.io.src1 := Mux(macReqCtrls.aluType === MACC, io.macReqSrcA, c0(macReqCtrls.src1Ridx))
   fpMac.io.src2 := io.macReqSrcB
   fpMac.io.src3 := Mux(macReqCtrls.aluType === MULT, 0.U, c0(macReqCtrls.src2Ridx))
@@ -353,7 +361,7 @@ class PE(
   intMac1.io.aluType := macReqCtrls.aluType
 
   // TODO: Optimization, latency = 1 for int8 mac; 3 for fp16 mac
-  when(macReqValid && macReqCtrls.srcType(2)) {
+  when(fpMac.io.validout) {
     c0(macReqCtrls.dstRidx) := fpMac.io.out
   }.elsewhen(macReqValid) {
     c0(macReqCtrls.dstRidx) := intMac0.io.out
