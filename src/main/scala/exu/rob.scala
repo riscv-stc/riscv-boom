@@ -75,7 +75,7 @@ class RobIo(
   // Port for unmarking loads/stores as speculation hazards..
   val lsu_clr_unsafe  = Input(Vec(memWidth, Valid(new MicroOp)))
 
-  val lsu_update_ls   = if (usingMatrix || usingVector) Input(Vec(4, Valid(new LSSplitCnt()))) else null
+  val lsu_update_ls   = if (usingMatrix || usingVector) Input(Vec(memWidth, Vec(4, Valid(new LSSplitCnt())))) else null
 
   // Track side-effects for debug purposes.
   // Also need to know when loads write back, whereas we don't need loads to unbusy.
@@ -365,13 +365,15 @@ class Rob(
     //-----------------------------------------------
     // update mls cnt by lsu
     if (usingVector) {
-      for(inc <- io.lsu_update_ls) {
-        when (inc.valid && MatchBank(GetBankIdx(inc.bits.rob_idx))) {
-          val cidx = GetRowIdx(inc.bits.rob_idx)
-          when (inc.bits.ud_copy) {
-            rob_ud_bsy(cidx) := inc.bits.ls_cnt > 0.U
-          } .otherwise {
-            rob_ls_cnt(cidx) := inc.bits.ls_cnt
+      for(up <- io.lsu_update_ls) {
+        for (inc <- up) {
+          when(inc.valid && MatchBank(GetBankIdx(inc.bits.rob_idx))) {
+            val cidx = GetRowIdx(inc.bits.rob_idx)
+            when(inc.bits.ud_copy) {
+              rob_ud_bsy(cidx) := inc.bits.ls_cnt > 0.U
+            }.otherwise {
+              rob_ls_cnt(cidx) := inc.bits.ls_cnt
+            }
           }
         }
       }

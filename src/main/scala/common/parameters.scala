@@ -33,6 +33,8 @@ case class BoomCoreParams(
     IssueParams(issueWidth=1, numEntries=16, iqType=IQT_FP.litValue , dispatchWidth=1)),
   numLdqEntries: Int = 16,
   numStqEntries: Int = 16,
+  numVLdPorts: Int = 1,
+  numVSdPorts: Int = 1,
   numIntPhysRegisters: Int = 96,
   numFpPhysRegisters: Int = 64,
   maxBrCount: Int = 4,
@@ -187,6 +189,8 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val numRcqEntries = boomParams.numRCQEntries       // number of RoCC commit queue entries. This can be large since it just keeps a pdst
   val numLdqEntries = boomParams.numLdqEntries       // number of LAQ entries
   val numStqEntries = boomParams.numStqEntries       // number of SAQ/SDQ entries
+  val numVLdPorts = boomParams.numVLdPorts // number of Vector Load ports
+  val numVSdPorts = boomParams.numVSdPorts // number of Vector Store ports
   val maxBrCount    = boomParams.maxBrCount          // number of branches we can speculate simultaneously
   val maxVconfigCount  = boomParams.maxVconfigCount  // number of vconfigs we can speculate simultaneously
   val ftqSz         = boomParams.ftq.nEntries        // number of FTQ entries
@@ -307,7 +311,8 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val maxUnitEntries = if (numVLdqEntries > numVStqEntries) numVLdqEntries else numVStqEntries
   val maxIdxEntries = if (numVLxqEntries > numVSxqEntries) numVLxqEntries else numVSxqEntries
   val maxEntries = if (maxUnitEntries > maxIdxEntries) maxUnitEntries else maxIdxEntries
-
+  val numVLdPortSz = if (usingVector) boomParams.numVLdPorts else 0
+  val numVSdPortSz = if (usingVector) boomParams.numVSdPorts else 0
   // matrix stuff
   require (issueParams.count(_.iqType == IQT_MAT.litValue) == 1 || !usingMatrix)
   def rLenb = rLen/8

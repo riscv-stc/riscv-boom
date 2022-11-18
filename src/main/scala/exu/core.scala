@@ -1972,9 +1972,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     io.lsu.vrf_rport        <> v_pipeline.io.lsu_vrf_rport
     io.lsu.tile_rport       <> m_pipeline.io.lsu_tile_rport
     m_pipeline.io.lsu_acc_rreq        := io.lsu.acc_rreq
-    m_pipeline.io.lsu_tile_wbk.bits   := io.lsu.tile_wbk.bits
-    m_pipeline.io.lsu_tile_wbk.valid  := io.lsu.tile_wbk.valid
-    io.lsu.tile_wbk.ready             := true.B
+    for (w <- 0 until numVLdPorts) {
+      m_pipeline.io.lsu_tile_wbk(w).bits := io.lsu.tile_wbk(w).bits
+      m_pipeline.io.lsu_tile_wbk(w).valid := io.lsu.tile_wbk(w).valid
+      io.lsu.tile_wbk(w).ready := true.B
+    }
     io.lsu.acc_rresp                  := m_pipeline.io.lsu_acc_rresp
   } else if (usingVector) {
     fp_pipeline.io.fromVec <> v_pipeline.io.to_fp

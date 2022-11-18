@@ -548,7 +548,7 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               decodeWidth = 2,
               numRobEntries = 64,
               issueParams = Seq(
-                IssueParams(issueWidth=1, numEntries=24, iqType=IQT_MEM.litValue, dispatchWidth=2),
+                IssueParams(issueWidth=2, numEntries=24, iqType=IQT_MEM.litValue, dispatchWidth=2),
                 IssueParams(issueWidth=2, numEntries=24, iqType=IQT_INT.litValue, dispatchWidth=2),
                 IssueParams(issueWidth=1, numEntries=16, iqType=IQT_FP.litValue , dispatchWidth=2),
                 IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VEC.litValue, dispatchWidth=2),
@@ -559,6 +559,8 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               numStqEntries = 16,
               numVLdqEntries = 18,
               numVStqEntries = 18,
+              numVLdPorts = 2,
+              numVSdPorts = 2,
               maxBrCount = 12,
               maxVconfigCount = 4,
               numFetchBufferEntries = 16,

@@ -385,20 +385,25 @@ object AgePriorityEncoder
 
 object AgePriorityEncoderN
 {
-  def apply(in: Seq[UInt], state: Seq[Bool], selN: Int): (Seq[UInt], Seq[Bool]) = {
+  def apply(in: Seq[Bool], head: UInt, selN: Int): (Seq[UInt], Seq[Bool]) = {
     val n = in.size
+    val width = log2Ceil(in.size)
 
-    val tem_in = (in zip state).map { case (i, s) => (i, s) }
-    val temp = tem_in.slice(selN, n) ++ tem_in.slice(0, selN)
+    val idxs = Wire(Vec(selN, UInt(width.W)))
+    val valids = Wire(Vec(selN, Bool()))
+    var temp_vec  = in
+    var mask = VecInit(in).asUInt
+    var res = 0.U
 
-    val rdy_list = temp.collect { case v if v._2.equals(true.B) => v }
-    val not_rdy_list = temp.collect { case v if ! v._2.equals(true.B) => v }
+    for (i <- 0 until selN) {
+      res = AgePriorityEncoder(temp_vec, head)
+      valids(i) := mask(res)
+      mask = mask & ~UIntToOH(res)
+      temp_vec = (0 until n).map(w => mask(w).asBool)
+      idxs(i) := res
+    }
 
-    val res = rdy_list ++ not_rdy_list
-    val idx  = res.map { _._1 }
-    val rdy  = res.map { _._2 }
-
-    (idx, rdy)
+    (idxs, valids)
   }
 }
 

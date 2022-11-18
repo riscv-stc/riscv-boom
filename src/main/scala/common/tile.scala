@@ -133,10 +133,19 @@ class BoomTile private(
   val dCacheWidget = LazyModule(new TLWidthWidget(tileParams.dcache.get.rowBits/8))
   tlMasterXbar.node := dCacheWidget.node := dcache.node
 
-  // VecMem
-  lazy val vecmem: VecMem = LazyModule(new VecMem)
-  val vecmemWidget = LazyModule(new TLWidthWidget(p(CacheBlockBytes)))
-  vectorNode := vecmemWidget.node := vecmem.node
+  // VecMem load ports
+  lazy val vecmemLdPorts = Seq.fill(boomParams.core.numVLdPorts)(LazyModule(new VecMem))
+  val vecmemLdWidget = Seq.fill(boomParams.core.numVLdPorts)(LazyModule(new TLWidthWidget(p(CacheBlockBytes))))
+  (vecmemLdPorts zip vecmemLdWidget).foreach {
+    case (v, w) => vectorNode := w.node := v.node
+  }
+
+  // VecMem store ports
+  lazy val vecmemSdPorts = Seq.fill(boomParams.core.numVSdPorts)(LazyModule(new VecMem))
+  val vecmemSdWidget = Seq.fill(boomParams.core.numVSdPorts)(LazyModule(new TLWidthWidget(p(CacheBlockBytes))))
+  (vecmemSdPorts zip vecmemSdWidget).foreach {
+    case (v, w) => vectorNode := w.node := v.node
+  }
 
   // Frontend/ICache
   val frontend = LazyModule(new BoomFrontend(tileParams.icache.get, staticIdForMetadataUseOnly))
@@ -239,7 +248,11 @@ class BoomTileModuleImp(outer: BoomTile) extends BaseTileModuleImp(outer){
   hellaCacheArb.io.requestor <> hellaCachePorts
   lsu.io.hellacache <> hellaCacheArb.io.mem
   outer.dcache.module.io.lsu <> lsu.io.dmem
-  outer.vecmem.module.io.lsu <> lsu.io.vmem
+
+  (0 until outer.boomParams.core.numVLdPorts).foreach(i =>
+    outer.vecmemLdPorts(i).module.io.lsu <> lsu.io.vmem_ld_ports(i))
+  (0 until outer.boomParams.core.numVSdPorts).foreach(i =>
+    outer.vecmemSdPorts(i).module.io.lsu <> lsu.io.vmem_sd_ports(i))
 
   // Generate a descriptive string
   val frontendStr = outer.frontend.module.toString

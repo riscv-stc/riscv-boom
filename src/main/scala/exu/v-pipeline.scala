@@ -43,12 +43,12 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val vbusy_status     = Input(UInt(numVecPhysRegs.W))
 
     val fromMat          = if (usingMatrix) Vec(matWidth, Flipped(Decoupled(new ExeUnitResp(vLen)))) else null
-    val ll_wports        = Flipped(Decoupled(new ExeUnitResp(vLen)))
+    val ll_wports        = Vec(numVLdPorts, Flipped(Decoupled(new ExeUnitResp(vLen))))
     val to_int           = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
     val to_fp            = Vec(vecWidth, Decoupled(new ExeUnitResp(eLen)))
     val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
     val fpupdate         = Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen))))
-    val lsu_vrf_rport    = new RegisterFileReadPortIO(vpregSz, vLen)
+    val lsu_vrf_rport    = Vec(memWidth, new RegisterFileReadPortIO(vpregSz, vLen))
 
     val vl_wakeup        = Input(Valid(new VlWakeupResp()))
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units for mem, int and fp
@@ -93,7 +93,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   require (exe_units.count(_.readsVrf) == vecWidth)
   require (exe_units.numVrfWritePorts + memWidth == numWakeupPorts)
-  require (vecWidth >= memWidth)
+  //require (vecWidth >= memWidth)
 
   //*************************************************************
   // Issue window logic
@@ -170,8 +170,10 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   for (w <- 0 until exe_units.numVrfReadPorts) {
     vregister_read.io.rf_read_ports(w) <> vregfile.io.read_ports(w)
   }
-  io.lsu_vrf_rport <> vregfile.io.read_ports(exe_units.numVrfReadPorts)
 
+  for (w <- 0 until memWidth) {
+    io.lsu_vrf_rport(w) <> vregfile.io.read_ports(exe_units.numVrfReadPorts + w)
+  }
   vregister_read.io.prf_read_ports map { port => port.data := false.B }
 
   vregister_read.io.iss_valids <> iss_valids
@@ -206,8 +208,8 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
 
   val ll_wbarb = Module(new Arbiter(new ExeUnitResp(vLen), matWidth+1))
-  ll_wbarb.io.in(0) <> io.ll_wports
-  ll_wbarb.io.in(0).bits.data := io.ll_wports.bits.data
+  ll_wbarb.io.in(0) <> io.ll_wports(0)
+  ll_wbarb.io.in(0).bits.data := io.ll_wports(0).bits.data
   for(w <- 0 until matWidth) {
     ll_wbarb.io.in(w+1) <> io.fromMat(w)
   }
@@ -219,8 +221,8 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   assert (ll_wbarb.io.in(0).ready) // never backpressure the memory unit.
 
   var w_cnt = 1
-  for (i <- 1 until memWidth) {
-    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports, vpregSz, vLen, isVector, true))
+  for (i <- 1 until numVLdPorts) {
+    vregfile.io.write_ports(w_cnt) := RegNext(WritePort(io.ll_wports(i), vpregSz, vLen, isVector, true))
     w_cnt += 1
   }
   for (eu <- exe_units) {
