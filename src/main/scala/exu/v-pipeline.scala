@@ -254,7 +254,13 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   io.wakeups(0).bits := ll_wbarb.io.out.bits
   ll_wbarb.io.out.ready := true.B
 
-  w_cnt = 1
+
+  for (i <- 1 until numVLdPorts) {
+    io.wakeups(i).valid := io.ll_wports(i).valid
+    io.wakeups(i).bits := io.ll_wports(i).bits
+  }
+
+  w_cnt = numVLdPorts
   for (eu <- exe_units) {
     if (eu.writesVrf) {
       val exe_resp = eu.io.vresp
