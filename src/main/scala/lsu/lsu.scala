@@ -711,8 +711,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                               !block_load_wakeup                                       &&
                               (w == memWidth-1).B                                      &&
                               (!ldq_wakeup_e.bits.addr_is_uncacheable || (io.core.commit_load_at_rob_head &&
-                                                                          ldq_head === ldq_wakeup_idx &&
-                                                                          ldq_wakeup_e.bits.st_dep_mask.asUInt === 0.U))))
+                                                                          ldq_head === ldq_wakeup_idx && ldq_wakeup_e.bits.st_dep_mask.asUInt === 0.U
+                                ))))
 
   // Can we fire an incoming hellacache request
   val can_fire_hella_incoming  = WireInit(widthMap(w => false.B)) // This is assigned to in the hellashim ocntroller
@@ -808,7 +808,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   // Can we fire a vldq lookup
   val (vldq_lkup_idx_tmp, vldq_lkup_sel_tmp) = AgePriorityEncoderN((0 until numVLdqEntries).map(i => {
     val e = vldq(i)
-    e.valid && e.bits.addr.valid && e.bits.addr_is_virtual && !e.bits.executed && !e.bits.order_fail && !e.bits.st_dep_mask(stq_head)
+    e.valid && e.bits.addr.valid && e.bits.addr_is_virtual && !e.bits.executed && !e.bits.order_fail //&& !e.bits.st_dep_mask(stq_head)
   }), vldq_head, memWidth)
 
   //vld memory port
@@ -836,7 +836,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   !vldq_lkup_e(w).bits.executed                             &&
                                   !vldq_lkup_e(w).bits.order_fail                           &&
                                   !vldq_lkup_e(w).bits.uop.exception                        &&
-                                  !vldq_lkup_e(w).bits.st_dep_mask.orR                      &&
+                                  //!vldq_lkup_e(w).bits.st_dep_mask.orR                      &&
                                    vld_mem_ports_rdy(w)))
 
   dontTouch(vld_mem_ports_sel(0))
