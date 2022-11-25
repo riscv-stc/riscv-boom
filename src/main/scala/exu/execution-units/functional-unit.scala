@@ -372,6 +372,10 @@ class ALUUnit(
 
   // operand 1 select
   var op1_data: UInt = null
+  val m_reg = RegInit(false.B)
+  val n_reg = RegInit(false.B)
+  val k_reg = RegInit(false.B)
+  val t_reg = RegInit(false.B)
   if (isJmpUnit) {
     // Get the uop PC for jumps
     val block_pc = AlignPCToBoundary(io.get_ftq_pc.pc, icBlockBytes)
@@ -386,6 +390,7 @@ class ALUUnit(
     val msettype = uop.uopc.isOneOf(uopMSETTYPE,  uopMSETTYPEI)
     val msetm    = uop.uopc.isOneOf(uopMSETTILEM, uopMSETTILEMI)
     val msetn    = uop.uopc.isOneOf(uopMSETTILEN, uopMSETTILENI)
+    val msetk    = uop.uopc.isOneOf(uopMSETTILEK, uopMSETTILEKI)
     val useMax   = uop.ldst =/= 0.U && uop.lrs1 === 0.U && msetr
     val msetdata = Mux(mseti, uop.imm_packed(15,3), rs1_data(12,0))
     val tilemMax = numTrTileRows.U
@@ -397,6 +402,18 @@ class ALUUnit(
                Mux(mset,     msettile,
                Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data, 0.U)))
     io.resp.bits.uop.mconfig.mtype := RegEnable(MType.fromUInt(msetdata), msettype)
+    t_reg := Mux(msettype,true.B,false.B)
+    m_reg := Mux(msetm,true.B,false.B)
+    n_reg := Mux(msetn,true.B,false.B)
+    k_reg := Mux(msetk,true.B,false.B)
+    io.resp.bits.uop.is_msettype := t_reg
+    io.resp.bits.uop.is_settilem := m_reg
+    io.resp.bits.uop.tile_m:= RegEnable(op1_data, msetm)
+    io.resp.bits.uop.is_settilen := n_reg
+    io.resp.bits.uop.tile_n := RegEnable(op1_data, msetn)
+    io.resp.bits.uop.is_settilek := k_reg
+    io.resp.bits.uop.tile_k := RegEnable(op1_data, msetk)
+    /**********************************************************/
   } else {
     op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data, 0.U)
   }

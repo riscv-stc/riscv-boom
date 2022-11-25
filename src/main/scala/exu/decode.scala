@@ -31,17 +31,17 @@ abstract trait DecodeConstants
   val RT_DC = BitPat.dontCare(RT_X.getWidth)
   def decode_default: List[BitPat] =
   //                                                       frs3_en                      wakeup_delay
-  //     is val inst?                                      |  imm sel                   |    bypassable (aka, known/fixed latency)
-  //     |  is fp inst?                                    |  |     uses_ldq            |    |  is_br              is vector instruction
+  //     is val inst?                                      |  imm sel                   |    bypassable (aka, known/fixed latency)     not_use_mtype
+  //     |  is fp inst?                                    |  |     uses_ldq            |    |  is_br              is vector instruction  |
   //     |  |  is single-prec?               rs1 regtype   |  |     |  uses_stq         |    |  |                  |  can be split  allow_vd_is_v0
   //     |  |  |  micro-code                 |      rs2 type  |     |  |  is_amo        |    |  |                  |  |  use vm?    |  not_use_vtype
   //     |  |  |  |     iq-type  func unit   |      |      |  |     |  |  |  is_fence   |    |  |                  |  |  |  ew of ls vector
   //     |  |  |  |     |        |           |      |      |  |     |  |  |  |  is_fencei    |  |  is breakpoint or ecall?  |       |  |  vd_unequal_vs1
-  //     |  |  |  |     |        |     dst   |      |      |  |     |  |  |  |  |  mem  |    |  |  |  is unique? (clear pipeline for it)  |  vd_unequal_vs2
-  //     |  |  |  |     |        |     regtype      |      |  |     |  |  |  |  |  cmd  |    |  |  |  |  flush on commit |  |       |  |  |  |  is matrix inst?
+  //     |  |  |  |     |        |     dst   |      |      |  |     |  |  |  |  |  mem  |    |  |  |  is unique? (clear pipeline for it)  |  |  vd_unequal_vs2
+  //     |  |  |  |     |        |     regtype      |      |  |     |  |  |  |  |  cmd  |    |  |  |  |  flush on commit |  |       |  |  |  |  |  is matrix inst?
   //     |  |  |  |     |        |     |     |      |      |  |     |  |  |  |  |  |    |    |  |  |  |  |  csr cmd   |  |  |    vstart_is_zero |
-  //     |  |  |  |     |        |     |     |      |      |  |     |  |  |  |  |  |    |    |  |  |  |  |  |      |  |  |  |    |  |  |  |  |  |
-    List(N, N, X, uopX, IQT_INT, FU_X, RT_X, RT_DC, RT_DC, X, IS_X, X, X, X, X, N, M_X, DC2, X, X, N, N, X, CSR.X, N, N, N, DC2, X, X, X, X, X, N)
+  //     |  |  |  |     |        |     |     |      |      |  |     |  |  |  |  |  |    |    |  |  |  |  |  |      |  |  |  |    |  |  |  |  |  |  |
+    List(N, N, X, uopX, IQT_INT, FU_X, RT_X, RT_DC, RT_DC, X, IS_X, X, X, X, X, N, M_X, DC2, X, X, N, N, X, CSR.X, N, N, N, DC2, X, X, X, X, X, X, N)
 
   val table: Array[(BitPat, List[BitPat])]
 }
@@ -103,6 +103,7 @@ class CtrlSigs extends Bundle with DecodeConstants
   val vstart_is_zero  = Bool()
   val allow_vd_is_v0  = Bool()
   val not_use_vtype   = Bool()
+  val not_use_mtype   = Bool()
   val vd_unequal_vs1  = Bool()
   val vd_unequal_vs2  = Bool()
   val is_rvm          = Bool()
@@ -116,7 +117,7 @@ class CtrlSigs extends Bundle with DecodeConstants
           is_fence, is_fencei, mem_cmd, wakeup_delay, bypassable,
           is_br, is_sys_pc2epc, inst_unique, flush_on_commit, csr_cmd,
           is_rvv, can_be_split, uses_vm, v_ls_ew, vstart_is_zero,
-          allow_vd_is_v0, not_use_vtype, vd_unequal_vs1, vd_unequal_vs2,
+          allow_vd_is_v0, not_use_vtype, not_use_mtype, vd_unequal_vs1, vd_unequal_vs2,
           is_rvm)
       sigs zip decoder map {case(s,d) => s := d}
       rocc := false.B
@@ -217,8 +218,9 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
   // Exception Handling
   val vsetvl = cs.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
-  val mconfig = uop.is_rvm && cs.inst_unique
-  io.csr_decode.csr := Mux(vsetvl | mconfig, 0.U, inst(31,20))
+  val mset = cs.uopc.isOneOf(uopMSETTYPEI, uopMSETTILEMI, uopMSETTILEKI,uopMSETTILENI,uopMSETTYPE,uopMSETTILEM,uopMSETTILEK,uopMSETTILEN)
+  val mconfig = uop.is_rvm 
+  io.csr_decode.csr := Mux(vsetvl | mset, 0.U, inst(31,20))
   val csr_en = cs.csr_cmd.isOneOf(CSR.S, CSR.C, CSR.W) && !vsetvl && !mconfig
   val csr_ren = cs.csr_cmd.isOneOf(CSR.S, CSR.C) && uop.lrs1 === 0.U
   val system_insn = cs.csr_cmd === CSR.I
@@ -535,8 +537,27 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val csr_tilem = io.csr_tilem
     val csr_tilen = io.csr_tilen
     val csr_tilek = io.csr_tilek
+    uop.mconfig := io.csr_mconfig
+    uop.tile_m := csr_tilem
+    uop.tile_n := csr_tilen
+    uop.tile_k := csr_tilek
+
 
     val is_mls = cs.is_rvm & (cs.uses_ldq | cs.uses_stq)
+    val mfcunt4 = uop.inst(29,26)
+    val mfcunt3 = uop.inst(14,12)
+    val mxa = ((mfcunt4 === 9.U) || (mfcunt4 === 13.U)) && is_mls
+    val mxb = ((mfcunt4 === 10.U) || (mfcunt4 === 14.U)) && is_mls
+    val mxc = ((mfcunt4 === 0.U) || (mfcunt4 === 4.U)) && is_mls
+    val mall = cs.is_rvm && ~(cs.uses_ldq | cs.uses_stq) && (
+      (mfcunt4 === 0.U) ||
+      (mfcunt4 === 1.U) ||
+      (mfcunt4 === 2.U)
+    ) && (mfcunt3 =/= 7.U)
+    val mcc = cs.is_rvm && ~(cs.uses_ldq | cs.uses_stq) && !mall && (mfcunt3 =/= 7.U)
+
+
+
     val mslice_dim = uop.inst(27,26)
     val transposed = uop.inst(28).asBool()     // 0, row, normal; 1, col, transposed
 
@@ -573,14 +594,25 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.mem_size   := cs.v_ls_ew
       uop.mem_signed := false.B
     }
-
+    
+    val mtile = (cs.uopc === uopMLE)
+    uop.mslice_dim := mslice_dim
+    uop.transposed := transposed
+    uop.is_msettype := (cs.uopc === uopMSETTYPEI)  || (cs.uopc === uopMSETTYPE)
+    uop.is_settilem := (cs.uopc === uopMSETTILEMI)  || (cs.uopc === uopMSETTILEM)
+    uop.is_settilen := (cs.uopc === uopMSETTILENI)  || (cs.uopc === uopMSETTILEN)
+    uop.is_settilek := (cs.uopc === uopMSETTILEKI)  || (cs.uopc === uopMSETTILEK)
+    uop.mtype_ready   := Mux(cs.not_use_mtype, true.B, io.enq.uop.mtype_ready)
+    uop.tile_m_ready   := Mux(mxa || mall || mcc || mxc, io.enq.uop.tile_m_ready, true.B)
+    uop.tile_n_ready   := Mux(mxb || mall || mcc || mxc, io.enq.uop.tile_n_ready, true.B)
+    uop.tile_k_ready   := Mux((mxa || mxb) || mall, io.enq.uop.tile_k_ready, true.B)
     uop.m_is_split    := cs.can_be_split
     uop.m_slice_cnt   := Mux(is_mls,  sel_slice_cnt, 
                          Mux(is_mopa, csr_tilek, csr_tilem))
     uop.m_slice_len   := Mux(is_mls, sel_slice_len, 
                          Mux(is_mmv && mslice_dim === 2.U, csr_tilem,
                          Mux(is_mmv && mslice_dim === 3.U, csr_tilen, csr_tilek)))
-    uop.m_tilen       := csr_tilen
+    uop.m_tilen       :=  csr_tilen
     uop.m_sidx        := 0.U
     uop.ts1_eew       := ts1_eew
     uop.ts2_eew       := ts2_eew
@@ -605,8 +637,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
 
     //matrix illegal instruction handler
 
-    val illegal_msew = cs.is_rvm && !cs.inst_unique && (td_eew > 2.U || ts1_eew > 2.U || ts2_eew > 2.U)
-    illegal_matrix_case := illegal_msew || cs.is_rvm && io.csr_mconfig.mtype.mill && !cs.inst_unique
+    val illegal_msew = cs.is_rvm && !mset && (td_eew > 2.U || ts1_eew > 2.U || ts2_eew > 2.U)
+    illegal_matrix_case := illegal_msew || cs.is_rvm && io.csr_mconfig.mtype.mill && !mset
 
   } // if usingMatrix
   io.deq.uop := uop
@@ -904,6 +936,79 @@ class VconfigMaskGenerationLogic(val pl_width: Int) (implicit p: Parameters) ext
   io.debug_vconfig_mask := vconfig_mask
 }
 
+class MconfigMaskGenerationLogic(val pl_width: Int) (implicit p: Parameters) extends BoomModule
+{
+  val io = IO(new Bundle {
+    // guess if the uop is a vsetvli/vsetivli (we'll catch this later)
+    val is_mconfig = Input(Vec(pl_width, Bool()))
+    // lock in that it's actually a vconfig and will fire, so we update
+    // the vconfig_masks.
+    val will_fire = Input(Vec(pl_width, Bool()))
+
+    // give out tag immediately (needed in rename)
+    // mask can come later in the cycle
+    val mconfig_tag    = Output(Vec(pl_width, UInt(vconfigTagSz.W)))
+    val mconfig_mask   = Output(Vec(pl_width, UInt(maxVconfigCount.W)))
+
+    // tell decoders the vconfig mask has filled up, but on the granularity
+    // of an individual micro-op (so some micro-ops can go through)
+    val is_full   = Output(Vec(pl_width, Bool()))
+
+    //deadallocate the committed vconfig
+    val mconfig_mask_update  = Input(UInt(maxVconfigCount.W))
+    val flush_pipeline = Input(Bool())
+
+    val debug_vconfig_mask = Output(UInt(maxVconfigCount.W))
+  })
+
+  val mconfig_mask = RegInit(0.U(maxVconfigCount.W))
+
+  //-------------------------------------------------------------
+  // Give out the branch tag to each speculative vconfig micro-op
+
+  var allocate_mask = mconfig_mask
+  val update_vtag = (io.is_mconfig zip io.will_fire).map{case(v,w) => v && w}.reduce(_||_)
+  val tag_masks = Wire(Vec(pl_width, UInt(maxVconfigCount.W)))
+  for (w <- 0 until pl_width) {
+    io.is_full(w) := (allocate_mask === ~(0.U(maxVconfigCount.W))) && io.is_mconfig(w)
+
+    // find vconfig_tag and compute next vconfig_mask
+    val new_vconfig_tag = RegInit(0.U(vconfigTagSz.W))
+    //new_vconfig_tag := 0.U
+    tag_masks(w) := 0.U
+
+    for (i <- maxVconfigCount - 1 to 0 by -1) {
+      when(~allocate_mask(i)) {
+        tag_masks(w) := (1.U << i.U)
+        when(update_vtag) {
+          new_vconfig_tag := new_vconfig_tag + 1.U
+        }
+      }
+    }
+
+    io.mconfig_tag(w) := new_vconfig_tag
+    allocate_mask = Mux(io.is_mconfig(w), tag_masks(w) | allocate_mask, allocate_mask)
+  }
+  //-------------------------------------------------------------
+  // Give out the branch mask to each micro-op
+  // (kill off the bits that corresponded to branches that aren't going to fire)
+
+  var curr_mask = mconfig_mask
+  for (w <- 0 until pl_width) {
+    io.mconfig_mask(w) := ~io.mconfig_mask_update & curr_mask
+    curr_mask = Mux(io.will_fire(w), tag_masks(w) | curr_mask, curr_mask)
+  }
+  //-------------------------------------------------------------
+  // Update the current vconfig_mask
+
+  when (io.flush_pipeline) {
+    mconfig_mask := 0.U
+  } .otherwise {
+    mconfig_mask := ~io.mconfig_mask_update & curr_mask
+  }
+
+  io.debug_vconfig_mask := mconfig_mask
+}
 case class VcqParameters(
                           nEntries: Int = 4
                         )
@@ -983,4 +1088,172 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
   io.enq.ready := !full
   io.get_vconfig := ram(WrapDec(enq_ptr, num_entries))
   io.empty := empty
+}
+
+
+class MtypeWakeupResp(implicit p: Parameters) extends BoomBundle
+{
+  val mcq_idx = UInt(vcqSz.W)
+  val mconfig = new MConfig
+  val mconfig_tag = UInt(vconfigTagSz.W)
+  val mconfig_mask = UInt(maxVconfigCount.W)
+}
+
+class MtileWakeupResp(implicit p: Parameters) extends BoomBundle
+{
+  val tile_idx = UInt(vcqSz.W)
+  val tile_len = UInt((rLenbSz+1).W)
+  val tile_tag = UInt(vconfigTagSz.W)
+  val tile_mask = UInt(maxVconfigCount.W)
+  
+}
+
+class TileDecodeSignals(implicit p: Parameters) extends BoomBundle
+{
+  val tile_ready = Bool()
+  val tile_len    = UInt((rLenbSz+1).W)
+}
+
+class MconfigDecodeSignals(implicit p: Parameters) extends BoomBundle
+{
+  val mtype_ready = Bool()
+  val mconfig    = new MConfig
+}
+
+class MconfigQueue(implicit p: Parameters) extends BoomModule
+  with HasBoomCoreParameters {
+  val num_entries = vcqSz
+  private val idx_sz = log2Ceil(num_entries)
+
+  val io = IO(new BoomBundle {
+    //Enqueue one entry when decode a vconfig instruction.
+    val enq = Flipped(Decoupled(new MconfigDecodeSignals()))
+    val enq_idx = Output(UInt(num_entries.W))
+    val deq   = Input(Bool())
+    val flush = Input(Bool())
+
+    val get_mconfig = Output(new MconfigDecodeSignals())
+    val empty = Output(Bool())
+
+    val update_mtype_idx = Input(UInt(num_entries.W))
+    val update_mtype = Flipped(Decoupled(new MconfigDecodeSignals()))
+
+    val mcq_Wcsr = Output(new MconfigDecodeSignals())
+  })
+
+  val ram = Reg(Vec(num_entries, new MconfigDecodeSignals()))
+  ram.suggestName("Mconfig_table")
+
+  val enq_ptr = RegInit(0.U(num_entries.W))
+  val deq_ptr = RegInit(0.U(num_entries.W))
+  val maybe_full = RegInit(false.B)
+
+  val ptr_match = enq_ptr === deq_ptr
+  val empty = ptr_match && !maybe_full
+  val full = ptr_match && maybe_full
+  val do_enq = WireDefault(io.enq.fire())
+  val do_deq = WireDefault(io.deq)
+
+ /* def inc(ptr: UInt) = {
+    val n = ptr.getWidth
+    Cat(ptr(n-2,0), ptr(n-1))
+  }
+  def dec(ptr: UInt) = {
+    val n = ptr.getWidth
+    Cat(ptr(0), ptr(n-1,1))
+  }
+*/
+  when(do_enq) {
+    ram(enq_ptr) := io.enq.bits
+    enq_ptr := WrapInc(enq_ptr, num_entries)
+  }
+  io.enq_idx := enq_ptr
+
+  when(do_deq && !empty) {
+    deq_ptr := WrapInc(deq_ptr, num_entries)
+    io.mcq_Wcsr := ram(deq_ptr)
+  }
+  when(io.update_mtype.valid) {
+    ram(io.update_mtype_idx).mconfig:= io.update_mtype.bits.mconfig
+    ram(io.update_mtype_idx).mtype_ready := io.update_mtype.bits.mtype_ready
+  }
+  when(do_enq =/= do_deq) {
+    maybe_full := do_enq
+  }
+  when(io.flush) {
+    enq_ptr := 0.U
+    deq_ptr := 0.U
+    maybe_full := false.B
+  }
+
+  io.enq_idx := enq_ptr
+  io.enq.ready := !full
+  io.get_mconfig := ram(WrapDec(enq_ptr, num_entries))
+  io.empty := empty
+}
+
+
+
+class TileQueue(implicit p: Parameters) extends BoomModule
+  with HasBoomCoreParameters {
+  val num_entries = vcqSz
+  private val idx_sz = log2Ceil(num_entries)
+
+  val io = IO(new BoomBundle {
+    //Enqueue one entry when decode a vconfig instruction.
+    val enq = Flipped( Decoupled(new TileDecodeSignals()))
+    val enq_idx = Output(UInt(num_entries.W))
+    val deq   = Input(Bool())
+    val flush = Input(Bool())
+
+    val get_tile_size = Output(new TileDecodeSignals())
+    val empty = Output(Bool())
+
+    val update_tile_size_idx = Input(UInt(num_entries.W))
+    val update_tile_size = Flipped(Decoupled(new TileDecodeSignals()))
+
+    val mcq_Wcsr = Output(new TileDecodeSignals())
+  })
+
+  val ram = Reg(Vec(num_entries, new TileDecodeSignals()))
+  //ram.suggestName("Mconfig_table")
+
+  val enq_ptr = RegInit(0.U(num_entries.W))
+  val deq_ptr = RegInit(0.U(num_entries.W))
+  val maybe_full = RegInit(false.B)
+
+  val ptr_match = enq_ptr === deq_ptr
+  val empty = ptr_match && !maybe_full
+  val full = ptr_match && maybe_full
+  val do_enq = WireDefault(io.enq.fire())
+  val do_deq = WireDefault(io.deq)
+
+
+    when(do_enq) {
+      ram(enq_ptr) := io.enq.bits
+      enq_ptr := WrapInc(enq_ptr, num_entries)
+    }
+    io.enq_idx := enq_ptr
+  
+    when(do_deq && !empty) {
+      deq_ptr := WrapInc(deq_ptr, num_entries)
+      io.mcq_Wcsr := ram(deq_ptr)
+    }
+    when(io.update_tile_size.valid) {
+      ram(io.update_tile_size_idx).tile_len:= io.update_tile_size.bits.tile_len
+      ram(io.update_tile_size_idx).tile_ready := io.update_tile_size.bits.tile_ready
+    }
+    when(do_enq =/= do_deq) {
+      maybe_full := do_enq
+    }
+    when(io.flush) { 
+      enq_ptr := 0.U
+      deq_ptr := 0.U
+      maybe_full := false.B
+    }
+    io.enq_idx := enq_ptr
+    io.enq.ready := !full
+    io.get_tile_size := ram(WrapDec(enq_ptr, num_entries))
+    io.empty := empty
+  
 }

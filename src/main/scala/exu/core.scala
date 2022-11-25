@@ -33,7 +33,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
-import freechips.rocketchip.rocket.{CSR, Causes, EventSet, EventSets, PRV, SuperscalarEventSets, VConfig, VType, MConfig}
+import freechips.rocketchip.rocket.{CSR, Causes, EventSet, EventSets, PRV, SuperscalarEventSets, VConfig, VType, MType, MConfig}
 import freechips.rocketchip.rocket.{EventSet, EventSets, SuperscalarEventSets}
 import freechips.rocketchip.util.{CoreMonitorBundle, SeqBoolBitwiseOps, Str, UIntIsOneOf}
 import freechips.rocketchip.util._
@@ -192,7 +192,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val vl_wakeup = WireInit(0.U.asTypeOf(Valid(new VlWakeupResp())))
   val update_vtype = WireInit(0.U.asTypeOf(new VType()))
   //vl-ready wake up logic, bypass from execution unit
-  vl_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && (exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetvli || exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetivli)
+  vl_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && 
+  (exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetvli || exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetivli)
   vl_wakeup.bits.vl := exe_units(csr_unit_idx).io.iresp.bits.data(maxVLMax.log2, 0)
   vl_wakeup.bits.vcq_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.vcq_idx
   vl_wakeup.bits.vconfig_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_mask
@@ -200,6 +201,35 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   update_vtype := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig.vtype
 
+/*******************************************************************************************/
+  val mtype_wakeup = WireInit(0.U.asTypeOf(Valid(new MtypeWakeupResp())))
+  mtype_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && exe_units(csr_unit_idx).io.iresp.bits.uop.is_msettype
+  mtype_wakeup.bits.mconfig.mtype :=  exe_units(csr_unit_idx).io.iresp.bits.uop.mconfig.mtype
+  mtype_wakeup.bits.mcq_idx       :=  exe_units(csr_unit_idx).io.iresp.bits.uop.mcq_idx
+  mtype_wakeup.bits.mconfig_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.mconfig_mask
+  mtype_wakeup.bits.mconfig_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.mconfig_tag
+
+  val tile_m_wakeup = WireInit(0.U.asTypeOf(Valid(new MtileWakeupResp())))
+  val tile_n_wakeup = WireInit(0.U.asTypeOf(Valid(new MtileWakeupResp())))
+  val tile_k_wakeup = WireInit(0.U.asTypeOf(Valid(new MtileWakeupResp())))
+  tile_m_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && exe_units(csr_unit_idx).io.iresp.bits.uop.is_settilem
+  tile_m_wakeup.bits.tile_len :=  exe_units(csr_unit_idx).io.iresp.bits.uop.tile_m
+  tile_m_wakeup.bits.tile_idx       :=  exe_units(csr_unit_idx).io.iresp.bits.uop.tile_m_idx
+  tile_m_wakeup.bits.tile_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.tile_m_mask
+  tile_m_wakeup.bits.tile_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.tile_m_tag
+
+  tile_n_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && exe_units(csr_unit_idx).io.iresp.bits.uop.is_settilen
+  tile_n_wakeup.bits.tile_len :=  exe_units(csr_unit_idx).io.iresp.bits.uop.tile_n
+  tile_n_wakeup.bits.tile_idx       :=  exe_units(csr_unit_idx).io.iresp.bits.uop.tile_n_idx
+  tile_n_wakeup.bits.tile_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.tile_n_mask
+  tile_n_wakeup.bits.tile_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.tile_n_tag
+
+  tile_k_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && exe_units(csr_unit_idx).io.iresp.bits.uop.is_settilek
+  tile_k_wakeup.bits.tile_len :=  exe_units(csr_unit_idx).io.iresp.bits.uop.tile_k
+  tile_k_wakeup.bits.tile_idx       :=  exe_units(csr_unit_idx).io.iresp.bits.uop.tile_k_idx
+  tile_k_wakeup.bits.tile_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.tile_k_mask
+  tile_k_wakeup.bits.tile_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.tile_k_tag
+/*******************************************************************************************/
   require(exe_units.length == issue_units.map(_.issueWidth).sum)
 
   //***********************************
@@ -220,6 +250,16 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //// are the decoded instruction is vconfig instruction valid? It may be held up though.
   val dec_vconfig = Wire(Vec(coreWidth, new VconfigDecodeSignals()))
   val dec_vconfig_valid = Wire(Vec(coreWidth, Bool()))
+
+
+  val dec_mtile  = Wire(Vec(coreWidth, new TileDecodeSignals()))
+  val dec_mtile_valid = Wire(Vec(coreWidth, Bool()))
+  val dec_ntile  = Wire(Vec(coreWidth, new TileDecodeSignals()))
+  val dec_ntile_valid = Wire(Vec(coreWidth, Bool()))
+  val dec_ktile  = Wire(Vec(coreWidth, new TileDecodeSignals()))
+  val dec_ktile_valid = Wire(Vec(coreWidth, Bool()))
+  val dec_mconfig = Wire(Vec(coreWidth, new MconfigDecodeSignals()))
+  val dec_mconfig_valid = Wire(Vec(coreWidth, Bool()))
   // stall fetch/dcode because we ran out of vconfig tags
   val vconfig_mask_full = Wire(Vec(coreWidth, Bool()))
 
@@ -306,14 +346,20 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   if (usingVector) {
     v_pipeline.io.brupdate := brupdate
     v_pipeline.io.vbusy_status := v_rename_stage.io.vbusy_status
-
+    v_pipeline.io.mtype_wakeup := mtype_wakeup
+    v_pipeline.io.tile_m_wakeup := tile_m_wakeup
+    v_pipeline.io.tile_n_wakeup := tile_n_wakeup  
+    v_pipeline.io.tile_k_wakeup := tile_k_wakeup    
     v_pipeline.io.vl_wakeup := vl_wakeup
   }
 
   if (usingMatrix) {
     m_pipeline.io.brupdate := brupdate
     m_pipeline.io.vl_wakeup := vl_wakeup
-    // m_pipeline.io.ml_wakeup
+    m_pipeline.io.mtype_wakeup := mtype_wakeup
+    m_pipeline.io.tile_m_wakeup := tile_m_wakeup
+    m_pipeline.io.tile_n_wakeup := tile_n_wakeup  
+    m_pipeline.io.tile_k_wakeup := tile_k_wakeup 
   }
 
   // Load/Store Unit & ExeUnits
@@ -973,6 +1019,18 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val vcq_data  = Wire(Vec(coreWidth, new VconfigDecodeSignals()))
   val vcq_empty = WireInit(false.B)
 
+  val mcq_data  = Wire(Vec(coreWidth, new MconfigDecodeSignals()))
+  val mcq_empty = WireInit(false.B)
+
+  val mtileq_data  = Wire(Vec(coreWidth, new TileDecodeSignals()))
+  val mtileq_empty = WireInit(false.B)
+
+  val ntileq_data  = Wire(Vec(coreWidth, new TileDecodeSignals()))
+  val ntileq_empty = WireInit(false.B)
+
+  val ktileq_data  = Wire(Vec(coreWidth, new TileDecodeSignals()))
+  val ktileq_empty = WireInit(false.B)
+
   for (w <- 0 until coreWidth) {
     dec_valids(w) := io.ifu.fetchpacket.valid && dec_fbundle.uops(w).valid &&
       !dec_finished_mask(w)
@@ -995,10 +1053,42 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       dec_vconfig(w).vl_ready := (dec_fbundle.uops(w).bits.inst(19, 15) === 0.U && dec_fbundle.uops(w).bits.inst(11, 7) =/= 0.U) || dec_fbundle.uops(w).bits.inst(31)
     }
     if (usingMatrix) {
-      decode_units(w).io.csr_mconfig := csr.io.matrix.get.mconfig
-      decode_units(w).io.csr_tilem := csr.io.matrix.get.tilem
-      decode_units(w).io.csr_tilek := csr.io.matrix.get.tilek
-      decode_units(w).io.csr_tilen := csr.io.matrix.get.tilen
+      dec_mconfig_valid(w) := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 119.U) && 
+                             (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && 
+                             ((dec_fbundle.uops(w).bits.inst(31, 28) === 0.U) ||
+                             (dec_fbundle.uops(w).bits.inst(31, 28) === 1.U))
+      dec_mconfig(w).mconfig.mtype := Mux(dec_fbundle.uops(w).bits.inst(31,28) === 0.U,MType.fromUInt(dec_fbundle.uops(w).bits.inst(27, 15)),MType.mtype_value)
+      dec_mconfig(w).mtype_ready := (dec_fbundle.uops(w).bits.inst(31,28) === 0.U)
+
+      dec_mtile_valid(w)      := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 119.U) && 
+                                (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) &&
+                                ((dec_fbundle.uops(w).bits.inst(31, 28) === 2.U) ||
+                                (dec_fbundle.uops(w).bits.inst(31, 28) === 3.U))
+      dec_mtile(w).tile_ready :=  (dec_fbundle.uops(w).bits.inst(31,28) === 2.U)
+      dec_mtile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 2.U),dec_fbundle.uops(w).bits.inst(27, 15), 16.U)
+
+      dec_ntile_valid(w)      := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 119.U) && 
+                                (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && 
+                                ((dec_fbundle.uops(w).bits.inst(31, 28) === 6.U) ||
+                                (dec_fbundle.uops(w).bits.inst(31, 28) === 7.U))
+      dec_ntile(w).tile_ready :=  (dec_fbundle.uops(w).bits.inst(31,28) === 6.U)
+      dec_ntile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 6.U),dec_fbundle.uops(w).bits.inst(27, 15), 16.U)
+
+      dec_ktile_valid(w)      := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 119.U) && 
+                                (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && 
+                                ((dec_fbundle.uops(w).bits.inst(31, 28) === 4.U) ||
+                                (dec_fbundle.uops(w).bits.inst(31, 28) === 5.U))
+      dec_ktile(w).tile_ready :=  (dec_fbundle.uops(w).bits.inst(31,28) === 4.U)
+      dec_ktile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 4.U),dec_fbundle.uops(w).bits.inst(27, 15), 16.U)
+
+      decode_units(w).io.csr_mconfig := mcq_data(w).mconfig
+      decode_units(w).io.enq.uop.mtype_ready := mcq_data(w).mtype_ready
+      decode_units(w).io.csr_tilem := mtileq_data(w).tile_len
+      decode_units(w).io.enq.uop.tile_m_ready := mtileq_data(w).tile_ready
+      decode_units(w).io.csr_tilen := ntileq_data(w).tile_len
+      decode_units(w).io.enq.uop.tile_n_ready := ntileq_data(w).tile_ready
+      decode_units(w).io.csr_tilek := ktileq_data(w).tile_len
+      decode_units(w).io.enq.uop.tile_k_ready := ktileq_data(w).tile_ready
     }
 
     dec_uops(w) := decode_units(w).io.deq.uop
@@ -1007,16 +1097,36 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   for (w <- 0 until coreWidth) {
     when(vl_wakeup.valid && !decode_units(w).io.deq.uop.vl_ready &&
         (vl_wakeup.bits.vconfig_tag + 1.U) === dec_uops(w).vconfig_tag) {
-      dec_uops(w).vl_ready := true.B
+      dec_uops(w).vl_ready := true.B 
       dec_uops(w).vconfig.vl := Mux(dec_uops(w).uopc.isOneOf(uopVSMA, uopVLM),
         (vl_wakeup.bits.vl + 7.U) >> 3.U, vl_wakeup.bits.vl)
+    }
+    when(mtype_wakeup.valid && !decode_units(w).io.deq.uop.mtype_ready && 
+        (mtype_wakeup.bits.mconfig_tag + 1.U) === dec_uops(w).mconfig_tag) {
+          dec_uops(w).mtype_ready := true.B 
+          dec_uops(w).mconfig := mtype_wakeup.bits.mconfig
+    }
+    when(tile_m_wakeup.valid && !decode_units(w).io.deq.uop.tile_m_ready && 
+        (tile_m_wakeup.bits.tile_tag + 1.U) === dec_uops(w).tile_m_tag) {
+          dec_uops(w).tile_m_ready := true.B 
+          dec_uops(w).tile_m := tile_m_wakeup.bits.tile_len
+    }
+    when(tile_n_wakeup.valid && !decode_units(w).io.deq.uop.tile_n_ready && 
+        (tile_n_wakeup.bits.tile_tag + 1.U) === dec_uops(w).tile_n_tag) {
+          dec_uops(w).tile_n_ready := true.B 
+          dec_uops(w).tile_n := tile_n_wakeup.bits.tile_len
+    }
+    when(tile_k_wakeup.valid && !decode_units(w).io.deq.uop.tile_k_ready && 
+        (tile_k_wakeup.bits.tile_tag + 1.U) === dec_uops(w).tile_k_tag) {
+          dec_uops(w).tile_k_ready := true.B 
+          dec_uops(w).tile_k := tile_k_wakeup.bits.tile_len
     }
   }
 
   // Vconfig Mask Logic
-  val mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).map{ case(v, uop) => v && (uop.is_vsetvli || uop.is_vsetivli) }
+  val mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).map{ case(v, uop) => v && (uop.is_vsetvli || uop.is_vsetivli)}
   dec_vconfigmask_logic.io.vconfig_mask_update := RegNext(Mux(!mask_updates.reduce(_|_), 0.U,
-                                                          Mux1H(mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.vconfig_tag)))))
+                                                           Mux1H(mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.vconfig_tag)))))
 
   dec_vconfigmask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
   vconfig_mask_full := dec_vconfigmask_logic.io.is_full
@@ -1031,7 +1141,159 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dec_vconfig_nums  = dec_vconfig_fires.scanLeft(0.U)(_ + _)
   (dec_uops zip dec_vconfig_nums).map{ case(dec_uop, fire_num) =>
     dec_uop.vconfig_tag := dec_vconfigmask_logic.io.vconfig_tag.head + fire_num }
+/***************************************************************************/
+val matrix_mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).map{ case(v, uop) => v && (uop.is_msettype)}
+val dec_mconfigmask_logic = Module(new MconfigMaskGenerationLogic(coreWidth))
+dec_mconfigmask_logic.io.mconfig_mask_update := RegNext(Mux(!matrix_mask_updates.reduce(_|_), 0.U,
+                                                          Mux1H(matrix_mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.mconfig_tag)))))
+dec_mconfigmask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush                                                          
+for (w <- 0 until coreWidth) {
+    dec_mconfigmask_logic.io.is_mconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_msettype )
+    dec_mconfigmask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_msettype)
+    dec_uops(w).mconfig_mask := dec_mconfigmask_logic.io.mconfig_mask(w)
+  }
+val dec_mconfig_fires = (dec_mconfigmask_logic.io.is_mconfig zip dec_mconfigmask_logic.io.will_fire).map{ case(v, f) => (v && f).asUInt }
+val dec_mconfig_nums  = dec_mconfig_fires.scanLeft(0.U)(_ + _)
+(dec_uops zip dec_mconfig_nums).map{ case(dec_uop, fire_num) =>
+    dec_uop.mconfig_tag := dec_mconfigmask_logic.io.mconfig_tag.head + fire_num }
 
+val matrix_tilem_mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).map{ case(v, uop) => v && (uop.is_settilem)}
+val dec_mtilemask_logic = Module(new MconfigMaskGenerationLogic(coreWidth))
+dec_mtilemask_logic.io.mconfig_mask_update := RegNext(Mux(!matrix_tilem_mask_updates.reduce(_|_), 0.U,
+                                                          Mux1H(matrix_tilem_mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.tile_m_tag)))))
+dec_mtilemask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush                                                          
+for (w <- 0 until coreWidth) {
+    dec_mtilemask_logic.io.is_mconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_settilem )
+    dec_mtilemask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_settilem)
+    dec_uops(w).tile_m_mask := dec_mtilemask_logic.io.mconfig_mask(w)
+  }
+val dec_mtile_fires = (dec_mtilemask_logic.io.is_mconfig zip dec_mtilemask_logic.io.will_fire).map{ case(v, f) => (v && f).asUInt }
+val dec_mtile_nums  = dec_mtile_fires.scanLeft(0.U)(_ + _)
+(dec_uops zip dec_mtile_nums).map{ case(dec_uop, fire_num) =>
+    dec_uop.tile_m_tag := dec_mtilemask_logic.io.mconfig_tag.head + fire_num }
+
+  
+val matrix_tilen_mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).map{ case(v, uop) => v && (uop.is_settilen)}
+val dec_ntilemask_logic = Module(new MconfigMaskGenerationLogic(coreWidth))
+dec_ntilemask_logic.io.mconfig_mask_update := RegNext(Mux(!matrix_tilen_mask_updates.reduce(_|_), 0.U,
+                                                          Mux1H(matrix_tilen_mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.tile_n_tag)))))
+dec_ntilemask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush                                                          
+for (w <- 0 until coreWidth) {
+    dec_ntilemask_logic.io.is_mconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_settilen )
+    dec_ntilemask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_settilen)
+    dec_uops(w).tile_n_mask := dec_ntilemask_logic.io.mconfig_mask(w)
+  }
+val dec_ntile_fires = (dec_ntilemask_logic.io.is_mconfig zip dec_ntilemask_logic.io.will_fire).map{ case(v, f) => (v && f).asUInt }
+val dec_ntile_nums  = dec_ntile_fires.scanLeft(0.U)(_ + _)
+(dec_uops zip dec_ntile_nums).map{ case(dec_uop, fire_num) =>
+    dec_uop.tile_n_tag := dec_ntilemask_logic.io.mconfig_tag.head + fire_num }
+
+
+
+val matrix_tilek_mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).map{ case(v, uop) => v && (uop.is_settilek)}
+val dec_ktilemask_logic = Module(new MconfigMaskGenerationLogic(coreWidth))
+dec_ktilemask_logic.io.mconfig_mask_update := RegNext(Mux(!matrix_tilek_mask_updates.reduce(_|_), 0.U,
+                                                          Mux1H(matrix_tilek_mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.tile_k_tag)))))
+dec_ktilemask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush                                                          
+for (w <- 0 until coreWidth) {
+    dec_ktilemask_logic.io.is_mconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_settilek )
+    dec_ktilemask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_settilek)
+    dec_uops(w).tile_k_mask := dec_ktilemask_logic.io.mconfig_mask(w)
+  }
+val dec_ktile_fires = (dec_ktilemask_logic.io.is_mconfig zip dec_ktilemask_logic.io.will_fire).map{ case(v, f) => (v && f).asUInt }
+val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
+(dec_uops zip dec_ktile_nums).map{ case(dec_uop, fire_num) =>
+    dec_uop.tile_k_tag := dec_ktilemask_logic.io.mconfig_tag.head + fire_num }    
+/***************************************************************************/
+
+/***************************************************************************/
+  val mcq = Module(new MconfigQueue())
+  val youngest_mconfig_idx = (coreWidth - 1).U - PriorityEncoder(dec_mconfig_valid.reverse)
+  val oldest_mconfig_idx = PriorityEncoder(dec_mconfig_valid)
+  mcq.io.enq.bits := Mux(dec_mconfig_valid.last, dec_mconfig.last, dec_mconfig.head)
+  mcq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_msettype)}.reduce(_ | _)
+  mcq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_msettype, false.B)}.reduce(_ | _)
+  mcq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  mcq_empty         := mcq.io.empty
+
+  for(w <- 0 until coreWidth) {
+    mcq_data(w).mconfig  := Mux(dec_mconfig_valid(oldest_mconfig_idx) && oldest_mconfig_idx < w.U, dec_mconfig(oldest_mconfig_idx).mconfig, Mux(mcq_empty, csr.io.matrix.get.mconfig, mcq.io.get_mconfig.mconfig))
+    mcq_data(w).mtype_ready := Mux(dec_mconfig_valid(oldest_mconfig_idx) && oldest_mconfig_idx < w.U, dec_mconfig(oldest_mconfig_idx).mtype_ready, Mux(mcq_empty, true.B, mcq.io.get_mconfig.mtype_ready))
+  }
+
+  mcq.io.update_mtype.valid := mtype_wakeup.valid
+  mcq.io.update_mtype.bits.mtype_ready:= mtype_wakeup.valid
+  mcq.io.update_mtype.bits.mconfig := mtype_wakeup.bits.mconfig
+  mcq.io.update_mtype_idx := mtype_wakeup.bits.mcq_idx
+  dec_uops.map(d => d.mcq_idx := mcq.io.enq_idx)
+
+
+
+  val mtilecq = Module(new TileQueue())
+  val youngest_tile_m_idx = (coreWidth - 1).U - PriorityEncoder(dec_mtile_valid.reverse)
+  val oldest_tile_m_idx = PriorityEncoder(dec_mtile_valid)
+  mtilecq.io.enq.bits := Mux(dec_mtile_valid.last, dec_mtile.last, dec_mtile.head)
+  mtilecq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_settilem)}.reduce(_ | _)
+  mtilecq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_settilem, false.B)}.reduce(_ | _)
+  mtilecq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  mtileq_empty         := mtilecq.io.empty
+
+  for(w <- 0 until coreWidth) {
+    mtileq_data(w).tile_len  := Mux(dec_mtile_valid(oldest_tile_m_idx) && oldest_tile_m_idx < w.U, dec_mtile(oldest_tile_m_idx).tile_len, Mux(mtileq_empty, csr.io.matrix.get.tilem, mtilecq.io.get_tile_size.tile_len))
+    mtileq_data(w).tile_ready := Mux(dec_mtile_valid(oldest_tile_m_idx) && oldest_tile_m_idx < w.U, dec_mtile(oldest_tile_m_idx).tile_ready, Mux(mtileq_empty, true.B, mtilecq.io.get_tile_size.tile_ready))
+  }
+
+  mtilecq.io.update_tile_size.valid := tile_m_wakeup.valid
+  mtilecq.io.update_tile_size.bits.tile_ready:= tile_m_wakeup.valid
+  mtilecq.io.update_tile_size.bits.tile_len := tile_m_wakeup.bits.tile_len
+  mtilecq.io.update_tile_size_idx := tile_m_wakeup.bits.tile_idx
+  dec_uops.map(d => d.tile_m_idx := mtilecq.io.enq_idx)
+
+
+
+
+  val ntilecq = Module(new TileQueue())
+  val youngest_tile_n_idx = (coreWidth - 1).U - PriorityEncoder(dec_ntile_valid.reverse)
+  val oldest_tile_n_idx = PriorityEncoder(dec_ntile_valid)
+  ntilecq.io.enq.bits := Mux(dec_ntile_valid.last, dec_ntile.last, dec_ntile.head)
+  ntilecq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_settilen)}.reduce(_ | _)
+  ntilecq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_settilen, false.B)}.reduce(_ | _)
+  ntilecq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  ntileq_empty         := ntilecq.io.empty
+
+  for(w <- 0 until coreWidth) {
+    ntileq_data(w).tile_len  := Mux(dec_ntile_valid(oldest_tile_n_idx) && oldest_tile_n_idx < w.U, dec_ntile(oldest_tile_n_idx).tile_len, Mux(ntileq_empty, csr.io.matrix.get.tilen, ntilecq.io.get_tile_size.tile_len))
+    ntileq_data(w).tile_ready := Mux(dec_ntile_valid(oldest_tile_n_idx) && oldest_tile_n_idx < w.U, dec_ntile(oldest_tile_n_idx).tile_ready, Mux(ntileq_empty, true.B, ntilecq.io.get_tile_size.tile_ready))
+  }
+
+  ntilecq.io.update_tile_size.valid := tile_n_wakeup.valid
+  ntilecq.io.update_tile_size.bits.tile_ready:= tile_n_wakeup.valid
+  ntilecq.io.update_tile_size.bits.tile_len := tile_n_wakeup.bits.tile_len
+  ntilecq.io.update_tile_size_idx := tile_n_wakeup.bits.tile_idx
+  dec_uops.map(d => d.tile_n_idx := ntilecq.io.enq_idx)
+  
+
+
+  val ktilecq = Module(new TileQueue())
+  val youngest_tile_k_idx = (coreWidth - 1).U - PriorityEncoder(dec_ktile_valid.reverse)
+  val oldest_tile_k_idx = PriorityEncoder(dec_ktile_valid)
+  ktilecq.io.enq.bits := Mux(dec_ktile_valid.last, dec_ktile.last, dec_ktile.head)
+  ktilecq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_settilek)}.reduce(_ | _)
+  ktilecq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_settilek, false.B)}.reduce(_ | _)
+  ktilecq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  ktileq_empty         := ktilecq.io.empty
+
+  for(w <- 0 until coreWidth) {
+    ktileq_data(w).tile_len  := Mux(dec_ktile_valid(oldest_tile_k_idx) && oldest_tile_k_idx < w.U, dec_ktile(oldest_tile_k_idx).tile_len, Mux(ktileq_empty, csr.io.matrix.get.tilek, ktilecq.io.get_tile_size.tile_len))
+    ktileq_data(w).tile_ready := Mux(dec_ktile_valid(oldest_tile_k_idx) && oldest_tile_k_idx < w.U, dec_ktile(oldest_tile_k_idx).tile_ready, Mux(ktileq_empty, true.B, ktilecq.io.get_tile_size.tile_ready))
+  }
+
+  ktilecq.io.update_tile_size.valid := tile_k_wakeup.valid
+  ktilecq.io.update_tile_size.bits.tile_ready:= tile_k_wakeup.valid
+  ktilecq.io.update_tile_size.bits.tile_len := tile_k_wakeup.bits.tile_len
+  ktilecq.io.update_tile_size_idx := tile_k_wakeup.bits.tile_idx
+  dec_uops.map(d => d.tile_k_idx := ktilecq.io.enq_idx)
+/***************************************************************************/
   //vconfig instruction decode info enq to VCQ
   val vcq = Module(new VconfigQueue())
   val youngest_vconfig_idx = (coreWidth - 1).U - PriorityEncoder(dec_vconfig_valid.reverse)
@@ -1188,7 +1450,18 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     if (usingVector) {
       rename.io.vl_wakeup := vl_wakeup
     }
+    //if (usingMatrix) {
+      rename.io.mtype_wakeup := mtype_wakeup
+      rename.io.tile_m_wakeup := tile_m_wakeup
+      rename.io.tile_n_wakeup := tile_n_wakeup
+      rename.io.tile_k_wakeup := tile_k_wakeup
+   // }
   }
+
+  m_rename_stage.io.mtype_wakeup := mtype_wakeup
+  m_rename_stage.io.tile_m_wakeup := tile_m_wakeup
+  m_rename_stage.io.tile_n_wakeup := tile_n_wakeup
+  m_rename_stage.io.tile_k_wakeup := tile_k_wakeup
   if (usingVector) {
     v_rename_stage.io.vl_xcpt := rob.io.commit.vl_xcpt
   }
@@ -1283,6 +1556,35 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }.otherwise {
       dis_uops(w).vl_ready := v_uop.vl_ready
       dis_uops(w).vconfig.vl :=  v_uop.vconfig.vl
+    }
+
+    when(mtype_wakeup.valid && (mtype_wakeup.bits.mconfig_tag + 1.U) === v_uop.mconfig_tag && !v_uop.mtype_ready) {
+      dis_uops(w).mtype_ready := true.B
+      dec_uops(w).mconfig := mtype_wakeup.bits.mconfig
+    }.otherwise {
+      dis_uops(w).mtype_ready := v_uop.mtype_ready
+      dis_uops(w).mconfig :=  v_uop.mconfig
+    }
+    when(tile_m_wakeup.valid && (tile_m_wakeup.bits.tile_tag + 1.U) === v_uop.tile_m_tag && !v_uop.tile_m_ready) {
+      dec_uops(w).tile_m_ready := true.B 
+      dec_uops(w).tile_m := tile_m_wakeup.bits.tile_len
+    }.otherwise {
+      dis_uops(w).tile_m_ready := v_uop.tile_m_ready
+      dis_uops(w).tile_m :=  v_uop.tile_m
+    }
+    when(tile_n_wakeup.valid && (tile_n_wakeup.bits.tile_tag + 1.U) === v_uop.tile_n_tag && !v_uop.tile_n_ready) {
+      dis_uops(w).tile_n_ready := true.B
+      dis_uops(w).tile_n :=  tile_n_wakeup.bits.tile_len
+    }.otherwise {
+      dis_uops(w).tile_n_ready := v_uop.tile_n_ready
+      dis_uops(w).tile_n :=  v_uop.tile_n
+    }
+    when(tile_k_wakeup.valid && (tile_k_wakeup.bits.tile_tag + 1.U) === v_uop.tile_k_tag && !v_uop.tile_k_ready) {
+      dis_uops(w).tile_k_ready := true.B
+      dis_uops(w).tile_k :=  tile_k_wakeup.bits.tile_len
+    }.otherwise {
+      dis_uops(w).tile_k_ready := v_uop.tile_k_ready
+      dis_uops(w).tile_k :=  v_uop.tile_k
     }
     ren_stalls(w) := rename_stage.io.ren_stalls(w) || f_stall || p_stall || v_stall || m_stall
   }
@@ -1406,6 +1708,25 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }
   }
 
+
+    m_rename_stage.io.matrix_iss_valid := m_pipeline.io.matrix_iss_valid
+    m_rename_stage.io.matrix_iss_uop := m_pipeline.io.matrix_iss_uop
+    m_rename_stage.io.mem_iss_valid := mem_iss_unit.io.wake_tile_r(0)
+    m_rename_stage.io.mem_iss_uop := mem_iss_unit.io.iss_uops(0)
+    m_pipeline.io.wake_issue_prs := m_rename_stage.io.wake_issue_prs
+    m_pipeline.io.wake_issue_data := m_rename_stage.io.wake_issue_data
+    m_pipeline.io.wake_issue_valid := m_rename_stage.io.wake_issue_valid
+
+    mem_iss_unit.io.wake_issue_prs := m_rename_stage.io.wake_issue_prs
+    mem_iss_unit.io.wake_issue_data := m_rename_stage.io.wake_issue_data
+    mem_iss_unit.io.wake_issue_valid := m_rename_stage.io.wake_issue_valid
+
+    int_iss_unit.io.wake_issue_prs := DontCare
+    int_iss_unit.io.wake_issue_data := DontCare
+    int_iss_unit.io.wake_issue_valid := DontCare
+
+
+
   //-------------------------------------------------------------
   //-------------------------------------------------------------
   // **** Issue Stage ****
@@ -1498,6 +1819,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     iu.io.spec_ld_wakeup := io.lsu.spec_ld_wakeup
 
     iu.io.vl_wakeup      := vl_wakeup
+    iu.io.mtype_wakeup   := mtype_wakeup
+    iu.io.tile_m_wakeup   := tile_m_wakeup
+    iu.io.tile_n_wakeup   := tile_n_wakeup
+    iu.io.tile_k_wakeup   := tile_k_wakeup
   }
 
   // Connect the predicate wakeup port

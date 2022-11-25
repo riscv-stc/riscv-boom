@@ -89,7 +89,19 @@ abstract class AbstractRenameStage(
     val wakeups   = if (vector) Flipped(Vec(numWbPorts, Valid(new ExeUnitResp(vLen)))) 
                     else        Flipped(Vec(numWbPorts, Valid(new ExeUnitResp(xLen))))
     val vl_wakeup = if (usingVector) Flipped(Valid(new VlWakeupResp())) else null
-
+    
+    val mtype_wakeup = Flipped(Valid(new MtypeWakeupResp())) 
+    val tile_m_wakeup = Flipped(Valid(new MtileWakeupResp())) 
+    val tile_n_wakeup =Flipped(Valid(new MtileWakeupResp())) 
+    val tile_k_wakeup = Flipped(Valid(new MtileWakeupResp())) 
+  
+    val matrix_iss_valid = if (matrix) Input(Bool()) else null
+    val matrix_iss_uop = if (matrix) Input(new MicroOp()) else null
+    val mem_iss_valid = if (matrix) Input(Bool()) else null
+    val mem_iss_uop = if (matrix) Input(new MicroOp()) else null
+    val wake_issue_prs = Output(Vec(2,UInt((vLenb+1).W)))
+    val wake_issue_data = Output(Vec(2,UInt((vLenb+1).W)))
+    val wake_issue_valid = Output(Vec(2,Bool()))
     // commit stage
     val com_valids = Input(Vec(plWidth, Bool()))
     val com_uops   = Input(Vec(plWidth, new MicroOp()))
@@ -156,6 +168,61 @@ abstract class AbstractRenameStage(
                                                                       io.vl_wakeup.bits.vl)
       }
     }
+   // if (matrix) {
+        when(io.mtype_wakeup.valid && r_valid && !r_uop.mtype_ready && !ren2_ready &&
+          (io.mtype_wakeup.bits.mconfig_tag + 1.U) === r_uop.mconfig_tag) {
+            r_uop.mtype_ready := true.B 
+            r_uop.mconfig := io.mtype_wakeup.bits.mconfig
+        }
+        when(io.tile_m_wakeup.valid && r_valid && !r_uop.tile_m_ready && !ren2_ready &&
+            (io.tile_m_wakeup.bits.tile_tag + 1.U) === r_uop.tile_m_tag) {
+              r_uop.tile_m_ready := true.B 
+              r_uop.tile_m := io.tile_m_wakeup.bits.tile_len
+        }
+        when(io.tile_n_wakeup.valid && r_valid && !r_uop.tile_n_ready && !ren2_ready &&
+            (io.tile_n_wakeup.bits.tile_tag + 1.U) === r_uop.tile_n_tag) {
+              r_uop.tile_n_ready := true.B 
+              r_uop.tile_n := io.tile_n_wakeup.bits.tile_len
+        }
+        when(io.tile_k_wakeup.valid && r_valid && !r_uop.tile_k_ready && !ren2_ready &&
+            (io.tile_k_wakeup.bits.tile_tag + 1.U) === r_uop.tile_k_tag) {
+              r_uop.tile_k_ready := true.B 
+              r_uop.tile_k := io.tile_k_wakeup.bits.tile_len
+        }
+        val  m_ok = (io.tile_m_wakeup.valid && r_valid && !r_uop.tile_m_ready && !ren2_ready &&
+            (io.tile_m_wakeup.bits.tile_tag + 1.U) === r_uop.tile_m_tag)
+        val  n_ok = (io.tile_n_wakeup.valid && r_valid && !r_uop.tile_n_ready && !ren2_ready &&
+            (io.tile_n_wakeup.bits.tile_tag + 1.U) === r_uop.tile_n_tag)
+        val k_ok = (io.tile_k_wakeup.valid && r_valid && !r_uop.tile_k_ready && !ren2_ready &&
+            (io.tile_k_wakeup.bits.tile_tag + 1.U) === r_uop.tile_k_tag)
+        when(k_ok || n_ok || m_ok) {
+        val is_mls = r_uop.uopc.isOneOf(uopMLE,uopMSE)
+        val is_mopa = r_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA)
+        val is_mmv =  r_uop.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V)
+        val transposed = r_uop.transposed
+        val mslice_dim = r_uop.mslice_dim
+
+        val slice_cnt_tilem = (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed)
+        val slice_cnt_tilen = (mslice_dim === 2.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
+        val slice_cnt_tilek = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 2.U && !transposed)
+        val slice_len_tilem = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
+        val slice_len_tilen = (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed)
+        val slice_len_tilek = (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U &&  transposed)
+
+        val sel_m = Mux(m_ok, io.tile_m_wakeup.bits.tile_len, r_uop.tile_m)
+        val sel_n = Mux(n_ok, io.tile_n_wakeup.bits.tile_len, r_uop.tile_n)
+        val sel_k = Mux(k_ok, io.tile_k_wakeup.bits.tile_len, r_uop.tile_k)
+        val sel_slice_cnt = Mux(slice_cnt_tilem, sel_m,
+                            Mux(slice_cnt_tilen, sel_n, sel_k))
+        val sel_slice_len = Mux(slice_len_tilem, sel_m,
+                            Mux(slice_len_tilen, sel_n, sel_k))
+        r_uop.m_tilem   := Mux(is_mls,  sel_slice_cnt, 
+                                  Mux(is_mopa, sel_k, sel_m))
+        r_uop.m_tilek   := Mux(is_mls, sel_slice_len, 
+                                  Mux(is_mmv && mslice_dim === 2.U, sel_m,
+                                  Mux(is_mmv && mslice_dim === 3.U, sel_n, sel_k)))
+      }
+//    }
 
     ren2_valids(w) := r_valid
     ren2_uops(w)   := r_uop
@@ -957,15 +1024,30 @@ class MatRenameStage(
     trbusytable.io.rebusy_reqs(w)  := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_TR
     accbusytable.io.rebusy_reqs(w) := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_ACC
   }
+
+  trbusytable.io.matrix_iss_valid  := io.matrix_iss_valid && (io.matrix_iss_uop.dst_rtype ===  RT_TR)
+  trbusytable.io.matrix_iss_uop  := io.matrix_iss_uop
+  trbusytable.io.mem_iss_valid  := io.mem_iss_valid && (io.mem_iss_uop.dst_rtype ===  RT_TR)
+  trbusytable.io.mem_iss_uop  := io.mem_iss_uop
   trbusytable.io.ren_uops  := ren2_uops  // expects pdst to be set up.
   trbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_TR && Mux(x.bits.uop.uses_ldq, x.bits.uop.m_slice_done, true.B))
   trbusytable.io.wb_pdsts  := io.wakeups.map(_.bits.uop.pdst)
   trbusytable.io.wb_bits   := io.wakeups.map(w => UIntToOH(w.bits.uop.m_sidx))
+  io.wake_issue_valid(0) := trbusytable.io.wake_issue_valid
+  io.wake_issue_data(0) := trbusytable.io.wake_issue_data
+  io.wake_issue_prs(0) := trbusytable.io.wake_issue_prs
 
+  accbusytable.io.matrix_iss_valid  := io.matrix_iss_valid  && (io.matrix_iss_uop.dst_rtype ===  RT_ACC)
+  accbusytable.io.matrix_iss_uop  := io.matrix_iss_uop
+  accbusytable.io.mem_iss_valid  := io.mem_iss_valid  && (io.mem_iss_uop.dst_rtype ===  RT_ACC)
+  accbusytable.io.mem_iss_uop  := io.mem_iss_uop
   accbusytable.io.ren_uops  := ren2_uops  // expects pdst to be set up.
   accbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_ACC && Mux(x.bits.uop.uses_ldq, x.bits.uop.m_slice_done, true.B))
   accbusytable.io.wb_pdsts  := io.wakeups.map(_.bits.uop.pdst)
   accbusytable.io.wb_bits   := io.wakeups.map(w => Mux(w.bits.uop.m_is_split, UIntToOH(w.bits.uop.m_sidx), Fill(vLenb, 1.U(1.W))))
+  io.wake_issue_valid(1) := accbusytable.io.wake_issue_valid
+  io.wake_issue_data(1) := accbusytable.io.wake_issue_data
+  io.wake_issue_prs(1) := accbusytable.io.wake_issue_prs
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
     "[rename] Wakeup has wrong rtype.")

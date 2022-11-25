@@ -101,6 +101,7 @@ class IssueUnitCollapsing(
   // set default
   for (w <- 0 until issueWidth) {
     io.iss_valids(w) := false.B
+    io.wake_tile_r(w) := false.B
     io.iss_uops(w)   := NullMicroOp()
     // unsure if this is overkill
     io.iss_uops(w).prs1 := 0.U
@@ -141,6 +142,7 @@ class IssueUnitCollapsing(
         issue_slots(i).grant := true.B
         io.iss_valids(w) := true.B
         io.iss_uops(w) := issue_slots(i).uop
+        io.wake_tile_r(w) := issue_slots(i).uop.is_rvm && issue_slots(i).uop.m_split_last
       }
       val was_port_issued_yet = port_issued(w)
       port_issued(w) = (requests(i) && !uop_issued && can_allocate) | port_issued(w)

@@ -1435,6 +1435,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       ldq_e.bits.addr_is_uncacheable  := false.B
       ldq_e.bits.uop.vl_ready         := true.B
       ldq_e.bits.uop.vconfig.vl       := exe_req(w).bits.uop.vconfig.vl
+      ldq_e.bits.uop.m_slice_cnt      := exe_req(w).bits.uop.m_slice_cnt
+      ldq_e.bits.uop.m_slice_len      := exe_req(w).bits.uop.m_slice_len
     }
 
     when (will_fire_vstore_incoming(w)) {
@@ -1446,6 +1448,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq_e.bits.addr_is_virtual      := true.B
       stq_e.bits.uop.vl_ready         := true.B
       stq_e.bits.uop.vconfig.vl       := exe_req(w).bits.uop.vconfig.vl
+      stq_e.bits.uop.m_slice_cnt      := exe_req(w).bits.uop.m_slice_cnt
+      stq_e.bits.uop.m_slice_len      := exe_req(w).bits.uop.m_slice_len
     }
   }
 

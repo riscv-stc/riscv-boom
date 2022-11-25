@@ -42,6 +42,10 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     val tilem            = Input(UInt(xLen.W))
     val tilen            = Input(UInt(xLen.W))
     val tilek            = Input(UInt(xLen.W))
+
+    val wake_issue_prs = Input(Vec(2,UInt((vLenb+1).W)))
+    val wake_issue_data = Input(Vec(2,UInt((vLenb+1).W)))
+    val wake_issue_valid = Input(Vec(2,Bool()))
     // dispatched uops
     val dis_uops         = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
     // vector pipeline related
@@ -58,6 +62,12 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units
     val vl_wakeup        = Input(Valid(new VlWakeupResp()))
 
+    val mtype_wakeup        = Input(Valid(new MtypeWakeupResp()))
+    val tile_m_wakeup        = Input(Valid(new MtileWakeupResp()))
+    val tile_n_wakeup        = Input(Valid(new MtileWakeupResp()))
+    val tile_k_wakeup        = Input(Valid(new MtileWakeupResp()))
+    val matrix_iss_valid = Output(Bool())
+    val matrix_iss_uop = Output(new MicroOp())
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
     val debug_wb_wdata   = Output(Vec(numWakeupPorts, UInt((vLen).W)))
 
@@ -93,6 +103,10 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
   issue_unit.io.flush_pipeline := io.flush_pipeline
   issue_unit.io.intupdate := io.intupdate
   issue_unit.io.fpupdate  := io.fpupdate
+  issue_unit.io.mtype_wakeup := io.mtype_wakeup
+  issue_unit.io.tile_m_wakeup := io.tile_m_wakeup
+  issue_unit.io.tile_n_wakeup := io.tile_n_wakeup
+  issue_unit.io.tile_k_wakeup := io.tile_k_wakeup
 
   for (w <- 0 until memWidth) {
     issue_unit.io.spec_ld_wakeup(w).valid := false.B
@@ -126,7 +140,13 @@ class MatPipeline(implicit p: Parameters) extends BoomModule
     issue_unit.io.fu_types(i) := exe_units(i).io.fu_types
     require (exe_units(i).readsTrTile)
   }
-
+  val wake_tile_r = Wire(Bool())
+  wake_tile_r :=  issue_unit.io.wake_tile_r(0)
+ issue_unit.io.wake_issue_valid := io.wake_issue_valid
+ issue_unit.io.wake_issue_data := io.wake_issue_data
+ issue_unit.io.wake_issue_prs  := io.wake_issue_prs
+ io.matrix_iss_valid := wake_tile_r
+ io.matrix_iss_uop := iss_uops(0)
   // Wakeup
   for ((writeback, issue_wakeup) <- io.wakeups zip issue_unit.io.wakeup_ports) {
     issue_wakeup.valid         := writeback.valid

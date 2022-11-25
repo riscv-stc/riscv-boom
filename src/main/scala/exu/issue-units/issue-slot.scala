@@ -47,6 +47,15 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false, val matr
   val wakeup_ports  = Flipped(Vec(numWakeupPorts, Valid(new IqWakeup(maxPregSz, vector, matrix))))
   val pred_wakeup_port = Flipped(Valid(UInt(log2Ceil(ftqSz).W)))
   val vl_wakeup = Flipped(Valid(new VlWakeupResp()))
+  val mtype_wakeup = Flipped(Valid(new MtypeWakeupResp()))
+  val tile_m_wakeup = Flipped(Valid(new MtileWakeupResp()))
+  val tile_n_wakeup = Flipped(Valid(new MtileWakeupResp()))
+  val tile_k_wakeup = Flipped(Valid(new MtileWakeupResp()))
+  /*************************************************************/
+  val wake_issue_prs = Input(Vec(2,UInt((vLenb+1).W)))
+    val wake_issue_data = Input(Vec(2,UInt((vLenb+1).W)))
+    val wake_issue_valid = Input(Vec(2,Bool()))
+  /********************************************************************************/
   val spec_ld_wakeup= Flipped(Vec(memWidth, Valid(UInt(width=maxPregSz.W))))
   val in_uop        = Flipped(Valid(new MicroOp())) // if valid, this WILL overwrite an entry!
   val out_uop       = Output(new MicroOp()) // the updated slot uop; will be shifted upwards in a collasping queue.
@@ -104,7 +113,17 @@ class IssueSlot(
   val sidx  = if(matrix) RegInit(0.U(vLenSz.W)) else null
   val ppred = RegInit(false.B)
   val slot_uop = RegInit(NullMicroOp(usingVector))
+  val m_old_slice_cnt  = if (usingMatrix) RegInit(0.U((rLenbSz+1).W))  else null   // tilem in mopa instructions
   val vl_ready = WireInit(slot_uop.vl_ready)
+  val mtype_ready = WireInit(slot_uop.mtype_ready)
+  val tile_m_ready = WireInit(slot_uop.tile_m_ready)
+  val tile_n_ready = WireInit(slot_uop.tile_n_ready)
+  val tile_k_ready = WireInit(slot_uop.tile_k_ready)
+
+
+  /**************************************/
+
+  /**************************************/
   // Poison if woken up by speculative load.
   // Poison lasts 1 cycle (as ldMiss will come on the next cycle).
   // SO if poisoned is true, set it to false!
@@ -485,7 +504,7 @@ class IssueSlot(
   // Request Logic
   //io.request := is_valid && rs1check && rs2check && rs3check && vmcheck && ppred && !io.kill
   when (state === s_valid_1) {
-    io.request := ppred && rs1check && rs2check && rs3check && vmcheck && vl_ready && !io.kill
+    io.request := ppred && rs1check && rs2check && rs3check && vmcheck && vl_ready && mtype_ready && tile_m_ready && tile_n_ready & tile_k_ready && !io.kill
   } .elsewhen (state === s_valid_2) {
     io.request := (rs1check || rs2check) && ppred && vl_ready && !io.kill
   } .otherwise {
@@ -533,6 +552,19 @@ class IssueSlot(
     next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_)
     next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_)
     next_p3 := Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_)
+    for (i <- 0 until 2) {
+    val ready_sig = WireInit(io.wake_issue_valid(i) &&
+    (io.in_uop.bits.is_rvm || slot_uop.is_rvm))
+    when(ready_sig) {
+      next_p1 := Mux(Mux(io.in_uop.valid ,io.in_uop.bits.prs1, slot_uop.prs1) === io.wake_issue_prs(i), 
+                 Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_)  | ~io.wake_issue_data(i), Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_))
+      next_p2 := Mux(Mux(io.in_uop.valid ,io.in_uop.bits.prs2, slot_uop.prs2) === io.wake_issue_prs(i), 
+                    Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_)  | ~io.wake_issue_data(i), Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_))
+      next_p3 := Mux(Mux(io.in_uop.valid ,io.in_uop.bits.prs3, slot_uop.prs3) === io.wake_issue_prs(i), 
+                    Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_)  | ~io.wake_issue_data(i), Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_))
+    }
+  }
+  
   } else if (usingVector) {
     io.uop.v_eidx := slot_uop.v_eidx
     if (vector) {
@@ -594,6 +626,77 @@ class IssueSlot(
     slot_uop.vl_ready := true.B
     slot_uop.vconfig.vl := Mux(next_uop.uopc.isOneOf(uopVLM, uopVSMA), (io.vl_wakeup.bits.vl + 7.U) >> 3.U, io.vl_wakeup.bits.vl)
   }
+
+  when(io.mtype_wakeup.valid && !next_uop.mtype_ready && (io.mtype_wakeup.bits.mconfig_tag + 1.U) === next_uop.mconfig_tag) {
+    slot_uop.mtype_ready := true.B
+    slot_uop.mconfig := io.mtype_wakeup.bits.mconfig
+  }
+  val m_ok = io.tile_m_wakeup.valid && !next_uop.tile_m_ready && (io.tile_m_wakeup.bits.tile_tag + 1.U) === next_uop.tile_m_tag
+  when(m_ok) {
+    slot_uop.tile_m_ready := true.B
+    slot_uop.tile_m := io.tile_m_wakeup.bits.tile_len
+  }
+  val n_ok = io.tile_n_wakeup.valid && !next_uop.tile_n_ready && (io.tile_n_wakeup.bits.tile_tag + 1.U) === next_uop.tile_n_tag
+  when(n_ok) {
+    slot_uop.tile_n_ready := true.B
+    slot_uop.tile_n := io.tile_n_wakeup.bits.tile_len
+  }
+  val k_ok = io.tile_k_wakeup.valid && !next_uop.tile_k_ready && (io.tile_k_wakeup.bits.tile_tag + 1.U) === next_uop.tile_k_tag
+  when(k_ok) {
+    slot_uop.tile_k_ready := true.B
+    slot_uop.tile_k := io.tile_k_wakeup.bits.tile_len
+  }
+  if(usingMatrix ) { 
+    when((k_ok || n_ok || m_ok) ||(io.in_uop.bits.tile_m_ready && io.in_uop.bits.tile_n_ready && io.in_uop.bits.tile_k_ready)){
+      val is_mls = Mux(io.in_uop.valid,io.in_uop.bits.uopc.isOneOf(uopMLE,uopMSE),slot_uop.uopc.isOneOf(uopMLE,uopMSE))
+      val is_mopa = Mux(io.in_uop.valid,io.in_uop.bits.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA),slot_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA))
+      val is_mmv =  Mux(io.in_uop.valid,io.in_uop.bits.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V),slot_uop.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V))
+      val transposed = Mux(io.in_uop.valid,io.in_uop.bits.transposed,slot_uop.transposed)
+      val mslice_dim = Mux(io.in_uop.valid,io.in_uop.bits.mslice_dim,slot_uop.mslice_dim)
+
+      val slice_cnt_tilem = (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed)
+      val slice_cnt_tilen = (mslice_dim === 2.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
+      val slice_cnt_tilek = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 2.U && !transposed)
+      val slice_len_tilem = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
+      val slice_len_tilen = (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed)
+      val slice_len_tilek = (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U &&  transposed)
+      val sel_m = WireInit(io.in_uop.bits.tile_m)
+      val sel_n = WireInit(io.in_uop.bits.tile_n)
+      val sel_k = WireInit(io.in_uop.bits.tile_k)
+      when(m_ok){
+        sel_m := io.tile_m_wakeup.bits.tile_len
+      }.elsewhen(io.in_uop.valid) {
+        sel_m := io.in_uop.bits.tile_m
+      }.otherwise {
+        sel_m := slot_uop.tile_m
+      }
+      when(n_ok){
+        sel_n := io.tile_n_wakeup.bits.tile_len
+      }.elsewhen(io.in_uop.valid) {
+        sel_n := io.in_uop.bits.tile_n
+      }.otherwise {
+        sel_n := slot_uop.tile_n
+      }
+      when(k_ok){
+        sel_k := io.tile_k_wakeup.bits.tile_len
+      }.elsewhen(io.in_uop.valid) {
+        sel_k := io.in_uop.bits.tile_k
+      }.otherwise {
+        sel_k := slot_uop.tile_k
+      }
+
+      val sel_slice_cnt = Mux(slice_cnt_tilem, sel_m,
+                          Mux(slice_cnt_tilen, sel_n, sel_k))
+      val sel_slice_len = Mux(slice_len_tilem, sel_m,
+                          Mux(slice_len_tilen, sel_n, sel_k))
+      slot_uop.m_tilem   := Mux(is_mls,  sel_slice_cnt, 
+                                Mux(is_mopa, sel_k, sel_m))
+      slot_uop.m_tilek   := Mux(is_mls, sel_slice_len, 
+                                Mux(is_mmv && mslice_dim === 2.U, sel_m,
+                                Mux(is_mmv && mslice_dim === 3.U, sel_n, sel_k)))
+    }
+  }
+
 
   when (state === s_valid_2) {
     when (rs1check && rs2check && ppred && vl_ready)  {

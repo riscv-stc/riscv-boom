@@ -241,6 +241,16 @@ trait ScalarOpConstants
     uop.prs3       := 0.U
     uop.vconfig_tag := 0.U
     uop.vl_ready := false.B
+    uop.mtype_ready :=false.B
+    uop.tile_m_ready :=false.B
+    uop.tile_n_ready :=false.B
+    uop.tile_k_ready :=false.B
+    uop.mconfig_tag := 0.U
+    uop.tile_m_tag := 0.U
+    uop.tile_n_tag := 0.U
+    uop.tile_k_tag := 0.U
+    uop.is_rvm := false.B
+
     if (usingVector) {
       uop.pvm        := 0.U
     }
