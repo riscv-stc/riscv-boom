@@ -381,7 +381,7 @@ class Rob(
 
     //-----------------------------------------------
     // Writeback
-
+    val temp_ld_wbs =  WireInit(false.B).asTypeOf(Vec(numRobRows, Vec(numWakeupPorts, Bool())))
     for (i <- 0 until numWakeupPorts) {
       val wb_resp = io.wb_resps(i)
       val wb_uop = wb_resp.bits.uop
@@ -391,27 +391,31 @@ class Rob(
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
           val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX)
           val wb_rvm_load = wb_uop.uopc.isOneOf(uopMLE)
+
+          // copy stale data returns in-order while memory acess may return out-of-order
+          // increase rob_ls_wbs when rvv or rvm load write back;
+          when((wb_rvv_load || wb_rvm_load) && wb_uop.uses_ldq) {
+            //rob_ls_wbs(row_idx) := rob_ls_wbs(row_idx) + 1.U
+            temp_ld_wbs(row_idx)(i) := true.B
+          }
+
           // clear busy and unsafe; vconfig.vl in rob may be incorrect under speculatively vsetvl execution
           when(!wb_uop.is_vm_ext ||
-               (wb_rvv_load && wb_uop.uses_ldq && (rob_ls_wbs(row_idx) +& 1.U >= rob_ls_cnt(row_idx))) ||
+               (wb_rvv_load && wb_uop.uses_ldq && (rob_ls_wbs(row_idx) +& PopCount(temp_ld_wbs(row_idx)) >= rob_ls_cnt(row_idx))) ||
                (wb_uop.is_rvv && !wb_rvv_load && (!wb_uop.v_is_split || wb_uop.v_split_last)) || // have bug
-               (wb_rvm_load && (rob_ls_wbs(row_idx) +& 1.U >= rob_ls_cnt(row_idx))) ||
+               (wb_rvm_load && (rob_ls_wbs(row_idx) +& PopCount(temp_ld_wbs(row_idx)) >= rob_ls_cnt(row_idx))) ||
                (wb_uop.is_rvm && !wb_rvm_load && wb_uop.m_split_last)) {
             rob_bsy(row_idx)    := false.B
             rob_unsafe(row_idx) := false.B
           }
 
-          // copy stale data returns in-order while memory acess may return out-of-order
-          // increase rob_ls_wbs when rvv or rvm load write back;
-          when ((wb_rvv_load || wb_rvm_load) && wb_uop.uses_ldq) {
-            rob_ls_wbs(row_idx) := rob_ls_wbs(row_idx) + 1.U
-          }
           when (wb_rvv_load && !wb_uop.uses_ldq && wb_uop.v_split_last) {
             rob_ud_bsy(row_idx) := false.B
           }
 
           rob_predicated(row_idx) := wb_resp.bits.predicated
           rob_uop(row_idx).vxsat  := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
+          rob_ls_wbs(row_idx) := rob_ls_wbs(row_idx) + PopCount(temp_ld_wbs(row_idx))
 
           if (O3PIPEVIEW_PRINTF) {
             printf("%d; O3PipeView:complete:%d\n",
@@ -422,25 +426,29 @@ class Rob(
       } else if (usingVector) {
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
           val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX)
+
+          // copy stale data returns in-order while memory acess may return out-of-order
+          // increase rob_ls_wbs when rvv or rvm load write back;
+          when(wb_rvv_load && wb_uop.uses_ldq) {
+            //rob_ls_wbs(row_idx) := rob_ls_wbs(row_idx) + 1.U
+            temp_ld_wbs(row_idx)(i) := true.B
+          }
           // clear busy and unsafe
           when(!wb_uop.is_rvv || 
-               (wb_rvv_load && wb_uop.uses_ldq && (rob_ls_wbs(row_idx) +& 1.U >= rob_ls_cnt(row_idx))) ||
+               (wb_rvv_load && wb_uop.uses_ldq && (rob_ls_wbs(row_idx) +& PopCount(temp_ld_wbs(row_idx)) >= rob_ls_cnt(row_idx))) ||
                (!wb_rvv_load && (!wb_uop.v_is_split || wb_uop.v_split_last))) {
             rob_bsy(row_idx)    := false.B
             rob_unsafe(row_idx) := false.B
           }
 
-          // copy stale data returns in-order while memory acess may return out-of-order
-          // increase rob_ls_wbs when rvv or rvm load write back;
-          when (wb_rvv_load && wb_uop.uses_ldq) {
-            rob_ls_wbs(row_idx) := rob_ls_wbs(row_idx) + 1.U
-          }
+
           when (wb_rvv_load && !wb_uop.uses_ldq && wb_uop.v_split_last) {
             rob_ud_bsy(row_idx) := false.B
           }
 
           rob_predicated(row_idx) := wb_resp.bits.predicated
           rob_uop(row_idx).vxsat  := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
+          rob_ls_wbs(row_idx) := rob_ls_wbs(row_idx) + PopCount(temp_ld_wbs(row_idx))
 
           if (O3PIPEVIEW_PRINTF) {
             printf("%d; O3PipeView:complete:%d\n",
@@ -470,22 +478,24 @@ class Rob(
     }
 
     // Stores have a separate method to clear busy bits
-    for (lsu_clr_bsy <- io.lsu_clr_bsy) {
+
+    val temp_sd_wbs =  WireInit(false.B).asTypeOf(Vec(numRobRows, Vec(memWidth + 1, Bool())))
+
+    for (i <- 0 until (memWidth + 1)) {
+      val lsu_clr_bsy = io.lsu_clr_bsy(i)
       val clr_rob_idx = lsu_clr_bsy.bits.rob_idx
 
-      when (lsu_clr_bsy.valid && MatchBank(GetBankIdx(clr_rob_idx))) {
+      when(lsu_clr_bsy.valid && MatchBank(GetBankIdx(clr_rob_idx))) {
         val cidx = GetRowIdx(clr_rob_idx)
-        assert (rob_val(cidx) === true.B, "[rob] store writing back to invalid entry.")
-        assert (rob_bsy(cidx) === true.B, "[rob] store writing back to a not-busy entry.")
+
+        assert(rob_val(cidx) === true.B, "[rob] store writing back to invalid entry.")
+        assert(rob_bsy(cidx) === true.B, "[rob] store writing back to a not-busy entry.")
 
         if (usingMatrix) {
-          when (rob_uop(cidx).is_rvv || rob_uop(cidx).is_rvm) {
-            rob_ls_wbs(cidx) := rob_ls_wbs(cidx) + 1.U
-          }
-          when (!lsu_clr_bsy.bits.is_vm_ext ||
-                ((rob_uop(cidx).is_rvv || rob_uop(cidx).is_rvm) &&
-                (rob_ls_wbs(cidx) +& 1.U >= rob_ls_cnt(cidx)))) {
-            rob_bsy(cidx)    := false.B
+          when(rob_uop(cidx).is_rvv || rob_uop(cidx).is_rvm) {
+            temp_sd_wbs(cidx)(i) := true.B
+          }.otherwise {
+            rob_bsy(cidx) := false.B
             rob_unsafe(cidx) := false.B
 
             if (O3PIPEVIEW_PRINTF) {
@@ -494,12 +504,10 @@ class Rob(
             }
           }
         } else if (usingVector) {
-          when (rob_uop(cidx).is_rvv) {
-            rob_ls_wbs(cidx) := rob_ls_wbs(cidx) + 1.U
-          }
-
-          when (!lsu_clr_bsy.bits.is_rvv || (rob_ls_wbs(cidx) +& 1.U >= rob_ls_cnt(cidx))) {
-            rob_bsy(cidx)    := false.B
+          when(rob_uop(cidx).is_rvv) {
+            temp_sd_wbs(cidx)(i) := true.B
+          }.otherwise {
+            rob_bsy(cidx) := false.B
             rob_unsafe(cidx) := false.B
 
             if (O3PIPEVIEW_PRINTF) {
@@ -508,7 +516,7 @@ class Rob(
             }
           }
         } else {
-          rob_bsy(cidx)    := false.B
+          rob_bsy(cidx) := false.B
           rob_unsafe(cidx) := false.B
 
           if (O3PIPEVIEW_PRINTF) {
@@ -518,6 +526,49 @@ class Rob(
         }
       }
     }
+
+    for (i <- 0 until (memWidth + 1)) {
+      val next_lsu_clr_bsy = io.lsu_clr_bsy(i)
+      val clr_rob_idx = next_lsu_clr_bsy.bits.rob_idx
+      val cidx = GetRowIdx(clr_rob_idx)
+      dontTouch(next_lsu_clr_bsy)
+
+      when((rob_uop(cidx).is_rvv || rob_uop(cidx).is_rvm) &&
+          next_lsu_clr_bsy.valid && MatchBank(GetBankIdx(clr_rob_idx))) {
+          val wbk_ls_wbs = rob_ls_wbs(cidx) + PopCount(temp_sd_wbs(cidx))
+          dontTouch(wbk_ls_wbs)
+
+          if (usingMatrix) {
+            when((rob_uop(cidx).is_rvv || rob_uop(cidx).is_rvm) && (wbk_ls_wbs >= rob_ls_cnt(cidx))) {
+              assert(rob_val(cidx) === true.B, "[rob] store writing back to invalid entry.")
+              assert(rob_bsy(cidx) === true.B, "[rob] store writing back to a not-busy entry.")
+
+              rob_bsy(cidx) := false.B
+              rob_unsafe(cidx) := false.B
+
+              if (O3PIPEVIEW_PRINTF) {
+                printf("%d; O3PipeView:complete:%d\n",
+                  rob_uop(GetRowIdx(clr_rob_idx)).debug_events.fetch_seq, io.debug_tsc)
+              }
+            }
+          } else if (usingVector) {
+            when(next_lsu_clr_bsy.bits.is_rvv && (wbk_ls_wbs >= rob_ls_cnt(cidx))) {
+              assert(rob_val(cidx) === true.B, "[rob] store writing back to invalid entry.")
+              assert(rob_bsy(cidx) === true.B, "[rob] store writing back to a not-busy entry.")
+
+              rob_bsy(cidx) := false.B
+              rob_unsafe(cidx) := false.B
+
+              if (O3PIPEVIEW_PRINTF) {
+                printf("%d; O3PipeView:complete:%d\n",
+                  rob_uop(GetRowIdx(clr_rob_idx)).debug_events.fetch_seq, io.debug_tsc)
+              }
+            }
+          }
+          rob_ls_wbs(cidx) := wbk_ls_wbs
+      }
+    }
+
     for (clr <- io.lsu_clr_unsafe) {
       when (clr.valid && MatchBank(GetBankIdx(clr.bits.rob_idx))) {
         val cidx = GetRowIdx(clr.bits.rob_idx)
