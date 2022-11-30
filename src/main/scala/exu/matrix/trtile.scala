@@ -129,14 +129,12 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
       }
     }
   }
-  //ensure there is only 1 writer per trtile
+  //ensure there is only 1 writer per trtile slice
   if (numWritePorts > 1) {
     for (i <- 0 until (numWritePorts - 1)) {
       for (j <- (i + 1) until numWritePorts) {
-        assert(!io.writePorts(i).valid ||
-          !io.writePorts(j).valid ||
-          (io.writePorts(i).bits.addr =/= io.writePorts(j).bits.addr),
-          "[regfile] too many writers a register")
+        assert(!((io.writePorts(i).bits.addr === io.writePorts(j).bits.addr) && io.writePorts(i).valid && io.writePorts(j).valid &&
+        (io.writePorts(i).bits.index === io.writePorts(j).bits.index  || io.writePorts(i).bits.tt =/= io.writePorts(j).bits.tt)))
       }
     }
   }
