@@ -47,6 +47,7 @@ class MacCtrls(implicit p: Parameters) extends BoomBundle {
   val srcType = UInt(3.W)
   val outType = UInt(3.W)
   val aluType = UInt(3.W)
+  val macLast = Bool()
   val rm = UInt(3.W) // rounding mode
 }
 
@@ -85,6 +86,7 @@ class FpMacPipe(implicit p: Parameters) extends BoomBundle {
   val outType = UInt(3.W)
   val aluType = UInt(3.W)
   val dstRidx = UInt(log2Ceil(numAccTiles).W)
+  val macLast = Bool()
   val roundingMode = UInt(3.W)
   val detectTininess = UInt(1.W)
 }
@@ -132,7 +134,10 @@ class IntMacUnit extends Module {
 }
 
 // may use blackbox hardfloat modules
-class FpMacUnit(val fpLatency: Int = 3)(implicit p: Parameters) extends BoomModule with ShouldBeRetimed {
+class FpMacUnit(
+  val fpLatency: Int = 3,
+  val acc2Wider: Boolean = true
+)(implicit p: Parameters) extends BoomModule with ShouldBeRetimed {
   val io = IO(new Bundle {
     val validin = Input(Bool())
     val src1 = Input(UInt(32.W))
@@ -142,6 +147,7 @@ class FpMacUnit(val fpLatency: Int = 3)(implicit p: Parameters) extends BoomModu
     val outType = Input(UInt(3.W))
     val aluType = Input(UInt(3.W))
     val dstRidx = Input(UInt(log2Ceil(numAccTiles).W))
+    val macLast = Input(Bool())
     val roundingMode = Input(UInt(3.W))
     val detectTininess = Input(UInt(1.W))
     val validout = Output(Bool())
@@ -165,7 +171,7 @@ class FpMacUnit(val fpLatency: Int = 3)(implicit p: Parameters) extends BoomModu
   val recA16ToRec32 = Module(new RecFNToRecFN(H.exp, H.sig, S.exp, S.sig))
   val recA32ToRec16 = Module(new RecFNToRecFN(S.exp, S.sig, H.exp, H.sig))
   val recC16ToRec32 = Module(new RecFNToRecFN(H.exp, H.sig, S.exp, S.sig))
-  val recD16ToRec32 = Module(new RecFNToRecFN(H.exp, H.sig, S.exp, S.sig))
+  val recF16ToRec32 = Module(new RecFNToRecFN(H.exp, H.sig, S.exp, S.sig))
 
   // Multiplier.
   val mulRawFN = Module(new MulFullRawFN(H.exp, H.sig))
@@ -190,10 +196,17 @@ class FpMacUnit(val fpLatency: Int = 3)(implicit p: Parameters) extends BoomModu
   val pipeAddRecOut16 = Pipe(pipeStage1.valid, addRecOut16, pipeLatency).bits
   val pipeAddRecOut32 = Pipe(pipeStage1.valid, addRecOut32, pipeLatency).bits
 
-  val addRec32From16 = recD16ToRec32.io.out
+  val addRecFwd32 = Wire(UInt((S.exp + S.sig + 1).W))
+  val pipeAddRecFwd32 = Wire(UInt((S.exp + S.sig + 1).W))
+  val addRec32From16 = recF16ToRec32.io.out
   val pipeAddRec32From16 = Pipe(pipeStage1.valid, addRec32From16, pipeLatency).bits
-  val addRecFwd32 = Mux(pipeStage1.bits.outType === FP16TYPE, addRec32From16, addRecOut32)
-  val pipeAddRecFwd32 = Mux(pipeStage2.bits.outType === FP16TYPE, pipeAddRec32From16, pipeAddRecOut32)
+  if (acc2Wider) {
+    addRecFwd32 := addRecOut32
+    pipeAddRecFwd32 := pipeAddRecOut32
+  } else {
+    addRecFwd32 := Mux(pipeStage1.bits.outType === FP16TYPE, addRec32From16, addRecOut32)
+    pipeAddRecFwd32 := Mux(pipeStage2.bits.outType === FP16TYPE, pipeAddRec32From16, pipeAddRecOut32)
+  }
 
   // ------------------- Conversions. --------------------
   // Convert fp16 A, B, and C to recoded format
@@ -222,15 +235,16 @@ class FpMacUnit(val fpLatency: Int = 3)(implicit p: Parameters) extends BoomModu
   recA32ToRec16.io.detectTininess := pipeStage0.bits.detectTininess
 
   // Convert adder out rec16 to rec32.
-  recD16ToRec32.io.in := addRecOut16
-  recD16ToRec32.io.roundingMode := pipeStage1.bits.roundingMode
-  recD16ToRec32.io.detectTininess := pipeStage1.bits.detectTininess
+  recF16ToRec32.io.in := addRecOut16
+  recF16ToRec32.io.roundingMode := pipeStage1.bits.roundingMode
+  recF16ToRec32.io.detectTininess := pipeStage1.bits.detectTininess
 
   // ------------------ Pipeline Stage 0. -------------------
   pipeStage0.valid := io.validin
   pipeStage0.bits.outType := io.outType
   pipeStage0.bits.aluType := io.aluType
   pipeStage0.bits.dstRidx := io.dstRidx
+  pipeStage0.bits.macLast := io.macLast
   pipeStage0.bits.roundingMode := io.roundingMode
   pipeStage0.bits.detectTininess := io.detectTininess
   val pipeSrc32To16_0 = recA32ToRec16.io.out
@@ -329,7 +343,12 @@ class FpMacUnit(val fpLatency: Int = 3)(implicit p: Parameters) extends BoomModu
   val fp32Out = fNFromRecFN(S.exp, S.sig, pipeAddRecOut32)
   val fp16Out = Mux(pipeStage2.bits.aluType === CVT, fNFromRecFN(H.exp, H.sig, pipeSrc32To16_2),
     fNFromRecFN(H.exp, H.sig, pipeAddRecOut16))
-  fpOut := Mux(pipeStage2.bits.outType === FP16TYPE, Cat(0.U(16.W), fp16Out), fp32Out)
+
+  if (acc2Wider) {
+    fpOut := Mux((pipeStage2.bits.outType === FP16TYPE) && pipeStage2.bits.macLast, Cat(0.U(16.W), fp16Out), fp32Out)
+  } else {
+    fpOut := Mux(pipeStage2.bits.outType === FP16TYPE, Cat(0.U(16.W), fp16Out), fp32Out)
+  }
 
   // Output pipeline.
   val outLatency = if (fpLatency >= 3) (fpLatency - 3) else if (fpLatency >= 1) (fpLatency - 1) else 0
@@ -408,6 +427,7 @@ class PE(
   fpMac.io.outType := macReqCtrls.outType
   fpMac.io.aluType := macReqCtrls.aluType
   fpMac.io.dstRidx := macReqCtrls.dstRidx
+  fpMac.io.macLast := macReqCtrls.macLast
   fpMac.io.roundingMode := macReqCtrls.rm
   fpMac.io.detectTininess := hardfloat.consts.tininess_afterRounding
 
