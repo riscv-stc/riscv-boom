@@ -216,7 +216,8 @@ class IssueSlot(
       }
     } else if(matrix) {
       ret := Mux(!uop.rt(RD, isAccTile), true.B,
-             Mux(uop.fu_code === FU_GEMM, p3.andR, p3(uop.m_sidx)))
+             //Mux(uop.fu_code === FU_GEMM, p3.andR, p3(uop.m_sidx)))
+             Mux(uop.fu_code === FU_GEMM, true.B, p3(uop.m_sidx)))
     } else {
       ret := p3(0)
     }

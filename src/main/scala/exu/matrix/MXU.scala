@@ -48,6 +48,8 @@ class MacCtrls(implicit p: Parameters) extends BoomBundle {
   val outType = UInt(3.W)
   val aluType = UInt(3.W)
   val macLast = Bool()
+  val autoClr = Bool()
+  val autoCvt = Bool()
   val rm = UInt(3.W) // rounding mode
 }
 
@@ -87,6 +89,8 @@ class FpMacPipe(implicit p: Parameters) extends BoomBundle {
   val aluType = UInt(3.W)
   val dstRidx = UInt(log2Ceil(numAccTiles).W)
   val macLast = Bool()
+  val autoClr = Bool()
+  val autoCvt = Bool()
   val roundingMode = UInt(3.W)
   val detectTininess = UInt(1.W)
 }
@@ -148,6 +152,8 @@ class FpMacUnit(
     val aluType = Input(UInt(3.W))
     val dstRidx = Input(UInt(log2Ceil(numAccTiles).W))
     val macLast = Input(Bool())
+    val autoClr = Input(Bool())
+    val autoCvt = Input(Bool())
     val roundingMode = Input(UInt(3.W))
     val detectTininess = Input(UInt(1.W))
     val validout = Output(Bool())
@@ -245,6 +251,8 @@ class FpMacUnit(
   pipeStage0.bits.aluType := io.aluType
   pipeStage0.bits.dstRidx := io.dstRidx
   pipeStage0.bits.macLast := io.macLast
+  pipeStage0.bits.autoClr := io.autoClr
+  pipeStage0.bits.autoCvt := io.autoCvt
   pipeStage0.bits.roundingMode := io.roundingMode
   pipeStage0.bits.detectTininess := io.detectTininess
   val pipeSrc32To16_0 = recA32ToRec16.io.out
@@ -292,7 +300,7 @@ class FpMacUnit(
   val addRecSrcA = Mux(pipeStage0.bits.aluType(1), recA, mulRawToRec32.io.out)
   //val addRecSrcB = recC
   val addRecSrcB = if (fpLatency > 1) {
-    Mux(pipeStage0.bits.aluType === MULT, 0.U,
+    Mux((pipeStage0.bits.aluType === MULT) || pipeStage0.bits.autoClr, 0.U,
       Mux(pipeStage1.valid, addRecFwd32,
         Mux(pipeStage2.valid, pipeAddRecFwd32, recC)
       )
@@ -344,10 +352,11 @@ class FpMacUnit(
   val fp16Out = Mux(pipeStage2.bits.aluType === CVT, fNFromRecFN(H.exp, H.sig, pipeSrc32To16_2),
     fNFromRecFN(H.exp, H.sig, pipeAddRecOut16))
 
+  val cvtTo16 = (pipeStage2.bits.outType === FP16TYPE) || pipeStage2.bits.autoCvt
   if (acc2Wider) {
-    fpOut := Mux((pipeStage2.bits.outType === FP16TYPE) && pipeStage2.bits.macLast, Cat(0.U(16.W), fp16Out), fp32Out)
+    fpOut := Mux(cvtTo16 && pipeStage2.bits.macLast, Cat(0.U(16.W), fp16Out), fp32Out)
   } else {
-    fpOut := Mux(pipeStage2.bits.outType === FP16TYPE, Cat(0.U(16.W), fp16Out), fp32Out)
+    fpOut := Mux(cvtTo16, Cat(0.U(16.W), fp16Out), fp32Out)
   }
 
   // Output pipeline.
@@ -428,6 +437,8 @@ class PE(
   fpMac.io.aluType := macReqCtrls.aluType
   fpMac.io.dstRidx := macReqCtrls.dstRidx
   fpMac.io.macLast := macReqCtrls.macLast
+  fpMac.io.autoClr := macReqCtrls.autoClr
+  fpMac.io.autoCvt := macReqCtrls.autoCvt
   fpMac.io.roundingMode := macReqCtrls.rm
   fpMac.io.detectTininess := hardfloat.consts.tininess_afterRounding
 

@@ -540,19 +540,20 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
     case TilesLocated(InSubsystem) => {
       val prev = up(TilesLocated(InSubsystem), site)
       val idOffset = overrideIdOffset.getOrElse(prev.size)
+      val coreWidth = 2
       (0 until n).map { i =>
         BoomTileAttachParams(
           tileParams = BoomTileParams(
             core = BoomCoreParams(
               fetchWidth = 8,
-              decodeWidth = 2,
+              decodeWidth = coreWidth,
               numRobEntries = 64,
               issueParams = Seq(
-                IssueParams(issueWidth=1, numEntries=24, iqType=IQT_MEM.litValue, dispatchWidth=2),
-                IssueParams(issueWidth=2, numEntries=24, iqType=IQT_INT.litValue, dispatchWidth=2),
-                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_FP.litValue , dispatchWidth=2),
-                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VEC.litValue, dispatchWidth=2),
-                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_MAT.litValue, dispatchWidth=2)),
+                IssueParams(issueWidth=1, numEntries=24, iqType=IQT_MEM.litValue, dispatchWidth=coreWidth),
+                IssueParams(issueWidth=2, numEntries=24, iqType=IQT_INT.litValue, dispatchWidth=coreWidth),
+                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_FP.litValue , dispatchWidth=coreWidth),
+                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_VEC.litValue, dispatchWidth=coreWidth),
+                IssueParams(issueWidth=1, numEntries=16, iqType=IQT_MAT.litValue, dispatchWidth=coreWidth)),
               numIntPhysRegisters = 64,
               numFpPhysRegisters = 48,
               numLdqEntries = 16,
@@ -571,7 +572,7 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               vMemDataBits = 64,
               numVecPhysRegisters = 65,
               useMatrix = true,
-              rLen = 128,  
+              rLen = 128,
               mLen = 1024, // rLen * 8
               numMatTrRegisters = 12,
               numMatAccRegisters = 4,
