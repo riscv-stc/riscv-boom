@@ -16,6 +16,8 @@ import chisel3.util._
 import boom.common._
 import boom.util._
 import freechips.rocketchip.config.Parameters
+import freechips.rocketchip.util.{UIntIsOneOf, rightOR, uintToBitPat}
+import boom.common.MicroOpcodes._
 
 class BusyResp extends Bundle
 {
@@ -148,6 +150,17 @@ class MatRenameBusyTable(
     val wb_valids = Input(Vec(numWbPorts, Bool()))
     val wb_bits = Input(Vec(numWbPorts, UInt(vLenb.W)))   //write back without direction bit?
 
+
+    val matrix_iss_valid = Input(Bool())
+    val matrix_iss_uop = Input(new MicroOp()) 
+
+    val mem_iss_valid = Input(Bool())
+    val mem_iss_uop = Input(new MicroOp()) 
+
+
+    val wake_issue_prs = Output(UInt((vLenb+1).W))
+    val wake_issue_data = Output(UInt((vLenb+1).W))
+    val wake_issue_valid = Output(Bool())
     val debug = new Bundle {
       val busytable = Output(Vec(numPregs, UInt((vLenb + 1).W)))
     }
@@ -156,7 +169,7 @@ class MatRenameBusyTable(
   val busy_table = RegInit(VecInit(Seq.fill(numPregs) {0.U((vLenb+1).W)}))
   val busy_table_wb = Wire(Vec(numPregs, UInt((vLenb+1).W)))
   val busy_table_next = Wire(Vec(numPregs, UInt((vLenb+1).W)))
-
+  
   for (r <- 0 until numPregs) {
     // Unbusy written back registers.
     busy_table_wb(r) := busy_table(r) & ~(io.wb_pdsts zip io.wb_valids zip io.wb_bits)
@@ -167,8 +180,9 @@ class MatRenameBusyTable(
         Fill(vLenb, ((r.U === uop.pdst) && req).asUInt()) &
           Mux(uop.dst_rtype === RT_ACC && !uop.m_is_split, Fill(vLenb, 1.U(1.W)), MaskGen(uop.m_sidx, uop.m_slice_cnt, vLenb))) }.reduce(_ | _)
 
+           
     // Read the busy table.
-    for (i <- 0 until plWidth) {
+    for (i <- 0 until plWidth) {                                                                                                                                                                                                                                                                                                                                                                                                                                                          
       val prs1_was_bypassed = (0 until i).map(j =>
         (io.ren_uops(i).lrs1 === io.ren_uops(j).ldst) && (io.ren_uops(i).m_sidx === io.ren_uops(j).m_sidx)
          && (io.ren_uops(i).isHSlice === io.ren_uops(j).isHSlice) && io.rebusy_reqs(j)).foldLeft(false.B)(_ || _)
@@ -186,7 +200,31 @@ class MatRenameBusyTable(
     busy_table := busy_table_next
     io.debug.busytable := busy_table
   }
-
+  io.wake_issue_valid :=false.B
+  val matrix_value = Wire(UInt(((vLenb+1).W)))
+  val wake_pdst = Wire(UInt(pregSz.W))
+  matrix_value := 0.U
+  wake_pdst := 0.U
+  when(~(io.matrix_iss_uop.dst_rtype === RT_ACC && !io.matrix_iss_uop.m_is_split) && (io.matrix_iss_valid)) {
+       //matrix_value  := busy_table(io.matrix_iss_uop.pdst) & Cat(1.U(1.W),Fill(vLenb, 0.U(1.W)))
+       matrix_value  :=  busy_table_next(io.matrix_iss_uop.pdst) & Cat(busy_table_next(io.matrix_iss_uop.pdst)(vLenb),Fill(vLenb, 1.U(1.W)) &  MaskGen(0.U, io.matrix_iss_uop.m_slice_cnt, vLenb))
+       wake_pdst := io.matrix_iss_uop.pdst
+       busy_table(io.matrix_iss_uop.pdst) := matrix_value
+       io.wake_issue_valid := true.B
+       io.wake_issue_prs := wake_pdst
+       io.wake_issue_data := matrix_value
+  }
+  val mem_value = Wire(UInt(((vLenb+1).W)))
+  mem_value := 0.U
+  when(~(io.mem_iss_uop.dst_rtype === RT_ACC && !io.mem_iss_uop.m_is_split) && (io.mem_iss_valid)) {
+       //mem_value  := busy_table(io.mem_iss_uop.pdst) & Cat(1.U(1.W),Fill(vLenb, 0.U(1.W)))
+       mem_value  := busy_table_next(io.mem_iss_uop.pdst) & Cat(busy_table_next(io.mem_iss_uop.pdst)(vLenb),Fill(vLenb, 1.U(1.W)) &  MaskGen(0.U, io.mem_iss_uop.m_slice_cnt, vLenb))
+       wake_pdst := io.mem_iss_uop.pdst
+       busy_table(io.mem_iss_uop.pdst) := mem_value
+       io.wake_issue_valid := true.B
+       io.wake_issue_prs := wake_pdst
+       io.wake_issue_data := mem_value
+  }
   io.tbusy_status := Cat((0 until numPregs).map(p => busy_table(p)(vLenb-1, 0).orR).reverse)
 }
 

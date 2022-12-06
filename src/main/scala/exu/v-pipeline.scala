@@ -51,6 +51,11 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val lsu_vrf_rport    = Vec(memWidth, new RegisterFileReadPortIO(vpregSz, vLen))
 
     val vl_wakeup        = Input(Valid(new VlWakeupResp()))
+    
+    val mtype_wakeup        = Input(Valid(new MtypeWakeupResp()))
+    val tile_m_wakeup        = Input(Valid(new MtileWakeupResp()))
+    val tile_n_wakeup        = Input(Valid(new MtileWakeupResp()))
+    val tile_k_wakeup        = Input(Valid(new MtileWakeupResp()))
     val wakeups          = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units for mem, int and fp
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
@@ -160,7 +165,14 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   }
   issue_unit.io.pred_wakeup_port.valid  := false.B
   issue_unit.io.pred_wakeup_port.bits   := DontCare
-
+  issue_unit.io.mtype_wakeup := io.mtype_wakeup
+  issue_unit.io.tile_m_wakeup := io.tile_m_wakeup
+  issue_unit.io.tile_n_wakeup := io.tile_n_wakeup
+  issue_unit.io.tile_k_wakeup := io.tile_k_wakeup
+  
+  issue_unit.io.wake_issue_prs :=DontCare
+  issue_unit.io.wake_issue_data :=DontCare
+  issue_unit.io.wake_issue_valid :=DontCare
 
   //-------------------------------------------------------------
   // **** Register Read Stage ****

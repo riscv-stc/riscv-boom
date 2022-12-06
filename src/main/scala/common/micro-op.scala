@@ -70,6 +70,25 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val vconfig_tag           = UInt(vconfigTagSz.W)
   val vcq_idx               = UInt(vcqSz.W)
 
+  val mconfig_mask          = UInt(maxVconfigCount.W)  // which vconfig are we being speculated under?
+  val mconfig_tag           = UInt(vconfigTagSz.W)
+  val mcq_idx               = UInt(vcqSz.W)
+
+  val tile_m_idx             = UInt(vcqSz.W)
+  val tile_m_mask            = UInt(maxVconfigCount.W)
+  val tile_m_tag             = UInt(vconfigTagSz.W)
+
+  val tile_n_idx             = UInt(vcqSz.W)
+  val tile_n_mask            = UInt(maxVconfigCount.W)
+  val tile_n_tag             = UInt(vconfigTagSz.W)
+
+  val tile_k_idx             = UInt(vcqSz.W)
+  val tile_k_mask            = UInt(maxVconfigCount.W)
+  val tile_k_tag             = UInt(vconfigTagSz.W)
+
+  val tile_m                = UInt((rLenbSz+1).W)
+  val tile_n                = UInt((rLenbSz+1).W)
+  val tile_k                = UInt((rLenbSz+1).W)
   // Index into FTQ to figure out our fetch PC.
   val ftq_idx          = UInt(log2Ceil(ftqSz).W)
   // This inst straddles two fetch packets
@@ -182,6 +201,16 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val vstart           = if (usingVector) UInt(vLenSz.W) else UInt(0.W) // VSTART CSR
   val vstartSrc        = if (usingVector) UInt(1.W) else false.B      // vstart source: CSR or speculative zero
   // matrix extension
+  val mslice_dim      = if (usingMatrix)  UInt(2.W)       else UInt(0.W)
+  val transposed        = if (usingVector) Bool() else false.B
+  val is_msettype      = if (usingMatrix) Bool()          else false.B
+  val is_settilem     = if (usingMatrix) Bool()          else false.B
+  val is_settilen     = if (usingMatrix) Bool()          else false.B
+  val is_settilek     = if (usingMatrix) Bool()          else false.B
+  val mtype_ready      = if (usingMatrix) Bool()          else null
+  val tile_m_ready      = if (usingMatrix) Bool()          else null
+  val tile_n_ready      = if (usingMatrix) Bool()          else null
+  val tile_k_ready      = if (usingMatrix) Bool()          else null
   val is_rvm           = if (usingMatrix) Bool()          else false.B
   val pts1_busy        = if (usingMatrix) UInt(rLenb.W)   else null
   val pts2_busy        = if (usingMatrix) UInt(rLenb.W)   else null
