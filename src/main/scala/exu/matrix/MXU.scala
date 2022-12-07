@@ -47,6 +47,7 @@ class MacCtrls(implicit p: Parameters) extends BoomBundle {
   val srcType = UInt(3.W)
   val outType = UInt(3.W)
   val aluType = UInt(3.W)
+  val macInit = Bool()
   val macLast = Bool()
   val autoClr = Bool()
   val autoCvt = Bool()
@@ -88,6 +89,7 @@ class FpMacPipe(implicit p: Parameters) extends BoomBundle {
   val outType = UInt(3.W)
   val aluType = UInt(3.W)
   val dstRidx = UInt(log2Ceil(numAccTiles).W)
+  val macInit = Bool()
   val macLast = Bool()
   val autoClr = Bool()
   val autoCvt = Bool()
@@ -151,6 +153,7 @@ class FpMacUnit(
     val outType = Input(UInt(3.W))
     val aluType = Input(UInt(3.W))
     val dstRidx = Input(UInt(log2Ceil(numAccTiles).W))
+    val macInit = Input(Bool())
     val macLast = Input(Bool())
     val autoClr = Input(Bool())
     val autoCvt = Input(Bool())
@@ -207,8 +210,12 @@ class FpMacUnit(
   val addRec32From16 = recF16ToRec32.io.out
   val pipeAddRec32From16 = Pipe(pipeStage1.valid, addRec32From16, pipeLatency).bits
   if (acc2Wider) {
-    addRecFwd32 := addRecOut32
-    pipeAddRecFwd32 := pipeAddRecOut32
+    //addRecFwd32 := addRecOut32
+    //pipeAddRecFwd32 := pipeAddRecOut32
+    addRecFwd32 := Mux((pipeStage1.bits.outType === FP16TYPE)
+      && pipeStage1.bits.macInit, addRec32From16, addRecOut32)
+    pipeAddRecFwd32 := Mux((pipeStage2.bits.outType === FP16TYPE)
+      && pipeStage1.bits.macInit, pipeAddRec32From16, pipeAddRecOut32)
   } else {
     addRecFwd32 := Mux(pipeStage1.bits.outType === FP16TYPE, addRec32From16, addRecOut32)
     pipeAddRecFwd32 := Mux(pipeStage2.bits.outType === FP16TYPE, pipeAddRec32From16, pipeAddRecOut32)
@@ -250,6 +257,7 @@ class FpMacUnit(
   pipeStage0.bits.outType := io.outType
   pipeStage0.bits.aluType := io.aluType
   pipeStage0.bits.dstRidx := io.dstRidx
+  pipeStage0.bits.macInit := io.macInit
   pipeStage0.bits.macLast := io.macLast
   pipeStage0.bits.autoClr := io.autoClr
   pipeStage0.bits.autoCvt := io.autoCvt
@@ -419,6 +427,7 @@ class PE(
   val c1 = RegInit(VecInit(Seq.fill(numAccTiles)(0.U(32.W))))
 
   val fpMultiCycles = true
+  val fpAcc2Wider = true
 
   // -----------------------------------------------------------------------------------
   // matrix multiply-accumulate
@@ -427,7 +436,7 @@ class PE(
   val macReqCtrls = io.macReqIn.bits
   val fpMacValid = io.macReqIn.valid && macReqCtrls.srcType(2)
   // fp16*fp16+fp32
-  val fpMac = Module(new FpMacUnit(if (fpMultiCycles) 3 else 1))
+  val fpMac = Module(new FpMacUnit((if (fpMultiCycles) 3 else 1), fpAcc2Wider))
   fpMac.io.validin := fpMacValid
   fpMac.io.src1 := Mux(macReqCtrls.aluType === MACC, io.macReqSrcA, c0(macReqCtrls.src1Ridx))
   fpMac.io.src2 := io.macReqSrcB
@@ -436,6 +445,7 @@ class PE(
   fpMac.io.outType := macReqCtrls.outType
   fpMac.io.aluType := macReqCtrls.aluType
   fpMac.io.dstRidx := macReqCtrls.dstRidx
+  fpMac.io.macInit := macReqCtrls.macInit
   fpMac.io.macLast := macReqCtrls.macLast
   fpMac.io.autoClr := macReqCtrls.autoClr
   fpMac.io.autoCvt := macReqCtrls.autoCvt
