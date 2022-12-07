@@ -94,14 +94,15 @@ abstract class AbstractRenameStage(
     val tile_m_wakeup = Flipped(Valid(new MtileWakeupResp())) 
     val tile_n_wakeup =Flipped(Valid(new MtileWakeupResp())) 
     val tile_k_wakeup = Flipped(Valid(new MtileWakeupResp())) 
-  
-    val matrix_iss_valid = if (matrix) Input(Bool()) else null
-    val matrix_iss_uop = if (matrix) Input(new MicroOp()) else null
-    val mem_iss_valid = if (matrix) Input(Bool()) else null
-    val mem_iss_uop = if (matrix) Input(new MicroOp()) else null
-    val wake_issue_prs = Output(Vec(2,UInt((vLenb+1).W)))
-    val wake_issue_data = Output(Vec(2,UInt((vLenb+1).W)))
-    val wake_issue_valid = Output(Vec(2,Bool()))
+    val matrix_iss_valid = if (matrix) Input(Vec(matWidth,Bool())) else null
+    val matrix_iss_uop = if (matrix) Input(Vec(matWidth,new MicroOp())) else null
+    val mem_iss_valid = if (matrix) Input(Vec(memWidth,Bool())) else null
+    val mem_iss_uop = if (matrix) Input(Vec(memWidth,new MicroOp())) else null
+    val wake_issue_prs = Output(Vec(2,Vec(memWidth + matWidth,UInt((vLenb+1).W))))
+    val wake_issue_data = Output(Vec(2,Vec(memWidth + matWidth,UInt((vLenb+1).W))))
+    val wake_issue_valid = Output(Vec(2,Vec(memWidth + matWidth,Bool())))
+    val wake_issue_rs_type = Output(Vec(2,Vec(memWidth + matWidth,UInt(RT_X.getWidth.W))))
+
     // commit stage
     val com_valids = Input(Vec(plWidth, Bool()))
     val com_uops   = Input(Vec(plWidth, new MicroOp()))
@@ -1024,11 +1025,19 @@ class MatRenameStage(
     trbusytable.io.rebusy_reqs(w)  := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_TR
     accbusytable.io.rebusy_reqs(w) := ren2_alloc_reqs(w) && ren2_uops(w).dst_rtype === RT_ACC
   }
+  for (i <- 0 until matWidth) {
+    trbusytable.io.matrix_iss_valid(i)  := io.matrix_iss_valid(i)  && (io.matrix_iss_uop(i).dst_rtype ===  RT_TR)
+    trbusytable.io.matrix_iss_uop(i)  := io.matrix_iss_uop(i)
+    accbusytable.io.matrix_iss_valid(i)  := io.matrix_iss_valid(i)  && (io.matrix_iss_uop(i).dst_rtype ===  RT_ACC)
+  accbusytable.io.matrix_iss_uop(i)  := io.matrix_iss_uop(i)
+  }
+  for (j <- 0 until memWidth) {
+    trbusytable.io.mem_iss_valid(j)  := io.mem_iss_valid(j) && (io.mem_iss_uop(j).dst_rtype ===  RT_TR)
+    trbusytable.io.mem_iss_uop(j)  := io.mem_iss_uop(j)
+    accbusytable.io.mem_iss_valid(j) := io.mem_iss_valid(j)  && (io.mem_iss_uop(j).dst_rtype ===  RT_ACC)
+    accbusytable.io.mem_iss_uop(j)  := io.mem_iss_uop(j)
+  }
 
-  trbusytable.io.matrix_iss_valid  := io.matrix_iss_valid && (io.matrix_iss_uop.dst_rtype ===  RT_TR)
-  trbusytable.io.matrix_iss_uop  := io.matrix_iss_uop
-  trbusytable.io.mem_iss_valid  := io.mem_iss_valid && (io.mem_iss_uop.dst_rtype ===  RT_TR)
-  trbusytable.io.mem_iss_uop  := io.mem_iss_uop
   trbusytable.io.ren_uops  := ren2_uops  // expects pdst to be set up.
   trbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_TR && Mux(x.bits.uop.uses_ldq, x.bits.uop.m_slice_done, true.B))
   trbusytable.io.wb_pdsts  := io.wakeups.map(_.bits.uop.pdst)
@@ -1036,11 +1045,8 @@ class MatRenameStage(
   io.wake_issue_valid(0) := trbusytable.io.wake_issue_valid
   io.wake_issue_data(0) := trbusytable.io.wake_issue_data
   io.wake_issue_prs(0) := trbusytable.io.wake_issue_prs
+  io.wake_issue_rs_type(0) := trbusytable.io.wake_issue_rs_type
 
-  accbusytable.io.matrix_iss_valid  := io.matrix_iss_valid  && (io.matrix_iss_uop.dst_rtype ===  RT_ACC)
-  accbusytable.io.matrix_iss_uop  := io.matrix_iss_uop
-  accbusytable.io.mem_iss_valid  := io.mem_iss_valid  && (io.mem_iss_uop.dst_rtype ===  RT_ACC)
-  accbusytable.io.mem_iss_uop  := io.mem_iss_uop
   accbusytable.io.ren_uops  := ren2_uops  // expects pdst to be set up.
   accbusytable.io.wb_valids := io.wakeups.map(x => x.valid && x.bits.uop.dst_rtype === RT_ACC && Mux(x.bits.uop.uses_ldq, x.bits.uop.m_slice_done, true.B))
   accbusytable.io.wb_pdsts  := io.wakeups.map(_.bits.uop.pdst)
@@ -1048,6 +1054,7 @@ class MatRenameStage(
   io.wake_issue_valid(1) := accbusytable.io.wake_issue_valid
   io.wake_issue_data(1) := accbusytable.io.wake_issue_data
   io.wake_issue_prs(1) := accbusytable.io.wake_issue_prs
+  io.wake_issue_rs_type(1) := accbusytable.io.wake_issue_rs_type
 
   assert (!(io.wakeups.map(x => x.valid && !x.bits.uop.rt(RD, rtype)).reduce(_||_)),
     "[rename] Wakeup has wrong rtype.")

@@ -52,9 +52,10 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false, val matr
   val tile_n_wakeup = Flipped(Valid(new MtileWakeupResp()))
   val tile_k_wakeup = Flipped(Valid(new MtileWakeupResp()))
   /*************************************************************/
-  val wake_issue_prs = Input(Vec(2,UInt((vLenb+1).W)))
-    val wake_issue_data = Input(Vec(2,UInt((vLenb+1).W)))
-    val wake_issue_valid = Input(Vec(2,Bool()))
+  val wake_issue_prs = Input(Vec(2,Vec(memWidth + matWidth,UInt((vLenb+1).W))))
+  val wake_issue_rs_type = Input(Vec(2,Vec(memWidth + matWidth,UInt(RT_X.getWidth.W))))
+  val wake_issue_data = Input(Vec(2,Vec(memWidth + matWidth,UInt((vLenb+1).W))))
+  val wake_issue_valid = Input(Vec(2,Vec(memWidth + matWidth,Bool())))
   /********************************************************************************/
   val spec_ld_wakeup= Flipped(Vec(memWidth, Valid(UInt(width=maxPregSz.W))))
   val in_uop        = Flipped(Valid(new MicroOp())) // if valid, this WILL overwrite an entry!
@@ -553,15 +554,21 @@ class IssueSlot(
     next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_)
     next_p3 := Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_)
     for (i <- 0 until 2) {
-    val ready_sig = WireInit(io.wake_issue_valid(i) &&
-    (io.in_uop.bits.is_rvm || slot_uop.is_rvm))
-    when(ready_sig) {
-      next_p1 := Mux(Mux(io.in_uop.valid ,io.in_uop.bits.prs1, slot_uop.prs1) === io.wake_issue_prs(i), 
-                 Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_)  | ~io.wake_issue_data(i), Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_))
-      next_p2 := Mux(Mux(io.in_uop.valid ,io.in_uop.bits.prs2, slot_uop.prs2) === io.wake_issue_prs(i), 
-                    Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_)  | ~io.wake_issue_data(i), Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_))
-      next_p3 := Mux(Mux(io.in_uop.valid ,io.in_uop.bits.prs3, slot_uop.prs3) === io.wake_issue_prs(i), 
-                    Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_)  | ~io.wake_issue_data(i), Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_))
+      for (j <- 0 until (memWidth + matWidth)) {
+      val ready_sig = WireInit(
+        io.wake_issue_valid(i)(j) &&
+      (io.in_uop.bits.is_rvm || slot_uop.is_rvm))
+      when(ready_sig) {
+        next_p1 := Mux((Mux(io.in_uop.valid ,io.in_uop.bits.prs1, slot_uop.prs1) === io.wake_issue_prs(i)(j) && 
+                      (Mux(io.in_uop.valid ,io.in_uop.bits.lrs1_rtype, slot_uop.lrs1_rtype) === io.wake_issue_rs_type(i)(j))), 
+                      Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_)  | ~io.wake_issue_data(i)(j), Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_))
+        next_p2 := Mux((Mux(io.in_uop.valid ,io.in_uop.bits.prs2, slot_uop.prs2) === io.wake_issue_prs(i)(j) && 
+                      (Mux(io.in_uop.valid ,io.in_uop.bits.lrs2_rtype, slot_uop.lrs2_rtype) === io.wake_issue_rs_type(i)(j))),
+                      Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_)  | ~io.wake_issue_data(i)(j), Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_))
+        next_p3 := Mux((Mux(io.in_uop.valid ,io.in_uop.bits.prs3, slot_uop.prs3) === io.wake_issue_prs(i)(j) &&
+                      (Mux(io.in_uop.valid ,io.in_uop.bits.dst_rtype, slot_uop.dst_rtype) === io.wake_issue_rs_type(i)(j))), 
+                      Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_)  | ~io.wake_issue_data(i)(j), Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_))
+      }
     }
   }
   

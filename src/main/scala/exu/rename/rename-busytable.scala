@@ -150,17 +150,17 @@ class MatRenameBusyTable(
     val wb_valids = Input(Vec(numWbPorts, Bool()))
     val wb_bits = Input(Vec(numWbPorts, UInt(vLenb.W)))   //write back without direction bit?
 
+    val matrix_iss_valid = Input(Vec(matWidth,Bool()))
+    val matrix_iss_uop = Input(Vec(matWidth,new MicroOp()))
 
-    val matrix_iss_valid = Input(Bool())
-    val matrix_iss_uop = Input(new MicroOp()) 
+    val mem_iss_valid = Input(Vec(memWidth,Bool()))
+    val mem_iss_uop = Input(Vec(memWidth,new MicroOp()))
 
-    val mem_iss_valid = Input(Bool())
-    val mem_iss_uop = Input(new MicroOp()) 
+    val wake_issue_prs = Output(Vec(memWidth + matWidth,UInt((vLenb+1).W)))
+    val wake_issue_data = Output(Vec(memWidth + matWidth,UInt((vLenb+1).W)))
+    val wake_issue_valid = Output(Vec(memWidth + matWidth,Bool()))
+    val wake_issue_rs_type = Output(Vec(memWidth + matWidth,UInt(RT_X.getWidth.W)))
 
-
-    val wake_issue_prs = Output(UInt((vLenb+1).W))
-    val wake_issue_data = Output(UInt((vLenb+1).W))
-    val wake_issue_valid = Output(Bool())
     val debug = new Bundle {
       val busytable = Output(Vec(numPregs, UInt((vLenb + 1).W)))
     }
@@ -200,30 +200,46 @@ class MatRenameBusyTable(
     busy_table := busy_table_next
     io.debug.busytable := busy_table
   }
-  io.wake_issue_valid :=false.B
-  val matrix_value = Wire(UInt(((vLenb+1).W)))
-  val wake_pdst = Wire(UInt(pregSz.W))
-  matrix_value := 0.U
-  wake_pdst := 0.U
-  when(~(io.matrix_iss_uop.dst_rtype === RT_ACC && !io.matrix_iss_uop.m_is_split) && (io.matrix_iss_valid)) {
-       //matrix_value  := busy_table(io.matrix_iss_uop.pdst) & Cat(1.U(1.W),Fill(vLenb, 0.U(1.W)))
-       matrix_value  :=  busy_table_next(io.matrix_iss_uop.pdst) & Cat(busy_table_next(io.matrix_iss_uop.pdst)(vLenb),Fill(vLenb, 1.U(1.W)) &  MaskGen(0.U, io.matrix_iss_uop.m_slice_cnt, vLenb))
-       wake_pdst := io.matrix_iss_uop.pdst
-       busy_table(io.matrix_iss_uop.pdst) := matrix_value
-       io.wake_issue_valid := true.B
-       io.wake_issue_prs := wake_pdst
-       io.wake_issue_data := matrix_value
+
+  for ( i<- 0 until (memWidth + matWidth)) {
+    io.wake_issue_valid(i) := false.B
+   }
+
+  val matrix_value = Wire(Vec(matWidth, (UInt((vLenb+1).W))))
+  val matrix_wake_pdst = Wire(Vec(matWidth,(UInt(pregSz.W))))
+  val matrix_wake_type = Wire(Vec(matWidth,UInt(RT_X.getWidth.W)))
+
+  for ( i <- 0 until matWidth) {
+    matrix_value(i) := 0.U
+    matrix_wake_pdst(i)  := 0.U
+    matrix_wake_type(i) := 0.U
+    when(~(io.matrix_iss_uop(i).dst_rtype === RT_ACC && !io.matrix_iss_uop(i).m_is_split) && (io.matrix_iss_valid(i))) {
+        matrix_value(i)  :=  busy_table_next(io.matrix_iss_uop(i).pdst) & Cat(busy_table_next(io.matrix_iss_uop(i).pdst)(vLenb),Fill(vLenb, 1.U(1.W)) &  MaskGen(0.U, io.matrix_iss_uop(i).m_slice_cnt, vLenb))
+        matrix_wake_pdst(i) := io.matrix_iss_uop(i).pdst
+        busy_table(io.matrix_iss_uop(i).pdst) := matrix_value(i)
+        io.wake_issue_valid(i) := true.B
+        io.wake_issue_prs(i) := matrix_wake_pdst(i)
+        io.wake_issue_data(i) := matrix_value(i)
+        io.wake_issue_rs_type(i) := matrix_wake_type(i)
+    }
   }
-  val mem_value = Wire(UInt(((vLenb+1).W)))
-  mem_value := 0.U
-  when(~(io.mem_iss_uop.dst_rtype === RT_ACC && !io.mem_iss_uop.m_is_split) && (io.mem_iss_valid)) {
-       //mem_value  := busy_table(io.mem_iss_uop.pdst) & Cat(1.U(1.W),Fill(vLenb, 0.U(1.W)))
-       mem_value  := busy_table_next(io.mem_iss_uop.pdst) & Cat(busy_table_next(io.mem_iss_uop.pdst)(vLenb),Fill(vLenb, 1.U(1.W)) &  MaskGen(0.U, io.mem_iss_uop.m_slice_cnt, vLenb))
-       wake_pdst := io.mem_iss_uop.pdst
-       busy_table(io.mem_iss_uop.pdst) := mem_value
-       io.wake_issue_valid := true.B
-       io.wake_issue_prs := wake_pdst
-       io.wake_issue_data := mem_value
+
+  val mem_value = Wire(Vec(memWidth, (UInt((vLenb+1).W))))
+  val mem_wake_pdst = Wire(Vec(memWidth, (UInt(pregSz.W))))
+  val mem_wake_type = Wire(Vec(memWidth,UInt(RT_X.getWidth.W)))
+  for (j <-  0 until memWidth) {
+    mem_value(j) := 0.U
+    mem_wake_pdst(j) := 0.U
+    mem_wake_type(j) := 0.U
+    when(~(io.mem_iss_uop(j).dst_rtype === RT_ACC && !io.mem_iss_uop(j).m_is_split) && (io.mem_iss_valid(j))) {
+        mem_value(j)  := busy_table_next(io.mem_iss_uop(j).pdst) & Cat(busy_table_next(io.mem_iss_uop(j).pdst)(vLenb),Fill(vLenb, 1.U(1.W)) &  MaskGen(0.U, io.mem_iss_uop(j).m_slice_cnt, vLenb))
+        mem_wake_pdst(j) := io.mem_iss_uop(j).pdst
+        busy_table(io.mem_iss_uop(j).pdst) := mem_value(j)
+        io.wake_issue_valid(matWidth + j) := true.B
+        io.wake_issue_prs(matWidth + j) := mem_wake_pdst(j)
+        io.wake_issue_data(matWidth + j):= mem_value(j)
+        io.wake_issue_rs_type(matWidth + j):= mem_wake_type(j)
+    }
   }
   io.tbusy_status := Cat((0 until numPregs).map(p => busy_table(p)(vLenb-1, 0).orR).reverse)
 }

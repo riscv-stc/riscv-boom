@@ -1711,17 +1711,20 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
 
     m_rename_stage.io.matrix_iss_valid := m_pipeline.io.matrix_iss_valid
     m_rename_stage.io.matrix_iss_uop := m_pipeline.io.matrix_iss_uop
-    m_rename_stage.io.mem_iss_valid := mem_iss_unit.io.wake_tile_r(0)
-    m_rename_stage.io.mem_iss_uop := mem_iss_unit.io.iss_uops(0)
+    m_rename_stage.io.mem_iss_valid := mem_iss_unit.io.wake_tile_r
+    m_rename_stage.io.mem_iss_uop := mem_iss_unit.io.iss_uops
     m_pipeline.io.wake_issue_prs := m_rename_stage.io.wake_issue_prs
+    m_pipeline.io.wake_issue_rs_type := m_rename_stage.io.wake_issue_rs_type
     m_pipeline.io.wake_issue_data := m_rename_stage.io.wake_issue_data
     m_pipeline.io.wake_issue_valid := m_rename_stage.io.wake_issue_valid
 
     mem_iss_unit.io.wake_issue_prs := m_rename_stage.io.wake_issue_prs
+    mem_iss_unit.io.wake_issue_rs_type := m_rename_stage.io.wake_issue_rs_type
     mem_iss_unit.io.wake_issue_data := m_rename_stage.io.wake_issue_data
     mem_iss_unit.io.wake_issue_valid := m_rename_stage.io.wake_issue_valid
 
     int_iss_unit.io.wake_issue_prs := DontCare
+    int_iss_unit.io.wake_issue_rs_type := DontCare
     int_iss_unit.io.wake_issue_data := DontCare
     int_iss_unit.io.wake_issue_valid := DontCare
 

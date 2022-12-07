@@ -87,14 +87,14 @@ class IssueUnitIO(
   val tile_m_wakeup    = if (usingMatrix) Flipped(Valid(new MtileWakeupResp())) else null
   val tile_n_wakeup    = if (usingMatrix) Flipped(Valid(new MtileWakeupResp())) else null
   val tile_k_wakeup    = if (usingMatrix) Flipped(Valid(new MtileWakeupResp())) else null
-  val wake_tile_r       = Output(Vec(issueWidth, Bool()))
-  val wake_issue_prs =  if (usingMatrix) Input(Vec(2,UInt((vLenb+1).W))) else null
-  val wake_issue_data =  if (usingMatrix) Input(Vec(2,UInt((vLenb+1).W))) else null
-  val wake_issue_valid = if (usingMatrix) Input(Vec(2,Bool())) else null
+
+  val wake_tile_r       = if (usingMatrix) Output(Vec(issueWidth, Bool())) else null
+  val wake_issue_prs =  if (usingMatrix) Input(Vec(2,Vec(memWidth + matWidth,UInt((vLenb+1).W)))) else null
+  val wake_issue_rs_type = if (usingMatrix) Input(Vec(2,Vec(memWidth + matWidth,UInt(RT_X.getWidth.W)))) else null
+  val wake_issue_data =  if (usingMatrix) Input(Vec(2,Vec(memWidth + matWidth,UInt((vLenb+1).W)))) else null
+  val wake_issue_valid = if (usingMatrix) Input(Vec(2,Vec(memWidth + matWidth,Bool())))else null
 
   val spec_ld_wakeup   = Flipped(Vec(memWidth, Valid(UInt(width=maxPregSz.W))))
-
-
 
   // tell the issue unit what each execution pipeline has in terms of functional units
   val fu_types         = Input(Vec(issueWidth, Bits(width=FUC_SZ.W)))
@@ -247,6 +247,7 @@ abstract class IssueUnit(
     issue_slots(i).tile_n_wakeup  := io.tile_n_wakeup
     issue_slots(i).tile_k_wakeup  := io.tile_k_wakeup
     issue_slots(i).wake_issue_prs  := io.wake_issue_prs
+    issue_slots(i).wake_issue_rs_type  := io.wake_issue_rs_type
     issue_slots(i).wake_issue_data  := io.wake_issue_data
     issue_slots(i).wake_issue_valid  := io.wake_issue_valid   
     if (usingMatrix && matrix) {

@@ -769,7 +769,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   dontTouch(ldq_vag_e)
   dontTouch(ldq_vag_uop)
 
-  val can_fire_vload_addrgen = widthMap(w =>      
+  val can_fire_vload_addrgen = widthMap(w =>
                                  ( ldq_vag_sel(w)                                                                &&
                                    ldq_vag_e(w).valid                                                           &&
                                    ldq_vag_e(w).bits.addr.valid                                                 &&
