@@ -575,7 +575,7 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               rLen = 128,
               mLen = 1024, // rLen * 8
               numMatTrRegisters = 12,
-              numMatAccRegisters = 4,
+              numMatAccRegisters = 8,
               mxuTileRows = 4,              // 1 mxu tile contains $mxuTileRows rows of PEs
               mxuTileCols = 4               // 1 mxu tile contains $mxuTileCols cols of (fp16) PEs or 2*$mxuTileCols cols of (int8) PEs
             ),

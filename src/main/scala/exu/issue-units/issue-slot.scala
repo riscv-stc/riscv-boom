@@ -123,6 +123,7 @@ class IssueSlot(
   val next_uop_mma        = if (matrix) next_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA) else null
   val next_uop_ts1_hslice = if (matrix) Mux(next_uop_mma, false.B, next_uop.isHSlice) else null
   val next_uop_ts2_hslice = if (matrix) Mux(next_uop_mma, true.B,  next_uop.isHSlice) else null
+  val slot_uop_mma        = if (matrix) slot_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA) else null
 
   val last_check: Bool = {
     val ret = Wire(Bool())
@@ -523,7 +524,7 @@ class IssueSlot(
     io.out_uop.m_scalar_data := sdata
     io.uop.m_sidx            := sidx
     io.uop.m_scalar_data     := sdata
-    when(io.request && io.grant && next_uop_mma) {
+    when(io.request && io.grant && slot_uop_mma) {
       io.uop.m_split_last  := slot_uop.m_sidx === slot_uop.m_tilek - 1.U
       io.uop.m_sidx        := slot_uop.m_sidx
       io.out_uop.m_sidx    := slot_uop.m_sidx + 1.U
