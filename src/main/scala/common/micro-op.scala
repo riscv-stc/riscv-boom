@@ -13,12 +13,10 @@ package boom.common
 
 import chisel3._
 import chisel3.util._
-
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket._
-import freechips.rocketchip.util.{ElaborationArtefacts,UIntIsOneOf}
-
-import boom.exu.FUConstants
+import freechips.rocketchip.util.{ElaborationArtefacts, UIntIsOneOf}
+import boom.exu.{FUConstants, FusionCode}
 
 /**
  * Extension to BoomBundle to add a MicroOp
@@ -233,6 +231,9 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val isHSlice         = if (usingMatrix) Bool()          else null
   val pts1DirCross     = if (usingMatrix) Bool()          else null
   val pts2DirCross     = if (usingMatrix) Bool()          else null
+  val m_auto_clr       = if (usingMatrix) Bool()          else null
+  val m_auto_cvt       = if (usingMatrix) Bool()          else null
+  val fusion_code      = if (usingMatrix) UInt(FusionCode.FUS_SZ.W) else null
   // purely debug information
   val debug_wdata      = UInt(xLen.W)
   val debug_events     = new DebugStageEvents
@@ -253,6 +254,8 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   def unsafe           = uses_ldq || (uses_stq && !is_fence) || is_br || is_jalr
 
   def fu_code_is(_fu: UInt) = (fu_code & _fu) =/= 0.U
+  
+  def fusion_code_has(fc: UInt) = (fusion_code & fc) =/= 0.U
 
   def is_vm_ext        = is_rvv || is_rvm
   def uses_scalar      = (is_rvv || is_rvm) && (iq_type & (IQT_INT | IQT_FP)) =/= 0.U

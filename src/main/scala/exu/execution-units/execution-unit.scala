@@ -1390,6 +1390,10 @@ class MatExeUnit() (implicit p: Parameters)
                                   Mux(io.req.bits.uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), MACC,
                                   Mux(io.req.bits.uop.uopc.isOneOf(uopMEMUL), MULT,
                                   Mux(io.req.bits.uop.uopc.isOneOf(uopMADD, uopMWADD, uopMQADD), ADD, SUB))))
+  mxu.io.macReq.bits.macInit   := io.req.bits.uop.m_sidx === 0.U
+  mxu.io.macReq.bits.macLast   := io.req.bits.uop.m_split_last
+  mxu.io.macReq.bits.autoClr   := false.B //io.req.bits.uop.m_auto_clr
+  mxu.io.macReq.bits.autoCvt   := false.B //io.req.bits.uop.m_auto_cvt
   mxu.io.macReq.bits.rm        := io.fcsr_rm
   mxu.io.macReqSrcA            := io.req.bits.rs1_data
   mxu.io.macReqSrcB            := io.req.bits.rs2_data

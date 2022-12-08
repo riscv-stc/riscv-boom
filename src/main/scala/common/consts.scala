@@ -26,9 +26,9 @@ import freechips.rocketchip.rocket.RVCExpander
 trait BOOMDebugConstants
 {
   val DEBUG_PRINTF        = false // use the Chisel printf functionality
-  val COMMIT_LOG_PRINTF   = true // dump commit state, for comparision against ISA sim
+  val COMMIT_LOG_PRINTF   = false // dump commit state, for comparision against ISA sim
   val MEMTRACE_PRINTF     = false // dump trace of memory accesses to L1D for debugging
-  val O3PIPEVIEW_PRINTF   = false // dump trace for O3PipeView from gem5
+  val O3PIPEVIEW_PRINTF   = true // dump trace for O3PipeView from gem5
   val O3_CYCLE_TIME       = (1000)// "cycle" time expected by o3pipeview.py
 
   val DROMAJO_COSIM_ENABLE = false // enable dromajo cosim
