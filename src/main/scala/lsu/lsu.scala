@@ -351,8 +351,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   require(numVLdPorts >= memWidth)
   // for matrix load write-back control
-  val ml_wbq            = Reg(Vec(numVLdqEntries, UInt((rLenbSz+2).W)))
-  val ml_wbq_tail       = Reg(UInt(vldqAddrSz.W))
+  val ml_wbq            = Reg(Vec(memWidth, Vec(numVLdqEntries, UInt((rLenbSz+2).W))))
+  val ml_wbq_tail       = Reg(Vec(memWidth, UInt(vldqAddrSz.W)))
 
   require(numVStqEntries > 16) // Avoid deadlock between vsagu and ROB when vstq is full
 
@@ -1036,15 +1036,15 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       vldq(vldq_enq_idx).bits.vmask := vlagu(w).io.resp_vm
       vldq(vldq_enq_idx).bits.shamt := vlagu(w).io.resp_shamt
       vldq(vldq_enq_idx).bits.shdir := vlagu(w).io.resp_shdir
-      vldq(vldq_enq_idx).bits.ml_wbq_idx := ml_wbq_tail
+      vldq(vldq_enq_idx).bits.ml_wbq_idx := ml_wbq_tail(w)
     }
     vldq_enq_idx = Mux(vlagu(w).io.resp.fire, WrapInc(vldq_enq_idx, numVLdqEntries), vldq_enq_idx)
     // clear ml_wbq entry, ml_wbq records how many bytes has loaded from memory
     when(vlagu(w).io.resp.fire && vlagu(w).io.resp_sfirst) {
-      ml_wbq(ml_wbq_tail) := 0.U
+      ml_wbq(w)(ml_wbq_tail(w)) := 0.U
     }
     when(vlagu(w).io.resp.fire && vlagu(w).io.resp_slast) {
-      ml_wbq_tail := WrapInc(ml_wbq_tail, numVLdqEntries)
+      ml_wbq_tail(w) := WrapInc(ml_wbq_tail(w), numVLdqEntries)
     }
 
     when(vlxagu(w).io.resp.fire) {
@@ -1701,7 +1701,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         ldq(ldq_idx).bits.succeeded := true.B
       }
       when(vldq(vldq_idx).bits.uop.is_rvm) {
-        ml_wbq(vldq(vldq_idx).bits.ml_wbq_idx) := ml_wbq(vldq(vldq_idx).bits.ml_wbq_idx) + PopCount(vldq(vldq_idx).bits.vmask)
+        ml_wbq(w)(vldq(vldq_idx).bits.ml_wbq_idx) := ml_wbq(w)(vldq(vldq_idx).bits.ml_wbq_idx) + PopCount(vldq(vldq_idx).bits.vmask)
       }
     }
 
@@ -2077,7 +2077,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     io.core.tile_wbk(w).bits.uop := vload_resp_e(w).bits.uop
     io.core.tile_wbk(w).bits.data := Mux(vload_resp_e(w).bits.shdir, vload_resp_data_shr(w), vload_resp_data_shl(w))
     io.core.tile_wbk(w).bits.vmask := vload_resp_e(w).bits.vmask
-    io.core.tile_wbk(w).bits.uop.m_slice_done := ml_wbq(vload_resp_e(w).bits.ml_wbq_idx) +& PopCount(vload_resp_e(w).bits.vmask) >= (vload_resp_e(w).bits.uop.m_slice_len << vload_resp_e(w).bits.uop.m_ls_ew)
+    io.core.tile_wbk(w).bits.uop.m_slice_done := ml_wbq(w)(vload_resp_e(w).bits.ml_wbq_idx) +& PopCount(vload_resp_e(w).bits.vmask) >= (vload_resp_e(w).bits.uop.m_slice_len << vload_resp_e(w).bits.uop.m_ls_ew)
     io.core.tile_wbk(w).bits.predicated := false.B
     io.core.tile_wbk(w).bits.fflags.valid := false.B
     when(io.core.tile_wbk(w).valid) {
@@ -2950,12 +2950,13 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       vlxq(i).bits.succeeded  := false.B
     }
 
-    ml_wbq_tail := 0.U
+    for (w <- 0 until memWidth) {
+    ml_wbq_tail(w) := 0.U
     for (i <- 0 until numVLdqEntries) 
     {
-      ml_wbq(i) := 0.U
+      ml_wbq(w)(i) := 0.U
     }
-
+  }
     when (reset.asBool)
     {
       stq_head := 0.U
