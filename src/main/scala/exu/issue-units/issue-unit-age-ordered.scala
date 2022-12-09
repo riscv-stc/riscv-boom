@@ -235,6 +235,9 @@ class IssueUnitCollapsing(
         val isMACPrev = valid_bits_prev(w) && valid_uops_prev(w).fu_code === FU_GEMM && !valid_uops_prev(w).m_split_last
         val isMACCurr = issue_slots(i).uop.fu_code === FU_GEMM && issue_slots(i).uop.rob_idx =/= valid_uops_prev(w).rob_idx
         canMACIss    := !(isMACCurr && isMACPrev)
+        dontTouch(isMACPrev)
+        dontTouch(isMACCurr)
+        dontTouch(canMACIss)
       }
 
       when (requests(i) && !uop_issued && can_allocate && !port_issued(w) && canDivIss && canMMVIss && canMACIss) {
@@ -244,8 +247,10 @@ class IssueUnitCollapsing(
         io.wake_tile_r(w) := issue_slots(i).uop.is_rvm && issue_slots(i).uop.m_split_last
       }
       val was_port_issued_yet = port_issued(w)
-      port_issued(w) = (requests(i) && !uop_issued && can_allocate) | port_issued(w)
-      uop_issued = (requests(i) && can_allocate && !was_port_issued_yet) | uop_issued
+      //port_issued(w) = (requests(i) && !uop_issued && can_allocate) | port_issued(w)
+      port_issued(w) = (requests(i) && !uop_issued && can_allocate && canDivIss && canMMVIss && canMACIss) | port_issued(w)
+      //uop_issued = (requests(i) && can_allocate && !was_port_issued_yet) | uop_issued
+      uop_issued = (requests(i) && can_allocate && !was_port_issued_yet && canDivIss && canMMVIss && canMACIss) | uop_issued
     }
   }
 }

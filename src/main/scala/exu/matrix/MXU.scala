@@ -427,7 +427,7 @@ class PE(
   val c1 = RegInit(VecInit(Seq.fill(numAccTiles)(0.U(32.W))))
 
   val fpMultiCycles = true
-  val fpAcc2Wider = true
+  val fpAcc2Wider = false
 
   // -----------------------------------------------------------------------------------
   // matrix multiply-accumulate

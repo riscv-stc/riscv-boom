@@ -262,7 +262,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dec_mconfig_valid = Wire(Vec(coreWidth, Bool()))
   // stall fetch/dcode because we ran out of vconfig tags
   val vconfig_mask_full = Wire(Vec(coreWidth, Bool()))
-
+  val mconfig_mask_full = Wire(Vec(coreWidth, Bool()))
+  val tile_m_mask_full = Wire(Vec(coreWidth, Bool()))
+  val tile_n_mask_full = Wire(Vec(coreWidth, Bool()))
+  val tile_k_mask_full = Wire(Vec(coreWidth, Bool()))
+  
   // Rename2/Dispatch stage
   val dis_valids = Wire(Vec(coreWidth, Bool()))
   val dis_uops   = Wire(Vec(coreWidth, new MicroOp))
@@ -1146,7 +1150,8 @@ val matrix_mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).map{ cas
 val dec_mconfigmask_logic = Module(new MconfigMaskGenerationLogic(coreWidth))
 dec_mconfigmask_logic.io.mconfig_mask_update := RegNext(Mux(!matrix_mask_updates.reduce(_|_), 0.U,
                                                           Mux1H(matrix_mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.mconfig_tag)))))
-dec_mconfigmask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush                                                          
+dec_mconfigmask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+mconfig_mask_full := dec_mconfigmask_logic.io.is_full
 for (w <- 0 until coreWidth) {
     dec_mconfigmask_logic.io.is_mconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_msettype )
     dec_mconfigmask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_msettype)
@@ -1161,8 +1166,9 @@ val matrix_tilem_mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).ma
 val dec_mtilemask_logic = Module(new MconfigMaskGenerationLogic(coreWidth))
 dec_mtilemask_logic.io.mconfig_mask_update := RegNext(Mux(!matrix_tilem_mask_updates.reduce(_|_), 0.U,
                                                           Mux1H(matrix_tilem_mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.tile_m_tag)))))
-dec_mtilemask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush                                                          
-for (w <- 0 until coreWidth) {
+dec_mtilemask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+tile_m_mask_full := dec_mtilemask_logic.io.is_full
+  for (w <- 0 until coreWidth) {
     dec_mtilemask_logic.io.is_mconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_settilem )
     dec_mtilemask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_settilem)
     dec_uops(w).tile_m_mask := dec_mtilemask_logic.io.mconfig_mask(w)
@@ -1177,8 +1183,9 @@ val matrix_tilen_mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).ma
 val dec_ntilemask_logic = Module(new MconfigMaskGenerationLogic(coreWidth))
 dec_ntilemask_logic.io.mconfig_mask_update := RegNext(Mux(!matrix_tilen_mask_updates.reduce(_|_), 0.U,
                                                           Mux1H(matrix_tilen_mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.tile_n_tag)))))
-dec_ntilemask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush                                                          
-for (w <- 0 until coreWidth) {
+dec_ntilemask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+tile_n_mask_full := dec_ntilemask_logic.io.is_full
+  for (w <- 0 until coreWidth) {
     dec_ntilemask_logic.io.is_mconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_settilen )
     dec_ntilemask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_settilen)
     dec_uops(w).tile_n_mask := dec_ntilemask_logic.io.mconfig_mask(w)
@@ -1194,7 +1201,8 @@ val matrix_tilek_mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).ma
 val dec_ktilemask_logic = Module(new MconfigMaskGenerationLogic(coreWidth))
 dec_ktilemask_logic.io.mconfig_mask_update := RegNext(Mux(!matrix_tilek_mask_updates.reduce(_|_), 0.U,
                                                           Mux1H(matrix_tilek_mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.tile_k_tag)))))
-dec_ktilemask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush                                                          
+dec_ktilemask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+tile_k_mask_full := dec_ktilemask_logic.io.is_full
 for (w <- 0 until coreWidth) {
     dec_ktilemask_logic.io.is_mconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_settilek )
     dec_ktilemask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_settilek)
@@ -1391,6 +1399,10 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                       || dec_xcpt_stall
                       || branch_mask_full(w)
                       || vconfig_mask_full(w)
+                      || mconfig_mask_full(w)
+                      || tile_m_mask_full(w)
+                      || tile_n_mask_full(w)
+                      || tile_k_mask_full(w)
                       || brupdate.b1.mispredict_mask =/= 0.U
                       || brupdate.b2.mispredict
                       || io.ifu.redirect_flush))
