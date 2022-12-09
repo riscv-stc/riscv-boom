@@ -1667,7 +1667,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     }
     io.vmem_sd_ports(w).req.valid := io.vmem_sd_ports(w).req.ready && will_fire_vstq_commit(w)
     io.vmem_sd_ports(w).req.bits := vmem_sd_req(w)
-    io.vmem_sd_ports(w).vdata := Mux(vmem_sd_req(w).uop.is_rvm, vstq_commit_e(w).bits.data.bits, vsxq_commit_e.bits.data.bits)
+    io.vmem_sd_ports(w).vdata := Mux(vmem_sd_req(w).uop.is_rvm || vmem_sd_req(w).uop.v_unit_ls, vstq_commit_e(w).bits.data.bits, vsxq_commit_e.bits.data.bits)
     io.vmem_sd_ports(w).s1_kill := false.B // fixme
     io.vmem_sd_ports(w).brupdate := io.core.brupdate
     io.vmem_sd_ports(w).exception := io.core.exception
