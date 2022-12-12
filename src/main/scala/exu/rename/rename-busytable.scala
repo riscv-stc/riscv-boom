@@ -216,6 +216,7 @@ class MatRenameBusyTable(
     when(~(io.matrix_iss_uop(i).dst_rtype === RT_ACC && !io.matrix_iss_uop(i).m_is_split) && (io.matrix_iss_valid(i))) {
         matrix_value(i)  :=  busy_table_next(io.matrix_iss_uop(i).pdst) & Cat(busy_table_next(io.matrix_iss_uop(i).pdst)(vLenb),Fill(vLenb, 1.U(1.W)) &  MaskGen(0.U, io.matrix_iss_uop(i).m_slice_cnt, vLenb))
         matrix_wake_pdst(i) := io.matrix_iss_uop(i).pdst
+        matrix_wake_type(i) := io.matrix_iss_uop(i).dst_rtype
         busy_table(io.matrix_iss_uop(i).pdst) := matrix_value(i)
         io.wake_issue_valid(i) := true.B
         io.wake_issue_prs(i) := matrix_wake_pdst(i)
@@ -234,6 +235,7 @@ class MatRenameBusyTable(
     when(~(io.mem_iss_uop(j).dst_rtype === RT_ACC && !io.mem_iss_uop(j).m_is_split) && (io.mem_iss_valid(j))) {
         mem_value(j)  := busy_table_next(io.mem_iss_uop(j).pdst) & Cat(busy_table_next(io.mem_iss_uop(j).pdst)(vLenb),Fill(vLenb, 1.U(1.W)) &  MaskGen(0.U, io.mem_iss_uop(j).m_slice_cnt, vLenb))
         mem_wake_pdst(j) := io.mem_iss_uop(j).pdst
+        mem_wake_type(j) := io.mem_iss_uop(j).dst_rtype
         busy_table(io.mem_iss_uop(j).pdst) := mem_value(j)
         io.wake_issue_valid(matWidth + j) := true.B
         io.wake_issue_prs(matWidth + j) := mem_wake_pdst(j)
