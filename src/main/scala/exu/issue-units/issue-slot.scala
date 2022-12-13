@@ -164,7 +164,7 @@ class IssueSlot(
       val vsew   = uop.vs1_eew
       val vLen_ecnt   = vLenb.U >> vsew
       val v_eidx = Mux(uop.is_reduce, 0.U, uop.v_eidx)
-      when(vcompress) {  
+      when(vcompress) {
         ret := (0 until 8).toList.map(i => {
           val rsel   = VRegSel(v_eidx+& vLen_ecnt*i.U, uop.vs1_eew, eLenSelSz)
           val pvs1   = uop.pvs1(rsel).bits
@@ -177,9 +177,10 @@ class IssueSlot(
                      Mux(uop.uses_scalar, ps, true.B))
       }
     } else if(matrix) {
-      ret := Mux(uop.rt(RS1, isTrTile) && uop.pts1DirCross, p1.andR, 
+      ret := Mux(uop.rt(RS1, isTrTile) && uop.pts1DirCross, p1.andR,
              Mux(uop.rt(RS1, isTrTile),   p1(uop.m_sidx),
-             Mux(uop.fu_code === FU_GEMM, p1.andR,
+             //Mux(uop.fu_code === FU_GEMM, p1.andR,
+             Mux(uop.fu_code === FU_GEMM, p1(0),
              Mux(uop.rt(RS1, isAccTile),  p1(uop.m_sidx), true.B))))
     } else {
       ret := p1(0)
@@ -238,7 +239,7 @@ class IssueSlot(
     } else if(matrix) {
       ret := Mux(!uop.rt(RD, isAccTile), true.B,
              //Mux(uop.fu_code === FU_GEMM, p3.andR, p3(uop.m_sidx)))
-             Mux(uop.fu_code === FU_GEMM, true.B, p3(uop.m_sidx)))
+             Mux(uop.fu_code === FU_GEMM, p3(0), p3(uop.m_sidx)))
     } else {
       ret := p3(0)
     }

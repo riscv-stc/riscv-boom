@@ -235,9 +235,9 @@ class IssueUnitCollapsing(
         val isMACPrev = valid_bits_prev(w) && valid_uops_prev(w).fu_code === FU_GEMM && !valid_uops_prev(w).m_split_last
         val isMACCurr = issue_slots(i).uop.fu_code === FU_GEMM && issue_slots(i).uop.rob_idx =/= valid_uops_prev(w).rob_idx
         canMACIss    := !(isMACCurr && isMACPrev)
-        dontTouch(isMACPrev)
-        dontTouch(isMACCurr)
-        dontTouch(canMACIss)
+//        dontTouch(isMACPrev)
+//        dontTouch(isMACCurr)
+//        dontTouch(canMACIss)
       }
 
       when (requests(i) && !uop_issued && can_allocate && !port_issued(w) && canDivIss && canMMVIss && canMACIss) {
