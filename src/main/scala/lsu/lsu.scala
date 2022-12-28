@@ -3751,14 +3751,14 @@ class VecMemImp(outer: VecMem) extends LazyModuleImp(outer)
       fromSource = Cat(0.U(1.W), (vmemq.io.deq.bits.uop.is_rvm || vmemq.io.deq.bits.uop.v_unit_ls),
                   vmemq.io.deq.bits.vldq_idx),
       toAddress  = (vmemq.io.deq.bits.addr >> clSizeLog2.U) ## 0.U(clSizeLog2.W),
-      lgSize     = lgCacheBlockBytes.U
+      lgSize     = (lgCacheBlockBytes-1).U
     )._2
   } .otherwise {
     tl_out.a.bits   := edge.Put(
       fromSource = Cat(1.U(1.W), (vmemq.io.deq.bits.uop.is_rvm || vmemq.io.deq.bits.uop.v_unit_ls),
                   vmemq.io.deq.bits.vstq_idx),
       toAddress  = (vmemq.io.deq.bits.addr >> clSizeLog2.U) ## 0.U(clSizeLog2.W),
-      lgSize     = lgCacheBlockBytes.U,
+      lgSize     = (lgCacheBlockBytes-1).U,
       data       = Mux(vmemq.io.deq.bits.shdir, vsdq.io.deq.bits << (vmemq.io.deq.bits.shamt << 3.U),
                                                 vsdq.io.deq.bits >> (vmemq.io.deq.bits.shamt << 3.U)),
       mask       = Mux(vmemq.io.deq.bits.shdir, vmemq.io.deq.bits.mask << vmemq.io.deq.bits.shamt,
