@@ -135,14 +135,14 @@ class BoomTile private(
 
   // VecMem load ports
   lazy val vecmemLdPorts = Seq.fill(boomParams.core.numVLdPorts)(LazyModule(new VecMem))
-  val vecmemLdWidget = Seq.fill(boomParams.core.numVLdPorts)(LazyModule(new TLWidthWidget(p(CacheBlockBytes))))
+  val vecmemLdWidget = Seq.fill(boomParams.core.numVLdPorts)(LazyModule(new TLWidthWidget(p(CacheBlockBytes)/2)))
   (vecmemLdPorts zip vecmemLdWidget).foreach {
     case (v, w) => vectorNode := w.node := v.node
   }
 
   // VecMem store ports
   lazy val vecmemSdPorts = Seq.fill(boomParams.core.numVSdPorts)(LazyModule(new VecMem))
-  val vecmemSdWidget = Seq.fill(boomParams.core.numVSdPorts)(LazyModule(new TLWidthWidget(p(CacheBlockBytes))))
+  val vecmemSdWidget = Seq.fill(boomParams.core.numVSdPorts)(LazyModule(new TLWidthWidget(p(CacheBlockBytes)/2)))
   (vecmemSdPorts zip vecmemSdWidget).foreach {
     case (v, w) => vectorNode := w.node := v.node
   }
