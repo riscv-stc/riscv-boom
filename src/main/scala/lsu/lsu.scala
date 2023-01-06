@@ -864,12 +864,13 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     val e = vstq(i)
     e.valid && e.bits.addr.valid && e.bits.addr_is_virtual && !e.bits.committed
   }))
-  val (vstq_lkup_idx, vstq_lkup_sel) = AgePriorityEncoderN(vstq_state, vstq_head, memWidth)
+  val (vstq_lkup_idx, vstq_lkup_sel) = AgePriorityEncoderN(vstq_state, vstq_head, numVSdPorts)
 
-  val vstq_lkup_e   = widthMap(w => vstq(vstq_lkup_idx(w)))
+  val vstq_lkup_e   = vsdMap(w => vstq(vstq_lkup_idx(w)))
 
-  val can_fire_vstq_lookup   = widthMap(w =>
-                                 ( vstq_lkup_sel(w)                                      &&
+  val can_fire_vstq_lookup   = vsdMap(w =>
+                                 ( (w == 0).B                                   &&
+                                   vstq_lkup_sel(w)                                      &&
                                    vstq_lkup_e(w).valid                                     &&
                                    vstq_lkup_e(w).bits.addr.valid                           &&
                                    vstq_lkup_e(w).bits.addr_is_virtual                      &&
@@ -885,7 +886,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
 
   // can we fire a vstq exception report
-  val can_fire_vstq_exception = widthMap( w =>
+  val can_fire_vstq_exception = vsdMap( w =>
                                   (//(w == 0).B                                   &&
                                   vstq(vstq_head).valid                                 &&
                                    vstq(vstq_head).bits.uop.exception                    &&
@@ -893,24 +894,24 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   // Can we fire a vstq (partial) commit
   val (vsd_mem_ports_sel, vsd_mem_ports_rdy) = AgePriorityEncoderN(vsdMap(i => io.vmem_sd_ports(i).req.ready),
-                                                                                  vsd_mem_port_head, memWidth)
+                                                                                  vsd_mem_port_head, numVSdPorts)
   vsd_mem_port_head := WrapInc(PopCount(vsd_mem_ports_rdy), numVSdPorts)
 
-  val vstq_commit_e_sel = widthMap(w => vstq(WrapAdd(vstq_execute_head, w.U, numVStqEntries)))
-  val vstq_commit_idx_sel = widthMap(w => WrapAdd(vstq_execute_head, w.U, numVStqEntries))
+  val vstq_commit_e_sel = vsdMap(w => vstq(WrapAdd(vstq_execute_head, w.U, numVStqEntries)))
+  val vstq_commit_idx_sel = vsdMap(w => WrapAdd(vstq_execute_head, w.U, numVStqEntries))
 
-  val vstq_commit_e = widthMap(w => vstq(WrapAdd(vstq_execute_head, w.U, numVStqEntries)))
-  val vstq_commit_idx = widthMap(w => WrapAdd(vstq_execute_head, w.U, numVStqEntries))
+  val vstq_commit_e = vsdMap(w => vstq(WrapAdd(vstq_execute_head, w.U, numVStqEntries)))
+  val vstq_commit_idx = vsdMap(w => WrapAdd(vstq_execute_head, w.U, numVStqEntries))
 
   //map ready vstq entry to ready store port
-  for (w <- 0 until memWidth) {
+  for (w <- 0 until numVSdPorts) {
     when(vsd_mem_ports_rdy(w)) {
       vstq_commit_e(vsd_mem_ports_sel(w)) := vstq_commit_e_sel(w)
       vstq_commit_idx(vsd_mem_ports_sel(w)) := vstq_commit_idx_sel(w)
     }
   }
 
-  val can_fire_vstq_commit   = widthMap(w =>
+  val can_fire_vstq_commit   = vsdMap(w =>
                                  (vstq_commit_e(w).valid                                   &&
                                    vstq_commit_e(w).bits.data.valid                         &&
                                   !vstq_commit_e(w).bits.executed                           &&
@@ -972,11 +973,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val (vsxq_lkup_idx, vsxq_lkup_sel) = AgePriorityEncoderN((0 until numVSxqEntries).map(i => {
     val e = vsxq(i)
     e.valid && e.bits.addr.valid && e.bits.addr_is_virtual && !e.bits.committed
-  }), vsxq_head, memWidth)
+  }), vsxq_head, numVSdPorts)
 
-  val vsxq_lkup_e   = widthMap(w => vsxq(vsxq_lkup_idx(w)))
+  val vsxq_lkup_e   = vsdMap(w => vsxq(vsxq_lkup_idx(w)))
 
-  val can_fire_vsxq_lookup   = widthMap(w =>
+  val can_fire_vsxq_lookup   = vsdMap(w =>
                                  ( vsxq_lkup_sel(w)                                          &&
                                    vsxq_lkup_e(w).valid                                      &&
                                    vsxq_lkup_e(w).bits.addr.valid                            &&
@@ -985,7 +986,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                   !vsxq_lkup_e(w).bits.committed))
 
   // can we fire a vsxq exception report
-  val can_fire_vsxq_exception = widthMap(w => 
+  val can_fire_vsxq_exception = vsdMap(w =>
                                   ( (w == 0).B                                   &&
                                    vsxq(vsxq_head).valid                                  &&
                                    vsxq(vsxq_head).bits.uop.exception                     &&
@@ -993,7 +994,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   // Can we fire a vsxq (partial) commit
   val vsxq_commit_e = vsxq(vsxq_execute_head)
-  val can_fire_vsxq_commit   = widthMap(w =>
+  val can_fire_vsxq_commit   = vsdMap(w =>
                                  ( (w == 0).B                                     &&
                                    vsxq_commit_e.valid                                     &&
                                   !vsxq_commit_e.bits.executed                             &&
