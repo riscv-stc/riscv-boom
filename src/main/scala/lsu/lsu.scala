@@ -153,6 +153,10 @@ class BKQUInt(val maskWidth: Int = 0, val dataWidth: Int = 0)(implicit p: Parame
 class LSSplitCnt(implicit p: Parameters) extends BoomBundle()(p)
 {
   val ud_copy = Bool()
+  val ud_idx  = UInt(robAddrSz.W)
+  val ud_cnt  = UInt((vLenSz + 1).W)
+  val ud_fast = Bool()
+  val cnt_upd = Bool()
   val rob_idx = UInt(robAddrSz.W)
   val ls_cnt  = UInt((vLenSz+1).W)
 }
@@ -3155,6 +3159,7 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
     val vbusy_status = if (usingVector) Input(UInt(numVecPhysRegs.W)) else null
   })
 
+  val fastVLSAGU = false
   val clSize = p(freechips.rocketchip.subsystem.CacheBlockBytes)
   val clSizeLog2 = log2Up(clSize)
   val vcRatio    = if(vLenb > clSize) vLenb/clSize      else 1
@@ -3175,14 +3180,18 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
   val emul     = uop.vd_emul
   val op1      = req.rs1_data                          // base address
   val op2      = Mux(uop.is_rvm, req.rs2_data, 0.U)    // row strides in mle and mse
-  val clOffset = if(vLenb > clSize) RegEnable(io.req.bits.rs1_data(clSizeLog2-1, 0), io.req.valid) 
-                 else               op1(clSizeLog2-1, 0)
+  val clOffset = if (vLenb > clSize) RegEnable(io.req.bits.rs1_data(clSizeLog2-1, 0), io.req.valid)
+                 else op1(clSizeLog2-1, 0)
   val usSplitCtr = RegInit(0.U((vcRatioSz+1).W))
   val addrInc    = WireInit(0.U(xLen.W))
   val eidxInc    = WireInit(0.U(vLenSz.W))
   val misaligned = WireInit(false.B)
   val ioAligned  = WireInit(false.B)
   val usSplitLeftCnt = RegInit(0.U(vLenSz.W))      // counted in bytes
+
+  val ud_fast    = WireInit(false.B)
+  val ud_fast_r  = RegInit(false.B)
+  val aligned_r  = RegInit(false.B)
 
   if (vLenb > clSize) {
     addrInc := Mux(usSplitCtr === 0.U, clSize.U - clOffset,
@@ -3206,6 +3215,7 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
   val sliceLeftBytes = sliceBytes - sliceBlockAddr
   val sliceCrossBlk  = RegInit(false.B)
   val sliceCrossByte = RegEnable(rLenb.U - clLeftBytes, io.resp.fire)
+
   if (vLenb > clSize) {
     sliceAddrInc := sliceLeftBytes.min(clLeftBytes)
     sliceLenLast := sliceLeftBytes <= clLeftBytes
@@ -3216,7 +3226,7 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
 
   when (io.req.valid) {
     assert(ioUop.is_vm_ext && (ioUop.uses_ldq || ioUop.uses_stq))
-    assert(state === s_idle)
+    //assert(state === s_idle)
   }
 
   // FIXME: handle segment ls
@@ -3224,16 +3234,19 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
     switch(state) {
       is (s_idle) {
         when (io.req.valid) {
-          ioAligned      := ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> ioUop.vd_eew) << (Mux(ioUop.vd_emul(2), 0.U, ioUop.vd_emul)))
-          emulCtr        := 0.U
-          usSplitCtr     := 0.U
-          sliceCntCtr    := 0.U
-          sliceBaseAddr  := Mux(ioUop.is_rvm, io.req.bits.rs1_data, 0.U)
-          sliceBlockAddr := 0.U
-          splitCnt       := 0.U
+          ioAligned       := ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> ioUop.vd_eew) << (Mux(ioUop.vd_emul(2), 0.U, ioUop.vd_emul)))
+          emulCtr         := 0.U
+          usSplitCtr      := 0.U
+          sliceCntCtr     := 0.U
+          sliceBaseAddr   := Mux(ioUop.is_rvm, io.req.bits.rs1_data, 0.U)
+          sliceBlockAddr  := 0.U
+          splitCnt        := 0.U
+          ud_fast         := !ioUop.is_rvm && ioUop.v_unmasked && (!ioUop.uses_ldq || ioAligned)
+          ud_fast_r       := ud_fast
+          aligned_r       := ioAligned
 
           state := Mux(ioUop.is_rvm,      s_slice,
-                   Mux(!ioUop.v_unmasked, s_vmask, 
+                   Mux(!ioUop.v_unmasked, s_vmask,
                    Mux(ioUop.uses_ldq && (!ioAligned || !ioUop.v_unmasked), s_udcpy, s_split)))
         }
       }
@@ -3267,8 +3280,29 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
           }
 
           when (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl) {
-            emulCtr  := 0.U
-            state    := s_idle
+            emulCtr := 0.U
+            if (fastVLSAGU) {
+              when (io.req.valid) {
+                ioAligned       := ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> ioUop.vd_eew) << (Mux(ioUop.vd_emul(2), 0.U, ioUop.vd_emul)))
+                emulCtr         := 0.U
+                usSplitCtr      := 0.U
+                sliceCntCtr     := 0.U
+                sliceBaseAddr   := Mux(ioUop.is_rvm, io.req.bits.rs1_data, 0.U)
+                sliceBlockAddr  := 0.U
+                splitCnt        := 0.U
+                ud_fast         := !ioUop.is_rvm && ioUop.v_unmasked && (!ioUop.uses_ldq || ioAligned)
+                ud_fast_r       := ud_fast
+                aligned_r       := ioAligned
+
+                state           := Mux(ioUop.is_rvm, s_slice,
+                  Mux(!ioUop.v_unmasked, s_vmask,
+                    Mux(ioUop.uses_ldq && (!ioAligned || !ioUop.v_unmasked), s_udcpy, s_split)))
+              } .otherwise {
+                state           := s_idle
+              }
+            } else {
+              state := s_idle
+            }
           }
         }
       }
@@ -3290,20 +3324,23 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
       }
     }
   } else {
-    switch(state) {
+    switch (state) {
       is (s_idle) {
-        when(io.req.valid) {
-          ioAligned      := ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> ioUop.vd_eew) << (Mux(ioUop.vd_emul(2), 0.U, ioUop.vd_emul)))
-          emulCtr        := 0.U
-          usSplitCtr     := 0.U
-          sliceCntCtr    := 0.U
-          sliceBaseAddr  := Mux(ioUop.is_rvm, io.req.bits.rs1_data, 0.U)
-          sliceBlockAddr := 0.U
-          sliceCrossBlk  := false.B
-          splitCnt       := 0.U
+        when (io.req.valid) {
+          ioAligned       := ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> ioUop.vd_eew) << (Mux(ioUop.vd_emul(2), 0.U, ioUop.vd_emul)))
+          emulCtr         := 0.U
+          usSplitCtr      := 0.U
+          sliceCntCtr     := 0.U
+          sliceBaseAddr   := Mux(ioUop.is_rvm, io.req.bits.rs1_data, 0.U)
+          sliceBlockAddr  := 0.U
+          sliceCrossBlk   := false.B
+          splitCnt        := 0.U
+          ud_fast         := !ioUop.is_rvm && ioUop.v_unmasked && (!ioUop.uses_ldq || ioAligned)
+          ud_fast_r       := ud_fast
+          aligned_r       := ioAligned
 
           state := Mux(ioUop.is_rvm,      s_slice,
-                   Mux(!ioUop.v_unmasked, s_vmask, 
+                   Mux(!ioUop.v_unmasked, s_vmask,
                    Mux(ioUop.uses_ldq && (!ioAligned || !ioUop.v_unmasked), s_udcpy, s_split)))
         }
       }
@@ -3340,11 +3377,33 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
 
           when (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl) {
             emulCtr := 0.U
-            state   := s_idle
+            if (fastVLSAGU) {
+              when (io.req.valid) {
+                ioAligned       := ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> ioUop.vd_eew) << (Mux(ioUop.vd_emul(2), 0.U, ioUop.vd_emul)))
+                emulCtr         := 0.U
+                usSplitCtr      := 0.U
+                sliceCntCtr     := 0.U
+                sliceBaseAddr   := Mux(ioUop.is_rvm, io.req.bits.rs1_data, 0.U)
+                sliceBlockAddr  := 0.U
+                sliceCrossBlk   := false.B
+                splitCnt        := 0.U
+                ud_fast         := !ioUop.is_rvm && ioUop.v_unmasked && (!ioUop.uses_ldq || ioAligned)
+                ud_fast_r       := ud_fast
+                aligned_r       := ioAligned
+
+                state           := Mux(ioUop.is_rvm, s_slice,
+                  Mux(!ioUop.v_unmasked, s_vmask,
+                    Mux(ioUop.uses_ldq && (!ioAligned || !ioUop.v_unmasked), s_udcpy, s_split)))
+              } .otherwise {
+                state           := s_idle
+              }
+            } else {
+              state := s_idle
+            }
           }
         }
       }
-      is(s_slice) {
+      is (s_slice) {
         when (io.resp.fire) {
           sliceBlockAddr   := sliceBlockAddr + sliceAddrInc
           sliceCrossBlk    := clLeftBytes < sliceLeftBytes && clLeftBytes < rLenb.U
@@ -3364,6 +3423,11 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
       }
     }
   }
+
+  val splitFinish = (state === s_split) && io.resp.fire && (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl)
+  val sliceFinish = (state === s_slice) && io.resp.fire && sliceLenLast && (misaligned || sliceCntCtr +& 1.U === uop.m_slice_cnt)
+  val stateReady  = (state === s_idle) || splitFinish
+  val splitNext   = stateReady && io.req.valid
 
   val branchKill = Mux(io.req.fire, IsKilledByBranch(io.brupdate, ioUop), IsKilledByBranch(io.brupdate, uop))
   when (branchKill || io.kill) {
@@ -3391,13 +3455,17 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
 
   // output control
   io.req.ready       := true.B
-  io.busy            := state =/= s_idle
+  if (fastVLSAGU) {
+    io.busy            := !stateReady
+  } else {
+    io.busy            := state =/= s_idle
+  }
   // vrf access
   io.vrf_type        := Mux(state === s_udcpy, 1.U,
                         Mux(state === s_split, 2.U, 0.U))
   io.vrf_vmask       := ~activeByteMask
   io.vrf_raddr.valid := Mux(state === s_udcpy, ~io.vbusy_status(uop.stale_pvd(emulCtr).bits),
-                        Mux(state === s_vmask, ~io.vbusy_status(uop.pvm), 
+                        Mux(state === s_vmask, ~io.vbusy_status(uop.pvm),
                         Mux(state === s_split,  io.resp.fire && uop.uses_stq, false.B)))
   io.vrf_raddr.bits  := Mux(state === s_vmask, uop.pvm,
                         Mux(state === s_udcpy || state === s_split, uop.stale_pvd(emulCtr).bits, 0.U))
@@ -3412,17 +3480,35 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
   io.tile_rreq.bits.vstq_idx := DontCare
 
   // update ls count in rob
-  io.update_ls.valid            := (state === s_idle && io.req.valid && ioUop.uses_ldq && ioUop.is_rvv) || 
-                                   (io.resp.fire && ((state === s_split && (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl)) || 
+  if (!fastVLSAGU) {
+    io.update_ls.valid          := (state === s_idle && io.req.valid && ioUop.uses_ldq && ioUop.is_rvv) ||
+                                   (io.resp.fire && ((state === s_split && (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl)) ||
                                                      (state === s_slice && (misaligned || sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast)))
-  io.update_ls.bits.ud_copy     := (state === s_idle)
-  io.update_ls.bits.rob_idx     := Mux(state === s_idle, ioUop.rob_idx, uop.rob_idx)
-  io.update_ls.bits.ls_cnt      := Mux(state =/= s_idle, splitCnt + 1.U,
+    io.update_ls.bits.ud_copy   := (state === s_idle)
+    io.update_ls.bits.rob_idx   := Mux(state === s_idle, ioUop.rob_idx, uop.rob_idx)
+    io.update_ls.bits.ls_cnt    := Mux(state =/= s_idle, splitCnt + 1.U,
                                    Mux(ioAligned, 0.U, nrVecGroup(ioUop.vd_emul, ioUop.v_seg_nf)))
+    io.update_ls.bits.ud_idx    := io.update_ls.bits.rob_idx
+    io.update_ls.bits.ud_cnt    := io.update_ls.bits.ls_cnt
+    io.update_ls.bits.ud_fast   := false.B
+    io.update_ls.bits.cnt_upd   := (state =/= s_idle)
+  } else {
+    val ud_copy                    = splitNext && !ud_fast
+    val cnt_upd                    = (io.resp.fire && ((state === s_split && (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl)) ||
+      (state === s_slice && (misaligned || sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast)))
+    io.update_ls.valid            := ud_copy || cnt_upd
+    io.update_ls.bits.ud_copy     := ud_copy
+    io.update_ls.bits.ud_idx      := ioUop.rob_idx
+    io.update_ls.bits.ud_cnt      := Mux(ioAligned, 0.U, nrVecGroup(ioUop.vd_emul, ioUop.v_seg_nf))
+    io.update_ls.bits.ud_fast     := ud_fast_r
+    io.update_ls.bits.cnt_upd     := cnt_upd
+    io.update_ls.bits.rob_idx     := uop.rob_idx
+    io.update_ls.bits.ls_cnt      := splitCnt + 1.U
+  }
 
   // generated vls splits
   io.resp.valid                 := !IsKilledByBranch(io.brupdate, uop) &&
-                                   (state === s_slice || 
+                                   (state === s_slice ||
                                     state === s_split && (uop.uses_ldq || ~io.vbusy_status(uop.stale_pvd(emulCtr).bits)))
   io.resp.bits.uop              := UpdateBrMask(io.brupdate, uop)
   io.resp.bits.uop.pdst         := Mux(uop.is_rvv, uop.pvd(emulCtr).bits, uop.pdst)
@@ -3670,6 +3756,10 @@ class VecIndexLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters)
   io.update_ls.bits.rob_idx     := Mux(state === s_idle, ioUop.rob_idx, uop.rob_idx)
   io.update_ls.bits.ls_cnt      := Mux(state =/= s_idle, splitCnt + 1.U,
                                    Mux(ioAligned, 0.U, nrVecGroup(ioUop.vd_emul, ioUop.v_seg_nf)))
+  io.update_ls.bits.ud_idx      := io.update_ls.bits.rob_idx
+  io.update_ls.bits.ud_cnt      := io.update_ls.bits.ls_cnt
+  io.update_ls.bits.ud_fast     := false.B
+  io.update_ls.bits.cnt_upd     := (state =/= s_idle)
 
   io.resp.valid                 := state === s_split && (active || vSplitLast) && !IsKilledByBranch(io.brupdate, uop)
   io.resp.bits.uop              := UpdateBrMask(io.brupdate, uop)
