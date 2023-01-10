@@ -3136,7 +3136,10 @@ class ForwardingAgeLogic(num_entries: Int)(implicit p: Parameters) extends BoomM
 // + matrix mle and mse instructions
 // TODO: unit-stride segment load and stores
 // TODO: optimization for special strided vls (stride = sew; 2*sew; 4*sew;)
-class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) extends BoomModule()(p)
+class VecLSAddrGenUnit(
+  val is_vst: Boolean = false,
+  val fast_gen: Boolean = true
+)(implicit p: Parameters) extends BoomModule()(p)
 {
   val io = IO(new Bundle {
     val req          = Flipped(new DecoupledIO(new FuncUnitReq(xLen)))
@@ -3158,8 +3161,6 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
     val update_ls    = Output(Valid(new LSSplitCnt()))
     val vbusy_status = if (usingVector) Input(UInt(numVecPhysRegs.W)) else null
   })
-
-  val fastVLSAGU = true
 
   val clSize = p(freechips.rocketchip.subsystem.CacheBlockBytes)
   val clSizeLog2 = log2Up(clSize)
@@ -3282,7 +3283,7 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
 
           when (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl) {
             emulCtr := 0.U
-            if (fastVLSAGU) {
+            if (fast_gen) {
               when (io.req.valid) {
                 ioAligned       := ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> ioUop.vd_eew) << (Mux(ioUop.vd_emul(2), 0.U, ioUop.vd_emul)))
                 emulCtr         := 0.U
@@ -3291,6 +3292,8 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
                 sliceBaseAddr   := Mux(ioUop.is_rvm, io.req.bits.rs1_data, 0.U)
                 sliceBlockAddr  := 0.U
                 splitCnt        := 0.U
+                uop.v_eidx      := ioUop.v_eidx
+
                 ud_fast         := !ioUop.is_rvm && ioUop.v_unmasked && (!ioUop.uses_ldq || ioAligned)
                 ud_fast_r       := ud_fast
                 aligned_r       := ioAligned
@@ -3378,7 +3381,7 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
 
           when (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl) {
             emulCtr := 0.U
-            if (fastVLSAGU) {
+            if (fast_gen) {
               when (io.req.valid) {
                 ioAligned       := ioUop.vstart === 0.U && (ioUop.vconfig.vl === (vLenb.U >> ioUop.vd_eew) << (Mux(ioUop.vd_emul(2), 0.U, ioUop.vd_emul)))
                 emulCtr         := 0.U
@@ -3388,6 +3391,8 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
                 sliceBlockAddr  := 0.U
                 sliceCrossBlk   := false.B
                 splitCnt        := 0.U
+                uop.v_eidx      := ioUop.v_eidx
+
                 ud_fast         := !ioUop.is_rvm && ioUop.v_unmasked && (!ioUop.uses_ldq || ioAligned)
                 ud_fast_r       := ud_fast
                 aligned_r       := ioAligned
@@ -3456,7 +3461,7 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
 
   // output control
   io.req.ready       := true.B
-  if (fastVLSAGU) {
+  if (fast_gen) {
     io.busy            := !stateReady
   } else {
     io.busy            := state =/= s_idle
@@ -3481,7 +3486,7 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
   io.tile_rreq.bits.vstq_idx := DontCare
 
   // update ls count in rob
-  if (!fastVLSAGU) {
+  if (!fast_gen) {
     io.update_ls.valid          := (state === s_idle && io.req.valid && ioUop.uses_ldq && ioUop.is_rvv) ||
                                    (io.resp.fire && ((state === s_split && (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl)) ||
                                                      (state === s_slice && (misaligned || sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast)))
