@@ -384,9 +384,9 @@ class Rob(
           }
           when (inc.valid && MatchBank(GetBankIdx(inc.bits.rob_idx))) {
             val cidx = GetRowIdx(inc.bits.rob_idx)
-            when (inc.bits.ud_fast) {
+            /*when (inc.bits.ud_fast) {
               rob_ud_bsy(cidx) := false.B
-            }
+            }*/
             when (inc.bits.cnt_upd) {
               rob_ls_cnt(cidx) := inc.bits.ls_cnt
             }

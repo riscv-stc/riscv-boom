@@ -3159,7 +3159,8 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
     val vbusy_status = if (usingVector) Input(UInt(numVecPhysRegs.W)) else null
   })
 
-  val fastVLSAGU = false
+  val fastVLSAGU = true
+
   val clSize = p(freechips.rocketchip.subsystem.CacheBlockBytes)
   val clSizeLog2 = log2Up(clSize)
   val vcRatio    = if(vLenb > clSize) vLenb/clSize      else 1
@@ -3493,9 +3494,10 @@ class VecLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters) exte
     io.update_ls.bits.ud_fast   := false.B
     io.update_ls.bits.cnt_upd   := (state =/= s_idle)
   } else {
-    val ud_copy                    = splitNext && !ud_fast
+    //val ud_copy                    = splitNext && !ud_fast
+    val ud_copy                    = splitNext
     val cnt_upd                    = (io.resp.fire && ((state === s_split && (misaligned || uop.v_eidx +& eidxInc >= uop.vconfig.vl)) ||
-      (state === s_slice && (misaligned || sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast)))
+                                                       (state === s_slice && (misaligned || sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast)))
     io.update_ls.valid            := ud_copy || cnt_upd
     io.update_ls.bits.ud_copy     := ud_copy
     io.update_ls.bits.ud_idx      := ioUop.rob_idx
