@@ -367,15 +367,6 @@ class Rob(
     if (usingVector) {
       for(up <- io.lsu_update_ls) {
         for (inc <- up) {
-          /*when(inc.valid && MatchBank(GetBankIdx(inc.bits.rob_idx))) {
-            val cidx = GetRowIdx(inc.bits.rob_idx)
-            when(inc.bits.ud_copy) {
-              rob_ud_bsy(cidx) := inc.bits.ls_cnt > 0.U
-            }.otherwise {
-              rob_ls_cnt(cidx) := inc.bits.ls_cnt
-            }
-          }*/
-
           when (inc.valid && MatchBank(GetBankIdx(inc.bits.ud_idx))) {
             val uidx = GetRowIdx(inc.bits.ud_idx)
             when (inc.bits.ud_copy) {
@@ -384,9 +375,6 @@ class Rob(
           }
           when (inc.valid && MatchBank(GetBankIdx(inc.bits.rob_idx))) {
             val cidx = GetRowIdx(inc.bits.rob_idx)
-            /*when (inc.bits.ud_fast) {
-              rob_ud_bsy(cidx) := false.B
-            }*/
             when (inc.bits.cnt_upd) {
               rob_ls_cnt(cidx) := inc.bits.ls_cnt
             }
