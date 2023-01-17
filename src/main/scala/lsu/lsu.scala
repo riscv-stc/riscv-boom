@@ -890,7 +890,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   // can we fire a vstq exception report
   val can_fire_vstq_exception = vsdMap( w =>
-                                  (//(w == 0).B                                   &&
+                                  ((w == 0).B                                   &&
                                   vstq(vstq_head).valid                                 &&
                                    vstq(vstq_head).bits.uop.exception                    &&
                                   !vstq(vstq_head).bits.succeeded ))
@@ -900,11 +900,11 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                                                                   vsd_mem_port_head, numVSdPorts)
   vsd_mem_port_head := WrapInc(PopCount(vsd_mem_ports_rdy), numVSdPorts)
 
-  val vstq_commit_e_sel = vsdMap(w => vstq(WrapAdd(vstq_execute_head, w.U, numVStqEntries)))
-  val vstq_commit_idx_sel = vsdMap(w => WrapAdd(vstq_execute_head, w.U, numVStqEntries))
+  val vstq_commit_e_sel = vsdMap(w => vstq(WrapAdd(vstq_execute_head, 0.U, numVStqEntries)))
+  val vstq_commit_idx_sel = vsdMap(w => WrapAdd(vstq_execute_head, 0.U, numVStqEntries))
 
-  val vstq_commit_e = vsdMap(w => vstq(WrapAdd(vstq_execute_head, w.U, numVStqEntries)))
-  val vstq_commit_idx = vsdMap(w => WrapAdd(vstq_execute_head, w.U, numVStqEntries))
+  val vstq_commit_e = vsdMap(w => vstq(WrapAdd(vstq_execute_head, 0.U, numVStqEntries)))
+  val vstq_commit_idx = vsdMap(w => WrapAdd(vstq_execute_head, 0.U, numVStqEntries))
 
   //map ready vstq entry to ready store port
   for (w <- 0 until numVSdPorts) {
@@ -915,7 +915,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   }
 
   val can_fire_vstq_commit   = vsdMap(w =>
-                                 (vstq_commit_e(w).valid                                   &&
+                                 ( (w == 0).B &&
+                                   vstq_commit_e(w).valid                                   &&
                                    vstq_commit_e(w).bits.data.valid                         &&
                                   !vstq_commit_e(w).bits.executed                           &&
                                   !mem_xcpt_valid                                           &&
@@ -928,6 +929,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                     vstq_commit_e(w).bits.uop.rob_idx === io.core.rob_head_idx))
                                  ))
 
+  dontTouch(can_fire_vstq_commit)
   dontTouch(vstq_execute_head)
   dontTouch(vstq_commit_e_sel)
   dontTouch(vstq_execute_head)
@@ -981,7 +983,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val vsxq_lkup_e   = vsdMap(w => vsxq(vsxq_lkup_idx(w)))
 
   val can_fire_vsxq_lookup   = vsdMap(w =>
-                                 ( vsxq_lkup_sel(w)                                          &&
+                                 ( (w == 0).B &&
+                                   vsxq_lkup_sel(w)                                          &&
                                    vsxq_lkup_e(w).valid                                      &&
                                    vsxq_lkup_e(w).bits.addr.valid                            &&
                                    vsxq_lkup_e(w).bits.addr_is_virtual                       &&
@@ -1635,6 +1638,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       vmem_sd_req(w).vstq_idx := 0.U
     }
 
+  dontTouch(will_fire_vstq_commit)
   var vstq_exe_idx = vstq_execute_head
   for (w <- 0 until memWidth) {
     when(will_fire_vstq_commit(w) && !pf_st(w) && !ae_st(w)) {
