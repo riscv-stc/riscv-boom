@@ -3290,6 +3290,7 @@ class VecLSAddrGenUnit(
                 sliceBlockAddr  := 0.U
                 splitCnt        := 0.U
                 uop.v_eidx      := ioUop.v_eidx
+                op1             := io.req.bits.rs1_data
 
                 state           := Mux(ioUop.is_rvm, s_slice,
                                    Mux(!ioUop.v_unmasked, s_vmask,
@@ -3399,6 +3400,7 @@ class VecLSAddrGenUnit(
                 sliceCrossBlk   := false.B
                 splitCnt        := 0.U
                 uop.v_eidx      := ioUop.v_eidx
+                op1             := io.req.bits.rs1_data
 
                 state           := Mux(ioUop.is_rvm, s_slice,
                                    Mux(!ioUop.v_unmasked, s_vmask,
