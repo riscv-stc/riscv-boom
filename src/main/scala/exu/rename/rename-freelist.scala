@@ -125,6 +125,9 @@ class VecRenameFreeList(
     // Mispredict info for recovering speculatively allocated registers.
     val brupdate      = Input(new BrUpdateInfo)
 
+    //  Get stall information
+    val stall = Input(Vec(plWidth, Bool()))
+
     val debug = new Bundle {
       val pipeline_empty = Input(Bool())
       val freelist = Output(Bits(numPregs.W))
@@ -133,6 +136,12 @@ class VecRenameFreeList(
   })
   val ioreq_grp = io.reqs.map(req => lvdGroup(req))
 
+  val alloc_pregs_valid = Wire(Vec(plWidth,Vec(8,Bool())))
+
+  val position  = alloc_pregs_valid.map(i => PriorityEncoder(i.map(j=>j)))
+  val is_stall = io.stall.fold(false.B)(_||_)
+  val stall_count = PopCount(io.stall)
+
   // The free list register array and its branch allocation lists.
   val free_list = RegInit(UInt(numPregs.W), ~(1.U(numPregs.W)))
   val br_alloc_lists = Reg(Vec(maxBrCount, UInt(numPregs.W)))
@@ -140,6 +149,25 @@ class VecRenameFreeList(
   // Select pregs from the free list.
   val vec_sels = Wire(Vec(plWidth, Vec(8, UInt(numPregs.W))))
   val flat_sels = SelectFirstN(free_list, plWidth*8)
+  val active_preg = Wire(Vec(plWidth,Vec(8,Bool())))
+
+  for (i <- 0 until plWidth) {
+    for (j <- 0 until 8) {
+      alloc_pregs_valid(i)(j) := ~io.alloc_pregs(i)(j).valid
+    }
+  }
+
+  for (w <- 0 until plWidth) {
+    for (i <- 0 until 8) {
+      active_preg(w)(i) := position(w) > i.U
+      when(is_stall) {
+        vec_sels(w)(i) := Mux(active_preg(w)(i), 0.U, Mux(io.stall(w),flat_sels(stall_count*(i.U - position(w)) +& w.U) ,0.U))
+      }.otherwise{
+        vec_sels(w)(i) := flat_sels(plWidth*i + w)
+      }
+    }
+  }
+
   for (w <- 0 until plWidth) {
     for (i <- 0 until 8) {
       vec_sels(w)(i) := flat_sels(2*i+w)

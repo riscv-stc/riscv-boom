@@ -729,6 +729,7 @@ extends AbstractRenameStage(
   for (w <- 0 until plWidth) {
     freelist.io.reqs(w).valid := ren2_alloc_reqs(w)
     freelist.io.reqs(w).bits  := ren2_uops(w)
+    freelist.io.stall(w) := (ren2_uops(w).rt(RD, rtype)) && !freelist.io.can_allocate(w)
   }
   (freelist.io.dealloc_pregs zip io.com_uops zip com_valids zip rbk_valids zip io.vl_xcpt).map { case((((da, uop), c), r), x) => {
     da.zipWithIndex.map { case (d, i) => {

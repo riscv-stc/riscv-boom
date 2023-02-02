@@ -314,7 +314,8 @@ class VecFDivSqrtUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeF
   val uop = io.req.bits.uop
   val rs1_data = io.req.bits.rs1_data
   val rs2_data = io.req.bits.rs2_data
-  val rs3_data = io.req.bits.rs3_data
+  val rs3_data = WireDefault(io.req.bits.rs3_data)
+  val old_data = WireDefault(io.req.bits.rs3_data)
   val rvm_data = io.req.bits.rvm_data
   val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
   val vl = uop.vconfig.vl
@@ -323,7 +324,23 @@ class VecFDivSqrtUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeF
   mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)), Cat((0 until vLen/16).map(b => rvm_data(b)).reverse))
   tail     := Cat((0 until vLen/16).map(b => uop.v_eidx + b.U >= vl).reverse)
   inactive := prestart | body & ~mask | tail
-  
+  val unmask = body & ~mask
+  val tail_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, tail),
+                               FillInterleaved(16, tail(vLenb/2-1, 0)),
+                               FillInterleaved(32, tail(vLenb/4-1, 0)),
+                               FillInterleaved(64, tail(vLenb/8-1, 0))))
+  val unmask_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, unmask),
+                               FillInterleaved(16, unmask(vLenb/2-1, 0)),
+                               FillInterleaved(32, unmask(vLenb/4-1, 0)),
+                               FillInterleaved(64, unmask(vLenb/8-1, 0))))
+  rs3_data := Mux1H(UIntToOH(Cat(uop.vconfig.vtype.vta,uop.vconfig.vtype.vma)),
+              Seq(old_data,
+                  old_data | unmask_bitInactive,
+                  old_data | tail_bitInactive,
+                  old_data | tail_bitInactive | unmask_bitInactive))
+
   val fdivValid  = Wire(Vec(vLen/16, Bool()))
   val e64DataOut = Wire(Vec(numELENinVLEN,   UInt(64.W)))
   val e32DataOut = Wire(Vec(numELENinVLEN*2, UInt(32.W)))

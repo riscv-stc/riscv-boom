@@ -66,8 +66,8 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
 
   val vconfig_mask          = UInt(maxVconfigCount.W)  // which vconfig are we being speculated under?
   val vconfig_tag           = UInt(vconfigTagSz.W)
-  val vcq_idx               = UInt(vcqSz.W)
-
+  val vcq_vl_idx            = UInt(vcqSz.W)
+  val vcq_vtype_idx         = UInt(vcqSz.W)
   val mconfig_mask          = UInt(maxVconfigCount.W)  // which vconfig are we being speculated under?
   val mconfig_tag           = UInt(vconfigTagSz.W)
   val mcq_idx               = UInt(vcqSz.W)

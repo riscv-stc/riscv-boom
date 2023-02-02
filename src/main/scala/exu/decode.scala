@@ -309,10 +309,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   uop.is_fence   := cs.is_fence
   uop.is_fencei  := cs.is_fencei
   uop.is_sys_pc2epc   := cs.is_sys_pc2epc
-  uop.is_unique  := cs.inst_unique || (cs.uopc === uopVSETVLI) && inst(19,15) === 0.U && inst(11,7)  === 0.U
+  //uop.is_unique  := cs.inst_unique || (cs.uopc === uopVSETVLI) && inst(19,15) === 0.U && inst(11,7)  === 0.U
   //uop.is_unique :=  cs.inst_unique ||  vsetvl
-  uop.flush_on_commit := cs.flush_on_commit || (csr_en && !csr_ren && io.csr_decode.write_flush) || (cs.uopc === uopVSETVLI) && inst(19,15) === 0.U && inst(11,7)  === 0.U
-  //uop.flush_on_commit := cs.flush_on_commit ||  vsetvl
+  uop.is_unique :=  cs.inst_unique
+  //uop.flush_on_commit := cs.flush_on_commit || (csr_en && !csr_ren && io.csr_decode.write_flush) || (cs.uopc === uopVSETVLI) && inst(19,15) === 0.U && inst(11,7)  === 0.U
+  uop.flush_on_commit := cs.flush_on_commit || (csr_en && !csr_ren && io.csr_decode.write_flush) 
   uop.is_vsetivli := (cs.uopc === uopVSETIVLI)
   uop.is_vsetvli := (cs.uopc === uopVSETVLI)
   uop.vl_ready   := Mux(cs.not_use_vtype, true.B, io.enq.uop.vl_ready)
@@ -843,7 +844,7 @@ class BranchMaskGenerationLogic(val pl_width: Int)(implicit p: Parameters) exten
 
 class VlWakeupResp(implicit p: Parameters) extends BoomBundle
 {
-  val vcq_idx = UInt(vcqSz.W)
+  val vcq_vl_idx = UInt(vcqSz.W)
   val vl = UInt((maxVLMax.log2 + 1).W)
   val vconfig_tag = UInt(vconfigTagSz.W)
   val vconfig_mask = UInt(maxVconfigCount.W)
@@ -1010,7 +1011,7 @@ class MconfigMaskGenerationLogic(val pl_width: Int) (implicit p: Parameters) ext
   io.debug_vconfig_mask := mconfig_mask
 }
 case class VcqParameters(
-                          nEntries: Int = 4
+                          nEntries: Int = 8
                         )
 
 /**
@@ -1018,6 +1019,13 @@ case class VcqParameters(
  *
  * @param num_entries # of entries in the VCQ
  */
+class LocalVconfigDecodeSignals(implicit p: Parameters) extends BoomBundle
+{
+  val config_br_tag = (UInt(brTagSz.W))
+  val config    = (new VconfigDecodeSignals)
+  val old_ptr   = (UInt(vcqSz.W))
+}
+
 class VconfigQueue(implicit p: Parameters) extends BoomModule
   with HasBoomCoreParameters {
   val num_entries = vcqSz
@@ -1026,20 +1034,21 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
   val io = IO(new BoomBundle {
     //Enqueue one entry when decode a vconfig instruction.
     val enq = Flipped(Decoupled(new VconfigDecodeSignals()))
+    val enq_br_tag = Input((UInt(brTagSz.W)))
     val enq_idx = Output(UInt(num_entries.W))
     val deq   = Input(Bool())
     val flush = Input(Bool())
-
+    val redirect         = Input(new BrUpdateInfo())
     val get_vconfig = Output(new VconfigDecodeSignals())
     val empty = Output(Bool())
-
+    val full  = Output(Bool())
     val update_vl_idx = Input(UInt(num_entries.W))
     val update_vl = Flipped(Decoupled(new VconfigDecodeSignals()))
 
     val vcq_Wcsr = Output(new VconfigDecodeSignals())
   })
 
-  val ram = Reg(Vec(num_entries, new VconfigDecodeSignals()))
+  val ram = Reg(Vec(num_entries, new LocalVconfigDecodeSignals()))
   ram.suggestName("vconfig_table")
 
   val enq_ptr = RegInit(0.U(num_entries.W))
@@ -1052,6 +1061,13 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
   val do_enq = WireDefault(io.enq.fire())
   val do_deq = WireDefault(io.deq)
 
+  val is_sel = Wire(Vec(num_entries , Bool()))
+  val is_order = WireDefault(enq_ptr > deq_ptr)
+  val in_rang = Wire(Vec(num_entries , Bool()))
+  val findVal = Wire(Vec(num_entries , Bool()))
+  val sel_val = Wire(Vec(num_entries , UInt((num_entries.W))))
+  val mispredict_state = io.redirect.b2.mispredict && !empty
+
  /* def inc(ptr: UInt) = {
     val n = ptr.getWidth
     Cat(ptr(n-2,0), ptr(n-1))
@@ -1062,23 +1078,49 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
   }
 */
   when(do_enq) {
-    ram(enq_ptr) := io.enq.bits
+    ram(enq_ptr).config := io.enq.bits
+    ram(enq_ptr).config_br_tag := io.enq_br_tag
+    ram(enq_ptr).old_ptr := enq_ptr
     enq_ptr := WrapInc(enq_ptr, num_entries)
   }
   io.enq_idx := enq_ptr
 
   when(do_deq && !empty) {
     deq_ptr := WrapInc(deq_ptr, num_entries)
-    io.vcq_Wcsr := ram(deq_ptr)
+    io.vcq_Wcsr := ram(deq_ptr).config
   }
+
   when(io.update_vl.valid) {
-    ram(io.update_vl_idx).vconfig.vl := io.update_vl.bits.vconfig.vl
-    ram(io.update_vl_idx).vl_ready := io.update_vl.bits.vl_ready
+    ram(io.update_vl_idx).config.vconfig.vl := io.update_vl.bits.vconfig.vl
+    ram(io.update_vl_idx).config.vl_ready := io.update_vl.bits.vl_ready
   }
+
   when(do_enq =/= do_deq) {
     maybe_full := do_enq
   }
-  when(io.flush) {
+
+  for (r <- 0 until num_entries) {
+    in_rang(r) := false.B
+    is_sel(r) := false.B
+    findVal(r) := false.B
+    sel_val(r) := 0.U
+  }
+
+  when(mispredict_state) {
+    for (i <- 0 until num_entries){
+      sel_val(i) := enq_ptr + i.U + 1.U
+      is_sel(i) := ram(Mux(is_order, i.U, enq_ptr + i.U + 1.U)).config_br_tag === io.redirect.b2.uop.br_tag
+      in_rang(i) := Mux(is_order, (i.U >= deq_ptr) && (i.U < enq_ptr),
+      (sel_val(i) >= deq_ptr) && (sel_val(i) < (enq_ptr + num_entries.U)))
+      when(is_sel(i) && in_rang(i)) {
+        enq_ptr := WrapInc(ram(Mux(is_order, i.U, enq_ptr + i.U + 1.U)).old_ptr, num_entries)
+        maybe_full := false.B
+        findVal(i) := true.B
+      }
+    }
+  }
+
+  when(io.flush || (!findVal.reduce(_||_) && mispredict_state)) {
     enq_ptr := 0.U
     deq_ptr := 0.U
     maybe_full := false.B
@@ -1086,7 +1128,8 @@ class VconfigQueue(implicit p: Parameters) extends BoomModule
 
   io.enq_idx := enq_ptr
   io.enq.ready := !full
-  io.get_vconfig := ram(WrapDec(enq_ptr, num_entries))
+  io.full := full
+  io.get_vconfig := ram(WrapDec(enq_ptr, num_entries)).config
   io.empty := empty
 }
 
@@ -1154,15 +1197,6 @@ class MconfigQueue(implicit p: Parameters) extends BoomModule
   val do_enq = WireDefault(io.enq.fire())
   val do_deq = WireDefault(io.deq)
 
- /* def inc(ptr: UInt) = {
-    val n = ptr.getWidth
-    Cat(ptr(n-2,0), ptr(n-1))
-  }
-  def dec(ptr: UInt) = {
-    val n = ptr.getWidth
-    Cat(ptr(0), ptr(n-1,1))
-  }
-*/
   when(do_enq) {
     ram(enq_ptr) := io.enq.bits
     enq_ptr := WrapInc(enq_ptr, num_entries)

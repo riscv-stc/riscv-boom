@@ -447,7 +447,7 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
 
   // all FP units are padded out to the same latency for easy scheduling of the write port
   val fpu_latency = dfmaLatency
-  val io_req = io.req.bits
+  val io_req = WireInit(io.req.bits)
 
   val fp_decoder = Module(new UOPCodeFPUDecoder(vector = true))
   fp_decoder.io.uopc := io_req.uop.uopc
@@ -456,6 +456,8 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
   val rs1_data = WireInit(io_req.rs1_data)
   val rs2_data = WireInit(io_req.rs2_data)
   val rs3_data = WireInit(io_req.rs3_data)
+  val old_data = WireInit(io_req.rs3_data)
+  val rvm_data = io.req.bits.rvm_data
   val vd_widen = io_req.uop.rt(RD , isWidenV)
   val vs1_widen= io_req.uop.rt(RS1, isWidenV)
   val vs2_widen= io_req.uop.rt(RS2, isWidenV)
@@ -473,6 +475,31 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
     fp_ctrl.typeTagIn := Mux(fp_ctrl.swap12 || vs1_widen && !vs2_widen, vs2_fmt, vs1_fmt)
     fp_ctrl.typeTagOut:= vd_fmt
   }
+
+  val uop = io_req.uop
+  val body, tail, mask = Wire(UInt(vLenb.W))
+  body     := Cat((0 until vLenb).map(b => uop.v_eidx + b.U >= uop.vstart && uop.v_eidx + b.U < uop.vconfig.vl).reverse)
+  mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)), Cat((0 until vLen/16).map(b => rvm_data(b)).reverse))
+  tail     := Cat((0 until vLenb).map(b => uop.v_eidx + b.U >= uop.vconfig.vl).reverse)
+  val unmask = body & ~mask
+  val tail_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, tail),
+                               FillInterleaved(16, tail(vLenb/2-1, 0)),
+                               FillInterleaved(32, tail(vLenb/4-1, 0)),
+                               FillInterleaved(64, tail(vLenb/8-1, 0))))
+  val unmask_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, unmask),
+                               FillInterleaved(16, unmask(vLenb/2-1, 0)),
+                               FillInterleaved(32, unmask(vLenb/4-1, 0)),
+                               FillInterleaved(64, unmask(vLenb/8-1, 0))))
+  old_data := Mux1H(UIntToOH(Cat(uop.vconfig.vtype.vta,uop.vconfig.vtype.vma)),
+              Seq(io.req.bits.rs3_data,
+                  io.req.bits.rs3_data | unmask_bitInactive,
+                  io.req.bits.rs3_data | tail_bitInactive,
+                  io.req.bits.rs3_data | tail_bitInactive | unmask_bitInactive)
+  )
+
+
 
   // FIXME: H->S widening operation must be fixed
   def fuInput(minT: Option[tile.FType], esel: Int): tile.FPInput = {
@@ -575,6 +602,7 @@ class VecFPU()(implicit p: Parameters) extends BoomModule with tile.HasFPUParame
   reqfue.fpiu_out := (fp_ctrl.toint || (!fp_ctrl.fastpipe && fp_ctrl.wflags))
   reqfue.fpiu_vmf  :=  fp_ctrl.toint && !fp_ctrl.fastpipe && fp_ctrl.wflags && fp_ctrl.ren2
   reqfue.fpmu := fp_ctrl.fastpipe
+  io_req.rs3_data := old_data
   val reqpipe = Pipe(io.req.valid, io_req, fpu_latency)
   val fuepipe = Pipe(io.req.valid, reqfue, fpu_latency).bits
 

@@ -234,7 +234,7 @@ class IssueSlot(
           val v_eidx    = Mux(uop.rt(RS1, isMaskVD), 0.U, uop.v_eidx)
           val rsel      = VRegSel(v_eidx, uop.vd_eew, eLenSelSz)
           val stale_pvd = uop.stale_pvd(rsel).bits
-          ret          := !uop.rt(RD, isVector) || !io.vbusy_status(stale_pvd)
+          ret          := Mux(uop.vconfig.vtype.vma && uop.vconfig.vtype.vta, true.B,!uop.rt(RD, isVector) || !io.vbusy_status(stale_pvd))
       }
     } else if(matrix) {
       ret := Mux(!uop.rt(RD, isAccTile), true.B,

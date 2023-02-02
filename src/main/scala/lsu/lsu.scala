@@ -147,6 +147,7 @@ class BKQUInt(val maskWidth: Int = 0, val dataWidth: Int = 0)(implicit p: Parame
   with HasBoomUOP
 {
   val mask = UInt(maskWidth.W)
+  val agnostic_mask = UInt(maskWidth.W)
   val data = UInt(dataWidth.W)
 }
 
@@ -772,6 +773,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   dontTouch(ldq_vag_e)
   dontTouch(ldq_vag_uop)
 
+  val ldq_is_agnostic = widthMap(w => ldq_vag_uop(w).vconfig.vtype.vta && ldq_vag_uop(w).vconfig.vtype.vma)
   val can_fire_vload_addrgen = widthMap(w =>
                                  ( ldq_vag_sel(w)                                                                &&
                                    ldq_vag_e(w).valid                                                           &&
@@ -782,7 +784,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                    (ldq_vag_uop(w).v_index_ls || ldq_vag_uop(w).v_stride_ls) && !vlxagu(w).io.busy)   &&
                                   ((ldq_vag_e(w).bits.uop.is_rvm)                                             ||
                                    (ldq_vag_e(w).bits.uop.is_rvv                                           &&
-                                   ~io.core.vbusy_status(ldq_vag_uop(w).stale_pvd(0).bits)                 &&
+                                   (~io.core.vbusy_status(ldq_vag_uop(w).stale_pvd(0).bits) || ldq_is_agnostic(w))                 &&
                                     (ldq_vag_uop(w).v_unmasked  || ~io.core.vbusy_status(ldq_vag_uop(w).pvm)) &&
                                     (~ldq_vag_uop(w).v_index_ls || ~io.core.vbusy_status(ldq_vag_uop(w).pvs2(0).bits))))))
 
@@ -804,7 +806,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
                                  ((stq_vag_uop.rt(RD, isTrTile)  && ~io.core.tr_busy_status(stq_vag_uop.stale_pdst)) || 
                                   (stq_vag_uop.rt(RD, isAccTile) && ~io.core.acc_busy_status(stq_vag_uop.stale_pdst))||
                                   (stq_vag_e.bits.uop.is_rvv                                            &&
-                                  ~io.core.vbusy_status(stq_vag_uop.stale_pvd(0).bits)                  &&
+                                  (~io.core.vbusy_status(stq_vag_uop.stale_pvd(0).bits))                 &&
                                   (stq_vag_uop.v_unmasked   || ~io.core.vbusy_status(stq_vag_uop.pvm))  &&
                                   (~stq_vag_uop.v_index_ls  || ~io.core.vbusy_status(stq_vag_uop.pvs2(0).bits))))))
 
@@ -2048,6 +2050,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vlud_vrf_q(w).io.enq.bits.uop.pdst := Mux(vlxagu(w).io.vrf_raddr.fire, vlxagu(w).io.resp.bits.uop.pvd(vlxagu(w).io.vrf_emul).bits,
       vlagu(w).io.resp.bits.uop.pvd(vlagu(w).io.vrf_emul).bits)
     vlud_vrf_q(w).io.enq.bits.mask := Mux(vlxagu(w).io.vrf_raddr.fire, vlxagu(w).io.vrf_vmask, vlagu(w).io.vrf_vmask)
+    vlud_vrf_q(w).io.enq.bits.agnostic_mask := Mux(vlxagu(w).io.vrf_raddr.fire, vlxagu(w).io.vrf_agnostic_vmask, vlagu(w).io.vrf_agnostic_vmask)
     vlud_vrf_q(w).io.enq.bits.data := 0.U
     vlud_vrf_q(w).io.deq.ready := vlud_dat_q(w).io.enq.ready
 
@@ -2056,7 +2059,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     vlud_dat_q(w).io.enq.valid := vlud_vrf_q(w).io.deq.valid
     vlud_dat_q(w).io.enq.bits.uop := vlud_vrf_q(w).io.deq.bits.uop
     vlud_dat_q(w).io.enq.bits.mask := vlud_vrf_q(w).io.deq.bits.mask
-    vlud_dat_q(w).io.enq.bits.data := io.core.vrf_rport(w).data
+    vlud_dat_q(w).io.enq.bits.agnostic_mask := 0.U
+    vlud_dat_q(w).io.enq.bits.data     := io.core.vrf_rport(w).data | (Fill(vLen,1.U) & vlud_vrf_q(w).io.deq.bits.agnostic_mask)
     vlud_dat_q(w).io.deq.ready := !vload_resp_valid(w)
   }
   // VRF write back
@@ -3157,6 +3161,7 @@ class VecLSAddrGenUnit(
     val busy         = Output(Bool())
     val vrf_type     = Output(UInt(2.W)) // 1, ud_copy; 2: get src data; 0: others, get mask
     val vrf_vmask    = Output(UInt(vLenb.W))
+    val vrf_agnostic_vmask    = Output(UInt(vLenb.W))
     val vrf_raddr    = new DecoupledIO(UInt(vpregSz.W))
     val vrf_rdata    = Input(UInt(vLen.W))
     val vrf_emul     = Output(UInt(3.W))
@@ -3193,6 +3198,7 @@ class VecLSAddrGenUnit(
   val misaligned = WireInit(false.B)
   val ioAligned  = WireInit(false.B)
   val usSplitLeftCnt = RegInit(0.U(vLenSz.W))      // counted in bytes
+  val is_agnostic = uop.vconfig.vtype.vta && uop.vconfig.vtype.vma && uop.uses_ldq
 
   if (vLenb > clSize) {
     addrInc := Mux(usSplitCtr === 0.U, clSize.U - clOffset,
@@ -3256,7 +3262,7 @@ class VecLSAddrGenUnit(
         }
       }
       is (s_udcpy) {
-        when (io.vrf_raddr.fire) {
+        when (io.vrf_raddr.fire||is_agnostic) {
           emulCtr    := emulCtr + 1.U
           uop.v_eidx := uop.v_eidx + vLenECnt
 
@@ -3363,7 +3369,7 @@ class VecLSAddrGenUnit(
         }
       }
       is (s_udcpy) {
-        when (io.vrf_raddr.fire) {
+        when (io.vrf_raddr.fire || is_agnostic) {
           emulCtr    := emulCtr + 1.U
           uop.v_eidx := uop.v_eidx + vLenECnt
 
@@ -3474,13 +3480,27 @@ class VecLSAddrGenUnit(
                                FillInterleaved(4, vmaskSel(vLenb/4-1, 0)),
                                FillInterleaved(8, vmaskSel(vLenb/8-1, 0))))
   val bodyMask     = Cat((0 until vLenb).map(i => uopVeidx +& i.U >= uop.vstart && uopVeidx +& i.U < uop.vconfig.vl).reverse)
+  val tailmask     = Cat((0 until vLenb).map(i =>  uopVeidx +& i.U > uop.vconfig.vl).reverse)
   val bodyByteMask = Mux1H(UIntToOH(uop.vd_eew),
                            Seq(bodyMask,
                                FillInterleaved(2, bodyMask(vLenb/2-1, 0)),
                                FillInterleaved(4, bodyMask(vLenb/4-1, 0)),
                                FillInterleaved(8, bodyMask(vLenb/8-1, 0))))
+  val tailByteMask = Mux1H(UIntToOH(uop.vd_eew),
+                           Seq(tailmask,
+                               FillInterleaved(2, tailmask(vLenb/2-1, 0)),
+                               FillInterleaved(4, tailmask(vLenb/4-1, 0)),
+                               FillInterleaved(8, tailmask(vLenb/8-1, 0))))
   val activeByteMask = Mux(uop.v_unmasked, Fill(vLenb, 1.U(1.W)), vmByteMask) & bodyByteMask
 
+  val body_unactiveByteMask = Mux(uop.v_unmasked, ~Fill(vLenb, 1.U(1.W)), ~vmByteMask) & bodyByteMask
+  val tail_unactiveByteMask = tailByteMask
+  val agnostic_mask = Mux1H(UIntToOH(Cat(uop.vconfig.vtype.vta,uop.vconfig.vtype.vma)),
+              Seq(0.U,
+                  body_unactiveByteMask,
+                  tail_unactiveByteMask,
+                  body_unactiveByteMask | tail_unactiveByteMask)
+  )
   // output control
   io.req.ready       := true.B
   if (fast_gen) {
@@ -3492,7 +3512,7 @@ class VecLSAddrGenUnit(
   io.vrf_type        := Mux(state === s_udcpy, 1.U,
                         Mux(state === s_split, 2.U, 0.U))
   io.vrf_vmask       := ~activeByteMask
-  io.vrf_raddr.valid := Mux(state === s_udcpy, ~io.vbusy_status(uop.stale_pvd(emulCtr).bits),
+  io.vrf_raddr.valid := Mux(state === s_udcpy, ~io.vbusy_status(uop.stale_pvd(emulCtr).bits) || is_agnostic,
                         Mux(state === s_vmask, ~io.vbusy_status(uop.pvm),
                         Mux(state === s_split,  io.resp.fire && uop.uses_stq, false.B)))
   io.vrf_raddr.bits  := Mux(state === s_vmask, uop.pvm,
@@ -3535,7 +3555,7 @@ class VecLSAddrGenUnit(
   // generated vls splits
   io.resp.valid                 := !IsKilledByBranch(io.brupdate, uop) &&
                                    (state === s_slice ||
-                                    state === s_split && (uop.uses_ldq || ~io.vbusy_status(uop.stale_pvd(emulCtr).bits)))
+                                    state === s_split && (uop.uses_ldq || (~io.vbusy_status(uop.stale_pvd(emulCtr).bits)|| is_agnostic)))
   io.resp.bits.uop              := UpdateBrMask(io.brupdate, uop)
   io.resp.bits.uop.pdst         := Mux(uop.is_rvv, uop.pvd(emulCtr).bits, uop.pdst)
   io.resp.bits.uop.stale_pdst   := Mux(uop.is_rvv, uop.stale_pvd(emulCtr).bits, uop.stale_pdst)
@@ -3594,6 +3614,7 @@ class VecIndexLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters)
     val busy      = Output(Bool())
     val vrf_type  = Output(UInt(2.W)) // 1: ud, 0, others
     val vrf_vmask = Output(UInt(vLenb.W))
+    val vrf_agnostic_vmask = Output(UInt(vLenb.W))
     val vrf_raddr = new DecoupledIO(UInt(vpregSz.W))
     val vrf_rdata = Input(UInt(vLen.W))
     val vrf_emul  = Output(UInt(3.W))
@@ -3628,6 +3649,7 @@ class VecIndexLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters)
   val misaligned = WireInit(false.B)
   val ioAligned  = WireInit(false.B)
   val vSplitLast = uop.v_eidx +& 1.U >= uop.vconfig.vl  // last split 
+  val is_agnostic = uop.vconfig.vtype.vta && uop.vconfig.vtype.vma && uop.uses_ldq
 
   when (io.req.valid) {
     assert(ioUop.is_vm_ext && (ioUop.uses_ldq || ioUop.uses_stq))
@@ -3657,7 +3679,7 @@ class VecIndexLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters)
       }
     }
     is (s_udcpy) {
-      when (io.vrf_raddr.fire) {
+      when (io.vrf_raddr.fire || is_agnostic) {
         emulCtr    := emulCtr + 1.U
         uop.v_eidx := uop.v_eidx + vLenECnt
         when (emulCtr + 1.U === nrVecGroup(emul, uop.v_seg_nf)) {
@@ -3729,12 +3751,26 @@ class VecIndexLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters)
                                FillInterleaved(4, udVmask(vLenb/4-1, 0)),
                                FillInterleaved(8, udVmask(vLenb/8-1, 0))))
   val udBodyMask    = Cat((0 until vLenb).map(i => uop.v_eidx +& i.U >= uop.vstart && uop.v_eidx +& i.U < uop.vconfig.vl).reverse)
+  val tailmask     = Cat((0 until vLenb).map(i =>  uop.v_eidx +& i.U > uop.vconfig.vl).reverse)
   val udBodyByteMask = Mux1H(UIntToOH(uop.vd_eew),
                            Seq(udBodyMask,
                                FillInterleaved(2, udBodyMask(vLenb/2-1, 0)),
                                FillInterleaved(4, udBodyMask(vLenb/4-1, 0)),
                                FillInterleaved(8, udBodyMask(vLenb/8-1, 0))))
+  val tailByteMask = Mux1H(UIntToOH(uop.vd_eew),
+                           Seq(tailmask,
+                               FillInterleaved(2, tailmask(vLenb/2-1, 0)),
+                               FillInterleaved(4, tailmask(vLenb/4-1, 0)),
+                               FillInterleaved(8, tailmask(vLenb/8-1, 0))))                             
   val activeByteMask = Mux(uop.v_unmasked, Fill(vLenb, 1.U(1.W)), udVmByteMask) & udBodyByteMask
+  val body_unactiveByteMask = Mux(uop.v_unmasked, ~Fill(vLenb, 1.U(1.W)), ~udVmByteMask) & udBodyByteMask
+  val tail_unactiveByteMask = tailByteMask
+  val agnostic_mask = Mux1H(UIntToOH(Cat(uop.vconfig.vtype.vta,uop.vconfig.vtype.vma)),
+              Seq(0.U,
+                  body_unactiveByteMask,
+                  tail_unactiveByteMask,
+                  body_unactiveByteMask | tail_unactiveByteMask)
+  )
 
   op2 := Mux(!uop.v_index_ls, 0.U, VDataSel(Cat(eindex.reverse), uop.vs2_eew, uop.v_eidx, vLen*8, eLen))
   when (RegNext(state === s_index && io.vrf_raddr.fire)) {
@@ -3767,9 +3803,10 @@ class VecIndexLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters)
   // vrf access
   io.vrf_type        := Mux(state === s_udcpy, 1.U, 0.U)
   io.vrf_vmask       := ~activeByteMask
+  io.vrf_agnostic_vmask  := agnostic_mask
   io.vrf_raddr.valid := Mux(state === s_vmask, ~io.vbusy_status(uop.pvm),
                         Mux(state === s_index, ~io.vbusy_status(uop.pvs2(emulCtr).bits), 
-                        Mux(state === s_udcpy || state === s_vdata, ~io.vbusy_status(uop.stale_pvd(emulCtr).bits), false.B)))
+                        Mux(state === s_udcpy || state === s_vdata, ~io.vbusy_status(uop.stale_pvd(emulCtr).bits) || is_agnostic, false.B)))
   io.vrf_raddr.bits  := Mux(state === s_vmask, uop.pvm,
                         Mux(state === s_index, uop.pvs2(emulCtr).bits, 
                         Mux(state === s_udcpy || state === s_vdata, uop.stale_pvd(emulCtr).bits, 0.U)))

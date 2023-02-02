@@ -192,10 +192,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val vl_wakeup = WireInit(0.U.asTypeOf(Valid(new VlWakeupResp())))
   val update_vtype = WireInit(0.U.asTypeOf(new VType()))
   //vl-ready wake up logic, bypass from execution unit
-  vl_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && 
-  (exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetvli || exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetivli)
+  vl_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && (exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetvli && !(exe_units(csr_unit_idx).io.iresp.bits.uop.ldst === 0.U && exe_units(csr_unit_idx).io.iresp.bits.uop.lrs1 === 0.U)|| exe_units(csr_unit_idx).io.iresp.bits.uop.is_vsetivli)
   vl_wakeup.bits.vl := exe_units(csr_unit_idx).io.iresp.bits.data(maxVLMax.log2, 0)
-  vl_wakeup.bits.vcq_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.vcq_idx
+  vl_wakeup.bits.vcq_vl_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.vcq_vl_idx
   vl_wakeup.bits.vconfig_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_mask
   vl_wakeup.bits.vconfig_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.vconfig_tag
 
@@ -249,7 +248,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   //// are the decoded instruction is vconfig instruction valid? It may be held up though.
   val dec_vconfig = Wire(Vec(coreWidth, new VconfigDecodeSignals()))
+  val dec_vconfig_br_tag = Wire(Vec(coreWidth, UInt(brTagSz.W)))
   val dec_vconfig_valid = Wire(Vec(coreWidth, Bool()))
+  val dec_keep_vl = Wire(Vec(coreWidth, Bool()))
 
 
   val dec_mtile  = Wire(Vec(coreWidth, new TileDecodeSignals()))
@@ -293,7 +294,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // brindices contains indices to reset pointers for allocated structures
   //           brindices is delayed a cycle
   val brupdate = Wire(new BrUpdateInfo)
-  val b1 = Wire(new BrUpdateMasks)
+  val b1 = Wire(new BrUpdateMasks)  
   val b2 = Reg(new BrResolutionInfo)
 
   brupdate.b1 := b1
@@ -1021,7 +1022,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
   // Decoders
   val vcq_data  = Wire(Vec(coreWidth, new VconfigDecodeSignals()))
-  val vcq_empty = WireInit(false.B)
+  val vcq_vl_empty = WireInit(false.B)
+  val vcq_vtype_empty = WireInit(false.B)
 
   val mcq_data  = Wire(Vec(coreWidth, new MconfigDecodeSignals()))
   val mcq_empty = WireInit(false.B)
@@ -1052,6 +1054,9 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       decode_units(w).io.csr_vconfig.vtype.reserved := DontCare
 
       dec_vconfig_valid(w) := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 87.U) && (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && ((dec_fbundle.uops(w).bits.inst(31, 30) === 3.U) || !dec_fbundle.uops(w).bits.inst(31))
+      //vsetvli && rd=0 && rs1=0
+      dec_keep_vl(w) :=(dec_fbundle.uops(w).bits.inst(6, 0) === 87.U) && (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && 
+                    !dec_fbundle.uops(w).bits.inst(31) && (dec_fbundle.uops(w).bits.inst(11, 7) === 0.U) && (dec_fbundle.uops(w).bits.inst(19, 15) === 0.U)
       dec_vconfig(w).vconfig.vl := Mux(dec_fbundle.uops(w).bits.inst(31), dec_fbundle.uops(w).bits.inst(19, 15), VType.fromUInt(dec_fbundle.uops(w).bits.inst(27, 20)).vlMax)
       dec_vconfig(w).vconfig.vtype := VType.fromUInt(dec_fbundle.uops(w).bits.inst(27, 20))
       dec_vconfig(w).vl_ready := (dec_fbundle.uops(w).bits.inst(19, 15) === 0.U && dec_fbundle.uops(w).bits.inst(11, 7) =/= 0.U) || dec_fbundle.uops(w).bits.inst(31)
@@ -1303,7 +1308,8 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   dec_uops.map(d => d.tile_k_idx := ktilecq.io.enq_idx)
 /***************************************************************************/
   //vconfig instruction decode info enq to VCQ
-  val vcq = Module(new VconfigQueue())
+  val vcq_vl = Module(new VconfigQueue())  
+  val vcq_vtype = Module(new VconfigQueue())
   val youngest_vconfig_idx = (coreWidth - 1).U - PriorityEncoder(dec_vconfig_valid.reverse)
   val oldest_vconfig_idx = PriorityEncoder(dec_vconfig_valid)
   val vconfig_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
@@ -1314,24 +1320,42 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
    */
   vconfig_stall(oldest_vconfig_idx + 1.U) := (youngest_vconfig_idx - oldest_vconfig_idx + 1.U) > dec_vconfig_nums(youngest_vconfig_idx)
 
-  vcq.io.enq.bits  := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
-  vcq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_vsetivli||u.is_vsetvli)}.reduce(_ | _)
-  vcq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_vsetivli||u.is_vsetvli, false.B)}.reduce(_ | _)
-  vcq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
-  vcq_empty        := vcq.io.empty
+  vcq_vtype.io.enq.bits   := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
+  vcq_vtype.io.enq_br_tag := Mux(dec_vconfig_valid.last, dec_vconfig_br_tag.last, dec_vconfig_br_tag.head)
+  vcq_vtype.io.enq.valid  := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_vsetivli||u.is_vsetvli)}.reduce(_ | _)
+  vcq_vtype.io.deq        := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_vsetivli||u.is_vsetvli, false.B)}.reduce(_ | _)
+  vcq_vtype.io.flush      := RegNext(rob.io.flush.valid)
+  vcq_vtype.io.redirect   := brupdate
+  vcq_vtype_empty         := vcq_vtype.io.empty
+
+  vcq_vl.io.enq.bits      := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
+  vcq_vl.io.enq_br_tag    := Mux(dec_vconfig_valid.last, dec_vconfig_br_tag.last, dec_vconfig_br_tag.head)
+  vcq_vl.io.enq.valid     := (dec_fire zip dec_uops).map { case (v, u) => v && (u.is_vsetivli || u.is_vsetvli && !(u.ldst === 0.U && u.lrs1 === 0.U)) }.reduce(_ | _)
+  vcq_vl.io.deq           := (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli && !(u.ldst === 0.U && u.lrs1 === 0.U), false.B) }.reduce(_ | _)
+  vcq_vl.io.flush         := RegNext(rob.io.flush.valid)
+  vcq_vl.io.redirect      := brupdate
+  vcq_vl_empty            := vcq_vl.io.empty
 
   for(w <- 0 until coreWidth) {
-    vcq_data(w).vconfig  := Mux(dec_vconfig_valid(oldest_vconfig_idx) && oldest_vconfig_idx < w.U, dec_vconfig(oldest_vconfig_idx).vconfig, Mux(vcq_empty, csr.io.vector.get.vconfig, vcq.io.get_vconfig.vconfig))
-    vcq_data(w).vl_ready := Mux(dec_vconfig_valid(oldest_vconfig_idx) && oldest_vconfig_idx < w.U, dec_vconfig(oldest_vconfig_idx).vl_ready, Mux(vcq_empty, true.B, vcq.io.get_vconfig.vl_ready))
+   vcq_data(w).vconfig.vtype  := Mux(dec_vconfig_valid(oldest_vconfig_idx) && oldest_vconfig_idx < w.U, dec_vconfig(oldest_vconfig_idx).vconfig.vtype,
+                                     Mux(vcq_vtype_empty, csr.io.vector.get.vconfig.vtype, vcq_vtype.io.get_vconfig.vconfig.vtype))
+    vcq_data(w).vconfig.vl  := Mux(dec_vconfig_valid(oldest_vconfig_idx) && (oldest_vconfig_idx < w.U) && !dec_keep_vl(oldest_vconfig_idx), dec_vconfig(oldest_vconfig_idx).vconfig.vl,
+                                      Mux(vcq_vl_empty, csr.io.vector.get.vconfig.vl, vcq_vl.io.get_vconfig.vconfig.vl))
+    vcq_data(w).vl_ready := Mux(dec_vconfig_valid(oldest_vconfig_idx) && (oldest_vconfig_idx < w.U) && !dec_keep_vl(oldest_vconfig_idx), dec_vconfig(oldest_vconfig_idx).vl_ready,
+      Mux(vcq_vl_empty, true.B, vcq_vl.io.get_vconfig.vl_ready))
   }
 
-  vcq.io.update_vl.valid := vl_wakeup.valid
-  vcq.io.update_vl.bits.vl_ready := vl_wakeup.valid
-  vcq.io.update_vl.bits.vconfig.vl := vl_wakeup.bits.vl
-  vcq.io.update_vl.bits.vconfig.vtype := update_vtype
-  vcq.io.update_vl_idx := vl_wakeup.bits.vcq_idx
+  vcq_vl.io.update_vl.valid := vl_wakeup.valid
+  vcq_vl.io.update_vl.bits.vl_ready := vl_wakeup.valid
+  vcq_vl.io.update_vl.bits.vconfig.vl := vl_wakeup.bits.vl
+  vcq_vl.io.update_vl.bits.vconfig.vtype := DontCare
+  vcq_vl.io.update_vl_idx := vl_wakeup.bits.vcq_vl_idx
 
-  dec_uops.map(d => d.vcq_idx := vcq.io.enq_idx)
+  vcq_vtype.io.update_vl := DontCare
+  vcq_vtype.io.update_vl_idx := DontCare
+
+  dec_uops.map(d => d.vcq_vl_idx := vcq_vl.io.enq_idx)
+  dec_uops.map(d => d.vcq_vtype_idx := vcq_vtype.io.enq_idx)
   //-------------------------------------------------------------
   // FTQ GetPC Port Arbitration
 
@@ -1403,6 +1427,8 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                       || tile_m_mask_full(w)
                       || tile_n_mask_full(w)
                       || tile_k_mask_full(w)
+                      || vcq_vl.io.full
+                      || vcq_vtype.io.full
                       || brupdate.b1.mispredict_mask =/= 0.U
                       || brupdate.b2.mispredict
                       || io.ifu.redirect_flush))
@@ -1432,8 +1458,9 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                                          dec_uops(w).allocate_brtag // ren, dis can back pressure us
     dec_uops(w).br_tag  := dec_brmask_logic.io.br_tag(w)
     dec_uops(w).br_mask := dec_brmask_logic.io.br_mask(w)
+    dec_vconfig_br_tag(w) := dec_brmask_logic.io.br_tag(w)
   }
-
+  
   branch_mask_full := dec_brmask_logic.io.is_full
 
   //-------------------------------------------------------------
@@ -2073,7 +2100,7 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
     // rvv related
     val csr_vld = csr_exe_unit.io.iresp.valid
     val csr_uop = csr_exe_unit.io.iresp.bits.uop
-    val vsetvl = csr_uop.uopc === uopVSETVL
+    val vsetvl = csr_uop.uopc === uopVSETVL 
     val cmt_rvv = (0 until coreParams.retireWidth).map{i =>
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvv }.reduce(_ || _)
     val cmt_archlast_rvv = (0 until coreParams.retireWidth).map{i =>
@@ -2084,14 +2111,15 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).uopc.isOneOf(uopVLFF) && rob.io.commit.uops(i).exception}
     val vleffSetVL = vleffXcpt.reduce(_||_)
     val vleffVl    = Mux1H(vleffXcpt, rob.io.commit.uops.map(_.v_eidx))
-    val vcq_setVL = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq.io.empty
-
+    //val vcq_setVL = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq.io.empty
+    val vcq_setVType  = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq_vtype.io.empty
+    val vcq_setVL  = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq_vl.io.empty
     csr.io.vector.get.set_vs_dirty        := cmt_rvv
-    csr.io.vector.get.set_vconfig.valid   := csr_vld && vsetvl || vleffSetVL || vcq_setVL
-    csr.io.vector.get.set_vconfig.bits    := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
+    csr.io.vector.get.set_vconfig.valid   := csr_vld && vsetvl || vleffSetVL || vcq_setVL || vcq_setVType
+    csr.io.vector.get.set_vconfig.bits    := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVType, vcq_vtype.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
     csr.io.vector.get.set_vconfig.bits.vl := Mux(csr_vld && vsetvl, csr_uop.vconfig.vl,
                                              Mux(vleffSetVL, vleffVl,
-                                             Mux(vcq_setVL,  vcq.io.vcq_Wcsr.vconfig.vl,
+                                             Mux(vcq_setVL,  vcq_vl.io.vcq_Wcsr.vconfig.vl,
                                                              csr.io.vector.get.vconfig.vl)))
     csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
     csr.io.vector.get.set_vstart.valid := cmt_archlast_rvv || rob.io.com_xcpt.bits.vls_xcpt.valid
@@ -2143,14 +2171,15 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).uopc.isOneOf(uopVLFF) && rob.io.commit.uops(i).exception}
     val vleffSetVL = vleffXcpt.reduce(_||_)
     val vleffVl    = Mux1H(vleffXcpt, rob.io.commit.uops.map(_.v_eidx))
-    val vcq_setVL  = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq.io.empty
+    val vcq_setVType  = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq_vtype.io.empty
+    val vcq_setVL  = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli, false.B) }.reduce(_ | _) && !vcq_vl.io.empty
 
     csr.io.vector.get.set_vs_dirty        := cmt_rvv
-    csr.io.vector.get.set_vconfig.valid   := csr_vld && vsetvl || vleffSetVL || vcq_setVL
-    csr.io.vector.get.set_vconfig.bits    := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVL, vcq.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
+    csr.io.vector.get.set_vconfig.valid   := csr_vld && vsetvl || vleffSetVL || vcq_setVL || vcq_setVType
+    csr.io.vector.get.set_vconfig.bits    := Mux(csr_vld && vsetvl, csr_uop.vconfig, Mux(vcq_setVType, vcq_vtype.io.vcq_Wcsr.vconfig, csr.io.vector.get.vconfig))
     csr.io.vector.get.set_vconfig.bits.vl := Mux(csr_vld && vsetvl, csr_uop.vconfig.vl,
                                              Mux(vleffSetVL, vleffVl,
-                                             Mux(vcq_setVL,  vcq.io.vcq_Wcsr.vconfig.vl,
+                                             Mux(vcq_setVL,  vcq_vl.io.vcq_Wcsr.vconfig.vl,
                                                              csr.io.vector.get.vconfig.vl)))
     csr.io.vector.get.set_vconfig.bits.vtype.reserved := DontCare
     csr.io.vector.get.set_vstart.valid := cmt_archlast_rvv || rob.io.com_xcpt.bits.vls_xcpt.valid

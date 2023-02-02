@@ -966,9 +966,10 @@ class FixMulAcc(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val rs1_data = io.req.bits.rs1_data
   val rs2_data = io.req.bits.rs2_data
   val rs3_data = io.req.bits.rs3_data
+  val old_data = WireInit(io.req.bits.rs3_data)
   val u_max = Wire(UInt((dataWidth+1).W))
   val hi, s_max, s_min = Wire(UInt(dataWidth.W))
-  val stale_rs3_data = Pipe(in_req.valid, rs3_data).bits
+  val stale_rs3_data = Pipe(in_req.valid, old_data).bits
 
   when (uop.uopc.isOneOf(uopVMADD, uopVNMSUB)) {
     in_req.bits.rs2_data := rs3_data
@@ -1093,7 +1094,8 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
   val uop = io.req.bits.uop
   val rs1_data = io.req.bits.rs1_data
   val rs2_data = io.req.bits.rs2_data
-  val rs3_data = io.req.bits.rs3_data
+  val rs3_data = WireInit(io.req.bits.rs3_data)
+  val old_data = WireInit(io.req.bits.rs3_data)
   val rvm_data = io.req.bits.rvm_data
   val rs1Unsigned = uop.rt(RS1, isUnsignedV) || uop.rt(RS1, isIntU)
   val rs2Unsigned = uop.rt(RS2, isUnsignedV)
@@ -1140,6 +1142,29 @@ class VecFixUnit(numStages: Int, dataWidth: Int)(implicit p: Parameters)
    ,BitPat(uopVNCLIP)   -> List(N, X, Y, N, X, X, Y, Y, Y, U_3, Y)
   )
   val cs = Wire(new FixMulAccCtrlSigs()).decoder(uop.uopc, table)
+
+  val body, tail, mask = Wire(UInt(vLenb.W))
+  body     := Cat((0 until vLenb).map(b => uop.v_eidx + b.U >= uop.vstart && uop.v_eidx + b.U < uop.vconfig.vl).reverse)
+  mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)),
+              Cat((0 until vLenb).map(b => rvm_data(b)).reverse))
+  tail     := Cat((0 until vLenb).map(b => uop.v_eidx + b.U >= uop.vconfig.vl).reverse)
+  val unmask = body & ~mask
+  val tail_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, tail),
+                               FillInterleaved(16, tail(vLenb/2-1, 0)),
+                               FillInterleaved(32, tail(vLenb/4-1, 0)),
+                               FillInterleaved(64, tail(vLenb/8-1, 0))))
+  val unmask_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, unmask),
+                               FillInterleaved(16, unmask(vLenb/2-1, 0)),
+                               FillInterleaved(32, unmask(vLenb/4-1, 0)),
+                               FillInterleaved(64, unmask(vLenb/8-1, 0))))
+  rs3_data := Mux1H(UIntToOH(Cat(uop.vconfig.vtype.vta,uop.vconfig.vtype.vma)),
+              Seq(old_data,
+                  old_data | unmask_bitInactive,
+                  old_data | tail_bitInactive,
+                  old_data | tail_bitInactive | unmask_bitInactive)
+  )
 
   for(e <- 0 until vLenb) {
     // instants
@@ -1312,7 +1337,9 @@ class VecFR7Unit(latency: Int, dataWidth: Int)(implicit p: Parameters)
     needsFcsr = true
   ) with tile.HasFPUParameters
 {
-  val io_req = io.req.bits
+  val io_req = WireDefault(io.req.bits)
+  val rs3_data = WireDefault(io.req.bits.rs3_data)
+  val uop = io.req.bits.uop
   val vsew = io_req.uop.vconfig.vtype.vsew
   val tag = Mux(vsew === 3.U, D, Mux(vsew === 2.U, S, H))
   val fp_ctrl = Wire(new FPUCtrlSigs())
@@ -1344,7 +1371,30 @@ class VecFR7Unit(latency: Int, dataWidth: Int)(implicit p: Parameters)
   reqfre.dfr7 := (tag === D)
   reqfre.sfr7 := (tag === S)
   reqfre.hfr7 := (tag === H)
-
+  val body, tail, mask = Wire(UInt(vLenb.W))
+  val rvm_data = io.req.bits.rvm_data
+  body     := Cat((0 until vLenb).map(b => uop.v_eidx + b.U >= uop.vstart && uop.v_eidx + b.U < uop.vconfig.vl).reverse)
+  mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)),
+              Cat((0 until vLenb).map(b => rvm_data(b)).reverse))
+  tail     := Cat((0 until vLenb).map(b => uop.v_eidx + b.U >= uop.vconfig.vl).reverse)
+  val unmask = body & ~mask
+  val tail_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, tail),
+                               FillInterleaved(16, tail(vLenb/2-1, 0)),
+                               FillInterleaved(32, tail(vLenb/4-1, 0)),
+                               FillInterleaved(64, tail(vLenb/8-1, 0))))
+  val unmask_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, unmask),
+                               FillInterleaved(16, unmask(vLenb/2-1, 0)),
+                               FillInterleaved(32, unmask(vLenb/4-1, 0)),
+                               FillInterleaved(64, unmask(vLenb/8-1, 0))))
+  rs3_data := Mux1H(UIntToOH(Cat(uop.vconfig.vtype.vta,uop.vconfig.vtype.vma)),
+              Seq(io.req.bits.rs3_data,
+                  io.req.bits.rs3_data | unmask_bitInactive,
+                  io.req.bits.rs3_data | tail_bitInactive,
+                  io.req.bits.rs3_data | tail_bitInactive | unmask_bitInactive)
+  )
+  io_req.rs3_data := rs3_data
   val reqpipe  = Pipe(io.req.valid, io_req, latency)
   val frepipe = Pipe(io.req.valid, reqfre, latency).bits
 
@@ -1484,12 +1534,14 @@ class VecALUUnit(
   val isVMask   = uop.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
   val isInvert  = uop.uopc.isOneOf(uopVMNAND, uopVMNOR, uopVMXNOR)
   val isScalarMove = uop.uopc.isOneOf(uopVMV_S_X, uopVFMV_S_F)
+  val is_vcompress = uop.uopc === uopVCOMPRESS
 
   // immediate generation
   val imm_xprlen = ImmGen(uop.imm_packed, uop.ctrl.imm_sel)
   val rs1_data = io.req.bits.rs1_data
   val rs2_data = io.req.bits.rs2_data
-  val rs3_data = io.req.bits.rs3_data
+  val rs3_data = WireDefault(io.req.bits.rs3_data)
+  val old_data = WireDefault(io.req.bits.rs3_data) 
   val rvm_data = io.req.bits.rvm_data
   val vl       = Mux(isVMask, uop.vconfig.vl >> 3.U, uop.vconfig.vl)
   val vstart   = Mux(isVMask, uop.vstart >> 3.U, uop.vstart)
@@ -1500,11 +1552,28 @@ class VecALUUnit(
               Cat((0 until vLenb).map(b => rvm_data(b)).reverse))
   tail     := Cat((0 until vLenb).map(b => uop.v_eidx + b.U >= vl).reverse)
   inactive := Mux(isScalarMove, Cat(Fill(vLenb-1, 1.U(1.W)), vstart >= vl), prestart | body & ~mask | tail)
+  val unmask = Mux(isScalarMove, Cat(Fill(vLenb-1, 1.U(1.W)), vstart >= vl),body & ~mask)
   val byteInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
                            Seq(inactive,
                                FillInterleaved(2, inactive(vLenb/2-1, 0)),
                                FillInterleaved(4, inactive(vLenb/4-1, 0)),
                                FillInterleaved(8, inactive(vLenb/8-1, 0))))
+  val tail_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, tail),
+                               FillInterleaved(16, tail(vLenb/2-1, 0)),
+                               FillInterleaved(32, tail(vLenb/4-1, 0)),
+                               FillInterleaved(64, tail(vLenb/8-1, 0))))
+  val unmask_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, unmask),
+                               FillInterleaved(16, unmask(vLenb/2-1, 0)),
+                               FillInterleaved(32, unmask(vLenb/4-1, 0)),
+                               FillInterleaved(64, unmask(vLenb/8-1, 0))))
+  rs3_data := Mux1H(UIntToOH(Cat(uop.vconfig.vtype.vta,uop.vconfig.vtype.vma)),
+              Seq(old_data,
+                  old_data | unmask_bitInactive,
+                  old_data | tail_bitInactive,
+                  old_data | tail_bitInactive | unmask_bitInactive)
+  )
   val shiftMask   = Fill(eLen, !isShift) | Mux1H(UIntToOH(uop.vs2_eew), Seq("h7".U, "hf".U, "h1f".U, "h3f".U))
   val bitPreStart = FillInterleaved(8, prestart)
   val bitTail     = FillInterleaved(8, tail)
@@ -1676,7 +1745,8 @@ class VecALUUnit(
   r_data(0) := Mux(isVMask,              rs3_data & bitInactive | alu_out & ~bitInactive,
                Mux(uop.rt(RD, isMaskVD), rs3_data & Cat(Fill(vLen-vLenb, 1.U(1.W)), inactive) | alu_out & ~inactive,
                Mux(isNarrowOdd,          Cat((0 until vLenb/2).map(b => Mux(byteInactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse) ## Fill(vLen/2, 0.U(1.W)),
-                                         Cat((0 until vLenb).map(b => Mux(byteInactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse))))
+               Mux(is_vcompress,         rs3_data,
+                                         Cat((0 until vLenb).map(b => Mux(byteInactive(b), rs3_data(b*8+7, b*8), alu_out(b*8+7, b*8))).reverse)))))
   r_mask(0) := Mux(isNarrowOdd, Fill(vLenb/2, 1.U(1.W)) ## Fill(vLenb/2, 0.U(1.W)), 
                Mux(isNarrowEven, Fill(vLenb / 2, 0.U(1.W)) ## Fill(vLenb / 2, 1.U(1.W)), Fill(vLenb, 1.U(1.W))))
   r_pred(0) := uop.is_sfb_shadow && io.req.bits.pred_data
@@ -2747,7 +2817,7 @@ class VecGatherUnit()(implicit p: Parameters) extends BoomModule {
 
   def gather_index(idx: UInt, iew: UInt): UInt = {
     val idx_reg = VRegSel(idx, iew, eLenSelSz)
-    val idx_off = VRegOff(idx, iew, vLenbSz, vLenSz)
+    val idx_off = VRegOff(idx, iew, vLenbSz, vLenSz) // 4  7
     val idx_dat = VDataSel(io.v1buf(idx_reg), iew, idx_off, vLen, eLen)
     idx_dat
   }
@@ -2901,7 +2971,6 @@ class VecCompressUnit()(implicit p: Parameters) extends BoomModule {
     val s_idle :: s_fill ::s_cal :: s_work :: Nil = Enum(4)
     val cur_state = RegInit(s_idle)
     val in_work_state = cur_state === s_work
-    
 
     val elem_wp       = RegInit(0.U(5.W))
     val elem_count       = RegInit(0.U(8.W))
@@ -2910,6 +2979,7 @@ class VecCompressUnit()(implicit p: Parameters) extends BoomModule {
     val v2buf_rp       = RegInit(0.U(vLen.W))
     val mid_buf = Reg(Vec(16,UInt(eLen.W)))
     val vdbuf = Reg(Vec(8, UInt(vLen.W)))
+    val is_agnostic = io.uop.vconfig.vtype.vta 
 
     cur_state := Mux(io.brkill, s_idle, cur_state)
 
@@ -2926,7 +2996,9 @@ class VecCompressUnit()(implicit p: Parameters) extends BoomModule {
         elem_wp     := 0.U
       }
       is(s_fill) {
-        vdbuf := io.vdbuf;
+        for ( i <- 0 until 8) {
+          vdbuf(i) := Mux(is_agnostic,io.vdbuf(i) | Fill(vLen,1.U),io.vdbuf(i))
+        }
         cur_state := s_cal;
       }
       is(s_cal) {
@@ -2952,7 +3024,7 @@ class VecCompressUnit()(implicit p: Parameters) extends BoomModule {
               (elem_wp === 0.U) -> vdbuf(vdbuf_wp),
               (elem_wp === 1.U) -> Mux1H(Seq(
                                 (io.uop.vs2_eew(1,0) === 0.U) -> Cat(vdbuf(vdbuf_wp)(127,8),Cat((0 until 1).map(mid_buf(_)(7,0)).reverse)),
-                                (io.uop.vs2_eew(1,0) === 1.U) -> Cat(vdbuf(vdbuf_wp)(127,16),Cat((0 until 1).map(mid_buf(_)(15,0)).reverse)),
+                                (io.uop.vs2_eew(1,0) === 1.U) -> Cat(vdbuf(vdbuf_wp)(127,16)  ,Cat((0 until 1).map(mid_buf(_)(15,0)).reverse)),
                                 (io.uop.vs2_eew(1,0) === 2.U) -> Cat(vdbuf(vdbuf_wp)(127,32),Cat((0 until 1).map(mid_buf(_)(31,0)).reverse)),
                                 (io.uop.vs2_eew(1,0) === 3.U) -> Cat(vdbuf(vdbuf_wp)(127,64),Cat((0 until 1).map(mid_buf(_)(63,0)).reverse)),
                               )),
@@ -3024,6 +3096,7 @@ class VecCompressUnit()(implicit p: Parameters) extends BoomModule {
   io.fbreq.bits.rs1_data := io.v1buf
   io.fbreq.bits.rs2_data := io.v2buf(progress)
   io.fbreq.bits.rs3_data := vdbuf(progress)
+  io.fbreq.bits.rvm_data := Fill(vLen , 1.U)
   io.fbreq.bits.uop.v_split_last := in_work_state && (nrVecGroup(io.uop.vd_emul) === (progress + 1.U))
   io.fbreq.bits.uop.v_eidx := eidx
   io.fbreq.bits.uop.v_split_ecnt := vlen_ecnt
@@ -3040,7 +3113,8 @@ class VecSRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFu
   val uop = io.req.bits.uop
   val rs1_data = io.req.bits.rs1_data
   val rs2_data = io.req.bits.rs2_data
-  val rs3_data = io.req.bits.rs3_data
+  val rs3_data = WireDefault(io.req.bits.rs3_data)
+  val old_data = WireDefault(io.req.bits.rs3_data)
   val rvm_data = io.req.bits.rvm_data
   val isSigned = !uop.rt(RS2, isUnsignedV)
   val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
@@ -3050,6 +3124,22 @@ class VecSRT4DivUnit(dataWidth: Int)(implicit p: Parameters) extends IterativeFu
   mask     := Mux(uop.v_unmasked, ~(0.U(vLenb.W)), Cat((0 until vLenb).map(b => rvm_data(b)).reverse))
   tail     := Cat((0 until vLenb).map(b => uop.v_eidx + b.U >= vl).reverse)
   inactive := prestart | body & ~mask | tail
+  val unmask = body & ~mask
+  val tail_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, tail),
+                               FillInterleaved(16, tail(vLenb/2-1, 0)),
+                               FillInterleaved(32, tail(vLenb/4-1, 0)),
+                               FillInterleaved(64, tail(vLenb/8-1, 0))))
+  val unmask_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, unmask),
+                               FillInterleaved(16, unmask(vLenb/2-1, 0)),
+                               FillInterleaved(32, unmask(vLenb/4-1, 0)),
+                               FillInterleaved(64, unmask(vLenb/8-1, 0))))
+  rs3_data := Mux1H(UIntToOH(Cat(uop.vconfig.vtype.vta,uop.vconfig.vtype.vma)),
+              Seq(old_data,
+                  old_data | unmask_bitInactive,
+                  old_data | tail_bitInactive,
+                  old_data | tail_bitInactive | unmask_bitInactive))
 
   val divValid = Wire(Vec(vLenb, Bool()))
   val e64Out   = Wire(Vec(numELENinVLEN, UInt(64.W)))
@@ -3204,6 +3294,7 @@ class VecMaskUnit(
   // vpopc, vfirst, vmsbf, vmsof, vmsif
   // ---------------------------------------------------
   val tailBits   = (Fill(vLen, 1.U(1.W)) << uop.vconfig.vl)(vLen-1, 0)
+  val keep_val  =  Mux(uop.vconfig.vtype.vta, tailBits, ~tailBits)
   val activeBits = Mux(uop.v_unmasked, ~tailBits, rs1_data & ~tailBits)
   for (e <- 0 until numELENinVLEN) {
     val vmaskUnit = Module(new VMaskUnit(offset = eLen*e))
@@ -3218,8 +3309,8 @@ class VecMaskUnit(
   }
   // special vmask output
   val hasNoSets    = (rs2_data & activeBits).orR === 0.U
-  val vmaskOutTail = rs3_data & ~activeBits
-  val vmaskOutSpc  = Mux(uop.uopc === uopVMSOF, vmaskOutTail, rs3_data | activeBits)
+  val vmaskOutTail = (rs3_data & ~activeBits) | keep_val
+  val vmaskOutSpc  = Mux(uop.uopc === uopVMSOF, vmaskOutTail, rs3_data | activeBits | keep_val)
 
   // stage1
   val vpopcSt1 = Reg(Vec(numELENinVLEN/2, UInt(vLenSz.W)))
@@ -3315,7 +3406,7 @@ class VecMaskUnit(
   val e16OutSt1  = RegNext(e16Out)
   val e8OutSt1   = RegNext(e8Out)
   val maskInSt1  = RegNext(maskIn)
-  val rs3DataSt1 = RegNext(rs3_data)
+  val rs3DataSt1 = RegNext(rs3_data | keep_val)
 
   val e64OutMux = Wire(Vec(numELENinVLEN,   UInt(64.W)))
   val e32OutMux = Wire(Vec(numELENinVLEN*2, UInt(32.W)))
@@ -3378,7 +3469,8 @@ class VecIntToFPUnit(dataWidth: Int, latency: Int)(implicit p: Parameters)
   val uop = io.req.bits.uop
   val rs1_data = io.req.bits.rs1_data
   val rs2_data = io.req.bits.rs2_data
-  val rs3_data = io.req.bits.rs3_data
+  val rs3_data = WireDefault(io.req.bits.rs3_data)
+  val old_data = WireDefault(io.req.bits.rs3_data) 
   val rvm_data = io.req.bits.rvm_data
   val body, prestart, tail, mask, inactive = Wire(UInt(vLenb.W))
   val vl = uop.vconfig.vl
@@ -3390,7 +3482,23 @@ class VecIntToFPUnit(dataWidth: Int, latency: Int)(implicit p: Parameters)
   val outInactive = Pipe(io.req.valid, inactive, latency).bits
   val outRs3Data  = Pipe(io.req.valid, rs3_data, latency).bits
   val isUnsigned  = uop.rt(RS2, isUnsignedV)
-
+  val unmask = body & ~mask
+  val tail_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, tail),
+                               FillInterleaved(16, tail(vLenb/2-1, 0)),
+                               FillInterleaved(32, tail(vLenb/4-1, 0)),
+                               FillInterleaved(64, tail(vLenb/8-1, 0))))
+  val unmask_bitInactive = Mux1H(UIntToOH(uop.vd_eew(1,0)),
+                           Seq(FillInterleaved(8, unmask),
+                               FillInterleaved(16, unmask(vLenb/2-1, 0)),
+                               FillInterleaved(32, unmask(vLenb/4-1, 0)),
+                               FillInterleaved(64, unmask(vLenb/8-1, 0))))
+  rs3_data := Mux1H(UIntToOH(Cat(uop.vconfig.vtype.vta,uop.vconfig.vtype.vma)),
+              Seq(old_data,
+                  old_data | unmask_bitInactive,
+                  old_data | tail_bitInactive,
+                  old_data | tail_bitInactive | unmask_bitInactive)
+  )
   val fp_decoder = Module(new UOPCodeFPUDecoder(vector = true)) // TODO use a simpler decoder
   fp_decoder.io.uopc := uop.uopc
   val fp_ctrl = WireInit(fp_decoder.io.sigs)

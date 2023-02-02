@@ -839,7 +839,7 @@ object VFilter {
     * @return Element after filter.
     */
   def filter_element(u: MicroOp, p: Bool, t: Bool, m: Bool, src: UInt, dst: UInt): UInt =
-    Mux((!p) && (!t) && (u.v_unmasked || m), src, dst)
+    Mux((!p) && (!t) && (u.v_unmasked || m), src, Mux((t && u.vconfig.vtype.vta)||(!(u.v_unmasked || m) && u.vconfig.vtype.vma),Fill(dst.getWidth,1.U),dst))
 
   /**
     * Filter single vector register with prestart, tail, active and inactive definitions.
