@@ -1312,24 +1312,26 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   val vcq_vtype = Module(new VconfigQueue())
   val youngest_vconfig_idx = (coreWidth - 1).U - PriorityEncoder(dec_vconfig_valid.reverse)
   val oldest_vconfig_idx = PriorityEncoder(dec_vconfig_valid)
-  val vconfig_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
+  val vconfig_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
+  //val vconfig_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
   /**
    *  when a group have at lest one inst between two vsetvl , eg. {vset2, vadd, vset0, vle},
    *  pipeline will hazard the instruction right after the oldest vestvl,
    *  and this instruction group will be divide into {vsetvl0, vle} + {xx, xx, vsetvl2, vadd}.
    */
-  vconfig_stall(oldest_vconfig_idx + 1.U) := (youngest_vconfig_idx - oldest_vconfig_idx + 1.U) > dec_vconfig_nums(youngest_vconfig_idx)
-
-  vcq_vtype.io.enq.bits   := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
-  vcq_vtype.io.enq_br_tag := Mux(dec_vconfig_valid.last, dec_vconfig_br_tag.last, dec_vconfig_br_tag.head)
+  // vconfig_stall(oldest_vconfig_idx + 1.U) := (youngest_vconfig_idx - oldest_vconfig_idx + 1.U) > dec_vconfig_nums(youngest_vconfig_idx)
+  vconfig_is_stall(oldest_vconfig_idx) := dec_vconfig_nums(youngest_vconfig_idx + 1.U) - dec_vconfig_nums(oldest_vconfig_idx + 1.U) > 0.U 
+  val vconfig_stall = vconfig_is_stall.scanLeft(false.B)(_|_)
+  vcq_vtype.io.enq.bits   := Mux1H(PriorityEncoderOH(dec_vconfig_valid),dec_vconfig)
+  vcq_vtype.io.enq_br_tag := Mux1H(PriorityEncoderOH(dec_vconfig_valid),dec_vconfig_br_tag)
   vcq_vtype.io.enq.valid  := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_vsetivli||u.is_vsetvli)}.reduce(_ | _)
   vcq_vtype.io.deq        := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_vsetivli||u.is_vsetvli, false.B)}.reduce(_ | _)
   vcq_vtype.io.flush      := RegNext(rob.io.flush.valid)
   vcq_vtype.io.redirect   := brupdate
   vcq_vtype_empty         := vcq_vtype.io.empty
 
-  vcq_vl.io.enq.bits      := Mux(dec_vconfig_valid.last, dec_vconfig.last, dec_vconfig.head)
-  vcq_vl.io.enq_br_tag    := Mux(dec_vconfig_valid.last, dec_vconfig_br_tag.last, dec_vconfig_br_tag.head)
+  vcq_vl.io.enq.bits      := Mux1H(PriorityEncoderOH(dec_vconfig_valid),dec_vconfig)
+  vcq_vl.io.enq_br_tag    := Mux1H(PriorityEncoderOH(dec_vconfig_valid),dec_vconfig_br_tag)
   vcq_vl.io.enq.valid     := (dec_fire zip dec_uops).map { case (v, u) => v && (u.is_vsetivli || u.is_vsetvli && !(u.ldst === 0.U && u.lrs1 === 0.U)) }.reduce(_ | _)
   vcq_vl.io.deq           := (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_vsetivli || u.is_vsetvli && !(u.ldst === 0.U && u.lrs1 === 0.U), false.B) }.reduce(_ | _)
   vcq_vl.io.flush         := RegNext(rob.io.flush.valid)
@@ -1429,6 +1431,7 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                       || tile_k_mask_full(w)
                       || vcq_vl.io.full
                       || vcq_vtype.io.full
+                      || vconfig_stall(w)
                       || brupdate.b1.mispredict_mask =/= 0.U
                       || brupdate.b2.mispredict
                       || io.ifu.redirect_flush))

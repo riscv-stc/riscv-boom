@@ -3262,7 +3262,7 @@ class VecLSAddrGenUnit(
         }
       }
       is (s_udcpy) {
-        when (io.vrf_raddr.fire||is_agnostic) {
+        when (io.vrf_raddr.fire) {
           emulCtr    := emulCtr + 1.U
           uop.v_eidx := uop.v_eidx + vLenECnt
 
@@ -3369,7 +3369,7 @@ class VecLSAddrGenUnit(
         }
       }
       is (s_udcpy) {
-        when (io.vrf_raddr.fire || is_agnostic) {
+        when (io.vrf_raddr.fire) {
           emulCtr    := emulCtr + 1.U
           uop.v_eidx := uop.v_eidx + vLenECnt
 
@@ -3679,7 +3679,7 @@ class VecIndexLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters)
       }
     }
     is (s_udcpy) {
-      when (io.vrf_raddr.fire || is_agnostic) {
+      when (io.vrf_raddr.fire) {
         emulCtr    := emulCtr + 1.U
         uop.v_eidx := uop.v_eidx + vLenECnt
         when (emulCtr + 1.U === nrVecGroup(emul, uop.v_seg_nf)) {
