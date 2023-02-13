@@ -1059,6 +1059,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
                     !dec_fbundle.uops(w).bits.inst(31) && (dec_fbundle.uops(w).bits.inst(11, 7) === 0.U) && (dec_fbundle.uops(w).bits.inst(19, 15) === 0.U)
       dec_vconfig(w).vconfig.vl := Mux(dec_fbundle.uops(w).bits.inst(31), dec_fbundle.uops(w).bits.inst(19, 15), VType.fromUInt(dec_fbundle.uops(w).bits.inst(27, 20)).vlMax)
       dec_vconfig(w).vconfig.vtype := VType.fromUInt(dec_fbundle.uops(w).bits.inst(27, 20))
+      dec_vconfig(w).vconfig.vtype.vma := true.B
+      dec_vconfig(w).vconfig.vtype.vta := true.B
       dec_vconfig(w).vl_ready := (dec_fbundle.uops(w).bits.inst(19, 15) === 0.U && dec_fbundle.uops(w).bits.inst(11, 7) =/= 0.U) || dec_fbundle.uops(w).bits.inst(31)
     }
     if (usingMatrix) {
@@ -1074,21 +1076,21 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
                                 ((dec_fbundle.uops(w).bits.inst(31, 28) === 2.U) ||
                                 (dec_fbundle.uops(w).bits.inst(31, 28) === 3.U))
       dec_mtile(w).tile_ready :=  (dec_fbundle.uops(w).bits.inst(31,28) === 2.U)
-      dec_mtile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 2.U),dec_fbundle.uops(w).bits.inst(27, 15), 16.U)
+      dec_mtile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 2.U),dec_fbundle.uops(w).bits.inst(27, 15), numTrTileRows.U)
 
       dec_ntile_valid(w)      := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 119.U) && 
                                 (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && 
                                 ((dec_fbundle.uops(w).bits.inst(31, 28) === 6.U) ||
                                 (dec_fbundle.uops(w).bits.inst(31, 28) === 7.U))
       dec_ntile(w).tile_ready :=  (dec_fbundle.uops(w).bits.inst(31,28) === 6.U)
-      dec_ntile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 6.U),dec_fbundle.uops(w).bits.inst(27, 15), 16.U)
+      dec_ntile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 6.U),dec_fbundle.uops(w).bits.inst(27, 15), numTrTileRows.U)
 
       dec_ktile_valid(w)      := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 119.U) && 
                                 (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && 
                                 ((dec_fbundle.uops(w).bits.inst(31, 28) === 4.U) ||
                                 (dec_fbundle.uops(w).bits.inst(31, 28) === 5.U))
       dec_ktile(w).tile_ready :=  (dec_fbundle.uops(w).bits.inst(31,28) === 4.U)
-      dec_ktile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 4.U),dec_fbundle.uops(w).bits.inst(27, 15), 16.U)
+      dec_ktile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 4.U),dec_fbundle.uops(w).bits.inst(27, 15), numTrTileRows.U)
 
       decode_units(w).io.csr_mconfig := mcq_data(w).mconfig
       decode_units(w).io.enq.uop.mtype_ready := mcq_data(w).mtype_ready
@@ -1223,7 +1225,11 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   val mcq = Module(new MconfigQueue())
   val youngest_mconfig_idx = (coreWidth - 1).U - PriorityEncoder(dec_mconfig_valid.reverse)
   val oldest_mconfig_idx = PriorityEncoder(dec_mconfig_valid)
-  mcq.io.enq.bits := Mux(dec_mconfig_valid.last, dec_mconfig.last, dec_mconfig.head)
+  val mconfig_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
+  val mconfig_stall = mconfig_is_stall.scanLeft(false.B)(_|_)
+
+  mconfig_is_stall(oldest_mconfig_idx) := dec_mconfig_nums(youngest_mconfig_idx + 1.U) - dec_mconfig_nums(oldest_mconfig_idx + 1.U) > 0.U
+  mcq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_mconfig_valid),dec_mconfig)
   mcq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_msettype)}.reduce(_ | _)
   mcq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_msettype, false.B)}.reduce(_ | _)
   mcq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
@@ -1245,7 +1251,11 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   val mtilecq = Module(new TileQueue())
   val youngest_tile_m_idx = (coreWidth - 1).U - PriorityEncoder(dec_mtile_valid.reverse)
   val oldest_tile_m_idx = PriorityEncoder(dec_mtile_valid)
-  mtilecq.io.enq.bits := Mux(dec_mtile_valid.last, dec_mtile.last, dec_mtile.head)
+  val mtilecq_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
+  val mtilecq_stall = mtilecq_is_stall.scanLeft(false.B)(_|_)
+
+  mtilecq_is_stall(oldest_tile_m_idx) := dec_mtile_nums(youngest_tile_m_idx + 1.U) - dec_mtile_nums(oldest_tile_m_idx + 1.U) > 0.U
+  mtilecq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_mtile_valid),dec_mtile)
   mtilecq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_settilem)}.reduce(_ | _)
   mtilecq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_settilem, false.B)}.reduce(_ | _)
   mtilecq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
@@ -1268,7 +1278,11 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   val ntilecq = Module(new TileQueue())
   val youngest_tile_n_idx = (coreWidth - 1).U - PriorityEncoder(dec_ntile_valid.reverse)
   val oldest_tile_n_idx = PriorityEncoder(dec_ntile_valid)
-  ntilecq.io.enq.bits := Mux(dec_ntile_valid.last, dec_ntile.last, dec_ntile.head)
+  val ntilecq_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
+  val ntilecq_stall = ntilecq_is_stall.scanLeft(false.B)(_|_)
+
+  ntilecq_is_stall(oldest_tile_n_idx) := dec_ntile_nums(youngest_tile_n_idx + 1.U) - dec_ntile_nums(oldest_tile_n_idx + 1.U) > 0.U
+  ntilecq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_ntile_valid),dec_ntile)
   ntilecq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_settilen)}.reduce(_ | _)
   ntilecq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_settilen, false.B)}.reduce(_ | _)
   ntilecq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
@@ -1290,7 +1304,11 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   val ktilecq = Module(new TileQueue())
   val youngest_tile_k_idx = (coreWidth - 1).U - PriorityEncoder(dec_ktile_valid.reverse)
   val oldest_tile_k_idx = PriorityEncoder(dec_ktile_valid)
-  ktilecq.io.enq.bits := Mux(dec_ktile_valid.last, dec_ktile.last, dec_ktile.head)
+  val ktilecq_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
+  val ktilecq_stall = ktilecq_is_stall.scanLeft(false.B)(_|_)
+
+  ktilecq_is_stall(oldest_tile_k_idx) := dec_ktile_nums(youngest_tile_k_idx + 1.U) - dec_ktile_nums(oldest_tile_k_idx + 1.U) > 0.U
+  ktilecq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_ktile_valid),dec_ktile)
   ktilecq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_settilek)}.reduce(_ | _)
   ktilecq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_settilek, false.B)}.reduce(_ | _)
   ktilecq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
@@ -1432,6 +1450,10 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                       || vcq_vl.io.full
                       || vcq_vtype.io.full
                       || vconfig_stall(w)
+                      || mconfig_stall(w)
+                      || mtilecq_stall(w)
+                      || ntilecq_stall(w)
+                      || ktilecq_stall(w)
                       || brupdate.b1.mispredict_mask =/= 0.U
                       || brupdate.b2.mispredict
                       || io.ifu.redirect_flush))
