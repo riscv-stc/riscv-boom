@@ -3153,7 +3153,7 @@ class VecLSAddrGenUnit(
     val resp         = (new DecoupledIO(new FuncUnitResp(xLen)))
     val resp_vm      = Output(UInt(vLenb.W))
     val resp_shdir   = Output(Bool()) // 0: vl:left/vs:right, 1: vl:right/vs:left
-    val resp_shamt   = Output(UInt(log2Ceil(vLenb.max(p(freechips.rocketchip.subsystem.CacheBlockBytes))).W))
+    val resp_shamt   = Output(UInt(log2Ceil(vLenb.max(p(freechips.rocketchip.subsystem.CacheBlockBytes)/2)).W))
     val resp_sfirst  = Output(Bool())
     val resp_slast   = Output(Bool())
     val brupdate     = Input(new BrUpdateInfo())
@@ -3170,7 +3170,7 @@ class VecLSAddrGenUnit(
     val vbusy_status = if (usingVector) Input(UInt(numVecPhysRegs.W)) else null
   })
 
-  val clSize = p(freechips.rocketchip.subsystem.CacheBlockBytes)
+  val clSize = p(freechips.rocketchip.subsystem.CacheBlockBytes)/2
   val clSizeLog2 = log2Up(clSize)
   val vcRatio    = if(vLenb > clSize) vLenb/clSize      else 1
   val vcRatioSz  = if(vLenb > clSize) log2Ceil(vcRatio) else 1
@@ -3608,7 +3608,7 @@ class VecIndexLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters)
     val resp      = (new DecoupledIO(new FuncUnitResp(xLen)))
     val resp_vm   = Output(UInt(vLenb.W))
     val resp_shdir= Output(Bool()) // 0: vl:left/vs:right, 1: vl:right/vs:left
-    val resp_shamt= Output(UInt(log2Ceil(vLenb.max(p(freechips.rocketchip.subsystem.CacheBlockBytes))).W))
+    val resp_shamt= Output(UInt(log2Ceil(vLenb.max(p(freechips.rocketchip.subsystem.CacheBlockBytes)/2)).W))
     val brupdate  = Input(new BrUpdateInfo())
     val kill      = Input(Bool())
     val busy      = Output(Bool())
@@ -3622,7 +3622,7 @@ class VecIndexLSAddrGenUnit(val is_vst: Boolean = false)(implicit p: Parameters)
     val vbusy_status = if (usingVector) Input(UInt(numVecPhysRegs.W)) else null
   })
 
-  val clSize = p(freechips.rocketchip.subsystem.CacheBlockBytes)
+  val clSize = (p(freechips.rocketchip.subsystem.CacheBlockBytes))/2
   val clSizeLog2 = log2Up(clSize)
 
   val s_idle :: s_vmask :: s_udcpy :: s_index :: s_vdata :: s_split :: Nil = Enum(6)
@@ -3874,7 +3874,7 @@ class VecMemImp(outer: VecMem) extends LazyModuleImp(outer)
     val lsu = Flipped(new VecMemIO)
   })
 
-  val clSize = p(freechips.rocketchip.subsystem.CacheBlockBytes)
+  val clSize = p(freechips.rocketchip.subsystem.CacheBlockBytes)/2
   val clSizeLog2 = log2Up(clSize)
 
   val vmemq = Module(new BranchKillableQueue(new BoomVMemReq, 64, flow = false))
@@ -3903,14 +3903,14 @@ class VecMemImp(outer: VecMem) extends LazyModuleImp(outer)
     tl_out.a.bits   := edge.Get(
       fromSource = Cat(0.U(1.W), (vmemq.io.deq.bits.uop.is_rvm || vmemq.io.deq.bits.uop.v_unit_ls),
                   vmemq.io.deq.bits.vldq_idx),
-      toAddress  = (vmemq.io.deq.bits.addr >> clSizeLog2.U) ## 0.U(clSizeLog2.W),
+      toAddress  = (vmemq.io.deq.bits.addr >> (clSizeLog2).U) ## 0.U((clSizeLog2).W),
       lgSize     = (lgCacheBlockBytes-1).U
     )._2
   } .otherwise {
     tl_out.a.bits   := edge.Put(
       fromSource = Cat(1.U(1.W), (vmemq.io.deq.bits.uop.is_rvm || vmemq.io.deq.bits.uop.v_unit_ls),
                   vmemq.io.deq.bits.vstq_idx),
-      toAddress  = (vmemq.io.deq.bits.addr >> clSizeLog2.U) ## 0.U(clSizeLog2.W),
+      toAddress  = (vmemq.io.deq.bits.addr >> (clSizeLog2).U) ## 0.U((clSizeLog2).W),
       lgSize     = (lgCacheBlockBytes-1).U,
       data       = Mux(vmemq.io.deq.bits.shdir, vsdq.io.deq.bits << (vmemq.io.deq.bits.shamt << 3.U),
                                                 vsdq.io.deq.bits >> (vmemq.io.deq.bits.shamt << 3.U)),
