@@ -942,7 +942,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   // Can we fire a vlxq lookup
   val (vlxq_lkup_idx_tmp, vlxq_lkup_sel_tmp) = AgePriorityEncoderN((0 until numVLxqEntries).map(i => {
     val e = vlxq(i)
-    e.valid && e.bits.addr.valid && e.bits.addr_is_virtual && !e.bits.executed && !e.bits.order_fail && !e.bits.st_dep_mask(stq_head)
+    e.valid && e.bits.addr.valid && e.bits.addr_is_virtual && !e.bits.executed && !e.bits.order_fail && !e.bits.st_dep_mask(stq_head) && e.bits.uop.rob_idx === io.core.rob_head_idx
   }), vlxq_head, memWidth)
 
 

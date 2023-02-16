@@ -150,6 +150,9 @@ class VecRenameFreeList(
   val vec_sels = Wire(Vec(plWidth, Vec(8, UInt(numPregs.W))))
   val flat_sels = SelectFirstN(free_list, plWidth*8)
   val active_preg = Wire(Vec(plWidth,Vec(8,Bool())))
+  val stall_offset = WireInit(0.U).asTypeOf(Vec(coreWidth + 1, UInt(log2Ceil(coreWidth).W)))
+
+  stall_offset := io.stall.scanLeft(0.U)(_.asUInt +& _.asUInt)
 
   for (i <- 0 until plWidth) {
     for (j <- 0 until 8) {
@@ -161,7 +164,7 @@ class VecRenameFreeList(
     for (i <- 0 until 8) {
       active_preg(w)(i) := position(w) > i.U
       when(is_stall) {
-        vec_sels(w)(i) := Mux(active_preg(w)(i), 0.U, Mux(io.stall(w),flat_sels(stall_count*(i.U - position(w)) +& w.U) ,0.U))
+        vec_sels(w)(i) := Mux(active_preg(w)(i), 0.U, Mux(io.stall(w),flat_sels(stall_count*(i.U - position(w)) +& stall_offset(w + 1) - 1.U) ,0.U))
       }.otherwise{
         vec_sels(w)(i) := flat_sels(plWidth*i + w)
       }

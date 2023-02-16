@@ -559,6 +559,8 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               numStqEntries = 16,
               numVLdqEntries = 36,
               numVStqEntries = 36,
+              numVLxqEntries = 36,
+              numVSxqEntries = 36,
               numVLdPorts = 2,
               numVSdPorts = 2,
               maxBrCount = 12,
