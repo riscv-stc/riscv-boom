@@ -30,6 +30,7 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
   val io = IO(new Bundle {
     val readPorts: Vec[TrTileRegReadPortIO] = Vec(numReadPorts, new TrTileRegReadPortIO())
     val writePorts: Vec[ValidIO[TrTileRegWritePortIO]] = Flipped(Vec(numWritePorts, Valid(new TrTileRegWritePortIO())))
+    val clearPorts = Flipped(Vec(memWidth, Valid(UInt(log2Ceil(numMatTrPhysRegs).W))))
   })
 
   require(isPow2(mLen))
@@ -119,7 +120,7 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
             Cat(Fill(rLen - 16, 0.U), Fill(16, 1.U)) << writeColShift,
             Cat(Fill(rLen - 32, 0.U), Fill(32, 1.U)) << writeColShift
           ))
-		      writeRowNumMask := Mux(writequad(w)===1.U, Cat(writebtyemask(w), 0.U(rLenb.W))(row.asUInt << writemsew(w)), 
+		      writeRowNumMask := Mux(writequad(w)===1.U, Cat(writebtyemask(w), 0.U(rLenb.W))(row.asUInt << writemsew(w)),
                                                                   writebtyemask(w)(row.asUInt << writemsew(w)))
           writeColRowData := writeColData << writeColShift
 		      writeColDataSel := Mux(writeRowNumMask, Cat((0 until rLen).map(i => Mux(writeColRowMask(i), writeColRowData(i), oldData(i))).reverse), oldData)
@@ -129,6 +130,15 @@ class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Param
       }
     }
   }
+
+  for (w <- 0 until memWidth) {
+    when (io.clearPorts(w).valid) {
+      for (r <- 0 until rowlen) {
+        trtile(io.clearPorts(w).bits)(r) := 0.U(rLen.W)
+      }
+    }
+  }
+
   //ensure there is only 1 writer per trtile slice
   if (numWritePorts > 1) {
     for (i <- 0 until (numWritePorts - 1)) {

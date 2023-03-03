@@ -49,6 +49,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
     val intupdate        = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
     val fpupdate         = Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen))))
     val lsu_vrf_rport    = Vec(memWidth, new RegisterFileReadPortIO(vpregSz, vLen))
+    val matrix_rport     = Vec(2, new RegisterFileReadPortIO(vpregSz, vLen))
 
     val vl_wakeup        = Input(Valid(new VlWakeupResp()))
     
@@ -81,7 +82,7 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   issue_unit.suggestName("vec_issue_unit")
 
   val vregfile       = Module(new RegisterFileSynthesizable(numVecPhysRegs,
-                         exe_units.numVrfReadPorts + memWidth,
+                         exe_units.numVrfReadPorts + memWidth + 2,
                          exe_units.numVrfWritePorts + memWidth,
                          vLen,
                          // No bypassing for any VEC units, + memWidth for ll_wb
@@ -186,6 +187,9 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
 
   for (w <- 0 until memWidth) {
     io.lsu_vrf_rport(w) <> vregfile.io.read_ports(exe_units.numVrfReadPorts + w)
+  }
+  for (w <- 0 until 2) {
+    io.matrix_rport(w) <> vregfile.io.read_ports(exe_units.numVrfReadPorts + memWidth + w)
   }
   vregister_read.io.prf_read_ports map { port => port.data := false.B }
 

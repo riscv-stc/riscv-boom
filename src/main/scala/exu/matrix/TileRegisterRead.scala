@@ -52,6 +52,7 @@ class TileRegisterRead(
 
     // interface with register file's read ports
     val tileReadPorts = Flipped(Vec(numTotalReadPorts, new TrTileRegReadPortIO()))
+    val vec_rport       = Vec(2, Flipped(new RegisterFileReadPortIO(vpregSz, vLen)))
 
     // send micro-ops to the execution pipelines
     val exe_reqs = Vec(issueWidth, (new DecoupledIO(new FuncUnitReq(registerWidth))))
@@ -101,8 +102,11 @@ class TileRegisterRead(
     io.tileReadPorts(idx+1).addr      := io.iss_uops(w).prs2
     io.tileReadPorts(idx+1).index     := io.iss_uops(w).m_sidx
 
-    rrd_ts1_data(w) := io.tileReadPorts(idx+0).data
-    rrd_ts2_data(w) := io.tileReadPorts(idx+1).data
+    io.vec_rport(idx+0).addr := io.iss_uops(w).pvs1(0).bits
+    io.vec_rport(idx+1).addr := io.iss_uops(w).pvs2(0).bits
+
+    rrd_ts1_data(w) := Mux(rrd_uops(w).rt(RS1, isVector), io.vec_rport(idx+0).data,io.tileReadPorts(idx+0).data)
+    rrd_ts2_data(w) := Mux(rrd_uops(w).rt(RS2, isVector), io.vec_rport(idx+1).data,io.tileReadPorts(idx+1).data)
 
     val rrd_kill = io.kill || IsKilledByBranch(io.brupdate, rrd_uops(w))
 

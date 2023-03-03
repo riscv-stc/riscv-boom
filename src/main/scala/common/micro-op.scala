@@ -87,6 +87,14 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val tile_m                = UInt((rLenbSz+1).W)
   val tile_n                = UInt((rLenbSz+1).W)
   val tile_k                = UInt((rLenbSz+1).W)
+
+  val moutsh                = new MShape
+  val minsh                 = new MShape
+  val mpad                  = new MPad
+  val mstdi                 = new MStrideDilation
+  val minsk                 = new MKernelPos
+  val moutsk                = new MKernelPos
+
   // Index into FTQ to figure out our fetch PC.
   val ftq_idx          = UInt(log2Ceil(ftqSz).W)
   // This inst straddles two fetch packets
@@ -200,11 +208,12 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val vstartSrc        = if (usingVector) UInt(1.W) else false.B      // vstart source: CSR or speculative zero
   // matrix extension
   val mslice_dim      = if (usingMatrix)  UInt(2.W)       else UInt(0.W)
-  val transposed        = if (usingVector) Bool() else false.B
+  val transposed        = if (usingMatrix) Bool() else false.B
   val is_msettype      = if (usingMatrix) Bool()          else false.B
   val is_settilem     = if (usingMatrix) Bool()          else false.B
   val is_settilen     = if (usingMatrix) Bool()          else false.B
   val is_settilek     = if (usingMatrix) Bool()          else false.B
+  val is_v_mls        = if (usingMatrix) Bool()          else false.B
   val mtype_ready      = if (usingMatrix) Bool()          else null
   val tile_m_ready      = if (usingMatrix) Bool()          else null
   val tile_n_ready      = if (usingMatrix) Bool()          else null
@@ -216,6 +225,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val m_scalar_busy    = if (usingMatrix) Bool()          else null
   val m_scalar_data    = if (usingMatrix) UInt(xLen.W)    else null        // scalar value for matrix pipe
   val m_sidx           = if (usingMatrix) UInt((rLenbSz+1).W)  else null   // slice index
+  val mmv_count        = if (usingMatrix) UInt((rLenbSz+1).W)  else null   // slice index
   val m_ls_ew          = if (usingMatrix) UInt(2.W)       else null        // eew encoded in load/store instructions
   val m_is_split       = if (usingMatrix) Bool()          else null
   val m_split_last     = if (usingMatrix) Bool()          else null
@@ -310,6 +320,7 @@ class CtrlSignals(implicit p: Parameters) extends BoomBundle()
   val is_std      = Bool()
   val is_vmlogic  = if (usingVector) Bool() else null
   val is_vmscmp   = if (usingVector) Bool() else null
+  val is_unfold   = if (usingMatrix) Bool() else null
 }
 
 /**
@@ -1159,11 +1170,25 @@ object MicroOpcodes extends Enumeration {
   val uopMSETTILEN_enum   = Value
   val uopMSETTILEN        = uopMSETTILEN_enum.id.U(UOPC_SZ.W)
 
+  val uopMSETOUTSH_enum   = Value
+  val uopMSETOUTSH        = uopMSETOUTSH_enum.id.U(UOPC_SZ.W)
+  val uopMSETINSH_enum    = Value
+  val uopMSETINSH         = uopMSETINSH_enum.id.U(UOPC_SZ.W)
+  val uopMSETSK_enum      = Value
+  val uopMSETSK           = uopMSETSK_enum.id.U(UOPC_SZ.W)
   //mload, mstore
   val uopMLE_enum         = Value
   val uopMLE              = uopMLE_enum.id.U(UOPC_SZ.W)
+  val uopMLE_V_enum       = Value
+  val uopMLE_V            = uopMLE_V_enum.id.U(UOPC_SZ.W)
   val uopMSE_enum         = Value
   val uopMSE              = uopMSE_enum.id.U(UOPC_SZ.W)
+  val uopMSE_V_enum       = Value
+  val uopMSE_V            = uopMSE_V_enum.id.U(UOPC_SZ.W)
+  val uopMLUF_enum        = Value
+  val uopMLUF             = uopMLUF_enum.id.U(UOPC_SZ.W)
+  val uopMSUF_enum        = Value
+  val uopMSUF             = uopMSUF_enum.id.U(UOPC_SZ.W)
   //marith
   val uopMCLRACC_enum     = Value
   val uopMCLRACC          = uopMCLRACC_enum.id.U(UOPC_SZ.W)
@@ -1171,12 +1196,16 @@ object MicroOpcodes extends Enumeration {
   val uopMMA              = uopMMA_enum.id.U(UOPC_SZ.W)
   val uopMWMA_enum        = Value
   val uopMWMA             = uopMWMA_enum.id.U(UOPC_SZ.W)
+  val uopMFMACCCR_MV_enum = Value
+  val uopMFMACCCR_MV      = uopMFMACCCR_MV_enum.id.U(UOPC_SZ.W)
   val uopMQMA_enum        = Value
   val uopMQMA             = uopMQMA_enum.id.U(UOPC_SZ.W)
   val uopMADD_enum        = Value
   val uopMADD             = uopMADD_enum.id.U(UOPC_SZ.W)
   val uopMWADD_enum       = Value
   val uopMWADD            = uopMWADD_enum.id.U(UOPC_SZ.W)
+  val uopMFADDCR_MV_enum  = Value
+  val uopMFADDCR_MV       = uopMFADDCR_MV_enum.id.U(UOPC_SZ.W)
   val uopMQADD_enum       = Value
   val uopMQADD            = uopMQADD_enum.id.U(UOPC_SZ.W)
   val uopMSUB_enum        = Value
@@ -1191,6 +1220,8 @@ object MicroOpcodes extends Enumeration {
   val uopMWRSUB           = uopMWRSUB_enum.id.U(UOPC_SZ.W)
   val uopMQRSUB_enum      = Value
   val uopMQRSUB           = uopMQRSUB_enum.id.U(UOPC_SZ.W)
+  val uopMFEMULCR_MV_enum       = Value
+  val uopMFEMULCR_MV            = uopMFEMULCR_MV_enum.id.U(UOPC_SZ.W)
   val uopMEMUL_enum       = Value
   val uopMEMUL            = uopMEMUL_enum.id.U(UOPC_SZ.W)
   val uopMWEMUL_enum      = Value

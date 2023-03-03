@@ -29,7 +29,7 @@ import boom.util._
 class MatPipeline(implicit p: Parameters) extends BoomModule {
   val matIssueParams = issueParams.find(_.iqType == IQT_MAT.litValue).get
   val dispatchWidth = matIssueParams.dispatchWidth
-  val numWakeupPorts = matWidth * 3 + numVLdPorts   // (MCLRACC; MOPA) + (VLSU to tr tile + VLSU to acc tile)
+  val numWakeupPorts = matWidth * 3 + numVLdPorts * 2   // (MCLRACC; MOPA) + (VLSU to tr tile + VLSU to acc tile)
 
   val io = IO(new Bundle {
     // pipeline ctrl signals
@@ -45,6 +45,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
     val wake_issue_rs_type = Input(Vec(2,Vec(memWidth + matWidth,UInt(RT_X.getWidth.W)))) 
     val wake_issue_data = Input(Vec(2,Vec(memWidth + matWidth,UInt((vLenb+1).W))))
     val wake_issue_valid = Input(Vec(2,Vec(memWidth + matWidth,Bool())))
+    val vbusy_status     = Input(UInt(numVecPhysRegs.W))
 
     // dispatched uops
     val dis_uops = Vec(dispatchWidth, Flipped(Decoupled(new MicroOp)))
@@ -54,14 +55,18 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
     val intupdate = Input(Vec(intWidth, Valid(new ExeUnitResp(eLen))))
     val fpupdate = Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen))))
     val lsu_tile_rport = Vec(memWidth, new TrTileRegReadPortIO())
-    val lsu_tile_wbk = Vec(numVLdPorts, Flipped(Decoupled(new ExeUnitResp(vLen))))
+    val vec_rport     = Vec(2, Flipped(new RegisterFileReadPortIO(vpregSz, vLen)))
+    val lsu_tile_wbk = Vec(numVLdPorts * 2, Flipped(Decoupled(new ExeUnitResp(vLen))))
     val lsu_acc_rreq = Flipped(ValidIO(new AccReadReq()))
     val lsu_acc_rresp = ValidIO(new AccReadResp())
     // mset_wakeup, vsetvl related wakeup
     // val mset_wakeup        = Input(Valid(new MlWakeupResp()))  // TODO: msettype/msettile speculation optimization
     val wakeups = Vec(numWakeupPorts, Valid(new ExeUnitResp(vLen))) // wakeup issue_units
+    val wakeup_bypass = Output(Vec(numWakeupPorts, Bool()))
     val vl_wakeup = Input(Valid(new VlWakeupResp()))
 
+    // Clear tile registers.
+    val trclr = Flipped(Vec(memWidth, Valid(UInt(log2Ceil(numMatTrPhysRegs).W))))
 
     val mtype_wakeup        = Input(Valid(new MtypeWakeupResp()))
     val tile_m_wakeup        = Input(Valid(new MtileWakeupResp()))
@@ -104,7 +109,7 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
   issue_unit.io.brupdate := io.brupdate
   issue_unit.io.flush_pipeline := io.flush_pipeline
   issue_unit.io.intupdate := io.intupdate
-
+  issue_unit.io.vbusy_status   := io.vbusy_status
   issue_unit.io.fpupdate  := io.fpupdate
   issue_unit.io.mtype_wakeup := io.mtype_wakeup
   issue_unit.io.tile_m_wakeup := io.tile_m_wakeup
@@ -152,6 +157,10 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
   io.matrix_iss_valid := wake_tile_r
   io.matrix_iss_uop := iss_uops
 
+  for (n <- 0 until numWakeupPorts) {
+    io.wakeup_bypass(n) := false.B
+  }
+
   // Wakeup
   for ((writeback, issue_wakeup) <- io.wakeups zip issue_unit.io.wakeup_ports) {
     issue_wakeup.valid := writeback.valid
@@ -183,6 +192,11 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
   for(w <- 0 until memWidth) {
     io.lsu_tile_rport(w) <> trtileReg.io.readPorts(exe_units.numTrTileReadPorts + w)
   }
+  for(w <- 0 until 2) {
+    io.vec_rport(w).addr := trtileReader.io.vec_rport(w).addr
+    trtileReader.io.vec_rport(w).data := io.vec_rport(w).data
+  }
+  trtileReg.io.clearPorts := io.trclr
   //-------------------------------------------------------------
   // **** Execute Stage ****
   //-------------------------------------------------------------
@@ -224,23 +238,30 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
       eu.io.accReadReq := io.lsu_acc_rreq
       io.lsu_acc_rresp := eu.io.accReadResp
     })
-  //-------------------------------------------------------------
-  //-------------------------------------------------------------
-  // **** Commit Stage ****
-  //-------------------------------------------------------------
-  //-------------------------------------------------------------
 
-  //io.wakeups(0).valid := ll_wbarb.io.out.valid
-  //io.wakeups(0).bits := ll_wbarb.io.out.bits
-  //ll_wbarb.io.out.ready := true.B
+    //-------------------------------------------------------------
+    //-------------------------------------------------------------
+    // **** Commit Stage ****
+    //-------------------------------------------------------------
+    //-------------------------------------------------------------
 
-  //vld write back clears busy table in rename but not busy bit in rob entry.
-  io.wakeups(w) <> DontCare
-  io.wakeups(w).valid := io.lsu_tile_wbk(w).valid && lsuWbkBits.uop.rt(RD, isTrTile)
-  io.wakeups(w).bits := io.lsu_tile_wbk(w).bits
-}
+    //io.wakeups(0).valid := ll_wbarb.io.out.valid
+    //io.wakeups(0).bits := ll_wbarb.io.out.bits
+    //ll_wbarb.io.out.ready := true.B
+
+    //vld write back clears busy table in rename but not busy bit in rob entry.
+    io.wakeups(w) <> DontCare
+    io.wakeups(w).valid := io.lsu_tile_wbk(w).valid && lsuWbkBits.uop.rt(RD, isTrTile)
+    io.wakeups(w).bits  := io.lsu_tile_wbk(w).bits
+  }
+
+  for (w <- numVLdPorts until numVLdPorts * 2) {
+    io.wakeups(w) := io.lsu_tile_wbk(w)
+    io.wakeup_bypass(w) := true.B
+  }
+
   // from MatExeUnit
-  var w_cnt = numVLdPorts
+  var w_cnt = numVLdPorts * 2
   for(eu <- exe_units) {
     io.wakeups(w_cnt)   := eu.io.mclrResp
     io.wakeups(w_cnt+1) := eu.io.mopaResp

@@ -9,6 +9,8 @@ import freechips.rocketchip.config.Parameters
 import hardfloat._
 import boom.common._
 import freechips.rocketchip.util.ShouldBeRetimed
+import freechips.rocketchip.util.{LCG, UIntIsOneOf}
+import boom.common.MicroOpcodes._
 
 // acc buffer related command
 object AccTileConstants {
@@ -31,11 +33,12 @@ object AccTileConstants {
   val Q2 = 2.U(2.W)
   val Q3 = 3.U(2.W)
   // alu types
-  val MACC = 0.U(3.W)
-  val MULT = 1.U(3.W)
-  val ADD = 2.U(3.W)
-  val SUB = 3.U(3.W)
-  val CVT = 4.U(3.W)
+  val MACC = 0.U(4.W)
+  val MULT = 1.U(4.W)
+  val ADD = 2.U(4.W)
+  val SUB = 3.U(4.W)
+  val CVT = 4.U(4.W)
+  val VECMACC = 5.U(4.W)
 }
 
 import AccTileConstants._
@@ -46,11 +49,12 @@ class MacCtrls(implicit p: Parameters) extends BoomBundle {
   val dstRidx = UInt(log2Ceil(numAccTiles).W)
   val srcType = UInt(3.W)
   val outType = UInt(3.W)
-  val aluType = UInt(3.W)
+  val aluType = UInt(4.W)
   val macInit = Bool()
   val macLast = Bool()
   val autoClr = Bool()
   val autoCvt = Bool()
+  val dirCal  = UInt(2.W)
   val rm = UInt(3.W) // rounding mode
 }
 
@@ -87,7 +91,7 @@ class AccReadResp(implicit p: Parameters) extends BoomBundle {
 
 class FpMacPipe(implicit p: Parameters) extends BoomBundle {
   val outType = UInt(3.W)
-  val aluType = UInt(3.W)
+  val aluType = UInt(4.W)
   val dstRidx = UInt(log2Ceil(numAccTiles).W)
   val macInit = Bool()
   val macLast = Bool()
@@ -105,7 +109,7 @@ class IntMacUnit extends Module {
     val src3 = Input(UInt(32.W))
     val srcType = Input(UInt(3.W))
     val outType = Input(UInt(3.W))
-    val aluType = Input(UInt(3.W))
+    val aluType = Input(UInt(4.W))
     val out = Output(UInt(32.W))
   })
 
@@ -151,7 +155,7 @@ class FpMacUnit(
     val src3 = Input(UInt(32.W))
     val srcType = Input(UInt(3.W))
     val outType = Input(UInt(3.W))
-    val aluType = Input(UInt(3.W))
+    val aluType = Input(UInt(4.W))
     val srcRidx = Input(UInt(log2Ceil(numAccTiles).W))
     val dstRidx = Input(UInt(log2Ceil(numAccTiles).W))
     val macInit = Input(Bool())
@@ -404,9 +408,13 @@ class PE(
     val macReqIn = Input(Valid(new MacCtrls())) // control signals
     val macReqSrcA = Input(UInt(16.W))
     val macReqSrcB = Input(UInt(16.W))
+    val macReqSrcC = Input(UInt(16.W))
+    val macReqSrcD = Input(UInt(16.W))
     val macReqOut = Output(Valid(new MacCtrls()))
     val macOutSrcA = Output(UInt(16.W)) // for systolic horizontally
     val macOutSrcB = Output(UInt(16.W)) // for systolic vertically
+    val macOutSrcC = Output(UInt(16.W)) // for systolic vertically
+    val macOutSrcD = Output(UInt(16.W)) // for systolic horizontally
     // clear tile slices, control signals propagated vertically
     val clrReqIn = Input(Valid(new ClrCtrls()))
     val clrReqOut = Output(Valid(new ClrCtrls()))
@@ -452,9 +460,13 @@ class PE(
   // fp16*fp16+fp32
   val fpMac = Module(new FpMacUnit((if (fpMultiCycles) 3 else 1), fpAcc2Wider))
   fpMac.io.validin := fpMacValid
-  fpMac.io.src1 := Mux(macReqCtrls.aluType === MACC, io.macReqSrcA, c0(macReqCtrls.src1Ridx))
-  fpMac.io.src2 := io.macReqSrcB
-  fpMac.io.src3 := Mux(macReqCtrls.aluType === MULT, 0.U, c0(macReqCtrls.src2Ridx))
+  fpMac.io.src1 := Mux(macReqCtrls.aluType === MACC && macReqCtrls.dirCal =/= 0.U, io.macReqSrcA, c0(macReqCtrls.src1Ridx))
+
+  fpMac.io.src2 := Mux(macReqCtrls.dirCal === 1.U,io.macReqSrcC,
+                   Mux(macReqCtrls.dirCal === 2.U, io.macReqSrcA,io.macReqSrcB))
+  fpMac.io.src3 := Mux(macReqCtrls.aluType === MULT, 0.U, 
+                   Mux(macReqCtrls.dirCal === 1.U, io.macReqSrcB,
+                   Mux(macReqCtrls.dirCal === 2.U, io.macReqSrcD,c0(macReqCtrls.src2Ridx))))
   fpMac.io.srcType := macReqCtrls.outType // Attention here, fpMac support fp16 multiply only
   fpMac.io.outType := macReqCtrls.outType
   fpMac.io.aluType := macReqCtrls.aluType
@@ -496,6 +508,8 @@ class PE(
   io.macReqOut := io.macReqIn
   io.macOutSrcA := io.macReqSrcA
   io.macOutSrcB := io.macReqSrcB
+  io.macOutSrcC := io.macReqSrcC
+  io.macOutSrcD := io.macReqSrcD
 
   // -----------------------------------------------------------------------------------
   // clear acc tiles
@@ -592,9 +606,13 @@ class Tile(
     val macReqIn = Input(Valid(new MacCtrls()))
     val macReqSrcA = Input(UInt((mxuTileRows * 16).W))
     val macReqSrcB = Input(UInt((mxuTileCols * 16).W))
+    val macReqSrcC = Input(UInt((mxuTileCols * 16).W))
+    val macReqSrcD = Input(UInt((mxuTileRows * 16).W))
     val macReqOut = Output(Valid(new MacCtrls()))
     val macOutSrcA = Output(UInt((mxuTileRows * 16).W))
     val macOutSrcB = Output(UInt((mxuTileCols * 16).W))
+    val macOutSrcC = Output(UInt((mxuTileCols * 16).W))
+    val macOutSrcD = Output(UInt((mxuTileRows * 16).W))
     // clear tile slices, control signals propagated vertically
     val clrReqIn = Input(Valid(new ClrCtrls()))
     val clrReqOut = Output(Valid(new ClrCtrls()))
@@ -634,6 +652,13 @@ class Tile(
       case (macReqSrcA, pe) => {
         pe.io.macReqSrcA := macReqSrcA
         pe.io.macOutSrcA
+      }
+    }
+    val peSrcD = io.macReqSrcD(16 * r + 15, 16 * r)
+    tile(r).foldLeft(peSrcD) {
+      case (macReqSrcD, pe) => {
+        pe.io.macReqSrcD := macReqSrcD
+        pe.io.macOutSrcD
       }
     }
     tile(r).foldLeft(io.colWriteReq) {
@@ -689,6 +714,13 @@ class Tile(
         pe.io.macOutSrcB
       }
     }
+    val peSrcC = io.macReqSrcC(16 * c + 15, 16 * c)
+    tileT(c).foldLeft(peSrcC) {
+      case (macReqSrcC, pe) => {
+        pe.io.macReqSrcC := macReqSrcC
+        pe.io.macOutSrcC
+      }
+    }
     tileT(c).foldLeft(io.clrReqIn) {
       case (clrReq, pe) => {
         pe.io.clrReqIn := clrReq
@@ -739,24 +771,30 @@ class Tile(
   io.colWriteResp := io.colWriteReq
 
   val macOutSrcAMux = WireInit(VecInit(Seq.fill(mxuTileRows)(0.U(16.W))))
+  val macOutSrcDMux = WireInit(VecInit(Seq.fill(mxuTileRows)(0.U(16.W))))
   val colWriteDataMux = WireInit(VecInit(Seq.fill(mxuTileRows)(0.U(32.W))))
   val colWriteMaskMux = WireInit(VecInit(Seq.fill(mxuTileRows)(0.U(1.W))))
   for (r <- 0 until mxuTileRows) {
     macOutSrcAMux(r) := tile(r)(mxuTileCols - 1).io.macOutSrcA
+    macOutSrcDMux(r) := tile(r)(mxuTileCols - 1).io.macOutSrcD
     colWriteDataMux(r) := tile(r)(mxuTileCols - 1).io.colWriteDout
     colWriteMaskMux(r) := tile(r)(mxuTileCols - 1).io.colWriteMout
   }
 
   val macOutSrcBMux = WireInit(VecInit(Seq.fill(mxuTileCols)(0.U(16.W))))
+  val macOutSrcCMux = WireInit(VecInit(Seq.fill(mxuTileCols)(0.U(16.W))))
   val rowWriteDataMux = WireInit(VecInit(Seq.fill(mxuTileCols)(0.U(64.W))))
   val rowWriteMaskMux = WireInit(VecInit(Seq.fill(mxuTileCols)(0.U(2.W))))
   for (c <- 0 until mxuTileCols) {
     macOutSrcBMux(c) := tile(mxuTileRows - 1)(c).io.macOutSrcB
+    macOutSrcCMux(c) := tile(mxuTileRows - 1)(c).io.macOutSrcC
     rowWriteDataMux(c) := tile(mxuTileRows - 1)(c).io.rowWriteDout
     rowWriteMaskMux(c) := tile(mxuTileRows - 1)(c).io.rowWriteMout
   }
   io.macOutSrcA := macOutSrcAMux.asUInt
+  io.macOutSrcD := macOutSrcDMux.asUInt
   io.macOutSrcB := macOutSrcBMux.asUInt
+  io.macOutSrcC := macOutSrcCMux.asUInt
   io.colWriteDout := colWriteDataMux.asUInt
   io.colWriteMout := colWriteMaskMux.asUInt
   io.rowWriteDout := rowWriteDataMux.asUInt
@@ -788,6 +826,8 @@ class Mesh(
     val macReq = Input(Vec(mxuMeshCols, Valid(new MacCtrls())))
     val macReqSrcA = Input(Vec(mxuMeshRows, UInt((mxuTileRows * 16).W)))
     val macReqSrcB = Input(Vec(mxuMeshCols, UInt((mxuTileCols * 16).W)))
+    val macReqSrcC = Input(Vec(mxuMeshCols, UInt((mxuTileCols * 16).W)))
+    val macReqSrcD = Input(Vec(mxuMeshRows, UInt((mxuTileRows * 16).W)))
     val macResp = Output(Valid(new MacCtrls()))
     // clear tile slices, control signals propagated vertically
     val clrReq = Input(Valid(new ClrCtrls()))
@@ -821,6 +861,12 @@ class Mesh(
       case (macReqSrcA, tile) => {
         tile.io.macReqSrcA := RegNext(macReqSrcA)
         tile.io.macOutSrcA
+      }
+    }
+    mesh(r).foldLeft(io.macReqSrcD(r)) {
+      case (macReqSrcD, tile) => {
+        tile.io.macReqSrcD := RegNext(macReqSrcD)
+        tile.io.macOutSrcD
       }
     }
     mesh(r).foldLeft(io.colWriteReq) {
@@ -869,6 +915,12 @@ class Mesh(
       case (macReqSrcB, tile) => {
         tile.io.macReqSrcB := RegNext(macReqSrcB)
         tile.io.macOutSrcB
+      }
+    }
+    meshT(c).foldLeft(io.macReqSrcC(c)) {
+      case (macReqSrcC, tile) => {
+        tile.io.macReqSrcC := RegNext(macReqSrcC)
+        tile.io.macOutSrcC
       }
     }
     meshT(c).foldLeft(io.clrReq) {
@@ -1012,6 +1064,7 @@ class MXU(implicit p: Parameters) extends BoomModule {
   // read row slices, write data to long-latency vector registers
   // add back-pressure mechanism (not pipelined)
   // -----------------------------------------------------------------------------------
+  val is_mmv = io.macReqUop.uopc.isOneOf(uopMMV_V)
   val trRowValid = ShiftRegister(io.rowReadReq.valid && io.rowReadReqUop.rt(RS1, isTrTile), mxuMeshRows + 2)
   val trRowData = Pipe(io.rowReadReq.valid, io.macReqSrcA, mxuMeshRows + 2).bits
   val rowReadCtrls = io.rowReadReq.bits
@@ -1020,7 +1073,7 @@ class MXU(implicit p: Parameters) extends BoomModule {
   switch(rowReadState) {
     is(sliceReady) {
       when(io.rowReadReq.valid && io.rowReadReqUop.rt(RS1, isAccTile)) {
-        rowVsCount := Mux(io.rowReadReqUop.vd_emul === 2.U, 3.U, io.rowReadReqUop.vd_emul)
+        rowVsCount := Mux(is_mmv,0.U,Mux(io.rowReadReqUop.vd_emul === 2.U, 3.U, io.rowReadReqUop.vd_emul))
         rowReadState := sliceWait
         rowReadReqValid := true.B
       }.elsewhen(io.rowReadReq.valid) {
@@ -1221,28 +1274,47 @@ class MXU(implicit p: Parameters) extends BoomModule {
     mesh.io.macReq(c).bits := ShiftRegister(io.macReq.bits, c, true.B)
   }
 
+  val rs1_is_vec = io.macReqUop.rt(RS1, isVector)
+  val rs2_is_vec = io.macReqUop.rt(RS2, isVector)
+  val has_one_vec = rs1_is_vec ^ rs2_is_vec
+  val is_transpose = io.macReqUop.transposed
+
+  val is_row_cal = has_one_vec && !is_transpose
+  val is_col_cal = has_one_vec && is_transpose
+
   val widenSrcA = WireInit(VecInit(Seq.fill(mxuMeshRows * mxuTileRows)(0.U(16.W))))
   (0 until mxuMeshRows * mxuTileRows).foreach(i => widenSrcA(i) := io.macReqSrcA(8 * i + 7, 8 * i))
-  val muxSrcA = Mux(io.macReq.bits.srcType(2), io.macReqSrcA, widenSrcA.asUInt)
+  val tmp_muxSrcA = Mux(io.macReq.bits.srcType(2), io.macReqSrcA ,widenSrcA.asUInt)
+  val muxSrcA = Mux(!rs1_is_vec, tmp_muxSrcA,Mux(io.macReqUop.m_sidx === 0.U && !is_transpose, tmp_muxSrcA.asUInt & Fill(128,1.U), Fill(8,0x0.U(16.W))))
+  val muxSrcD = Mux(is_row_cal && io.macReqUop.m_sidx === 0.U, io.macReqSrcB, 0.U)
   for (r <- 0 until mxuMeshRows) {
     mesh.io.macReqSrcA(r) := ShiftRegister(muxSrcA(16 * mxuTileRows * (r + 1) - 1, 16 * mxuTileRows * r), r, true.B)
+    mesh.io.macReqSrcD(r) := ShiftRegister(muxSrcD(16 * mxuTileRows * (r + 1) - 1, 16 * mxuTileRows * r), r, true.B)
   }
 
   val shuffSrcB = WireInit(VecInit(Seq.fill(mxuMeshCols * mxuTileCols * 2)(0.U(8.W))))
+  val shuffSrcC = WireInit(VecInit(Seq.fill(mxuMeshCols * mxuTileCols * 2)(0.U(8.W))))
   when(io.macReq.bits.srcType(2)) {
     (0 until mxuMeshCols * mxuTileCols).foreach { i =>
       shuffSrcB(2 * i) := io.macReqSrcB(16 * i + 7, 16 * i)
       shuffSrcB(2 * i + 1) := io.macReqSrcB(16 * i + 15, 16 * i + 8)
+      shuffSrcC(2 * i) := io.macReqSrcA(16 * i + 7, 16 * i)
+      shuffSrcC(2 * i + 1) := io.macReqSrcA(16 * i + 15, 16 * i + 8)
     }
   }.otherwise {
     (0 until mxuMeshCols * mxuTileCols).foreach { i =>
       shuffSrcB(2 * i) := io.macReqSrcB(8 * i + 7, 8 * i)
       shuffSrcB(2 * i + 1) := io.macReqSrcB(8 * mxuMeshCols * mxuTileCols + 8 * i + 7, 8 * mxuMeshCols * mxuTileCols + 8 * i)
+      shuffSrcC(2 * i) := io.macReqSrcA(8 * i + 7, 8 * i)
+      shuffSrcC(2 * i + 1) := io.macReqSrcA(8 * mxuMeshCols * mxuTileCols + 8 * i + 7, 8 * mxuMeshCols * mxuTileCols + 8 * i)
     }
   }
-  val muxSrcB = shuffSrcB.asUInt
+  
+  val muxSrcB = Mux(!rs2_is_vec, shuffSrcB.asUInt, Mux(io.macReqUop.m_sidx === 0.U && is_transpose, shuffSrcB.asUInt & Fill(128,1.U), Fill(8,0x0.U(16.W))))
+  val muxSrcC = Mux(!rs1_is_vec, shuffSrcB.asUInt, Mux(io.macReqUop.m_sidx === 0.U && is_transpose, shuffSrcC.asUInt& Fill(128,1.U), 0.U))
   for (c <- 0 until mxuMeshCols) {
     mesh.io.macReqSrcB(c) := ShiftRegister(muxSrcB(16 * mxuTileCols * (c + 1) - 1, 16 * mxuTileCols * c), c, true.B)
+    mesh.io.macReqSrcC(c) := ShiftRegister(muxSrcC(16 * mxuTileCols * (c + 1) - 1, 16 * mxuTileCols * c), c, true.B)
   }
 
   // ready control
@@ -1372,9 +1444,9 @@ class MXU(implicit p: Parameters) extends BoomModule {
 
   val pipeRowReadUop = Pipe(io.rowReadReq.valid, io.rowReadReqUop, mxuMeshRows + 2).bits
   io.rowReadRespUop := pipeRowReadUop
-  io.rowReadRespUop.m_split_last := rowVregIdx === rowVsCount
+  io.rowReadRespUop.m_split_last := Mux(pipeRowReadUop.uopc.isOneOf(uopMMV_V),pipeRowReadUop.m_split_last,rowVregIdx === rowVsCount)
   io.rowReadRespUop.v_split_last := rowVregIdx === rowVsCount
-  io.rowReadRespUop.pdst := pipeRowReadUop.pvd(rowVregIdx).bits
+  io.rowReadRespUop.pdst := Mux(pipeRowReadUop.uopc.isOneOf(uopMMV_V), pipeRowReadUop.pdst,pipeRowReadUop.pvd(rowVregIdx).bits)
   io.rowReadRespUop.stale_pdst := pipeRowReadUop.stale_pvd(rowVregIdx).bits
 
   val pipeColReadUop = Pipe(io.colReadReq.valid, io.colReadReqUop, mxuMeshCols + 2).bits

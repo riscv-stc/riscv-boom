@@ -28,7 +28,7 @@ import boom.common._
 import boom.common.MicroOpcodes._
 import boom.ifu.GetPCFromFtqIO
 import boom.util._
-
+ 
 /**
  * Response from Execution Unit. Bundles a MicroOp with data
  *
@@ -41,6 +41,7 @@ class ExeUnitResp(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
   val vmask = if (usingVector) UInt((dataWidth/8).W) else UInt(0.W)
   val predicated = Bool() // Was this predicated off?
   val fflags = new ValidIO(new FFlagsResp) // write fflags to ROB // TODO: Do this better
+  val is_merge  = Bool()
 }
 
 /**
@@ -389,6 +390,7 @@ class ALUExeUnit(
     queue.io.enq.bits.vmask  := Fill(dataWidth/8, 1.U(1.W))
     queue.io.enq.bits.predicated := ifpu.io.resp.bits.predicated
     queue.io.enq.bits.fflags := ifpu.io.resp.bits.fflags
+    queue.io.enq.bits.is_merge := false.B
     queue.io.brupdate := io.brupdate
     queue.io.flush := io.req.bits.kill
 
@@ -591,6 +593,7 @@ class FPUExeUnit(
     queue.io.enq.bits.vmask  := Fill(dataWidth/8, 1.U(1.W))
     queue.io.enq.bits.predicated := fpu.io.resp.bits.predicated
     queue.io.enq.bits.fflags := fpu.io.resp.bits.fflags
+    queue.io.enq.bits.is_merge := false.B
     queue.io.brupdate          := io.brupdate
     queue.io.flush           := io.req.bits.kill
 
@@ -604,6 +607,7 @@ class FPUExeUnit(
     fp_sdq.io.enq.bits.vmask := Fill(dataWidth/8, 1.U(1.W))
     fp_sdq.io.enq.bits.predicated := false.B
     fp_sdq.io.enq.bits.fflags := DontCare
+    fp_sdq.io.enq.bits.is_merge := false.B
     fp_sdq.io.brupdate         := io.brupdate
     fp_sdq.io.flush          := io.req.bits.kill
 
@@ -957,6 +961,7 @@ class VecExeUnit(
     vecToFPQueue.io.enq.bits.vmask := Fill(eLen/8, 1.U(1.W))
     vecToFPQueue.io.enq.bits.predicated := false.B
     vecToFPQueue.io.enq.bits.fflags := DontCare
+    vecToFPQueue.io.enq.bits.is_merge := false.B
     vecToFPQueue.io.brupdate := io.brupdate
     vecToFPQueue.io.flush := io.req.bits.kill
     io.fresp <> vecToFPQueue.io.deq
@@ -984,6 +989,7 @@ class VecExeUnit(
     vecToIntQueue.io.enq.bits.uop.v_split_last := Mux(vmv_valid, vmv_is_last, vmaskUop.v_split_last)
     vecToIntQueue.io.enq.bits.predicated := false.B
     vecToIntQueue.io.enq.bits.fflags := DontCare
+    vecToIntQueue.io.enq.bits.is_merge := DontCare
     vecToIntQueue.io.brupdate := io.brupdate
     vecToIntQueue.io.flush := io.req.bits.kill
     io.iresp <> vecToIntQueue.io.deq
@@ -1374,22 +1380,25 @@ class MatExeUnit() (implicit p: Parameters)
 
   // -------------------------------MXU Unit -------------------------------
   val mxu = Module(new MXU())
-
+  val is_vec = io.req.bits.uop.rt(RS1, isVector) || io.req.bits.uop.rt(RS2, isVector)
   hSliceBusy := !mxu.io.rowReadReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE))
   vSliceBusy := !mxu.io.colReadReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE))
 
   // matrix multiplication related
   // TODO: confirm latency
   mxu.io.macReq.valid          := io.req.valid && io.req.bits.uop.fu_code_is(FU_GEMM)
-  mxu.io.macReq.bits.src1Ridx  := Mux(io.req.bits.uop.uopc.isOneOf(uopMSUB, uopMWSUB, uopMQSUB), io.req.bits.uop.prs3, io.req.bits.uop.prs1)
+  mxu.io.macReq.bits.src1Ridx  := Mux(io.req.bits.uop.uopc.isOneOf(uopMSUB, uopMWSUB, uopMQSUB,uopMFMACCCR_MV), io.req.bits.uop.prs3, io.req.bits.uop.prs1)
   mxu.io.macReq.bits.src2Ridx  := Mux(io.req.bits.uop.uopc.isOneOf(uopMSUB, uopMWSUB, uopMQSUB), io.req.bits.uop.prs1, io.req.bits.uop.prs3)
   mxu.io.macReq.bits.dstRidx   := io.req.bits.uop.pdst
   mxu.io.macReq.bits.srcType   := Cat(io.req.bits.uop.fp_val.asUInt, Mux(io.req.bits.uop.rt(RS1, isAccTile), io.req.bits.uop.td_eew, io.req.bits.uop.ts1_eew))
   mxu.io.macReq.bits.outType   := Cat(io.req.bits.uop.fp_val.asUInt, io.req.bits.uop.td_eew)
   mxu.io.macReq.bits.aluType   := Mux(io.req.bits.uop.uopc.isOneOf(uopMFNCVT), CVT,
                                   Mux(io.req.bits.uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), MACC,
-                                  Mux(io.req.bits.uop.uopc.isOneOf(uopMEMUL), MULT,
-                                  Mux(io.req.bits.uop.uopc.isOneOf(uopMADD, uopMWADD, uopMQADD), ADD, SUB))))
+                                  Mux(io.req.bits.uop.uopc.isOneOf(uopMEMUL,uopMFEMULCR_MV), MULT,
+                                  Mux(io.req.bits.uop.uopc.isOneOf(uopMADD, uopMWADD, uopMQADD, uopMFADDCR_MV), ADD, 
+                                  Mux(io.req.bits.uop.uopc.isOneOf(uopMFMACCCR_MV),VECMACC,SUB)))))
+  mxu.io.macReq.bits.dirCal    := Mux(is_vec && io.req.bits.uop.transposed , 1.U ,
+                                  Mux(is_vec && !io.req.bits.uop.transposed , 2.U, 0.U))
   mxu.io.macReq.bits.macInit   := io.req.bits.uop.m_sidx === 0.U
   mxu.io.macReq.bits.macLast   := io.req.bits.uop.m_split_last
   mxu.io.macReq.bits.autoClr   := false.B //io.req.bits.uop.m_auto_clr

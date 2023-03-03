@@ -377,6 +377,10 @@ class Rob(
             val cidx = GetRowIdx(inc.bits.rob_idx)
             when (inc.bits.cnt_upd) {
               rob_ls_cnt(cidx) := inc.bits.ls_cnt
+              when(inc.bits.ls_cnt === 0.U) {
+                rob_bsy(cidx) := false.B
+                rob_unsafe(cidx) := false.B
+              }
             }
           }
         }
@@ -394,7 +398,7 @@ class Rob(
       if (usingMatrix) {
         when (wb_resp.valid && MatchBank(GetBankIdx(wb_uop.rob_idx))) {
           val wb_rvv_load = wb_uop.uopc.isOneOf(uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX)
-          val wb_rvm_load = wb_uop.uopc.isOneOf(uopMLE)
+          val wb_rvm_load = wb_uop.uopc.isOneOf(uopMLE,uopMLUF)
 
           // copy stale data returns in-order while memory acess may return out-of-order
           // increase rob_ls_wbs when rvv or rvm load write back;
@@ -407,7 +411,7 @@ class Rob(
           when(!wb_uop.is_vm_ext ||
                (wb_rvv_load && wb_uop.uses_ldq && (rob_ls_wbs(row_idx) +& PopCount(temp_ld_wbs(row_idx)) >= rob_ls_cnt(row_idx))) ||
                (wb_uop.is_rvv && !wb_rvv_load && (!wb_uop.v_is_split || wb_uop.v_split_last)) || // have bug
-               (wb_rvm_load && (rob_ls_wbs(row_idx) +& PopCount(temp_ld_wbs(row_idx)) >= rob_ls_cnt(row_idx))) ||
+               (wb_rvm_load && (rob_ls_wbs(row_idx) +& PopCount(temp_ld_wbs(row_idx)) +& Mux(wb_resp.bits.is_merge, 1.U,0.U) >= rob_ls_cnt(row_idx))) ||
                (wb_uop.is_rvm && !wb_rvm_load && wb_uop.m_split_last)) {
             rob_bsy(row_idx)    := false.B
             rob_unsafe(row_idx) := false.B
@@ -419,7 +423,7 @@ class Rob(
 
           rob_predicated(row_idx) := wb_resp.bits.predicated
           rob_uop(row_idx).vxsat  := rob_uop(row_idx).vxsat || (wb_uop.is_rvv && wb_uop.vxsat)
-          rob_ls_wbs(row_idx) := rob_ls_wbs(row_idx) + PopCount(temp_ld_wbs(row_idx))
+          rob_ls_wbs(row_idx) := rob_ls_wbs(row_idx) + PopCount(temp_ld_wbs(row_idx)) + Mux(wb_resp.bits.is_merge, 1.U,0.U)
 
           if (O3PIPEVIEW_PRINTF) {
             printf("%d; O3PipeView:complete:%d\n",

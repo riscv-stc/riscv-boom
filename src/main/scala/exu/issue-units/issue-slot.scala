@@ -63,7 +63,7 @@ class IssueSlotIO(val numWakeupPorts: Int, val vector: Boolean = false, val matr
   val uop           = Output(new MicroOp()) // the current Slot's uop. Sent down the pipeline when issued.
   val intupdate     = if (vector || matrix) Input(Vec(intWidth, Valid(new ExeUnitResp(eLen)))) else null
   val fpupdate      = if (vector || matrix) Input(Vec(fpWidth, Valid(new ExeUnitResp(eLen)))) else null
-  val vbusy_status  = if (vector) Input(UInt(numVecPhysRegs.W)) else null
+  val vbusy_status  = if (vector || matrix) Input(UInt(numVecPhysRegs.W)) else null
 
   val debug = {
     val result = new Bundle {
@@ -143,7 +143,8 @@ class IssueSlot(
   val next_uop_mma        = if (matrix) next_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA) else null
   val next_uop_ts1_hslice = if (matrix) Mux(next_uop_mma, false.B, next_uop.isHSlice) else null
   val next_uop_ts2_hslice = if (matrix) Mux(next_uop_mma, true.B,  next_uop.isHSlice) else null
-  val slot_uop_mma        = if (matrix) slot_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA) else null
+  val slot_uop_mma        = if (matrix) slot_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA,uopMFMACCCR_MV) else null
+  val slot_uop_mmv        = if (matrix) slot_uop.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V) else null
 
   val last_check: Bool = {
     val ret = Wire(Bool())
@@ -177,11 +178,13 @@ class IssueSlot(
                      Mux(uop.uses_scalar, ps, true.B))
       }
     } else if(matrix) {
+      val pvs1   = uop.pvs1(0).bits
       ret := Mux(uop.rt(RS1, isTrTile) && uop.pts1DirCross, p1.andR,
              Mux(uop.rt(RS1, isTrTile),   p1(uop.m_sidx),
              //Mux(uop.fu_code === FU_GEMM, p1.andR,
              Mux(uop.fu_code === FU_GEMM, p1(0),
-             Mux(uop.rt(RS1, isAccTile),  p1(uop.m_sidx), true.B))))
+             Mux(uop.rt(RS1, isAccTile),  p1(uop.m_sidx),
+             Mux(uop.rt(RS1, isVector),!io.vbusy_status(pvs1),true.B)))))
     } else {
       ret := p1(0)
     }
@@ -209,9 +212,11 @@ class IssueSlot(
         ret       := !uop.rt(RS2, isVector) || Mux(uop.is_reduce, !reduce_busy, !io.vbusy_status(pvs2))
       }
     } else if(matrix) {
+      val pvs2   = uop.pvs2(0).bits
       ret := Mux(uop.rt(RS2, isTrTile) && uop.pts2DirCross, p2.andR,
              Mux(uop.rt(RS2, isTrTile), p2(uop.m_sidx),
-             Mux(uop.rt(RS2, isInt) || uop.rt(RS2, isFloat), ps, true.B)))
+             Mux(uop.rt(RS2, isInt) || uop.rt(RS2, isFloat), ps, 
+             Mux(uop.rt(RS2, isVector),!io.vbusy_status(pvs2),true.B))))
     } else {
       ret := p2(0)
     }
@@ -545,13 +550,29 @@ class IssueSlot(
     io.out_uop.m_scalar_data := sdata
     io.uop.m_sidx            := sidx
     io.uop.m_scalar_data     := sdata
-    when(io.request && io.grant && slot_uop_mma) {
-      io.uop.m_split_last  := slot_uop.m_sidx === slot_uop.m_tilek - 1.U
-      io.uop.m_sidx        := slot_uop.m_sidx
-      io.out_uop.m_sidx    := slot_uop.m_sidx + 1.U
-      io.out_uop.prs3      := slot_uop.pdst
-      slot_uop.m_sidx      := slot_uop.m_sidx + 1.U
-      slot_uop.prs3        := slot_uop.pdst
+    // val vlmul_mag  = io.csr_vconfig.vtype.vlmul_mag
+    when(io.request && io.grant) {
+      when(slot_uop_mma){
+        io.uop.m_split_last  := slot_uop.m_sidx === slot_uop.m_slice_cnt - 1.U
+        io.uop.m_sidx        := slot_uop.m_sidx
+        io.out_uop.m_sidx    := slot_uop.m_sidx + 1.U
+        io.out_uop.prs3      := slot_uop.pdst
+        slot_uop.m_sidx      := slot_uop.m_sidx + 1.U
+        slot_uop.prs3        := slot_uop.pdst
+      }.elsewhen(slot_uop_mmv) {
+        io.uop.m_split_last  := (1.U << slot_uop.vconfig.vtype.vlmul_mag) -1.U === slot_uop.mmv_count
+        io.uop.m_sidx        := slot_uop.m_sidx
+        io.uop.mmv_count     := slot_uop.mmv_count
+        io.uop.pdst          := slot_uop.pvd(slot_uop.mmv_count).bits
+        io.out_uop.m_sidx    := slot_uop.m_sidx + 1.U
+        io.out_uop.mmv_count := slot_uop.mmv_count + 1.U
+        io.out_uop.pdst      := slot_uop.pvd(slot_uop.mmv_count).bits
+        io.out_uop.prs3      := slot_uop.pdst
+        slot_uop.m_sidx      := slot_uop.m_sidx + 1.U
+        slot_uop.mmv_count   := slot_uop.mmv_count + 1.U
+        slot_uop.prs3        := slot_uop.pdst
+        slot_uop.pdst        := slot_uop.pvd(slot_uop.mmv_count).bits  
+      }
     }
     next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_)
     next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_)

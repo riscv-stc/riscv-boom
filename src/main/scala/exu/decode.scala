@@ -10,14 +10,14 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
-import freechips.rocketchip.rocket.RVCExpander
-import freechips.rocketchip.rocket.{CSR, Causes, VConfig, VType, MConfig, MType}
+import freechips.rocketchip.rocket.{CSR, Causes, MConfig, MStrideDilation, MType, RVCExpander, VConfig, VType}
 import freechips.rocketchip.util.{UIntIsOneOf, rightOR, uintToBitPat}
 import FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
 import freechips.rocketchip.util._
+import freechips.rocketchip.rocket.{MShape, MPad, MStrideDilation, MKernelPos}
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -153,6 +153,13 @@ class DecodeUnitIo(implicit p: Parameters) extends BoomBundle
   val csr_tilem = Input(UInt(xLen.W))
   val csr_tilek = Input(UInt(xLen.W))
   val csr_tilen = Input(UInt(xLen.W))
+
+  val csr_moutsh = Input(new MShape)
+  val csr_minsh = Input(new MShape)
+  val csr_mpad = Input(new MPad)
+  val csr_mstdi = Input(new MStrideDilation())
+  val csr_minsk = Input(new MKernelPos)
+  val csr_moutsk = Input(new MKernelPos)
 }
 
 /**
@@ -217,9 +224,11 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   val cs = Wire(new CtrlSigs()).decode(inst, decode_table)
 
   // Exception Handling
-  val vsetvl = cs.uopc.isOneOf(uopVSETVL, uopVSETVLI, uopVSETIVLI)
-  val mset = cs.uopc.isOneOf(uopMSETTYPEI, uopMSETTILEMI, uopMSETTILEKI,uopMSETTILENI,uopMSETTYPE,uopMSETTILEM,uopMSETTILEK,uopMSETTILEN)
-  val mconfig = uop.is_rvm 
+  val vsetvl  = cs.uopc.isOneOf(uopVSETVL,    uopVSETVLI,    uopVSETIVLI)
+  val mset    = cs.uopc.isOneOf(uopMSETTYPEI, uopMSETTILEMI, uopMSETTILEKI, uopMSETTILENI,
+                                uopMSETTYPE,  uopMSETTILEM,  uopMSETTILEK,  uopMSETTILEN,
+                                uopMSETOUTSH, uopMSETINSH,   uopMSETSK)
+  val mconfig = uop.is_rvm
   io.csr_decode.csr := Mux(vsetvl | mset, 0.U, inst(31,20))
   val csr_en = cs.csr_cmd.isOneOf(CSR.S, CSR.C, CSR.W) && !vsetvl && !mconfig
   val csr_ren = cs.csr_cmd.isOneOf(CSR.S, CSR.C) && uop.lrs1 === 0.U
@@ -439,10 +448,15 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.vs1_emul    := vs1_emul
     uop.vs2_emul    := vs2_emul
     if(usingMatrix) {
-      uop.vd_emul := Mux(cs.uopc.isOneOf(uopMQMV_V), 2.U,
-                     Mux(cs.uopc.isOneOf(uopMWMV_V), 1.U, 
-                     Mux(cs.uopc.isOneOf(uopMMV_V),  0.U, vd_emul)))
+      // uop.vd_emul := Mux(cs.uopc.isOneOf(uopMQMV_V), 2.U,
+      //                Mux(cs.uopc.isOneOf(uopMWMV_V), 1.U, 
+      //                Mux(cs.uopc.isOneOf(uopMMV_V),  0.U, vd_emul)))
+      uop.vd_emul := Mux(cs.uopc.isOneOf(uopMMV_V),vlmul,vd_emul) 
+      when(cs.uopc.isOneOf(uopMMV_V))  {
+        uop.vl_ready := true.B
+      }         
     }
+    uop.mmv_count := 0.U
     //when (cs.is_rvv && !uop.v_unmasked) {
       //when (is_v_ls) {
         //uop.iq_type := IQT_MVEC
@@ -544,9 +558,20 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.tile_k := csr_tilek
 
 
+    uop.moutsh := io.csr_moutsh
+    uop.minsh := io.csr_minsh
+    uop.mpad := io.csr_mpad
+    uop.mstdi := io.csr_mstdi
+    uop.minsk := io.csr_minsk
+    uop.moutsk := io.csr_moutsk
+
+    val is_unfold = uop.uopc.isOneOf(uopMLUF, uopMSUF)
+    uop.ctrl.is_unfold := is_unfold
+
     val is_mls = cs.is_rvm & (cs.uses_ldq | cs.uses_stq)
     val mfcunt4 = uop.inst(29,26)
     val mfcunt3 = uop.inst(14,12)
+    val mfunct6 = uop.inst(31,26)
     val mxa = ((mfcunt4 === 9.U) || (mfcunt4 === 13.U)) && is_mls
     val mxb = ((mfcunt4 === 10.U) || (mfcunt4 === 14.U)) && is_mls
     val mxc = ((mfcunt4 === 0.U) || (mfcunt4 === 4.U)) && is_mls
@@ -556,18 +581,24 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       (mfcunt4 === 2.U)
     ) && (mfcunt3 =/= 7.U)
     val mcc = cs.is_rvm && ~(cs.uses_ldq | cs.uses_stq) && !mall && (mfcunt3 =/= 7.U)
-
+    uop.is_v_mls := Mux(mfunct6 === 34.U,true.B,false.B)
 
 
     val mslice_dim = uop.inst(27,26)
     val transposed = uop.inst(28).asBool()     // 0, row, normal; 1, col, transposed
 
-    val slice_cnt_tilem = (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed)
-    val slice_cnt_tilen = (mslice_dim === 2.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
-    val slice_cnt_tilek = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 2.U && !transposed)
-    val slice_len_tilem = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
-    val slice_len_tilen = (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed)
-    val slice_len_tilek = (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U &&  transposed)
+    val slice_cnt_tilem = Mux(is_unfold, (mslice_dim === 0.U) || (mslice_dim === 2.U),
+                          (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed))  // A  || C
+    val slice_cnt_tilen = Mux(is_unfold, false.B,
+                          (mslice_dim === 2.U &&  transposed) || (mslice_dim === 0.U &&  transposed))  // BT || CT
+    val slice_cnt_tilek = Mux(is_unfold, (mslice_dim === 1.U),
+                          (mslice_dim === 1.U &&  transposed) || (mslice_dim === 2.U && !transposed))  // AT || B
+    val slice_len_tilem = Mux(is_unfold, false.B,
+                          (mslice_dim === 1.U &&  transposed) || (mslice_dim === 0.U &&  transposed))  // AT || CT
+    val slice_len_tilen = Mux(is_unfold, (mslice_dim === 1.U) || (mslice_dim === 2.U),
+                          (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed))  // B  || C
+    val slice_len_tilek = Mux(is_unfold, (mslice_dim === 0.U),
+                          (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U &&  transposed))  // A  || BT
 
     val sel_slice_cnt = Mux(slice_cnt_tilem, csr_tilem,
                         Mux(slice_cnt_tilen, csr_tilen, csr_tilek))
@@ -621,8 +652,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.is_rvm        := cs.is_rvm
     uop.m_ls_ew       := cs.v_ls_ew
     uop.mconfig       := io.csr_mconfig
-
-    uop.m_split_last  := true.B
+    uop.m_split_last := Mux(cs.uopc.isOneOf(uopMMV_V),false.B,true.B)
     uop.m_slice_quad  := 0.U
     uop.m_slice_done  := false.B
     uop.isHSlice      := !transposed

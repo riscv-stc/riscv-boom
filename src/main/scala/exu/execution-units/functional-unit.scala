@@ -19,7 +19,6 @@ package boom.exu
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.chiselName
-
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.ALU._
 import freechips.rocketchip.util._
@@ -27,7 +26,7 @@ import freechips.rocketchip.tile.FPConstants._
 import freechips.rocketchip.tile.{FPUCtrlSigs, HasFPUParameters}
 import freechips.rocketchip.tile
 import freechips.rocketchip.rocket
-import freechips.rocketchip.rocket.{DecodeLogic,PipelinedMultiplier,BP,BreakpointUnit,Causes,CSR,VConfig,VType,MConfig,MType}
+import freechips.rocketchip.rocket.{BP, BreakpointUnit, CSR, Causes, DecodeLogic, MConfig, MKernelPos, MPad, MShape, MStrideDilation, MType, PipelinedMultiplier, VConfig, VType}
 
 //import FUConstants._
 import boom.common._
@@ -384,20 +383,23 @@ class ALUUnit(
     op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data,
                Mux(uop.ctrl.op1_sel.asUInt === OP1_PC  , Sext(uop_pc, xLen), 0.U))
   } else if(usingMatrix && isCsrUnit) {
-    val msetr    = uop.uopc.isOneOf(uopMSETTYPE, uopMSETTILEM, uopMSETTILEK, uopMSETTILEN)
-    val mseti    = uop.uopc.isOneOf(uopMSETTYPEI, uopMSETTILEMI, uopMSETTILEKI, uopMSETTILENI)
-    val mset     = msetr | mseti
-    val msettype = uop.uopc.isOneOf(uopMSETTYPE,  uopMSETTYPEI)
-    val msetm    = uop.uopc.isOneOf(uopMSETTILEM, uopMSETTILEMI)
-    val msetn    = uop.uopc.isOneOf(uopMSETTILEN, uopMSETTILENI)
-    val msetk    = uop.uopc.isOneOf(uopMSETTILEK, uopMSETTILEKI)
-    val useMax   = uop.ldst =/= 0.U && uop.lrs1 === 0.U && msetr
-    val msetdata = Mux(mseti, uop.imm_packed(15,3), rs1_data(12,0))
-    val tilemMax = numTrTileRows.U
-    val tilenMax = vLenb.U >> io.mconfig.mtype.msew
-    val tilekMax = tilemMax.min(tilenMax)
-    val msettile = Mux(msetm, tilemMax,
-                   Mux(msetn, tilenMax, tilekMax)).min(Mux(useMax, tilemMax+tilenMax, msetdata))
+    val msetr     = uop.uopc.isOneOf(uopMSETTYPE, uopMSETTILEM, uopMSETTILEK, uopMSETTILEN)
+    val mseti     = uop.uopc.isOneOf(uopMSETTYPEI, uopMSETTILEMI, uopMSETTILEKI, uopMSETTILENI)
+    val mset      = msetr | mseti
+    val msettype  = uop.uopc.isOneOf(uopMSETTYPE,  uopMSETTYPEI)
+    val msetm     = uop.uopc.isOneOf(uopMSETTILEM, uopMSETTILEMI)
+    val msetn     = uop.uopc.isOneOf(uopMSETTILEN, uopMSETTILENI)
+    val msetk     = uop.uopc.isOneOf(uopMSETTILEK, uopMSETTILEKI)
+    val msetoutsh = uop.uopc.isOneOf(uopMSETOUTSH)
+    val msetinsh  = uop.uopc.isOneOf(uopMSETINSH)
+    val msetsk    = uop.uopc.isOneOf(uopMSETSK)
+    val useMax    = uop.ldst =/= 0.U && uop.lrs1 === 0.U && msetr
+    val msetdata  = Mux(mseti, uop.imm_packed(15,3), rs1_data(12,0))
+    val tilemMax  = numTrTileRows.U
+    val tilenMax  = vLenb.U >> io.mconfig.mtype.msew
+    val tilekMax  = tilemMax.min(tilenMax)
+    val msettile  = Mux(msetm, tilemMax,
+                    Mux(msetn, tilenMax, tilekMax)).min(Mux(useMax, tilemMax+tilenMax, msetdata))
     op1_data = Mux(msettype, msetdata,
                Mux(mset,     msettile,
                Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data, 0.U)))
@@ -413,6 +415,10 @@ class ALUUnit(
     io.resp.bits.uop.tile_n := RegEnable(op1_data, msetn)
     io.resp.bits.uop.is_settilek := k_reg
     io.resp.bits.uop.tile_k := RegEnable(op1_data, msetk)
+
+    io.resp.bits.uop.moutsh.fromUInt(RegEnable(op1_data, msetoutsh))
+    io.resp.bits.uop.minsh.fromUInt(RegEnable(op1_data, msetinsh))
+    io.resp.bits.uop.minsk.fromUInt(RegEnable(op1_data, msetsk))
     /**********************************************************/
   } else {
     op1_data = Mux(uop.ctrl.op1_sel.asUInt === OP1_RS1 , rs1_data, 0.U)
@@ -431,6 +437,10 @@ class ALUUnit(
     val avl       = Mux(vsetivli, uop.prs1, rs1_data)
     val new_vl    = VType.computeVL(avl, vtypei, io.vconfig.vl, useCurrentVL, useMaxVL, false.B)
 
+    val msetoutsh = uop.uopc.isOneOf(uopMSETOUTSH)
+    val msetinsh  = uop.uopc.isOneOf(uopMSETINSH)
+    val msetsk    = uop.uopc.isOneOf(uopMSETSK)
+
     op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,     Sext(imm_xprlen.asUInt, xLen),
                Mux(uop.ctrl.op2_sel === OP2_IMMC,    uop.prs1(4,0),
                Mux(uop.ctrl.op2_sel === OP2_RS2 ,    rs2_data,
@@ -440,6 +450,10 @@ class ALUUnit(
     val set_vconfig = vsetvl | vsetvli | vsetivli
     io.resp.bits.uop.vconfig.vl := RegEnable(new_vl, set_vconfig)
     io.resp.bits.uop.vconfig.vtype := RegEnable(VType.fromUInt(vtypei), set_vconfig)
+
+    io.resp.bits.uop.mstdi.fromUInt(RegEnable(op2_data, msetoutsh))
+    io.resp.bits.uop.mpad.fromUInt(RegEnable(op2_data, msetinsh))
+    io.resp.bits.uop.moutsk.fromUInt(RegEnable(op2_data, msetsk))
   } else {
     op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,     Sext(imm_xprlen.asUInt, xLen),
                Mux(uop.ctrl.op2_sel === OP2_IMMC,    uop.prs1(4,0),

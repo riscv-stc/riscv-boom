@@ -359,6 +359,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   }
 
   if (usingMatrix) {
+    m_pipeline.io.vbusy_status := v_rename_stage.io.vbusy_status
     m_pipeline.io.brupdate := brupdate
     m_pipeline.io.vl_wakeup := vl_wakeup
     m_pipeline.io.mtype_wakeup := mtype_wakeup
@@ -1059,8 +1060,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
                     !dec_fbundle.uops(w).bits.inst(31) && (dec_fbundle.uops(w).bits.inst(11, 7) === 0.U) && (dec_fbundle.uops(w).bits.inst(19, 15) === 0.U)
       dec_vconfig(w).vconfig.vl := Mux(dec_fbundle.uops(w).bits.inst(31), dec_fbundle.uops(w).bits.inst(19, 15), VType.fromUInt(dec_fbundle.uops(w).bits.inst(27, 20)).vlMax)
       dec_vconfig(w).vconfig.vtype := VType.fromUInt(dec_fbundle.uops(w).bits.inst(27, 20))
-      dec_vconfig(w).vconfig.vtype.vma := true.B
-      dec_vconfig(w).vconfig.vtype.vta := true.B
       dec_vconfig(w).vl_ready := (dec_fbundle.uops(w).bits.inst(19, 15) === 0.U && dec_fbundle.uops(w).bits.inst(11, 7) =/= 0.U) || dec_fbundle.uops(w).bits.inst(31)
     }
     if (usingMatrix) {
@@ -1100,6 +1099,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       decode_units(w).io.enq.uop.tile_n_ready := ntileq_data(w).tile_ready
       decode_units(w).io.csr_tilek := ktileq_data(w).tile_len
       decode_units(w).io.enq.uop.tile_k_ready := ktileq_data(w).tile_ready
+
+      // FIXME
+      decode_units(w).io.csr_moutsh := csr.io.matrix.get.moutsh
+      decode_units(w).io.csr_minsh := csr.io.matrix.get.minsh
+      decode_units(w).io.csr_mpad := csr.io.matrix.get.mpad
+      decode_units(w).io.csr_mstdi := csr.io.matrix.get.mstdi
+      decode_units(w).io.csr_minsk := csr.io.matrix.get.minsk
+      decode_units(w).io.csr_moutsk := csr.io.matrix.get.moutsk
     }
 
     dec_uops(w) := decode_units(w).io.deq.uop
@@ -1603,7 +1610,8 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                             Mux(dis_uops(w).rt(RS1, isVector), v_uop.pvs1(0).bits, dis_uops(w).lrs1))))
         dis_uops(w).prs2 := Mux(dis_uops(w).rt(RS2, isFloat ), f_uop.prs2,
                             Mux(dis_uops(w).rt(RS2, isInt   ), i_uop.prs2,
-                            Mux(dis_uops(w).rt(RS2, isMatrix), m_uop.prs2, dis_uops(w).lrs2)))
+                            Mux(dis_uops(w).rt(RS2, isMatrix), m_uop.prs2, 
+                            Mux(dis_uops(w).rt(RS2, isVector), v_uop.pvs2(0).bits,dis_uops(w).lrs2))))
         dis_uops(w).prs3 := Mux(dis_uops(w).rt(RD,  isAccTile), m_uop.prs3, f_uop.prs3)
         dis_uops(w).m_scalar_busy := dis_uops(w).is_rvm && dis_uops(w).uses_scalar
       }
@@ -1772,6 +1780,10 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
     }
   }
 
+  for (w <- 0 until memWidth) {
+    m_pipeline.io.trclr(w).valid := mem_iss_unit.io.iss_valids(w) && mem_iss_unit.io.iss_uops(w).ctrl.is_unfold
+    m_pipeline.io.trclr(w).bits  := mem_iss_unit.io.iss_uops(w).pdst
+  }
 
     m_rename_stage.io.matrix_iss_valid := m_pipeline.io.matrix_iss_valid
     m_rename_stage.io.matrix_iss_uop := m_pipeline.io.matrix_iss_uop
@@ -1878,6 +1890,7 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   )
   pred_wakeup.bits.uop := iss_uops(jmp_unit_idx)
   pred_wakeup.bits.fflags := DontCare
+  pred_wakeup.bits.is_merge := DontCare
   pred_wakeup.bits.data := DontCare
   pred_wakeup.bits.predicated := DontCare
 
@@ -2159,6 +2172,9 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
     val msettilem = csr_uop.uopc === uopMSETTILEM || csr_uop.uopc === uopMSETTILEMI
     val msettilen = csr_uop.uopc === uopMSETTILEN || csr_uop.uopc === uopMSETTILENI
     val msettilek = csr_uop.uopc === uopMSETTILEK || csr_uop.uopc === uopMSETTILEKI
+    val msetoutsh = csr_uop.uopc === uopMSETOUTSH
+    val msetinsh  = csr_uop.uopc === uopMSETINSH
+    val msetsk    = csr_uop.uopc === uopMSETSK
 
     val cmt_rvm = (0 until coreParams.retireWidth).map{i =>
         rob.io.commit.arch_valids(i) && rob.io.commit.uops(i).is_rvm}.reduce(_ || _)
@@ -2178,6 +2194,19 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
     csr.io.matrix.get.set_tilem.bits    := csr_exe_unit.io.iresp.bits.data
     csr.io.matrix.get.set_tilen.bits    := csr_exe_unit.io.iresp.bits.data
     csr.io.matrix.get.set_tilek.bits    := csr_exe_unit.io.iresp.bits.data
+
+    csr.io.matrix.get.set_moutsh.valid  := csr_vld && msetoutsh
+    csr.io.matrix.get.set_moutsh.bits   := csr_uop.moutsh
+    csr.io.matrix.get.set_minsh.valid   := csr_vld && msetinsh
+    csr.io.matrix.get.set_minsh.bits    := csr_uop.minsh
+    csr.io.matrix.get.set_mpad.valid    := csr_vld && msetinsh
+    csr.io.matrix.get.set_mpad.bits     := csr_uop.mpad
+    csr.io.matrix.get.set_mstdi.valid   := csr_vld && msetoutsh
+    csr.io.matrix.get.set_mstdi.bits    := csr_uop.mstdi
+    csr.io.matrix.get.set_minsk.valid   := csr_vld && msetsk
+    csr.io.matrix.get.set_minsk.bits    := csr_uop.minsk
+    csr.io.matrix.get.set_moutsk.valid  := csr_vld && msetsk
+    csr.io.matrix.get.set_moutsk.bits   := csr_uop.moutsk
 
     csr_exe_unit.io.mconfig := csr.io.matrix.get.mconfig
     csr.io.matrix.get.set_ms_dirty := cmt_rvm
@@ -2365,8 +2394,9 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
 
     io.lsu.vrf_rport        <> v_pipeline.io.lsu_vrf_rport
     io.lsu.tile_rport       <> m_pipeline.io.lsu_tile_rport
+    m_pipeline.io.vec_rport <> v_pipeline.io.matrix_rport
     m_pipeline.io.lsu_acc_rreq        := io.lsu.acc_rreq
-    for (w <- 0 until numVLdPorts) {
+    for (w <- 0 until numVLdPorts * 2) {
       m_pipeline.io.lsu_tile_wbk(w).bits := io.lsu.tile_wbk(w).bits
       m_pipeline.io.lsu_tile_wbk(w).valid := io.lsu.tile_wbk(w).valid
       io.lsu.tile_wbk(w).ready := true.B
@@ -2471,15 +2501,21 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
     }
     if (usingMatrix) {
       for ((wdata, wakeup) <- m_pipeline.io.debug_wb_wdata zip m_pipeline.io.wakeups) {
-        rob.io.wb_resps(cnt) <> wakeup
         rob.io.debug_wb_valids(cnt) := wakeup.valid
         rob.io.debug_wb_wdata(cnt) := wdata
         cnt += 1
+      }
 
-        assert (!(wakeup.valid && !wakeup.bits.uop.rt(RD, isMatrix)),
+      cnt -= m_pipeline.io.wakeups.length
+      for ((bypass, wakeup) <- m_pipeline.io.wakeup_bypass zip m_pipeline.io.wakeups) {
+        rob.io.wb_resps(cnt).valid := wakeup.valid && !bypass
+        rob.io.wb_resps(cnt).bits := wakeup.bits
+        cnt += 1
+
+        assert (!(wakeup.valid && !bypass && !wakeup.bits.uop.rt(RD, isMatrix)),
           "[core] Matrix wakeup does not write back to a Matrix register.")
 
-        assert (!(wakeup.valid && !wakeup.bits.uop.is_rvm),
+        assert (!(wakeup.valid && !bypass && !wakeup.bits.uop.is_rvm),
           "[core] Matrix wakeup does not involve an Matrix instruction.")
       }
     }
