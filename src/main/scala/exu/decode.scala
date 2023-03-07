@@ -549,13 +549,12 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
   if (usingMatrix) {
     dontTouch(io.csr_mconfig.mtype.msew)
     val csr_msew = io.csr_mconfig.mtype.msew
-    val csr_tilem = io.csr_tilem
-    val csr_tilen = io.csr_tilen
-    val csr_tilek = io.csr_tilek
+    val vlmul_sign = io.csr_vconfig.vtype.vlmul_sign
+    val vlmul_mag  = io.csr_vconfig.vtype.vlmul_mag
+    val vlmul = Mux(vlmul_sign, 0.U(2.W), vlmul_mag)
+    val csr_vsew  = io.csr_vconfig.vtype.vsew
     uop.mconfig := io.csr_mconfig
-    uop.tile_m := csr_tilem
-    uop.tile_n := csr_tilen
-    uop.tile_k := csr_tilek
+
 
 
     uop.moutsh := io.csr_moutsh
@@ -583,14 +582,20 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val mcc = cs.is_rvm && ~(cs.uses_ldq | cs.uses_stq) && !mall && (mfcunt3 =/= 7.U)
     uop.is_v_mls := Mux(mfunct6 === 34.U,true.B,false.B)
 
-
+    
+    val is_mse_v = cs.uopc.isOneOf(uopMSE_V)
     val mslice_dim = uop.inst(27,26)
     val transposed = uop.inst(28).asBool()     // 0, row, normal; 1, col, transposed
+    val is_matrix_v = uop.inst(31).asBool()
+    val msew = Mux(is_mls, cs.v_ls_ew, csr_msew)
+    val csr_tilem = io.csr_tilem
+    val csr_tilen = Mux(is_mse_v, 1.U << (vlmul +& msew - csr_vsew), io.csr_tilen)
+    val csr_tilek = io.csr_tilek
 
     val slice_cnt_tilem = Mux(is_unfold, (mslice_dim === 0.U) || (mslice_dim === 2.U),
                           (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed))  // A  || C
     val slice_cnt_tilen = Mux(is_unfold, false.B,
-                          (mslice_dim === 2.U &&  transposed) || (mslice_dim === 0.U &&  transposed))  // BT || CT
+                          (mslice_dim === 2.U &&  transposed) || (mslice_dim === 0.U &&  transposed))  // BT || CT 
     val slice_cnt_tilek = Mux(is_unfold, (mslice_dim === 1.U),
                           (mslice_dim === 1.U &&  transposed) || (mslice_dim === 2.U && !transposed))  // AT || B
     val slice_len_tilem = Mux(is_unfold, false.B,
@@ -599,14 +604,16 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                           (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed))  // B  || C
     val slice_len_tilek = Mux(is_unfold, (mslice_dim === 0.U),
                           (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U &&  transposed))  // A  || BT
+    val sel_slice_cnt = Mux(is_mse_v, csr_tilen,
+                        Mux(slice_cnt_tilem, csr_tilem,
+                        Mux(slice_cnt_tilen, csr_tilen, csr_tilek)))
+    val sel_slice_len = Mux(is_mse_v, csr_tilem,
+                        Mux(slice_len_tilem, csr_tilem,
+                        Mux(slice_len_tilen, csr_tilen, csr_tilek)))
 
-    val sel_slice_cnt = Mux(slice_cnt_tilem, csr_tilem,
-                        Mux(slice_cnt_tilen, csr_tilen, csr_tilek))
-    val sel_slice_len = Mux(slice_len_tilem, csr_tilem,
-                        Mux(slice_len_tilen, csr_tilen, csr_tilek))
-
-    val msew = Mux(is_mls, cs.v_ls_ew, csr_msew)
+   
     val is_mmv  = cs.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V)
+    
     val is_mopa = cs.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA)
     val mqwiden = cs.uopc.isOneOf(uopMQMA,uopMQMV_T,uopMQMV_V, uopMQADD, uopMQSUB, uopMQRSUB)
     val mwwiden = cs.uopc.isOneOf(uopMWMA,uopMWMV_T,uopMWMV_V, uopMWADD, uopMWSUB, uopMWRSUB)
@@ -622,6 +629,10 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       assert(msew <= 3.U, "Unsupported msew")
     }
 
+    uop.tile_m := csr_tilem
+    uop.tile_n := csr_tilen
+    uop.tile_k := csr_tilek
+  
     when (is_mls) {
       uop.mem_size   := cs.v_ls_ew
       uop.mem_signed := false.B

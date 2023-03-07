@@ -679,12 +679,12 @@ class IssueSlot(
   }
   if(usingMatrix ) { 
     when((k_ok || n_ok || m_ok) ||(io.in_uop.bits.tile_m_ready && io.in_uop.bits.tile_n_ready && io.in_uop.bits.tile_k_ready)){
-      val is_mls = Mux(io.in_uop.valid,io.in_uop.bits.uopc.isOneOf(uopMLE,uopMSE),slot_uop.uopc.isOneOf(uopMLE,uopMSE))
+      val is_mls = Mux(io.in_uop.valid,io.in_uop.bits.uopc.isOneOf(uopMLE,uopMSE,uopMSE_V),slot_uop.uopc.isOneOf(uopMLE,uopMSE,uopMSE_V))
       val is_mopa = Mux(io.in_uop.valid,io.in_uop.bits.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA),slot_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA))
       val is_mmv =  Mux(io.in_uop.valid,io.in_uop.bits.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V),slot_uop.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V))
       val transposed = Mux(io.in_uop.valid,io.in_uop.bits.transposed,slot_uop.transposed)
       val mslice_dim = Mux(io.in_uop.valid,io.in_uop.bits.mslice_dim,slot_uop.mslice_dim)
-
+      val is_mse_v = Mux(io.in_uop.valid,io.in_uop.bits.uopc.isOneOf(uopMSE_V),slot_uop.uopc.isOneOf(uopMSE_V))
       val slice_cnt_tilem = (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed)
       val slice_cnt_tilen = (mslice_dim === 2.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
       val slice_cnt_tilek = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 2.U && !transposed)
@@ -716,10 +716,12 @@ class IssueSlot(
         sel_k := slot_uop.tile_k
       }
 
-      val sel_slice_cnt = Mux(slice_cnt_tilem, sel_m,
-                          Mux(slice_cnt_tilen, sel_n, sel_k))
-      val sel_slice_len = Mux(slice_len_tilem, sel_m,
-                          Mux(slice_len_tilen, sel_n, sel_k))
+      val sel_slice_cnt = Mux(is_mse_v,sel_n,
+                          Mux(slice_cnt_tilem, sel_m,
+                          Mux(slice_cnt_tilen, sel_n, sel_k)))
+      val sel_slice_len = Mux(is_mse_v,sel_m,
+                          Mux(slice_len_tilem, sel_m,
+                          Mux(slice_len_tilen, sel_n, sel_k)))
       slot_uop.m_tilem   := Mux(is_mls,  sel_slice_cnt, 
                                 Mux(is_mopa, sel_k, sel_m))
       slot_uop.m_tilek   := Mux(is_mls, sel_slice_len, 
