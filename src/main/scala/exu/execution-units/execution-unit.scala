@@ -128,8 +128,8 @@ abstract class ExecutionUnit(
     val ll_iresp = if (writesLlIrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_fresp = if (writesLlFrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
     val ll_vresp = if (writesLlVrf)   new DecoupledIO(new ExeUnitResp(dataWidth)) else null
-    val mlsuResp = if (writesAccTile) new DecoupledIO(new ExeUnitResp(dataWidth)) else null
-    val mlsuWbk  = if (writesAccTile) Flipped(Valid(new ExeUnitResp(vLen)))       else null
+    val mlsuResp = if (writesAccTile) Vec(numVLdPorts,new DecoupledIO(new ExeUnitResp(dataWidth))) else null
+    val mlsuWbk  = if (writesAccTile) Flipped(Vec(numVLdPorts,Valid(new ExeUnitResp(vLen))))       else null
     // acc read port for lsu
     val accReadReq  = if(writesAccTile) Flipped(ValidIO(new AccReadReq()))        else null
     val accReadResp = if(writesAccTile) ValidIO(new AccReadResp())                else null
@@ -1412,21 +1412,23 @@ class MatExeUnit() (implicit p: Parameters)
   mxu.io.clrReq.bits.ridx      := io.req.bits.uop.pdst
   mxu.io.clrReqUop             := io.req.bits.uop
   // write row slices
-  mxu.io.rowWriteReq.valid     := io.mlsuWbk.valid && io.mlsuWbk.bits.uop.rt(RD, isAccTile) && io.mlsuWbk.bits.uop.isHSlice
-  mxu.io.rowWriteReq.bits.ridx := io.mlsuWbk.bits.uop.pdst
-  mxu.io.rowWriteReq.bits.sidx := io.mlsuWbk.bits.uop.m_sidx
-  mxu.io.rowWriteReq.bits.sew  := io.mlsuWbk.bits.uop.td_eew
-  mxu.io.rowWriteReqUop        := io.mlsuWbk.bits.uop
-  mxu.io.rowWriteData          := io.mlsuWbk.bits.data
-  mxu.io.rowWriteMask          := io.mlsuWbk.bits.vmask
+  for (w <- 0 until numVLdPorts) {
+  mxu.io.rowWriteReq(w).valid     := io.mlsuWbk(w).valid && io.mlsuWbk(w).bits.uop.rt(RD, isAccTile) && io.mlsuWbk(w).bits.uop.isHSlice
+  mxu.io.rowWriteReq(w).bits.ridx := io.mlsuWbk(w).bits.uop.pdst
+  mxu.io.rowWriteReq(w).bits.sidx := io.mlsuWbk(w).bits.uop.m_sidx
+  mxu.io.rowWriteReq(w).bits.sew  := io.mlsuWbk(w).bits.uop.td_eew
+  mxu.io.rowWriteReqUop(w)        := io.mlsuWbk(w).bits.uop
+  mxu.io.rowWriteData(w)          := io.mlsuWbk(w).bits.data
+  mxu.io.rowWriteMask(w)          := io.mlsuWbk(w).bits.vmask
   // write col slices
-  mxu.io.colWriteReq.valid     := io.mlsuWbk.valid && io.mlsuWbk.bits.uop.rt(RD, isAccTile) && !io.mlsuWbk.bits.uop.isHSlice
-  mxu.io.colWriteReq.bits.ridx := io.mlsuWbk.bits.uop.pdst
-  mxu.io.colWriteReq.bits.sidx := io.mlsuWbk.bits.uop.m_sidx
-  mxu.io.colWriteReq.bits.sew  := io.mlsuWbk.bits.uop.td_eew
-  mxu.io.colWriteReqUop        := io.mlsuWbk.bits.uop
-  mxu.io.colWriteData          := io.mlsuWbk.bits.data
-  mxu.io.colWriteMask          := io.mlsuWbk.bits.vmask
+  mxu.io.colWriteReq(w).valid     := io.mlsuWbk(w).valid && io.mlsuWbk(w).bits.uop.rt(RD, isAccTile) && !io.mlsuWbk(w).bits.uop.isHSlice
+  mxu.io.colWriteReq(w).bits.ridx := io.mlsuWbk(w).bits.uop.pdst
+  mxu.io.colWriteReq(w).bits.sidx := io.mlsuWbk(w).bits.uop.m_sidx
+  mxu.io.colWriteReq(w).bits.sew  := io.mlsuWbk(w).bits.uop.td_eew
+  mxu.io.colWriteReqUop(w)        := io.mlsuWbk(w).bits.uop
+  mxu.io.colWriteData(w)          := io.mlsuWbk(w).bits.data
+  mxu.io.colWriteMask(w)          := io.mlsuWbk(w).bits.vmask
+  }
   // read row slices -- Port 0, for m-pipeline
   mxu.io.rowReadReq.valid      := io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE)
   mxu.io.rowReadReq.bits.ridx  := io.req.bits.uop.prs1
@@ -1455,10 +1457,12 @@ class MatExeUnit() (implicit p: Parameters)
     io.mopaResp.bits.uop  := mxu.io.macRespUop
     io.mopaResp.bits.data := 0.U
     io.mopaResp.bits.predicated := false.B
-    io.mlsuResp.valid     := (mxu.io.rowWriteResp.valid || mxu.io.colWriteResp.valid)
-    io.mlsuResp.bits.uop  := Mux(mxu.io.rowWriteResp.valid, mxu.io.rowWriteRespUop, mxu.io.colWriteRespUop)
-    io.mlsuResp.bits.data := 0.U
-    io.mlsuResp.bits.predicated := false.B
+    for (w <- 0 until numVLdPorts) {
+      io.mlsuResp(w).valid     := (mxu.io.rowWriteResp(w).valid || mxu.io.colWriteResp(w).valid)
+      io.mlsuResp(w).bits.uop  := Mux(mxu.io.rowWriteResp(w).valid, mxu.io.rowWriteRespUop(w), mxu.io.colWriteRespUop(w))
+      io.mlsuResp(w).bits.data := 0.U
+      io.mlsuResp(w).bits.predicated := false.B
+    }
   }
 
   if (writesLlVrf) {

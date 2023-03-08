@@ -29,7 +29,7 @@ import boom.util._
 class MatPipeline(implicit p: Parameters) extends BoomModule {
   val matIssueParams = issueParams.find(_.iqType == IQT_MAT.litValue).get
   val dispatchWidth = matIssueParams.dispatchWidth
-  val numWakeupPorts = matWidth * 3 + numVLdPorts * 2   // (MCLRACC; MOPA) + (VLSU to tr tile + VLSU to acc tile)
+  val numWakeupPorts = matWidth * 4 + numVLdPorts * 2  // (MCLRACC; MOPA) + (VLSU to tr tile + VLSU to acc tile)
 
   val io = IO(new Bundle {
     // pipeline ctrl signals
@@ -233,8 +233,8 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
     trtileReg.io.writePorts(w).bits.quad := lsuWbkBits.uop.m_slice_quad
 
     exe_units.withFilter(_.writesAccTile).map(eu => {
-      eu.io.mlsuWbk.valid := io.lsu_tile_wbk(w).valid && lsuWbkBits.uop.rt(RD, isAccTile)
-      eu.io.mlsuWbk.bits := io.lsu_tile_wbk(w).bits
+      eu.io.mlsuWbk(w).valid := io.lsu_tile_wbk(w).valid && lsuWbkBits.uop.rt(RD, isAccTile)
+      eu.io.mlsuWbk(w).bits := io.lsu_tile_wbk(w).bits
       eu.io.accReadReq := io.lsu_acc_rreq
       io.lsu_acc_rresp := eu.io.accReadResp
     })
@@ -265,8 +265,10 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
   for(eu <- exe_units) {
     io.wakeups(w_cnt)   := eu.io.mclrResp
     io.wakeups(w_cnt+1) := eu.io.mopaResp
-    io.wakeups(w_cnt+2) := eu.io.mlsuResp
-    w_cnt += 3
+    for (w <- 0 until numVLdPorts){
+      io.wakeups(w_cnt+ 2+ w) := eu.io.mlsuResp(w)
+    }
+    w_cnt += 2 + numVLdPorts
   }
 
   for ((wdata, wakeup) <- io.debug_wb_wdata zip io.wakeups) {

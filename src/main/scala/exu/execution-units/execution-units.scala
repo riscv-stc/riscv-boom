@@ -173,7 +173,9 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val 
       //FIX ME
       mat_exe_unit.io.mclrResp.ready := DontCare
       mat_exe_unit.io.mopaResp.ready := DontCare
-      mat_exe_unit.io.mlsuResp.ready := DontCare
+      for (w <- 0 until numVLdPorts) {
+        mat_exe_unit.io.mlsuResp(w).ready := DontCare
+      }
     }
   }
 

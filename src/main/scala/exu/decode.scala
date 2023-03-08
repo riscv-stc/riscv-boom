@@ -564,7 +564,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.minsk := io.csr_minsk
     uop.moutsk := io.csr_moutsk
 
-    val is_unfold = uop.uopc.isOneOf(uopMLUF, uopMSUF)
+    val is_unfold = uop.uopc.isOneOf(uopMLUF, uopMSFD)
     uop.ctrl.is_unfold := is_unfold
 
     val is_mls = cs.is_rvm & (cs.uses_ldq | cs.uses_stq)

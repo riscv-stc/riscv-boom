@@ -510,11 +510,11 @@ class RegisterReadDecode(supportedUnits: SupportedFuncUnits)(implicit p: Paramet
   io.rrd_uop.ctrl.fcn_dw  := rrd_cs.fcn_dw.asBool
   if (usingMatrix) {
     io.rrd_uop.ctrl.is_load := io.rrd_uop.uopc.isOneOf(uopLD, uopVL, uopVLM, uopVLFF, uopVLS, uopVLUX, uopVLOX, uopMLE, uopMLUF)
-    io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopVSA, uopVSMA, uopVSSA, uopVSUXA, uopVSOXA, uopAMO_AG, uopMSE, uopMSUF, uopMSE_V)
+    io.rrd_uop.ctrl.is_sta  := io.rrd_uop.uopc.isOneOf(uopSTA, uopVSA, uopVSMA, uopVSSA, uopVSUXA, uopVSOXA, uopAMO_AG, uopMSE, uopMSFD, uopMSE_V)
     io.rrd_uop.ctrl.is_std  := io.rrd_uop.uopc === uopSTD || (io.rrd_uop.ctrl.is_sta && io.rrd_uop.rt(RS2, isInt) && !io.rrd_uop.is_rvv)
     io.rrd_uop.ctrl.is_vmlogic  := io.rrd_uop.uopc.isOneOf(uopVMAND, uopVMNAND, uopVMANDNOT, uopVMXOR, uopVMOR, uopVMNOR, uopVMORNOT, uopVMXNOR)
     io.rrd_uop.ctrl.is_vmscmp   := io.rrd_uop.uopc.isOneOf(uopVMSEQ, uopVMSNE, uopVMSLTU, uopVMSLT, uopVMSLEU, uopVMSLE, uopVMSGTU, uopVMSGT)
-    io.rrd_uop.ctrl.is_unfold := io.rrd_uop.uopc.isOneOf(uopMLUF, uopMSUF)
+    io.rrd_uop.ctrl.is_unfold := io.rrd_uop.uopc.isOneOf(uopMLUF, uopMSFD)
     when(io.rrd_uop.uopc.isOneOf(uopVDIV, uopVDIVU, uopVREM, uopVREMU)) {
       io.rrd_uop.ctrl.fcn_dw := Mux(io.rrd_uop.vconfig.vtype.vsew === 3.U, true.B, false.B)
     }
