@@ -1745,6 +1745,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
 
   for (w <- 0 until numVLdPorts) {
     val vldq_idx = io.vmem_ld_ports(w).resp.bits.vldq_idx
+    val vload_resp_ml_wbq        = VecInit(io.vmem_ld_ports.map(vld => Mux(vld.resp.bits.is_unit, vldq(vld.resp.bits.vldq_idx), vlxq(vld.resp.bits.vldq_idx))))
     when(io.vmem_ld_ports(w).resp.valid && !io.vmem_ld_ports(w).resp.bits.is_vst && io.vmem_ld_ports(w).resp.bits.is_unit) {
       vldq(vldq_idx).bits.succeeded := true.B
       when((vldq(vldq_idx).bits.uop.is_rvv && vldq(vldq_idx).bits.uop.v_split_last) ||
@@ -1752,7 +1753,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         val ldq_idx = vldq(vldq_idx).bits.uop.ldq_idx
         ldq(ldq_idx).bits.succeeded := true.B
       }
-      when(vldq(vldq_idx).bits.uop.is_rvm) {
+      when(vldq(vldq_idx).bits.uop.is_rvm && 
+          ml_wbq(w)(vload_resp_ml_wbq(w).bits.ml_wbq_idx).ml_wbq_rob_idx === vload_resp_ml_wbq(w).bits.uop.rob_idx) {
         ml_wbq(w)(vldq(vldq_idx).bits.ml_wbq_idx).ml_wbq_count := ml_wbq(w)(vldq(vldq_idx).bits.ml_wbq_idx).ml_wbq_count + PopCount(vldq(vldq_idx).bits.vmask)
       }
     }
