@@ -39,6 +39,7 @@ object AccTileConstants {
   val SUB = 3.U(4.W)
   val CVT = 4.U(4.W)
   val VECMACC = 5.U(4.W)
+  val ONE_OP = 8.U(4.W)
 }
 
 import AccTileConstants._
@@ -311,7 +312,8 @@ class FpMacUnit(
   mulRawToRec32.io.detectTininess := pipeStage0.bits.detectTininess
 
   // ----------------- Recoded fp32 + fp32. -----------------
-  val addRecSrcA = Mux(pipeStage0.bits.aluType(1), recA, mulRawToRec32.io.out)
+  val addRecSrcA = Mux(pipeStage0.bits.aluType(3), 0.U , 
+                   Mux(pipeStage0.bits.aluType(1), recA, mulRawToRec32.io.out))
   //val addRecSrcB = recC
   val addRecSrcB = if (fpLatency > 1) {
     Mux((pipeStage0.bits.aluType === MULT) || pipeStage0.bits.autoClr, 0.U,

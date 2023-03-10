@@ -604,10 +604,10 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
                           (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed))  // B  || C
     val slice_len_tilek = Mux(is_unfold, (mslice_dim === 0.U),
                           (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U &&  transposed))  // A  || BT
-    val sel_slice_cnt = Mux(is_mse_v, csr_tilen,
+    val sel_slice_cnt = Mux(is_mse_v, csr_tilem,
                         Mux(slice_cnt_tilem, csr_tilem,
                         Mux(slice_cnt_tilen, csr_tilen, csr_tilek)))
-    val sel_slice_len = Mux(is_mse_v, csr_tilem,
+    val sel_slice_len = Mux(is_mse_v, csr_tilen,
                         Mux(slice_len_tilem, csr_tilem,
                         Mux(slice_len_tilen, csr_tilen, csr_tilek)))
 

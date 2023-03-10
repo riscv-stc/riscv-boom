@@ -3251,7 +3251,7 @@ class VecLSAddrGenUnit(
     val vrf_rdata    = Input(UInt(vLen.W))
     val vrf_emul     = Output(UInt(3.W))
     val vrf_shdir    = Output(Bool())
-    val vrf_shamt    = Output(UInt(log2Ceil(vLenb.max(p(freechips.rocketchip.subsystem.CacheBlockBytes)/2)).W))
+    val vrf_shamt    = Output(UInt(vLenSz.W))
     val vrf_data     = Output(UInt(vLen.W))
     val tile_rreq    = ValidIO(new TileReadReq())
     val update_ls    = Output(Valid(new LSSplitCnt()))
@@ -3303,7 +3303,7 @@ class VecLSAddrGenUnit(
   val matrix_old_row_count = WireInit(0.U(vLenSz.W))
   val matrix_new_row_count = WireInit(0.U(vLenSz.W))
   val need_merge = WireInit(false.B)
-  val ms_v_cnt       = RegInit(0.U(4.W))
+  val ms_v_cnt       = WireInit(0.U(4.W))
   // appended for mle and mse control
   val sliceCntCtr    = RegInit(0.U(rLenbSz.W))
   val splitCnt       = RegInit(0.U((rLenSz+1).W))
@@ -3548,9 +3548,9 @@ class VecLSAddrGenUnit(
             sliceBaseAddr  := sliceBaseAddr + Mux(is_unfold_r, unfold_inc, op2)
             sliceBlockAddr := 0.U
 
-            ms_v_cnt := ms_v_cnt + sliceCntCtr * sliceBytes >> vLenb.U
-            matrix_old_row_count := sliceCntCtr * sliceBytes
-            matrix_new_row_count := (sliceCntCtr + 1.U) * sliceBytes
+            ms_v_cnt := sliceCntCtr * sliceBytes >> vLenbSz.U
+            matrix_old_row_count := (Cat(Fill((vLenSz - rLenbSz),0.U(1.W)), sliceCntCtr) * sliceBytes)  << 3.U
+            matrix_new_row_count := (Cat(Fill((vLenSz - rLenbSz),0.U(1.W)), (sliceCntCtr +& 1.U)) * sliceBytes) << 3.U
             need_merge := Mux(matrix_old_row_count > matrix_new_row_count, true.B,false.B)
             when (is_unfold_r) {
               val pad_diff  = Cat(0.U(1.W), hout_pos_r).asSInt() -& Cat(0.U(1.W), pad_l_r).asSInt()
@@ -3562,7 +3562,6 @@ class VecLSAddrGenUnit(
             }
             when (misaligned || sliceCntCtr +& 1.U === uop.m_slice_cnt) {
               sliceCntCtr  := 0.U
-              ms_v_cnt     := 0.U
               if (fast_gen) {
                 when (io.req.valid) {
                   init_struct(vl_leq_cl)
@@ -3659,9 +3658,9 @@ class VecLSAddrGenUnit(
             sliceBlockAddr := 0.U
             sliceCrossBlk  := false.B
 
-            ms_v_cnt := ms_v_cnt + sliceCntCtr * sliceBytes >> vLenb.U
-            matrix_old_row_count := sliceCntCtr * sliceBytes << 3.U
-            matrix_new_row_count := (sliceCntCtr + 1.U) * sliceBytes << 3.U
+            ms_v_cnt := sliceCntCtr * sliceBytes >> vLenbSz.U
+            matrix_old_row_count := (Cat(Fill((vLenSz - rLenbSz),0.U(1.W)), sliceCntCtr) * sliceBytes)  << 3.U
+            matrix_new_row_count := (Cat(Fill((vLenSz - rLenbSz),0.U(1.W)), (sliceCntCtr +& 1.U)) * sliceBytes) << 3.U
             need_merge := Mux(matrix_old_row_count > matrix_new_row_count, true.B,false.B)
             when (is_unfold_r) {
               val pad_diff  = Cat(0.U(1.W), hout_pos_r).asSInt() -& Cat(0.U(1.W), pad_l_r).asSInt()
@@ -3675,7 +3674,6 @@ class VecLSAddrGenUnit(
 
             when (misaligned || sliceCntCtr +& 1.U === uop.m_slice_cnt) {
               sliceCntCtr  := 0.U
-              ms_v_cnt     := 0.U
               if (fast_gen) {
                 when (io.req.valid) {
                   init_struct(vl_leq_cl)
@@ -3763,7 +3761,7 @@ class VecLSAddrGenUnit(
   io.vrf_emul        := emulCtr
   io.vrf_shdir       := Mux(need_merge,true.B, false.B)
   io.vrf_shamt       := matrix_old_row_count
-  io.vrf_data        := RegNext(io.vrf_rdata)
+  io.vrf_data        := RegEnable(io.vrf_rdata, RegNext(io.vrf_raddr.valid && io.vrf_type === 3.U))
   // tile access
   io.tile_rreq.valid         := state === s_slice && io.resp.fire && uop.uses_stq && !is_mse_v
   io.tile_rreq.bits.ridx     := uop.stale_pdst
@@ -3801,7 +3799,7 @@ class VecLSAddrGenUnit(
  // generated vls splits
   io.resp.valid                 := !IsKilledByBranch(io.brupdate, uop) &&
                                   ((state === s_slice && (!is_unfold_r || lsacc_vld) && !is_mse_v) ||
-                                   (is_mse_v && ~io.vbusy_status(uop.stale_pvd(emulCtr).bits))||
+                                   (is_mse_v && ~io.vbusy_status(uop.stale_pvd(sliceCntCtr).bits))||
                                     (state === s_split && (uop.uses_ldq || ~io.vbusy_status(uop.stale_pvd(emulCtr).bits))))
   io.resp_bypass                := !IsKilledByBranch(io.brupdate, uop) &&
                                     (state === s_slice) && ls_bypass /*&&

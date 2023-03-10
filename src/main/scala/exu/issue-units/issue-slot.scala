@@ -716,10 +716,10 @@ class IssueSlot(
         sel_k := slot_uop.tile_k
       }
 
-      val sel_slice_cnt = Mux(is_mse_v,sel_n,
+      val sel_slice_cnt = Mux(is_mse_v,sel_m,
                           Mux(slice_cnt_tilem, sel_m,
                           Mux(slice_cnt_tilen, sel_n, sel_k)))
-      val sel_slice_len = Mux(is_mse_v,sel_m,
+      val sel_slice_len = Mux(is_mse_v,sel_n,
                           Mux(slice_len_tilem, sel_m,
                           Mux(slice_len_tilen, sel_n, sel_k)))
       slot_uop.m_tilem   := Mux(is_mls,  sel_slice_cnt, 

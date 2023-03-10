@@ -1381,6 +1381,7 @@ class MatExeUnit() (implicit p: Parameters)
   // -------------------------------MXU Unit -------------------------------
   val mxu = Module(new MXU())
   val is_vec = io.req.bits.uop.rt(RS1, isVector) || io.req.bits.uop.rt(RS2, isVector)
+  val is_first = io.req.bits.uop.m_sidx === 0.U
   hSliceBusy := !mxu.io.rowReadReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_HSLICE))
   vSliceBusy := !mxu.io.colReadReq.ready || (io.req.valid && io.req.bits.uop.fu_code_is(FU_VSLICE))
 
@@ -1396,7 +1397,8 @@ class MatExeUnit() (implicit p: Parameters)
                                   Mux(io.req.bits.uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), MACC,
                                   Mux(io.req.bits.uop.uopc.isOneOf(uopMEMUL,uopMFEMULCR_MV), MULT,
                                   Mux(io.req.bits.uop.uopc.isOneOf(uopMADD, uopMWADD, uopMQADD, uopMFADDCR_MV), ADD, 
-                                  Mux(io.req.bits.uop.uopc.isOneOf(uopMFMACCCR_MV),VECMACC,SUB)))))
+                                  Mux(io.req.bits.uop.uopc.isOneOf(uopMFMACCCR_MV),
+                                  Mux(is_first,VECMACC,ONE_OP),SUB)))))
   mxu.io.macReq.bits.dirCal    := Mux(is_vec && io.req.bits.uop.transposed , 1.U ,
                                   Mux(is_vec && !io.req.bits.uop.transposed , 2.U, 0.U))
   mxu.io.macReq.bits.macInit   := io.req.bits.uop.m_sidx === 0.U
