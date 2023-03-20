@@ -554,9 +554,6 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val vlmul = Mux(vlmul_sign, 0.U(2.W), vlmul_mag)
     val csr_vsew  = io.csr_vconfig.vtype.vsew
     uop.mconfig := io.csr_mconfig
-
-
-
     uop.moutsh := io.csr_moutsh
     uop.minsh := io.csr_minsh
     uop.mpad := io.csr_mpad
@@ -585,25 +582,33 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     
     val is_mse_v = cs.uopc.isOneOf(uopMSE_V)
     val mslice_dim = uop.inst(27,26)
-    val transposed = uop.inst(28).asBool()     // 0, row, normal; 1, col, transposed
+    val transposed = (!is_unfold) && uop.inst(28).asBool()     // 0, row, normal; 1, col, transposed
     val is_matrix_v = uop.inst(31).asBool()
     val msew = Mux(is_mls, cs.v_ls_ew, csr_msew)
     val csr_tilem = io.csr_tilem
     val csr_tilen = Mux(is_mse_v, 1.U << (vlmul +& msew - csr_vsew), io.csr_tilen)
     val csr_tilek = io.csr_tilek
 
-    val slice_cnt_tilem = Mux(is_unfold, (mslice_dim === 0.U) || (mslice_dim === 2.U),
-                          (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed))  // A  || C
-    val slice_cnt_tilen = Mux(is_unfold, false.B,
-                          (mslice_dim === 2.U &&  transposed) || (mslice_dim === 0.U &&  transposed))  // BT || CT 
-    val slice_cnt_tilek = Mux(is_unfold, (mslice_dim === 1.U),
-                          (mslice_dim === 1.U &&  transposed) || (mslice_dim === 2.U && !transposed))  // AT || B
-    val slice_len_tilem = Mux(is_unfold, false.B,
-                          (mslice_dim === 1.U &&  transposed) || (mslice_dim === 0.U &&  transposed))  // AT || CT
-    val slice_len_tilen = Mux(is_unfold, (mslice_dim === 1.U) || (mslice_dim === 2.U),
-                          (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed))  // B  || C
-    val slice_len_tilek = Mux(is_unfold, (mslice_dim === 0.U),
-                          (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U &&  transposed))  // A  || BT
+//    val slice_cnt_tilem = Mux(is_unfold, (mslice_dim === 0.U) || (mslice_dim === 2.U),
+//                          (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed))  // A  || C
+//    val slice_cnt_tilen = Mux(is_unfold, false.B,
+//                          (mslice_dim === 2.U &&  transposed) || (mslice_dim === 0.U &&  transposed))  // BT || CT
+//    val slice_cnt_tilek = Mux(is_unfold, (mslice_dim === 1.U),
+//                          (mslice_dim === 1.U &&  transposed) || (mslice_dim === 2.U && !transposed))  // AT || B
+//    val slice_len_tilem = Mux(is_unfold, false.B,
+//                          (mslice_dim === 1.U &&  transposed) || (mslice_dim === 0.U &&  transposed))  // AT || CT
+//    val slice_len_tilen = Mux(is_unfold, (mslice_dim === 1.U) || (mslice_dim === 2.U),
+//                          (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed))  // B  || C
+//    val slice_len_tilek = Mux(is_unfold, (mslice_dim === 0.U),
+//                          (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U &&  transposed))  // A  || BT
+
+    val slice_cnt_tilem = (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed)
+    val slice_cnt_tilen = (mslice_dim === 2.U && transposed) || (mslice_dim === 0.U && transposed)
+    val slice_cnt_tilek = (mslice_dim === 1.U && transposed) || (mslice_dim === 2.U && !transposed)
+    val slice_len_tilem = (mslice_dim === 1.U && transposed) || (mslice_dim === 0.U && transposed)
+    val slice_len_tilen = (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed)
+    val slice_len_tilek = (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U && transposed)
+
     val sel_slice_cnt = Mux(is_mse_v, csr_tilem,
                         Mux(slice_cnt_tilem, csr_tilem,
                         Mux(slice_cnt_tilen, csr_tilen, csr_tilek)))
@@ -638,42 +643,47 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
       uop.mem_signed := false.B
     }
     
-    val mtile = (cs.uopc === uopMLE)
-    uop.mslice_dim := mslice_dim
-    uop.transposed := transposed
-    uop.is_msettype := (cs.uopc === uopMSETTYPEI)  || (cs.uopc === uopMSETTYPE)
-    uop.is_settilem := (cs.uopc === uopMSETTILEMI)  || (cs.uopc === uopMSETTILEM)
-    uop.is_settilen := (cs.uopc === uopMSETTILENI)  || (cs.uopc === uopMSETTILEN)
-    uop.is_settilek := (cs.uopc === uopMSETTILEKI)  || (cs.uopc === uopMSETTILEK)
-    uop.mtype_ready   := Mux(cs.not_use_mtype, true.B, io.enq.uop.mtype_ready)
-    uop.tile_m_ready   := Mux(mxa || mall || mcc || mxc, io.enq.uop.tile_m_ready, true.B)
-    uop.tile_n_ready   := Mux(mxb || mall || mcc || mxc, io.enq.uop.tile_n_ready, true.B)
-    uop.tile_k_ready   := Mux((mxa || mxb) || mall, io.enq.uop.tile_k_ready, true.B)
-    uop.m_is_split    := cs.can_be_split
-    uop.m_slice_cnt   := Mux(is_mls,  sel_slice_cnt, 
-                         Mux(is_mopa, csr_tilek, csr_tilem))
-    uop.m_slice_len   := Mux(is_mls, sel_slice_len, 
-                         Mux(is_mmv && mslice_dim === 2.U, csr_tilem,
-                         Mux(is_mmv && mslice_dim === 3.U, csr_tilen, csr_tilek)))
-    uop.m_tilen       :=  csr_tilen
-    uop.m_sidx        := 0.U
-    uop.ts1_eew       := ts1_eew
-    uop.ts2_eew       := ts2_eew
-    uop.td_eew        := td_eew
-    uop.is_rvm        := cs.is_rvm
-    uop.m_ls_ew       := cs.v_ls_ew
-    uop.mconfig       := io.csr_mconfig
+    uop.mslice_dim   := mslice_dim
+    uop.transposed   := transposed
+    uop.is_msettype  := (cs.uopc === uopMSETTYPEI)  || (cs.uopc === uopMSETTYPE)
+    uop.is_settilem  := (cs.uopc === uopMSETTILEMI)  || (cs.uopc === uopMSETTILEM)
+    uop.is_settilen  := (cs.uopc === uopMSETTILENI)  || (cs.uopc === uopMSETTILEN)
+    uop.is_settilek  := (cs.uopc === uopMSETTILEKI)  || (cs.uopc === uopMSETTILEK)
+    uop.is_msetoutsh := cs.uopc === uopMSETOUTSH
+    uop.is_msetinsh  := cs.uopc === uopMSETINSH
+    uop.is_msetsk    := cs.uopc === uopMSETSK
+    uop.mtype_ready  := Mux(cs.not_use_mtype, true.B, io.enq.uop.mtype_ready)
+    uop.tile_m_ready := Mux(mxa || mall || mcc || mxc, io.enq.uop.tile_m_ready, true.B)
+    uop.tile_n_ready := Mux(mxb || mall || mcc || mxc, io.enq.uop.tile_n_ready, true.B)
+    uop.tile_k_ready := Mux((mxa || mxb) || mall, io.enq.uop.tile_k_ready, true.B)
+    uop.moutsh_ready := Mux(is_unfold, io.enq.uop.moutsh_ready, true.B)
+    uop.minsh_ready  := Mux(is_unfold, io.enq.uop.minsh_ready, true.B)
+    uop.msk_ready    := Mux(is_unfold, io.enq.uop.msk_ready, true.B)
+    uop.m_is_split   := cs.can_be_split
+    uop.m_slice_cnt  := Mux(is_mls,  sel_slice_cnt,
+                        Mux(is_mopa, csr_tilek, csr_tilem))
+    uop.m_slice_len  := Mux(is_mls, sel_slice_len,
+                        Mux(is_mmv && mslice_dim === 2.U, csr_tilem,
+                        Mux(is_mmv && mslice_dim === 3.U, csr_tilen, csr_tilek)))
+    uop.m_tilen      := csr_tilen
+    uop.m_sidx       := 0.U
+    uop.ts1_eew      := ts1_eew
+    uop.ts2_eew      := ts2_eew
+    uop.td_eew       := td_eew
+    uop.is_rvm       := cs.is_rvm
+    uop.m_ls_ew      := cs.v_ls_ew
+    uop.mconfig      := io.csr_mconfig
     uop.m_split_last := Mux(cs.uopc.isOneOf(uopMMV_V),false.B,true.B)
-    uop.m_slice_quad  := 0.U
-    uop.m_slice_done  := false.B
-    uop.isHSlice      := !transposed
-    uop.pts1DirCross  := false.B
-    uop.pts2DirCross  := false.B
+    uop.m_slice_quad := 0.U
+    uop.m_slice_done := false.B
+    uop.isHSlice     := !transposed
+    uop.pts1DirCross := false.B
+    uop.pts2DirCross := false.B
     when (cs.is_rvm && cs.uopc.isOneOf(uopMLE, uopMSE)) {
-      uop.dst_rtype  := Mux(uop.inst(29).asBool(), RT_TR, RT_ACC)
+      uop.dst_rtype  := Mux(uop.inst(27) || uop.inst(26), RT_TR, RT_ACC)
     }
     when (cs.is_rvm && cs.uopc.isOneOf(uopMMV_V, uopMWMV_V, uopMQMV_V)) {
-      uop.lrs1_rtype := Mux(uop.inst(29).asBool(), RT_TR, RT_ACC)
+      uop.lrs1_rtype := Mux(uop.inst(27) || uop.inst(26), RT_TR, RT_ACC)
       uop.fu_code    := Mux(uop.inst(28).asBool(), FU_VSLICE, FU_HSLICE)
     }
 
@@ -1198,10 +1208,9 @@ class TileDecodeSignals(implicit p: Parameters) extends BoomBundle
   val tile_len    = UInt((rLenbSz+1).W)
 }
 
-class MconfigDecodeSignals(implicit p: Parameters) extends BoomBundle
-{
+class MconfigDecodeSignals(implicit p: Parameters) extends BoomBundle {
   val mtype_ready = Bool()
-  val mconfig    = new MConfig
+  val mconfig = new MConfig
 }
 
 class MconfigQueue(implicit p: Parameters) extends BoomModule
@@ -1331,4 +1340,244 @@ class TileQueue(implicit p: Parameters) extends BoomModule
     io.get_tile_size := ram(WrapDec(enq_ptr, num_entries))
     io.empty := empty
   
+}
+
+class OutputShapeWakeupResp(implicit p: Parameters) extends BoomBundle
+{
+  val moutsh      = new MShape
+  val mstdi       = new MStrideDilation
+  val moutsh_idx  = UInt(vcqSz.W)
+  val moutsh_tag  = UInt(vconfigTagSz.W)
+  val moutsh_mask = UInt(maxVconfigCount.W)
+}
+
+class InputShapeWakeupResp(implicit p: Parameters) extends BoomBundle
+{
+  val minsh      = new MShape
+  val mpad       = new MPad
+  val minsh_idx  = UInt(vcqSz.W)
+  val minsh_tag  = UInt(vconfigTagSz.W)
+  val minsh_mask = UInt(maxVconfigCount.W)
+}
+
+class KernelPositionWakeupResp(implicit p: Parameters) extends BoomBundle
+{
+  val minsk    = new MKernelPos
+  val moutsk   = new MKernelPos
+  val msk_idx  = UInt(vcqSz.W)
+  val msk_tag  = UInt(vconfigTagSz.W)
+  val msk_mask = UInt(maxVconfigCount.W)
+}
+
+class OutputShapeDecodeSignals(implicit p: Parameters) extends BoomBundle
+{
+  val moutsh_ready = Bool()
+  val moutsh       = new MShape
+  val mstdi        = new MStrideDilation
+}
+
+class InputShapeDecodeSignals(implicit p: Parameters) extends BoomBundle
+{
+  val minsh_ready = Bool()
+  val minsh       = new MShape
+  val mpad        = new MPad
+}
+
+class KernelPositionDecodeSignals(implicit p: Parameters) extends BoomBundle
+{
+  val msk_ready = Bool()
+  val minsk     = new MKernelPos
+  val moutsk    = new MKernelPos
+}
+
+class OutputShapeQueue(implicit p: Parameters) extends BoomModule
+  with HasBoomCoreParameters {
+  val num_entries = vcqSz
+  private val idx_sz = log2Ceil(num_entries)
+
+  val io = IO(new BoomBundle {
+    //Enqueue one entry when decode an mset instruction.
+    val enq = Flipped(Decoupled(new OutputShapeDecodeSignals()))
+    val enq_idx = Output(UInt(num_entries.W))
+    val deq = Input(Bool())
+    val flush = Input(Bool())
+
+    val get = Output(new OutputShapeDecodeSignals())
+    val empty = Output(Bool())
+
+    val update_idx = Input(UInt(num_entries.W))
+    val update = Flipped(Decoupled(new OutputShapeDecodeSignals()))
+
+    val wcsr = Output(new OutputShapeDecodeSignals())
+  })
+
+  val ram = Reg(Vec(num_entries, new OutputShapeDecodeSignals()))
+  ram.suggestName("outsh_table")
+
+  val enq_ptr = RegInit(0.U(num_entries.W))
+  val deq_ptr = RegInit(0.U(num_entries.W))
+  val maybe_full = RegInit(false.B)
+
+  val ptr_match = enq_ptr === deq_ptr
+  val empty = ptr_match && !maybe_full
+  val full = ptr_match && maybe_full
+  val do_enq = WireDefault(io.enq.fire())
+  val do_deq = WireDefault(io.deq)
+
+  when(do_enq) {
+    ram(enq_ptr) := io.enq.bits
+    enq_ptr := WrapInc(enq_ptr, num_entries)
+  }
+  io.enq_idx := enq_ptr
+
+  when(do_deq && !empty) {
+    deq_ptr := WrapInc(deq_ptr, num_entries)
+    io.wcsr := ram(deq_ptr)
+  }
+  when(io.update.valid) {
+    ram(io.update_idx).moutsh := io.update.bits.moutsh
+    ram(io.update_idx).mstdi := io.update.bits.mstdi
+    ram(io.update_idx).moutsh_ready := io.update.bits.moutsh_ready
+  }
+  when(do_enq =/= do_deq) {
+    maybe_full := do_enq
+  }
+  when(io.flush) {
+    enq_ptr := 0.U
+    deq_ptr := 0.U
+    maybe_full := false.B
+  }
+
+  io.enq_idx := enq_ptr
+  io.enq.ready := !full
+  io.get := ram(WrapDec(enq_ptr, num_entries))
+  io.empty := empty
+}
+
+class InputShapeQueue(implicit p: Parameters) extends BoomModule
+  with HasBoomCoreParameters {
+  val num_entries = vcqSz
+  private val idx_sz = log2Ceil(num_entries)
+
+  val io = IO(new BoomBundle {
+    //Enqueue one entry when decode an mset instruction.
+    val enq = Flipped(Decoupled(new InputShapeDecodeSignals()))
+    val enq_idx = Output(UInt(num_entries.W))
+    val deq = Input(Bool())
+    val flush = Input(Bool())
+
+    val get = Output(new InputShapeDecodeSignals())
+    val empty = Output(Bool())
+
+    val update_idx = Input(UInt(num_entries.W))
+    val update = Flipped(Decoupled(new InputShapeDecodeSignals()))
+
+    val wcsr = Output(new InputShapeDecodeSignals())
+  })
+
+  val ram = Reg(Vec(num_entries, new InputShapeDecodeSignals()))
+  ram.suggestName("insh_table")
+
+  val enq_ptr = RegInit(0.U(num_entries.W))
+  val deq_ptr = RegInit(0.U(num_entries.W))
+  val maybe_full = RegInit(false.B)
+
+  val ptr_match = enq_ptr === deq_ptr
+  val empty = ptr_match && !maybe_full
+  val full = ptr_match && maybe_full
+  val do_enq = WireDefault(io.enq.fire())
+  val do_deq = WireDefault(io.deq)
+
+  when(do_enq) {
+    ram(enq_ptr) := io.enq.bits
+    enq_ptr := WrapInc(enq_ptr, num_entries)
+  }
+  io.enq_idx := enq_ptr
+
+  when(do_deq && !empty) {
+    deq_ptr := WrapInc(deq_ptr, num_entries)
+    io.wcsr := ram(deq_ptr)
+  }
+  when(io.update.valid) {
+    ram(io.update_idx).minsh := io.update.bits.minsh
+    ram(io.update_idx).mpad := io.update.bits.mpad
+    ram(io.update_idx).minsh_ready := io.update.bits.minsh_ready
+  }
+  when(do_enq =/= do_deq) {
+    maybe_full := do_enq
+  }
+  when(io.flush) {
+    enq_ptr := 0.U
+    deq_ptr := 0.U
+    maybe_full := false.B
+  }
+
+  io.enq_idx := enq_ptr
+  io.enq.ready := !full
+  io.get := ram(WrapDec(enq_ptr, num_entries))
+  io.empty := empty
+}
+
+class KernelPositionQueue(implicit p: Parameters) extends BoomModule
+  with HasBoomCoreParameters {
+  val num_entries = vcqSz
+  private val idx_sz = log2Ceil(num_entries)
+
+  val io = IO(new BoomBundle {
+    //Enqueue one entry when decode an mset instruction.
+    val enq = Flipped(Decoupled(new KernelPositionDecodeSignals()))
+    val enq_idx = Output(UInt(num_entries.W))
+    val deq = Input(Bool())
+    val flush = Input(Bool())
+
+    val get = Output(new KernelPositionDecodeSignals())
+    val empty = Output(Bool())
+
+    val update_idx = Input(UInt(num_entries.W))
+    val update = Flipped(Decoupled(new KernelPositionDecodeSignals()))
+
+    val wcsr = Output(new KernelPositionDecodeSignals())
+  })
+
+  val ram = Reg(Vec(num_entries, new KernelPositionDecodeSignals()))
+  ram.suggestName("kpos_table")
+
+  val enq_ptr = RegInit(0.U(num_entries.W))
+  val deq_ptr = RegInit(0.U(num_entries.W))
+  val maybe_full = RegInit(false.B)
+
+  val ptr_match = enq_ptr === deq_ptr
+  val empty = ptr_match && !maybe_full
+  val full = ptr_match && maybe_full
+  val do_enq = WireDefault(io.enq.fire())
+  val do_deq = WireDefault(io.deq)
+
+  when(do_enq) {
+    ram(enq_ptr) := io.enq.bits
+    enq_ptr := WrapInc(enq_ptr, num_entries)
+  }
+  io.enq_idx := enq_ptr
+
+  when(do_deq && !empty) {
+    deq_ptr := WrapInc(deq_ptr, num_entries)
+    io.wcsr := ram(deq_ptr)
+  }
+  when(io.update.valid) {
+    ram(io.update_idx).minsk := io.update.bits.minsk
+    ram(io.update_idx).moutsk := io.update.bits.moutsk
+    ram(io.update_idx).msk_ready := io.update.bits.msk_ready
+  }
+  when(do_enq =/= do_deq) {
+    maybe_full := do_enq
+  }
+  when(io.flush) {
+    enq_ptr := 0.U
+    deq_ptr := 0.U
+    maybe_full := false.B
+  }
+
+  io.enq_idx := enq_ptr
+  io.enq.ready := !full
+  io.get := ram(WrapDec(enq_ptr, num_entries))
+  io.empty := empty
 }

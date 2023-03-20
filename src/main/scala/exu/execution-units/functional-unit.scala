@@ -375,6 +375,10 @@ class ALUUnit(
   val n_reg = RegInit(false.B)
   val k_reg = RegInit(false.B)
   val t_reg = RegInit(false.B)
+  val msetoutsh = uop.uopc.isOneOf(uopMSETOUTSH)
+  val msetinsh = uop.uopc.isOneOf(uopMSETINSH)
+  val msetsk = uop.uopc.isOneOf(uopMSETSK)
+
   if (isJmpUnit) {
     // Get the uop PC for jumps
     val block_pc = AlignPCToBoundary(io.get_ftq_pc.pc, icBlockBytes)
@@ -390,9 +394,6 @@ class ALUUnit(
     val msetm     = uop.uopc.isOneOf(uopMSETTILEM, uopMSETTILEMI)
     val msetn     = uop.uopc.isOneOf(uopMSETTILEN, uopMSETTILENI)
     val msetk     = uop.uopc.isOneOf(uopMSETTILEK, uopMSETTILEKI)
-    val msetoutsh = uop.uopc.isOneOf(uopMSETOUTSH)
-    val msetinsh  = uop.uopc.isOneOf(uopMSETINSH)
-    val msetsk    = uop.uopc.isOneOf(uopMSETSK)
     val useMax    = uop.ldst =/= 0.U && uop.lrs1 === 0.U && msetr
     val msetdata  = Mux(mseti, uop.imm_packed(15,3), rs1_data(12,0))
     val tilemMax  = numTrTileRows.U
@@ -416,6 +417,9 @@ class ALUUnit(
     io.resp.bits.uop.is_settilek := k_reg
     io.resp.bits.uop.tile_k := RegEnable(op1_data, msetk)
 
+    io.resp.bits.uop.is_msetoutsh := RegNext(msetoutsh)
+    io.resp.bits.uop.is_msetinsh := RegNext(msetinsh)
+    io.resp.bits.uop.is_msetsk := RegNext(msetsk)
     io.resp.bits.uop.moutsh.fromUInt(RegEnable(op1_data, msetoutsh))
     io.resp.bits.uop.minsh.fromUInt(RegEnable(op1_data, msetinsh))
     io.resp.bits.uop.minsk.fromUInt(RegEnable(op1_data, msetsk))
@@ -436,10 +440,6 @@ class ALUUnit(
     val useMaxVL     = (vsetvli | vsetvl) & (uop.ldst =/= 0.U) & (uop.prs1 === 0.U)
     val avl       = Mux(vsetivli, uop.prs1, rs1_data)
     val new_vl    = VType.computeVL(avl, vtypei, io.vconfig.vl, useCurrentVL, useMaxVL, false.B)
-
-    val msetoutsh = uop.uopc.isOneOf(uopMSETOUTSH)
-    val msetinsh  = uop.uopc.isOneOf(uopMSETINSH)
-    val msetsk    = uop.uopc.isOneOf(uopMSETSK)
 
     op2_data:= Mux(uop.ctrl.op2_sel === OP2_IMM,     Sext(imm_xprlen.asUInt, xLen),
                Mux(uop.ctrl.op2_sel === OP2_IMMC,    uop.prs1(4,0),

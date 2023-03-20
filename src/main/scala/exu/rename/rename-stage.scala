@@ -90,10 +90,14 @@ abstract class AbstractRenameStage(
                     else        Flipped(Vec(numWbPorts, Valid(new ExeUnitResp(xLen))))
     val vl_wakeup = if (usingVector) Flipped(Valid(new VlWakeupResp())) else null
     
-    val mtype_wakeup = Flipped(Valid(new MtypeWakeupResp())) 
-    val tile_m_wakeup = Flipped(Valid(new MtileWakeupResp())) 
-    val tile_n_wakeup =Flipped(Valid(new MtileWakeupResp())) 
-    val tile_k_wakeup = Flipped(Valid(new MtileWakeupResp())) 
+    val mtype_wakeup  = Flipped(Valid(new MtypeWakeupResp()))
+    val tile_m_wakeup = Flipped(Valid(new MtileWakeupResp()))
+    val tile_n_wakeup = Flipped(Valid(new MtileWakeupResp()))
+    val tile_k_wakeup = Flipped(Valid(new MtileWakeupResp()))
+    val moutsh_wakeup = Flipped(Valid(new OutputShapeWakeupResp()))
+    val minsh_wakeup  = Flipped(Valid(new InputShapeWakeupResp()))
+    val msk_wakeup    = Flipped(Valid(new KernelPositionWakeupResp()))
+
     val matrix_iss_valid = if (matrix) Input(Vec(matWidth,Bool())) else null
     val matrix_iss_uop = if (matrix) Input(Vec(matWidth,new MicroOp())) else null
     val mem_iss_valid = if (matrix) Input(Vec(memWidth,Bool())) else null
@@ -169,25 +173,49 @@ abstract class AbstractRenameStage(
                                                                       io.vl_wakeup.bits.vl)
       }
     }
+
+    if (usingMatrix) {
+      when (io.moutsh_wakeup.valid && r_valid && !r_uop.moutsh_ready && !ren2_ready &&
+        (io.moutsh_wakeup.bits.moutsh_tag + 1.U) === r_uop.moutsh_tag) {
+        r_uop.moutsh_ready := true.B
+        r_uop.moutsh := io.moutsh_wakeup.bits.moutsh
+        r_uop.mstdi := io.moutsh_wakeup.bits.mstdi
+      }
+
+      when(io.minsh_wakeup.valid && r_valid && !r_uop.minsh_ready && !ren2_ready &&
+        (io.minsh_wakeup.bits.minsh_tag + 1.U) === r_uop.minsh_tag) {
+        r_uop.minsh_ready := true.B
+        r_uop.minsh := io.minsh_wakeup.bits.minsh
+        r_uop.mpad := io.minsh_wakeup.bits.mpad
+      }
+
+      when(io.msk_wakeup.valid && r_valid && !r_uop.msk_ready && !ren2_ready &&
+        (io.msk_wakeup.bits.msk_tag + 1.U) === r_uop.msk_tag) {
+        r_uop.msk_ready := true.B
+        r_uop.minsk := io.msk_wakeup.bits.minsk
+        r_uop.moutsk := io.msk_wakeup.bits.moutsk
+      }
+    }
+
    // if (matrix) {
         when(io.mtype_wakeup.valid && r_valid && !r_uop.mtype_ready && !ren2_ready &&
           (io.mtype_wakeup.bits.mconfig_tag + 1.U) === r_uop.mconfig_tag) {
-            r_uop.mtype_ready := true.B 
+            r_uop.mtype_ready := true.B
             r_uop.mconfig := io.mtype_wakeup.bits.mconfig
         }
         when(io.tile_m_wakeup.valid && r_valid && !r_uop.tile_m_ready && !ren2_ready &&
             (io.tile_m_wakeup.bits.tile_tag + 1.U) === r_uop.tile_m_tag) {
-              r_uop.tile_m_ready := true.B 
+              r_uop.tile_m_ready := true.B
               r_uop.tile_m := io.tile_m_wakeup.bits.tile_len
         }
         when(io.tile_n_wakeup.valid && r_valid && !r_uop.tile_n_ready && !ren2_ready &&
             (io.tile_n_wakeup.bits.tile_tag + 1.U) === r_uop.tile_n_tag) {
-              r_uop.tile_n_ready := true.B 
+              r_uop.tile_n_ready := true.B
               r_uop.tile_n := io.tile_n_wakeup.bits.tile_len
         }
         when(io.tile_k_wakeup.valid && r_valid && !r_uop.tile_k_ready && !ren2_ready &&
             (io.tile_k_wakeup.bits.tile_tag + 1.U) === r_uop.tile_k_tag) {
-              r_uop.tile_k_ready := true.B 
+              r_uop.tile_k_ready := true.B
               r_uop.tile_k := io.tile_k_wakeup.bits.tile_len
         }
         val  m_ok = (io.tile_m_wakeup.valid && r_valid && !r_uop.tile_m_ready && !ren2_ready &&
@@ -197,31 +225,46 @@ abstract class AbstractRenameStage(
         val k_ok = (io.tile_k_wakeup.valid && r_valid && !r_uop.tile_k_ready && !ren2_ready &&
             (io.tile_k_wakeup.bits.tile_tag + 1.U) === r_uop.tile_k_tag)
         when(k_ok || n_ok || m_ok) {
-        val is_mls = r_uop.uopc.isOneOf(uopMLE,uopMSE)
-        val is_mopa = r_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA)
-        val is_mmv =  r_uop.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V)
-        val transposed = r_uop.transposed
-        val mslice_dim = r_uop.mslice_dim
+//          val is_mls = r_uop.uopc.isOneOf(uopMLE,uopMSE)
+          val is_mls = r_uop.is_rvm && (r_uop.uses_ldq || r_uop.uses_stq)
+          val is_mopa = r_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA)
+          val is_mmv =  r_uop.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V)
+          val transposed = r_uop.transposed
+          val mslice_dim = r_uop.mslice_dim
+          val is_unfold = r_uop.ctrl.is_unfold
 
-        val slice_cnt_tilem = (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed)
-        val slice_cnt_tilen = (mslice_dim === 2.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
-        val slice_cnt_tilek = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 2.U && !transposed)
-        val slice_len_tilem = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
-        val slice_len_tilen = (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed)
-        val slice_len_tilek = (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U &&  transposed)
+          val slice_cnt_tilem = (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed)
+          val slice_cnt_tilen = (mslice_dim === 2.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
+          val slice_cnt_tilek = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 2.U && !transposed)
+          val slice_len_tilem = (mslice_dim === 1.U &&  transposed) || (mslice_dim === 0.U &&  transposed)
+          val slice_len_tilen = (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed)
+          val slice_len_tilek = (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U &&  transposed)
 
-        val sel_m = Mux(m_ok, io.tile_m_wakeup.bits.tile_len, r_uop.tile_m)
-        val sel_n = Mux(n_ok, io.tile_n_wakeup.bits.tile_len, r_uop.tile_n)
-        val sel_k = Mux(k_ok, io.tile_k_wakeup.bits.tile_len, r_uop.tile_k)
-        val sel_slice_cnt = Mux(slice_cnt_tilem, sel_m,
-                            Mux(slice_cnt_tilen, sel_n, sel_k))
-        val sel_slice_len = Mux(slice_len_tilem, sel_m,
-                            Mux(slice_len_tilen, sel_n, sel_k))
-        r_uop.m_tilem   := Mux(is_mls,  sel_slice_cnt, 
-                                  Mux(is_mopa, sel_k, sel_m))
-        r_uop.m_tilek   := Mux(is_mls, sel_slice_len, 
-                                  Mux(is_mmv && mslice_dim === 2.U, sel_m,
-                                  Mux(is_mmv && mslice_dim === 3.U, sel_n, sel_k)))
+//          val slice_cnt_tilem = Mux(is_unfold, (mslice_dim === 0.U) || (mslice_dim === 2.U),
+//            (mslice_dim === 1.U && !transposed) || (mslice_dim === 0.U && !transposed)) // A  || C
+//          val slice_cnt_tilen = Mux(is_unfold, false.B,
+//            (mslice_dim === 2.U && transposed) || (mslice_dim === 0.U && transposed)) // BT || CT
+//          val slice_cnt_tilek = Mux(is_unfold, (mslice_dim === 1.U),
+//            (mslice_dim === 1.U && transposed) || (mslice_dim === 2.U && !transposed)) // AT || B
+//          val slice_len_tilem = Mux(is_unfold, false.B,
+//            (mslice_dim === 1.U && transposed) || (mslice_dim === 0.U && transposed)) // AT || CT
+//          val slice_len_tilen = Mux(is_unfold, (mslice_dim === 1.U) || (mslice_dim === 2.U),
+//            (mslice_dim === 2.U && !transposed) || (mslice_dim === 0.U && !transposed)) // B  || C
+//          val slice_len_tilek = Mux(is_unfold, (mslice_dim === 0.U),
+//            (mslice_dim === 1.U && !transposed) || (mslice_dim === 2.U && transposed)) // A  || BT
+
+          val sel_m = Mux(m_ok, io.tile_m_wakeup.bits.tile_len, r_uop.tile_m)
+          val sel_n = Mux(n_ok, io.tile_n_wakeup.bits.tile_len, r_uop.tile_n)
+          val sel_k = Mux(k_ok, io.tile_k_wakeup.bits.tile_len, r_uop.tile_k)
+          val sel_slice_cnt = Mux(slice_cnt_tilem, sel_m,
+                              Mux(slice_cnt_tilen, sel_n, sel_k))
+          val sel_slice_len = Mux(slice_len_tilem, sel_m,
+                              Mux(slice_len_tilen, sel_n, sel_k))
+          r_uop.m_slice_cnt   := Mux(is_mls,  sel_slice_cnt,
+                                    Mux(is_mopa, sel_k, sel_m))
+          r_uop.m_slice_len   := Mux(is_mls, sel_slice_len,
+                                    Mux(is_mmv && mslice_dim === 2.U, sel_m,
+                                    Mux(is_mmv && mslice_dim === 3.U, sel_n, sel_k)))
       }
 //    }
 

@@ -34,6 +34,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.rocket.{CSR, Causes, EventSet, EventSets, PRV, SuperscalarEventSets, VConfig, VType, MType, MConfig}
+import freechips.rocketchip.rocket.{MShape, MPad, MStrideDilation, MKernelPos}
 import freechips.rocketchip.rocket.{EventSet, EventSets, SuperscalarEventSets}
 import freechips.rocketchip.util.{CoreMonitorBundle, SeqBoolBitwiseOps, Str, UIntIsOneOf}
 import freechips.rocketchip.util._
@@ -228,6 +229,30 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   tile_k_wakeup.bits.tile_idx       :=  exe_units(csr_unit_idx).io.iresp.bits.uop.tile_k_idx
   tile_k_wakeup.bits.tile_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.tile_k_mask
   tile_k_wakeup.bits.tile_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.tile_k_tag
+
+  val moutsh_wakeup = WireInit(0.U.asTypeOf(Valid(new OutputShapeWakeupResp())))
+  moutsh_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && exe_units(csr_unit_idx).io.iresp.bits.uop.is_msetoutsh
+  moutsh_wakeup.bits.moutsh := exe_units(csr_unit_idx).io.iresp.bits.uop.moutsh
+  moutsh_wakeup.bits.mstdi := exe_units(csr_unit_idx).io.iresp.bits.uop.mstdi
+  moutsh_wakeup.bits.moutsh_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.moutsh_idx
+  moutsh_wakeup.bits.moutsh_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.moutsh_mask
+  moutsh_wakeup.bits.moutsh_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.moutsh_tag
+
+  val minsh_wakeup = WireInit(0.U.asTypeOf(Valid(new InputShapeWakeupResp())))
+  minsh_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && exe_units(csr_unit_idx).io.iresp.bits.uop.is_msetinsh
+  minsh_wakeup.bits.minsh := exe_units(csr_unit_idx).io.iresp.bits.uop.minsh
+  minsh_wakeup.bits.mpad := exe_units(csr_unit_idx).io.iresp.bits.uop.mpad
+  minsh_wakeup.bits.minsh_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.minsh_idx
+  minsh_wakeup.bits.minsh_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.minsh_mask
+  minsh_wakeup.bits.minsh_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.minsh_tag
+
+  val msk_wakeup = WireInit(0.U.asTypeOf(Valid(new KernelPositionWakeupResp())))
+  msk_wakeup.valid := exe_units(csr_unit_idx).io.iresp.valid && exe_units(csr_unit_idx).io.iresp.bits.uop.is_msetsk
+  msk_wakeup.bits.minsk := exe_units(csr_unit_idx).io.iresp.bits.uop.minsk
+  msk_wakeup.bits.moutsk := exe_units(csr_unit_idx).io.iresp.bits.uop.moutsk
+  msk_wakeup.bits.msk_idx := exe_units(csr_unit_idx).io.iresp.bits.uop.msk_idx
+  msk_wakeup.bits.msk_mask := exe_units(csr_unit_idx).io.iresp.bits.uop.msk_mask
+  msk_wakeup.bits.msk_tag := exe_units(csr_unit_idx).io.iresp.bits.uop.msk_tag
 /*******************************************************************************************/
   require(exe_units.length == issue_units.map(_.issueWidth).sum)
 
@@ -261,13 +286,23 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val dec_ktile_valid = Wire(Vec(coreWidth, Bool()))
   val dec_mconfig = Wire(Vec(coreWidth, new MconfigDecodeSignals()))
   val dec_mconfig_valid = Wire(Vec(coreWidth, Bool()))
+  val dec_moutsh = Wire(Vec(coreWidth, new OutputShapeDecodeSignals()))
+  val dec_moutsh_valid = Wire(Vec(coreWidth, Bool()))
+  val dec_minsh = Wire(Vec(coreWidth, new InputShapeDecodeSignals()))
+  val dec_minsh_valid = Wire(Vec(coreWidth, Bool()))
+  val dec_msk = Wire(Vec(coreWidth, new KernelPositionDecodeSignals()))
+  val dec_msk_valid = Wire(Vec(coreWidth, Bool()))
+
   // stall fetch/dcode because we ran out of vconfig tags
   val vconfig_mask_full = Wire(Vec(coreWidth, Bool()))
   val mconfig_mask_full = Wire(Vec(coreWidth, Bool()))
   val tile_m_mask_full = Wire(Vec(coreWidth, Bool()))
   val tile_n_mask_full = Wire(Vec(coreWidth, Bool()))
   val tile_k_mask_full = Wire(Vec(coreWidth, Bool()))
-  
+  val moutsh_mask_full = Wire(Vec(coreWidth, Bool()))
+  val minsh_mask_full  = Wire(Vec(coreWidth, Bool()))
+  val msk_mask_full    = Wire(Vec(coreWidth, Bool()))
+
   // Rename2/Dispatch stage
   val dis_valids = Wire(Vec(coreWidth, Bool()))
   val dis_uops   = Wire(Vec(coreWidth, new MicroOp))
@@ -364,8 +399,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     m_pipeline.io.vl_wakeup := vl_wakeup
     m_pipeline.io.mtype_wakeup := mtype_wakeup
     m_pipeline.io.tile_m_wakeup := tile_m_wakeup
-    m_pipeline.io.tile_n_wakeup := tile_n_wakeup  
-    m_pipeline.io.tile_k_wakeup := tile_k_wakeup 
+    m_pipeline.io.tile_n_wakeup := tile_n_wakeup
+    m_pipeline.io.tile_k_wakeup := tile_k_wakeup
+    m_pipeline.io.moutsh_wakeup := moutsh_wakeup
+    m_pipeline.io.minsh_wakeup := minsh_wakeup
+    m_pipeline.io.msk_wakeup := msk_wakeup
   }
 
   // Load/Store Unit & ExeUnits
@@ -1038,6 +1076,15 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val ktileq_data  = Wire(Vec(coreWidth, new TileDecodeSignals()))
   val ktileq_empty = WireInit(false.B)
 
+  val outshq_data  = Wire(Vec(coreWidth, new OutputShapeDecodeSignals()))
+  val outshq_empty = WireInit(false.B)
+
+  val inshq_data  = Wire(Vec(coreWidth, new InputShapeDecodeSignals()))
+  val inshq_empty = WireInit(false.B)
+
+  val skq_data  = Wire(Vec(coreWidth, new KernelPositionDecodeSignals()))
+  val skq_empty = WireInit(false.B)
+
   for (w <- 0 until coreWidth) {
     dec_valids(w) := io.ifu.fetchpacket.valid && dec_fbundle.uops(w).valid &&
       !dec_finished_mask(w)
@@ -1100,13 +1147,34 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       decode_units(w).io.csr_tilek := ktileq_data(w).tile_len
       decode_units(w).io.enq.uop.tile_k_ready := ktileq_data(w).tile_ready
 
-      // FIXME
-      decode_units(w).io.csr_moutsh := csr.io.matrix.get.moutsh
-      decode_units(w).io.csr_minsh := csr.io.matrix.get.minsh
-      decode_units(w).io.csr_mpad := csr.io.matrix.get.mpad
-      decode_units(w).io.csr_mstdi := csr.io.matrix.get.mstdi
-      decode_units(w).io.csr_minsk := csr.io.matrix.get.minsk
-      decode_units(w).io.csr_moutsk := csr.io.matrix.get.moutsk
+      dec_moutsh_valid(w) := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 119.U) &&
+        (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && (dec_fbundle.uops(w).bits.inst(31, 28) === 8.U)
+      dec_moutsh(w).moutsh_ready := false.B
+      dec_moutsh(w).moutsh := 0.U.asTypeOf(new MShape)
+      dec_moutsh(w).mstdi := 0.U.asTypeOf(new MStrideDilation)
+
+      dec_minsh_valid(w) := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 119.U) &&
+        (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && (dec_fbundle.uops(w).bits.inst(31, 28) === 9.U)
+      dec_minsh(w).minsh_ready := false.B
+      dec_minsh(w).minsh := 0.U.asTypeOf(new MShape)
+      dec_minsh(w).mpad := 0.U.asTypeOf(new MPad)
+
+      dec_msk_valid(w) := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 119.U) &&
+        (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && (dec_fbundle.uops(w).bits.inst(31, 28) === 10.U)
+      dec_msk(w).msk_ready := false.B
+      dec_msk(w).minsk := 0.U.asTypeOf(new MKernelPos)
+      dec_msk(w).moutsk := 0.U.asTypeOf(new MKernelPos)
+
+      decode_units(w).io.csr_moutsh := outshq_data(w).moutsh
+      decode_units(w).io.csr_mstdi := outshq_data(w).mstdi
+      decode_units(w).io.csr_minsh := inshq_data(w).minsh
+      decode_units(w).io.csr_mpad := inshq_data(w).mpad
+      decode_units(w).io.csr_minsk := skq_data(w).minsk
+      decode_units(w).io.csr_moutsk := skq_data(w).moutsk
+
+      decode_units(w).io.enq.uop.moutsh_ready := outshq_data(w).moutsh_ready
+      decode_units(w).io.enq.uop.minsh_ready := inshq_data(w).minsh_ready
+      decode_units(w).io.enq.uop.msk_ready := skq_data(w).msk_ready
     }
 
     dec_uops(w) := decode_units(w).io.deq.uop
@@ -1138,6 +1206,24 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         (tile_k_wakeup.bits.tile_tag + 1.U) === dec_uops(w).tile_k_tag) {
           dec_uops(w).tile_k_ready := true.B 
           dec_uops(w).tile_k := tile_k_wakeup.bits.tile_len
+    }
+    when(moutsh_wakeup.valid && !decode_units(w).io.deq.uop.moutsh_ready &&
+      (moutsh_wakeup.bits.moutsh_tag + 1.U) === dec_uops(w).moutsh_tag) {
+      dec_uops(w).moutsh_ready := true.B
+      dec_uops(w).moutsh := moutsh_wakeup.bits.moutsh
+      dec_uops(w).mstdi := moutsh_wakeup.bits.mstdi
+    }
+    when(minsh_wakeup.valid && !decode_units(w).io.deq.uop.minsh_ready &&
+      (minsh_wakeup.bits.minsh_tag + 1.U) === dec_uops(w).minsh_tag) {
+      dec_uops(w).minsh_ready := true.B
+      dec_uops(w).minsh := minsh_wakeup.bits.minsh
+      dec_uops(w).mpad := minsh_wakeup.bits.mpad
+    }
+    when(msk_wakeup.valid && !decode_units(w).io.deq.uop.msk_ready &&
+      (msk_wakeup.bits.msk_tag + 1.U) === dec_uops(w).msk_tag) {
+      dec_uops(w).msk_ready := true.B
+      dec_uops(w).minsk := msk_wakeup.bits.minsk
+      dec_uops(w).moutsk := msk_wakeup.bits.moutsk
     }
   }
 
@@ -1225,7 +1311,60 @@ for (w <- 0 until coreWidth) {
 val dec_ktile_fires = (dec_ktilemask_logic.io.is_mconfig zip dec_ktilemask_logic.io.will_fire).map{ case(v, f) => (v && f).asUInt }
 val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
 (dec_uops zip dec_ktile_nums).map{ case(dec_uop, fire_num) =>
-    dec_uop.tile_k_tag := dec_ktilemask_logic.io.mconfig_tag.head + fire_num }    
+    dec_uop.tile_k_tag := dec_ktilemask_logic.io.mconfig_tag.head + fire_num }
+
+  ///////////////////////////////////////////////////////////////////////////////
+  val moutsh_mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, uop) => v && (uop.is_msetoutsh) }
+  val dec_moutsh_mask_logic = Module(new MconfigMaskGenerationLogic(coreWidth))
+  dec_moutsh_mask_logic.io.mconfig_mask_update := RegNext(Mux(!moutsh_mask_updates.reduce(_ | _), 0.U,
+    Mux1H(moutsh_mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.moutsh_tag)))))
+  dec_moutsh_mask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  moutsh_mask_full := dec_moutsh_mask_logic.io.is_full
+  for (w <- 0 until coreWidth) {
+    dec_moutsh_mask_logic.io.is_mconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_msetoutsh)
+    dec_moutsh_mask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_msetoutsh)
+    dec_uops(w).moutsh_mask := dec_moutsh_mask_logic.io.mconfig_mask(w)
+  }
+  val dec_moutsh_fires = (dec_moutsh_mask_logic.io.is_mconfig zip dec_moutsh_mask_logic.io.will_fire).map { case (v, f) => (v && f).asUInt }
+  val dec_moutsh_nums = dec_moutsh_fires.scanLeft(0.U)(_ + _)
+  (dec_uops zip dec_moutsh_nums).map { case (dec_uop, fire_num) =>
+    dec_uop.moutsh_tag := dec_moutsh_mask_logic.io.mconfig_tag.head + fire_num
+  }
+
+  val minsh_mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, uop) => v && (uop.is_msetinsh) }
+  val dec_minsh_mask_logic = Module(new MconfigMaskGenerationLogic(coreWidth))
+  dec_minsh_mask_logic.io.mconfig_mask_update := RegNext(Mux(!minsh_mask_updates.reduce(_ | _), 0.U,
+    Mux1H(minsh_mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.minsh_tag)))))
+  dec_minsh_mask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  minsh_mask_full := dec_minsh_mask_logic.io.is_full
+  for (w <- 0 until coreWidth) {
+    dec_minsh_mask_logic.io.is_mconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_msetinsh)
+    dec_minsh_mask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_msetinsh)
+    dec_uops(w).minsh_mask := dec_minsh_mask_logic.io.mconfig_mask(w)
+  }
+  val dec_minsh_fires = (dec_minsh_mask_logic.io.is_mconfig zip dec_minsh_mask_logic.io.will_fire).map { case (v, f) => (v && f).asUInt }
+  val dec_minsh_nums = dec_minsh_fires.scanLeft(0.U)(_ + _)
+  (dec_uops zip dec_minsh_nums).map { case (dec_uop, fire_num) =>
+    dec_uop.minsh_tag := dec_minsh_mask_logic.io.mconfig_tag.head + fire_num
+  }
+
+  val msk_mask_updates = (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, uop) => v && (uop.is_msetsk) }
+  val dec_msk_mask_logic = Module(new MconfigMaskGenerationLogic(coreWidth))
+  dec_msk_mask_logic.io.mconfig_mask_update := RegNext(Mux(!msk_mask_updates.reduce(_ | _), 0.U,
+    Mux1H(msk_mask_updates, rob.io.commit.uops.map(uop => UIntToOH(uop.msk_tag)))))
+  dec_msk_mask_logic.io.flush_pipeline := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  msk_mask_full := dec_msk_mask_logic.io.is_full
+  for (w <- 0 until coreWidth) {
+    dec_msk_mask_logic.io.is_mconfig(w) := !dec_finished_mask(w) && (dec_uops(w).is_msetsk)
+    dec_msk_mask_logic.io.will_fire(w) := dec_fire(w) && (dec_uops(w).is_msetsk)
+    dec_uops(w).msk_mask := dec_msk_mask_logic.io.mconfig_mask(w)
+  }
+  val dec_msk_fires = (dec_msk_mask_logic.io.is_mconfig zip dec_msk_mask_logic.io.will_fire).map { case (v, f) => (v && f).asUInt }
+  val dec_msk_nums = dec_msk_fires.scanLeft(0.U)(_ + _)
+  (dec_uops zip dec_msk_nums).map { case (dec_uop, fire_num) =>
+    dec_uop.msk_tag := dec_msk_mask_logic.io.mconfig_tag.head + fire_num
+  }
+
 /***************************************************************************/
 
 /***************************************************************************/
@@ -1331,6 +1470,104 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   ktilecq.io.update_tile_size.bits.tile_len := tile_k_wakeup.bits.tile_len
   ktilecq.io.update_tile_size_idx := tile_k_wakeup.bits.tile_idx
   dec_uops.map(d => d.tile_k_idx := ktilecq.io.enq_idx)
+
+  //////////
+  val outshq = Module(new OutputShapeQueue())
+  val youngest_outsh_idx = (coreWidth - 1).U - PriorityEncoder(dec_moutsh_valid.reverse)
+  val oldest_outsh_idx = PriorityEncoder(dec_moutsh_valid)
+  val outshq_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
+  val outshq_stall = outshq_is_stall.scanLeft(false.B)(_ | _)
+
+  outshq_is_stall(oldest_outsh_idx) := dec_moutsh_nums(youngest_outsh_idx + 1.U) - dec_moutsh_nums(oldest_outsh_idx + 1.U) > 0.U
+  outshq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_moutsh_valid), dec_moutsh)
+  outshq.io.enq.valid := (dec_fire zip dec_uops).map { case (v, u) => v && (u.is_msetoutsh) }.reduce(_ | _)
+  outshq.io.deq := (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_msetoutsh, false.B) }.reduce(_ | _)
+  outshq.io.flush := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  outshq_empty := outshq.io.empty
+
+  for (w <- 0 until coreWidth) {
+    outshq_data(w).moutsh := Mux(dec_moutsh_valid(oldest_outsh_idx) && oldest_outsh_idx < w.U,
+      dec_moutsh(oldest_outsh_idx).moutsh,
+      Mux(outshq_empty, csr.io.matrix.get.moutsh, outshq.io.get.moutsh))
+    outshq_data(w).mstdi := Mux(dec_moutsh_valid(oldest_outsh_idx) && oldest_outsh_idx < w.U,
+      dec_moutsh(oldest_outsh_idx).mstdi,
+      Mux(outshq_empty, csr.io.matrix.get.mstdi, outshq.io.get.mstdi))
+    outshq_data(w).moutsh_ready := Mux(dec_moutsh_valid(oldest_outsh_idx) && oldest_outsh_idx < w.U,
+      dec_moutsh(oldest_outsh_idx).moutsh_ready,
+      Mux(outshq_empty, true.B, outshq.io.get.moutsh_ready))
+  }
+
+  outshq.io.update.valid := moutsh_wakeup.valid
+  outshq.io.update.bits.moutsh_ready := moutsh_wakeup.valid
+  outshq.io.update.bits.moutsh := moutsh_wakeup.bits.moutsh
+  outshq.io.update.bits.mstdi := moutsh_wakeup.bits.mstdi
+  outshq.io.update_idx := moutsh_wakeup.bits.moutsh_idx
+  dec_uops.map(d => d.moutsh_idx := outshq.io.enq_idx)
+
+  val inshq = Module(new InputShapeQueue())
+  val youngest_insh_idx = (coreWidth - 1).U - PriorityEncoder(dec_minsh_valid.reverse)
+  val oldest_insh_idx = PriorityEncoder(dec_minsh_valid)
+  val inshq_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
+  val inshq_stall = inshq_is_stall.scanLeft(false.B)(_ | _)
+
+  inshq_is_stall(oldest_insh_idx) := dec_minsh_nums(youngest_insh_idx + 1.U) - dec_minsh_nums(oldest_insh_idx + 1.U) > 0.U
+  inshq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_minsh_valid), dec_minsh)
+  inshq.io.enq.valid := (dec_fire zip dec_uops).map { case (v, u) => v && (u.is_msetinsh) }.reduce(_ | _)
+  inshq.io.deq := (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_msetinsh, false.B) }.reduce(_ | _)
+  inshq.io.flush := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  inshq_empty := inshq.io.empty
+
+  for (w <- 0 until coreWidth) {
+    inshq_data(w).minsh := Mux(dec_minsh_valid(oldest_insh_idx) && oldest_insh_idx < w.U,
+      dec_minsh(oldest_insh_idx).minsh,
+      Mux(inshq_empty, csr.io.matrix.get.minsh, inshq.io.get.minsh))
+    inshq_data(w).mpad := Mux(dec_minsh_valid(oldest_insh_idx) && oldest_insh_idx < w.U,
+      dec_minsh(oldest_insh_idx).mpad,
+      Mux(inshq_empty, csr.io.matrix.get.mpad, inshq.io.get.mpad))
+    inshq_data(w).minsh_ready := Mux(dec_minsh_valid(oldest_insh_idx) && oldest_insh_idx < w.U,
+      dec_minsh(oldest_insh_idx).minsh_ready,
+      Mux(inshq_empty, true.B, inshq.io.get.minsh_ready))
+  }
+
+  inshq.io.update.valid := minsh_wakeup.valid
+  inshq.io.update.bits.minsh_ready := minsh_wakeup.valid
+  inshq.io.update.bits.minsh := minsh_wakeup.bits.minsh
+  inshq.io.update.bits.mpad := minsh_wakeup.bits.mpad
+  inshq.io.update_idx := minsh_wakeup.bits.minsh_idx
+  dec_uops.map(d => d.minsh_idx := inshq.io.enq_idx)
+
+  val skq = Module(new KernelPositionQueue())
+  val youngest_sk_idx = (coreWidth - 1).U - PriorityEncoder(dec_msk_valid.reverse)
+  val oldest_sk_idx = PriorityEncoder(dec_msk_valid)
+  val skq_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
+  val skq_stall = skq_is_stall.scanLeft(false.B)(_ | _)
+
+  skq_is_stall(oldest_sk_idx) := dec_msk_nums(youngest_sk_idx + 1.U) - dec_msk_nums(oldest_sk_idx + 1.U) > 0.U
+  skq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_msk_valid), dec_msk)
+  skq.io.enq.valid := (dec_fire zip dec_uops).map { case (v, u) => v && (u.is_msetsk) }.reduce(_ | _)
+  skq.io.deq := (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_msetsk, false.B) }.reduce(_ | _)
+  skq.io.flush := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  skq_empty := skq.io.empty
+
+  for (w <- 0 until coreWidth) {
+    skq_data(w).minsk := Mux(dec_msk_valid(oldest_sk_idx) && oldest_sk_idx < w.U,
+      dec_msk(oldest_sk_idx).minsk,
+      Mux(skq_empty, csr.io.matrix.get.minsk, skq.io.get.minsk))
+    skq_data(w).moutsk := Mux(dec_msk_valid(oldest_sk_idx) && oldest_sk_idx < w.U,
+      dec_msk(oldest_sk_idx).moutsk,
+      Mux(skq_empty, csr.io.matrix.get.moutsk, skq.io.get.moutsk))
+    skq_data(w).msk_ready := Mux(dec_msk_valid(oldest_sk_idx) && oldest_sk_idx < w.U,
+      dec_msk(oldest_sk_idx).msk_ready,
+      Mux(skq_empty, true.B, skq.io.get.msk_ready))
+  }
+
+  skq.io.update.valid := msk_wakeup.valid
+  skq.io.update.bits.msk_ready := msk_wakeup.valid
+  skq.io.update.bits.minsk := msk_wakeup.bits.minsk
+  skq.io.update.bits.moutsk := msk_wakeup.bits.moutsk
+  skq.io.update_idx := msk_wakeup.bits.msk_idx
+  dec_uops.map(d => d.msk_idx := skq.io.enq_idx)
+
 /***************************************************************************/
   //vconfig instruction decode info enq to VCQ
   val vcq_vl = Module(new VconfigQueue())  
@@ -1454,6 +1691,9 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                       || tile_m_mask_full(w)
                       || tile_n_mask_full(w)
                       || tile_k_mask_full(w)
+                      || moutsh_mask_full(w)
+                      || minsh_mask_full(w)
+                      || msk_mask_full(w)
                       || vcq_vl.io.full
                       || vcq_vtype.io.full
                       || vconfig_stall(w)
@@ -1461,6 +1701,9 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                       || mtilecq_stall(w)
                       || ntilecq_stall(w)
                       || ktilecq_stall(w)
+                      || outshq_stall(w)
+                      || inshq_stall(w)
+                      || skq_stall(w)
                       || brupdate.b1.mispredict_mask =/= 0.U
                       || brupdate.b2.mispredict
                       || io.ifu.redirect_flush))
@@ -1526,6 +1769,9 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
       rename.io.tile_m_wakeup := tile_m_wakeup
       rename.io.tile_n_wakeup := tile_n_wakeup
       rename.io.tile_k_wakeup := tile_k_wakeup
+      rename.io.moutsh_wakeup := moutsh_wakeup
+      rename.io.minsh_wakeup := minsh_wakeup
+      rename.io.msk_wakeup := msk_wakeup
    // }
   }
 
@@ -1533,6 +1779,9 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   m_rename_stage.io.tile_m_wakeup := tile_m_wakeup
   m_rename_stage.io.tile_n_wakeup := tile_n_wakeup
   m_rename_stage.io.tile_k_wakeup := tile_k_wakeup
+  m_rename_stage.io.moutsh_wakeup := moutsh_wakeup
+  m_rename_stage.io.minsh_wakeup := minsh_wakeup
+  m_rename_stage.io.msk_wakeup := msk_wakeup
   if (usingVector) {
     v_rename_stage.io.vl_xcpt := rob.io.commit.vl_xcpt
   }
@@ -1630,34 +1879,65 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
       dis_uops(w).vconfig.vl :=  v_uop.vconfig.vl
     }
 
-    when(mtype_wakeup.valid && (mtype_wakeup.bits.mconfig_tag + 1.U) === v_uop.mconfig_tag && !v_uop.mtype_ready) {
+    when(mtype_wakeup.valid && (mtype_wakeup.bits.mconfig_tag + 1.U) === m_uop.mconfig_tag && !m_uop.mtype_ready) {
       dis_uops(w).mtype_ready := true.B
-      dec_uops(w).mconfig := mtype_wakeup.bits.mconfig
+      dis_uops(w).mconfig := mtype_wakeup.bits.mconfig
     }.otherwise {
-      dis_uops(w).mtype_ready := v_uop.mtype_ready
-      dis_uops(w).mconfig :=  v_uop.mconfig
+      dis_uops(w).mtype_ready := m_uop.mtype_ready
+      dis_uops(w).mconfig :=  m_uop.mconfig
     }
-    when(tile_m_wakeup.valid && (tile_m_wakeup.bits.tile_tag + 1.U) === v_uop.tile_m_tag && !v_uop.tile_m_ready) {
-      dec_uops(w).tile_m_ready := true.B 
-      dec_uops(w).tile_m := tile_m_wakeup.bits.tile_len
+    when(tile_m_wakeup.valid && (tile_m_wakeup.bits.tile_tag + 1.U) === m_uop.tile_m_tag && !m_uop.tile_m_ready) {
+      dis_uops(w).tile_m_ready := true.B
+      dis_uops(w).tile_m := tile_m_wakeup.bits.tile_len
     }.otherwise {
-      dis_uops(w).tile_m_ready := v_uop.tile_m_ready
-      dis_uops(w).tile_m :=  v_uop.tile_m
+      dis_uops(w).tile_m_ready := m_uop.tile_m_ready
+      dis_uops(w).tile_m :=  m_uop.tile_m
     }
-    when(tile_n_wakeup.valid && (tile_n_wakeup.bits.tile_tag + 1.U) === v_uop.tile_n_tag && !v_uop.tile_n_ready) {
+    when(tile_n_wakeup.valid && (tile_n_wakeup.bits.tile_tag + 1.U) === m_uop.tile_n_tag && !m_uop.tile_n_ready) {
       dis_uops(w).tile_n_ready := true.B
       dis_uops(w).tile_n :=  tile_n_wakeup.bits.tile_len
     }.otherwise {
-      dis_uops(w).tile_n_ready := v_uop.tile_n_ready
-      dis_uops(w).tile_n :=  v_uop.tile_n
+      dis_uops(w).tile_n_ready := m_uop.tile_n_ready
+      dis_uops(w).tile_n :=  m_uop.tile_n
     }
-    when(tile_k_wakeup.valid && (tile_k_wakeup.bits.tile_tag + 1.U) === v_uop.tile_k_tag && !v_uop.tile_k_ready) {
+    when(tile_k_wakeup.valid && (tile_k_wakeup.bits.tile_tag + 1.U) === m_uop.tile_k_tag && !m_uop.tile_k_ready) {
       dis_uops(w).tile_k_ready := true.B
       dis_uops(w).tile_k :=  tile_k_wakeup.bits.tile_len
     }.otherwise {
-      dis_uops(w).tile_k_ready := v_uop.tile_k_ready
-      dis_uops(w).tile_k :=  v_uop.tile_k
+      dis_uops(w).tile_k_ready := m_uop.tile_k_ready
+      dis_uops(w).tile_k :=  m_uop.tile_k
     }
+
+    when(moutsh_wakeup.valid && (moutsh_wakeup.bits.moutsh_tag + 1.U) === m_uop.moutsh_tag && !m_uop.moutsh_ready) {
+      dis_uops(w).moutsh_ready := true.B
+      dis_uops(w).moutsh := moutsh_wakeup.bits.moutsh
+      dis_uops(w).mstdi := moutsh_wakeup.bits.mstdi
+    }.otherwise {
+      dis_uops(w).moutsh_ready := m_uop.moutsh_ready
+      dis_uops(w).moutsh := m_uop.moutsh
+      dis_uops(w).mstdi := m_uop.mstdi
+    }
+
+    when(minsh_wakeup.valid && (minsh_wakeup.bits.minsh_tag + 1.U) === m_uop.minsh_tag && !m_uop.minsh_ready) {
+      dis_uops(w).minsh_ready := true.B
+      dis_uops(w).minsh := minsh_wakeup.bits.minsh
+      dis_uops(w).mpad := minsh_wakeup.bits.mpad
+    }.otherwise {
+      dis_uops(w).minsh_ready := m_uop.minsh_ready
+      dis_uops(w).minsh := m_uop.minsh
+      dis_uops(w).mpad := m_uop.mpad
+    }
+
+    when(msk_wakeup.valid && (msk_wakeup.bits.msk_tag + 1.U) === m_uop.msk_tag && !m_uop.msk_ready) {
+      dis_uops(w).msk_ready := true.B
+      dis_uops(w).minsk := msk_wakeup.bits.minsk
+      dis_uops(w).moutsk := msk_wakeup.bits.moutsk
+    }.otherwise {
+      dis_uops(w).msk_ready := m_uop.msk_ready
+      dis_uops(w).minsk := m_uop.minsk
+      dis_uops(w).moutsk := m_uop.moutsk
+    }
+
     ren_stalls(w) := rename_stage.io.ren_stalls(w) || f_stall || p_stall || v_stall || m_stall
   }
 
@@ -1898,11 +2178,14 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   issue_units map { iu =>
     iu.io.spec_ld_wakeup := io.lsu.spec_ld_wakeup
 
-    iu.io.vl_wakeup      := vl_wakeup
-    iu.io.mtype_wakeup   := mtype_wakeup
-    iu.io.tile_m_wakeup   := tile_m_wakeup
-    iu.io.tile_n_wakeup   := tile_n_wakeup
-    iu.io.tile_k_wakeup   := tile_k_wakeup
+    iu.io.vl_wakeup     := vl_wakeup
+    iu.io.mtype_wakeup  := mtype_wakeup
+    iu.io.tile_m_wakeup := tile_m_wakeup
+    iu.io.tile_n_wakeup := tile_n_wakeup
+    iu.io.tile_k_wakeup := tile_k_wakeup
+    iu.io.moutsh_wakeup := moutsh_wakeup
+    iu.io.minsh_wakeup  := minsh_wakeup
+    iu.io.msk_wakeup    := msk_wakeup
   }
 
   // Connect the predicate wakeup port

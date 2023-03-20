@@ -88,10 +88,30 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val tile_n                = UInt((rLenbSz+1).W)
   val tile_k                = UInt((rLenbSz+1).W)
 
+  val moutsh_idx            = UInt(vcqSz.W)
+  val moutsh_mask           = UInt(maxVconfigCount.W)
+  val moutsh_tag            = UInt(vconfigTagSz.W)
+
+  val minsh_idx             = UInt(vcqSz.W)
+  val minsh_mask            = UInt(maxVconfigCount.W)
+  val minsh_tag             = UInt(vconfigTagSz.W)
+
+  val msk_idx               = UInt(vcqSz.W)
+  val msk_mask              = UInt(maxVconfigCount.W)
+  val msk_tag               = UInt(vconfigTagSz.W)
+
+  val is_msetoutsh          = Bool()
+  val is_msetinsh           = Bool()
+  val is_msetsk             = Bool()
+
+  val moutsh_ready          = Bool()
+  val minsh_ready           = Bool()
+  val msk_ready             = Bool()
+
   val moutsh                = new MShape
+  val mstdi                 = new MStrideDilation
   val minsh                 = new MShape
   val mpad                  = new MPad
-  val mstdi                 = new MStrideDilation
   val minsk                 = new MKernelPos
   val moutsk                = new MKernelPos
 

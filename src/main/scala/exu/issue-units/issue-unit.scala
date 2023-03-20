@@ -83,10 +83,13 @@ class IssueUnitIO(
   val wakeup_ports     = Flipped(Vec(numWakeupPorts, Valid(new IqWakeup(maxPregSz, vector, matrix))))
   val pred_wakeup_port = Flipped(Valid(UInt(log2Ceil(ftqSz).W)))
   val vl_wakeup        = if (usingVector) Flipped(Valid(new VlWakeupResp())) else null
-  val mtype_wakeup     = if (usingMatrix)  Flipped(Valid(new MtypeWakeupResp())) else null
+  val mtype_wakeup     = if (usingMatrix) Flipped(Valid(new MtypeWakeupResp())) else null
   val tile_m_wakeup    = if (usingMatrix) Flipped(Valid(new MtileWakeupResp())) else null
   val tile_n_wakeup    = if (usingMatrix) Flipped(Valid(new MtileWakeupResp())) else null
   val tile_k_wakeup    = if (usingMatrix) Flipped(Valid(new MtileWakeupResp())) else null
+  val moutsh_wakeup    = if (usingMatrix) Flipped(Valid(new OutputShapeWakeupResp())) else null
+  val minsh_wakeup     = if (usingMatrix) Flipped(Valid(new InputShapeWakeupResp())) else null
+  val msk_wakeup       = if (usingMatrix) Flipped(Valid(new KernelPositionWakeupResp())) else null
 
   val wake_tile_r       = if (usingMatrix) Output(Vec(issueWidth, Bool())) else null
   val wake_issue_prs =  if (usingMatrix) Input(Vec(2,Vec(memWidth + matWidth,UInt((vLenb+1).W)))) else null
@@ -241,12 +244,15 @@ abstract class IssueUnit(
     issue_slots(i).ldspec_miss      := io.ld_miss
     issue_slots(i).brupdate         := io.brupdate
     issue_slots(i).kill             := io.flush_pipeline
-    issue_slots(i).vl_wakeup   := io.vl_wakeup
+    issue_slots(i).vl_wakeup      := io.vl_wakeup
     issue_slots(i).mtype_wakeup   := io.mtype_wakeup
     issue_slots(i).tile_m_wakeup  := io.tile_m_wakeup
     issue_slots(i).tile_n_wakeup  := io.tile_n_wakeup
     issue_slots(i).tile_k_wakeup  := io.tile_k_wakeup
-    issue_slots(i).wake_issue_prs  := io.wake_issue_prs
+    issue_slots(i).moutsh_wakeup  := io.moutsh_wakeup
+    issue_slots(i).minsh_wakeup   := io.minsh_wakeup
+    issue_slots(i).msk_wakeup     := io.msk_wakeup
+    issue_slots(i).wake_issue_prs := io.wake_issue_prs
     issue_slots(i).wake_issue_rs_type  := io.wake_issue_rs_type
     issue_slots(i).wake_issue_data  := io.wake_issue_data
     issue_slots(i).wake_issue_valid  := io.wake_issue_valid   

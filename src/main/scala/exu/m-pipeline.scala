@@ -68,10 +68,14 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
     // Clear tile registers.
     val trclr = Flipped(Vec(memWidth, Valid(UInt(log2Ceil(numMatTrPhysRegs).W))))
 
-    val mtype_wakeup        = Input(Valid(new MtypeWakeupResp()))
-    val tile_m_wakeup        = Input(Valid(new MtileWakeupResp()))
-    val tile_n_wakeup        = Input(Valid(new MtileWakeupResp()))
-    val tile_k_wakeup        = Input(Valid(new MtileWakeupResp()))
+    val mtype_wakeup  = Input(Valid(new MtypeWakeupResp()))
+    val tile_m_wakeup = Input(Valid(new MtileWakeupResp()))
+    val tile_n_wakeup = Input(Valid(new MtileWakeupResp()))
+    val tile_k_wakeup = Input(Valid(new MtileWakeupResp()))
+    val moutsh_wakeup = Flipped(Valid(new OutputShapeWakeupResp()))
+    val minsh_wakeup  = Flipped(Valid(new InputShapeWakeupResp()))
+    val msk_wakeup    = Flipped(Valid(new KernelPositionWakeupResp()))
+
     val matrix_iss_valid = Output(Vec(matWidth,Bool()))
     val matrix_iss_uop = Output(Vec(matWidth,new MicroOp()))
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
@@ -115,6 +119,9 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
   issue_unit.io.tile_m_wakeup := io.tile_m_wakeup
   issue_unit.io.tile_n_wakeup := io.tile_n_wakeup
   issue_unit.io.tile_k_wakeup := io.tile_k_wakeup
+  issue_unit.io.moutsh_wakeup := io.moutsh_wakeup
+  issue_unit.io.minsh_wakeup  := io.minsh_wakeup
+  issue_unit.io.msk_wakeup    := io.msk_wakeup
 
   for (w <- 0 until memWidth) {
     issue_unit.io.spec_ld_wakeup(w).valid := false.B

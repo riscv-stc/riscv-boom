@@ -1584,6 +1584,12 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       ldq_e.bits.uop.vconfig.vl       := exe_req(w).bits.uop.vconfig.vl
       ldq_e.bits.uop.m_slice_cnt      := exe_req(w).bits.uop.m_slice_cnt
       ldq_e.bits.uop.m_slice_len      := exe_req(w).bits.uop.m_slice_len
+      ldq_e.bits.uop.moutsh           := exe_req(w).bits.uop.moutsh
+      ldq_e.bits.uop.mstdi            := exe_req(w).bits.uop.mstdi
+      ldq_e.bits.uop.minsh            := exe_req(w).bits.uop.minsh
+      ldq_e.bits.uop.mpad             := exe_req(w).bits.uop.mpad
+      ldq_e.bits.uop.minsk            := exe_req(w).bits.uop.minsk
+      ldq_e.bits.uop.moutsk           := exe_req(w).bits.uop.moutsk
     }
 
     when (will_fire_vstore_incoming(w)) {
@@ -1597,6 +1603,12 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq_e.bits.uop.vconfig.vl       := exe_req(w).bits.uop.vconfig.vl
       stq_e.bits.uop.m_slice_cnt      := exe_req(w).bits.uop.m_slice_cnt
       stq_e.bits.uop.m_slice_len      := exe_req(w).bits.uop.m_slice_len
+      stq_e.bits.uop.moutsh           := exe_req(w).bits.uop.moutsh
+      stq_e.bits.uop.mstdi            := exe_req(w).bits.uop.mstdi
+      stq_e.bits.uop.minsh            := exe_req(w).bits.uop.minsh
+      stq_e.bits.uop.mpad             := exe_req(w).bits.uop.mpad
+      stq_e.bits.uop.minsk            := exe_req(w).bits.uop.minsk
+      stq_e.bits.uop.moutsk           := exe_req(w).bits.uop.moutsk
     }
   }
     //------------------------------

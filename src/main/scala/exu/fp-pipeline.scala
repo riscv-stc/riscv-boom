@@ -123,6 +123,12 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   issue_unit.io.tile_n_wakeup.bits := DontCare
   issue_unit.io.tile_k_wakeup.valid := false.B
   issue_unit.io.tile_k_wakeup.bits := DontCare
+  issue_unit.io.moutsh_wakeup.valid := false.B
+  issue_unit.io.moutsh_wakeup.bits := DontCare
+  issue_unit.io.minsh_wakeup.valid := false.B
+  issue_unit.io.minsh_wakeup.bits := DontCare
+  issue_unit.io.msk_wakeup.valid := false.B
+  issue_unit.io.msk_wakeup.bits := DontCare
   issue_unit.io.wake_issue_prs :=DontCare
   issue_unit.io.wake_issue_data :=DontCare
   issue_unit.io.wake_issue_valid :=DontCare

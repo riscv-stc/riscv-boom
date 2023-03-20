@@ -176,6 +176,13 @@ class VecPipeline(implicit p: Parameters) extends BoomModule
   issue_unit.io.wake_issue_valid :=DontCare
   issue_unit.io.wake_issue_rs_type :=DontCare
 
+  issue_unit.io.moutsh_wakeup.valid := false.B
+  issue_unit.io.moutsh_wakeup.bits := DontCare
+  issue_unit.io.minsh_wakeup.valid := false.B
+  issue_unit.io.minsh_wakeup.bits := DontCare
+  issue_unit.io.msk_wakeup.valid := false.B
+  issue_unit.io.msk_wakeup.bits := DontCare
+
   //-------------------------------------------------------------
   // **** Register Read Stage ****
   //-------------------------------------------------------------

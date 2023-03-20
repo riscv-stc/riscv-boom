@@ -249,6 +249,12 @@ trait ScalarOpConstants
     uop.tile_m_tag := 0.U
     uop.tile_n_tag := 0.U
     uop.tile_k_tag := 0.U
+    uop.moutsh_ready := false.B
+    uop.minsh_ready := false.B
+    uop.msk_ready := false.B
+    uop.moutsh_tag := 0.U
+    uop.minsh_tag := 0.U
+    uop.msk_tag := 0.U
     uop.is_rvm := false.B
 
     if (usingVector) {
