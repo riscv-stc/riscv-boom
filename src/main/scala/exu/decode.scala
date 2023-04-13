@@ -568,8 +568,8 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     val mfcunt4 = uop.inst(29,26)
     val mfcunt3 = uop.inst(14,12)
     val mfunct6 = uop.inst(31,26)
-    val mxa = ((mfcunt4 === 9.U) || (mfcunt4 === 13.U)) && is_mls
-    val mxb = ((mfcunt4 === 10.U) || (mfcunt4 === 14.U)) && is_mls
+    val mxa = ((mfcunt4 === 1.U) || (mfcunt4 === 5.U)) && is_mls
+    val mxb = ((mfcunt4 === 2.U) || (mfcunt4 === 6.U)) && is_mls
     val mxc = ((mfcunt4 === 0.U) || (mfcunt4 === 4.U)) && is_mls
     val mall = cs.is_rvm && ~(cs.uses_ldq | cs.uses_stq) && (
       (mfcunt4 === 0.U) ||
@@ -679,7 +679,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.isHSlice     := !transposed
     uop.pts1DirCross := false.B
     uop.pts2DirCross := false.B
-    when (cs.is_rvm && cs.uopc.isOneOf(uopMLE, uopMSE)) {
+    when (cs.is_rvm && cs.uopc.isOneOf(uopMLE, uopMSE, uopMLUF, uopMSFD)) {
       uop.dst_rtype  := Mux(uop.inst(27) || uop.inst(26), RT_TR, RT_ACC)
     }
     when (cs.is_rvm && cs.uopc.isOneOf(uopMMV_V, uopMWMV_V, uopMQMV_V)) {
@@ -1032,10 +1032,11 @@ class MconfigMaskGenerationLogic(val pl_width: Int) (implicit p: Parameters) ext
     for (i <- maxVconfigCount - 1 to 0 by -1) {
       when(~allocate_mask(i)) {
         tag_masks(w) := (1.U << i.U)
-        when(update_vtag) {
-          new_vconfig_tag := new_vconfig_tag + 1.U
-        }
       }
+    }
+
+    when(update_vtag) {
+      new_vconfig_tag := new_vconfig_tag + 1.U
     }
 
     io.mconfig_tag(w) := new_vconfig_tag
@@ -1518,6 +1519,14 @@ class InputShapeQueue(implicit p: Parameters) extends BoomModule
   io.empty := empty
 }
 
+class KernelPositionDecodeSignalsWithBrInfo(implicit p: Parameters) extends BoomBundle
+{
+  val config = (new KernelPositionDecodeSignals)
+  val br_idx = UInt(brIdxSz.W)
+  val br_tag = UInt(brTagSz.W)
+  val br_resolved = Bool()
+}
+
 class KernelPositionQueue(implicit p: Parameters) extends BoomModule
   with HasBoomCoreParameters {
   val num_entries = vcqSz
@@ -1526,25 +1535,30 @@ class KernelPositionQueue(implicit p: Parameters) extends BoomModule
   val io = IO(new BoomBundle {
     //Enqueue one entry when decode an mset instruction.
     val enq = Flipped(Decoupled(new KernelPositionDecodeSignals()))
+    val enq_br_idx = Input((UInt(brIdxSz.W)))
+    val enq_br_tag = Input((UInt(brTagSz.W)))
     val enq_idx = Output(UInt(num_entries.W))
-    val deq = Input(Bool())
+    val deq   = Input(Bool())
     val flush = Input(Bool())
-
+    val redirect = Input(new BrUpdateInfo())
     val get = Output(new KernelPositionDecodeSignals())
     val empty = Output(Bool())
-
+    val full  = Output(Bool())
     val update_idx = Input(UInt(num_entries.W))
     val update = Flipped(Decoupled(new KernelPositionDecodeSignals()))
 
     val wcsr = Output(new KernelPositionDecodeSignals())
   })
 
-  val ram = Reg(Vec(num_entries, new KernelPositionDecodeSignals()))
+  val ram = Reg(Vec(num_entries, new KernelPositionDecodeSignalsWithBrInfo()))
   ram.suggestName("kpos_table")
 
   val enq_ptr = RegInit(0.U(num_entries.W))
   val deq_ptr = RegInit(0.U(num_entries.W))
   val maybe_full = RegInit(false.B)
+
+  val last_deq_br_tag = RegInit(0.U(brTagSz.W))
+  val last_deq_br_resolved = RegInit(false.B)
 
   val ptr_match = enq_ptr === deq_ptr
   val empty = ptr_match && !maybe_full
@@ -1552,24 +1566,97 @@ class KernelPositionQueue(implicit p: Parameters) extends BoomModule
   val do_enq = WireDefault(io.enq.fire())
   val do_deq = WireDefault(io.deq)
 
+  val is_sel = Wire(Vec(num_entries , Bool()))
+  val is_order = WireDefault((enq_ptr > deq_ptr) || empty)
+  val in_rang = Wire(Vec(num_entries , Bool()))
+  val findVal = Wire(Vec(num_entries , Bool()))
+  val sel_idx = Wire(Vec(num_entries , UInt((idx_sz.W))))
+  val mispredict_state = io.redirect.b2.mispredict && !empty
+  val mispredict_mask = RegNext(io.redirect.b1.mispredict_mask)
+
+  dontTouch(sel_idx)
+  dontTouch(is_sel)
+  dontTouch(in_rang)
+  dontTouch(findVal)
+
   when(do_enq) {
-    ram(enq_ptr) := io.enq.bits
+    ram(enq_ptr).config := io.enq.bits
+    ram(enq_ptr).br_idx := io.enq_br_idx
+    ram(enq_ptr).br_tag := io.enq_br_tag
+    ram(enq_ptr).br_resolved := false.B
     enq_ptr := WrapInc(enq_ptr, num_entries)
   }
   io.enq_idx := enq_ptr
 
   when(do_deq && !empty) {
+    //last_deq_br_tag := ram(deq_ptr).br_tag
+    //last_deq_br_resolved := ram(deq_ptr).br_resolved
     deq_ptr := WrapInc(deq_ptr, num_entries)
-    io.wcsr := ram(deq_ptr)
+    io.wcsr := ram(deq_ptr).config
   }
+
   when(io.update.valid) {
-    ram(io.update_idx).minsk := io.update.bits.minsk
-    ram(io.update_idx).moutsk := io.update.bits.moutsk
-    ram(io.update_idx).msk_ready := io.update.bits.msk_ready
+    ram(io.update_idx).config.minsk := io.update.bits.minsk
+    ram(io.update_idx).config.moutsk := io.update.bits.moutsk
+    ram(io.update_idx).config.msk_ready := io.update.bits.msk_ready
   }
+
   when(do_enq =/= do_deq) {
     maybe_full := do_enq
   }
+
+  // Resolve branches.
+  /*val right_mask = io.redirect.b1.resolve_mask & (~io.redirect.b1.mispredict_mask)
+  for (i <- 0 until num_entries) {
+    val ele_vld = Mux(is_order, (i.U >= deq_ptr) && (i.U < enq_ptr), (i.U >= deq_ptr) || (i.U < enq_ptr))
+    when (ele_vld && (((1.U << ram(i.U).br_tag) & right_mask) =/= 0.U)) {
+      ram(i.U).br_resolved := true.B
+    }
+  }*/
+
+  for (r <- 0 until num_entries) {
+    in_rang(r) := false.B
+    is_sel(r) := false.B
+    findVal(r) := false.B
+    sel_idx(r) := 0.U
+  }
+
+  /*when(mispredict_state) {
+    for (i <- 0 until num_entries) {
+      sel_idx(i) := Mux(enq_ptr +& i.U < num_entries.U, enq_ptr +& i.U, enq_ptr +& i.U -& num_entries.U)
+      //is_sel(i) := ((1.U << ram(sel_idx(i)).config_br_tag) & mispredict_mask) =/= 0.U
+      is_sel(i) := ram(sel_idx(i)).br_resolved || (ram(sel_idx(i)).br_tag === io.redirect.b2.uop.br_tag)// &&
+                   //!(if (i == num_entries - 1) false.B else ((i + 1) until num_entries).map(x => findVal(x)).reduce(_ || _))
+      in_rang(i) := Mux(is_order, (sel_idx(i) >= deq_ptr) && (sel_idx(i) < enq_ptr),
+                                  (sel_idx(i) >= deq_ptr) || (sel_idx(i) < enq_ptr))
+      when(is_sel(i) && in_rang(i)) {
+        enq_ptr := WrapInc(sel_idx(i), num_entries)
+        //enq_ptr := sel_idx(i)
+        maybe_full := false.B
+        findVal(i) := true.B
+      }
+    }
+  }*/
+
+  when(mispredict_state) {
+    for (i <- (0 until num_entries).reverse) {
+      sel_idx(i) := Mux(enq_ptr +& i.U < num_entries.U, enq_ptr +& i.U, enq_ptr +& i.U -& num_entries.U)
+      is_sel(i)  := ram(sel_idx(i)).br_idx === io.redirect.b2.uop.ftq_idx
+      in_rang(i) := Mux(is_order, (sel_idx(i) >= deq_ptr) && (sel_idx(i) < enq_ptr),
+                                  (sel_idx(i) >= deq_ptr) || (sel_idx(i) < enq_ptr))
+      when(is_sel(i) && in_rang(i)) {
+        enq_ptr := sel_idx(i)
+        maybe_full := false.B
+        findVal(i) := true.B
+      }
+    }
+  }
+
+  /*val mispredict_clear = mispredict_state && (!findVal.reduce(_||_)) &&
+                         last_deq_br_resolved && (last_deq_br_tag === io.redirect.b2.uop.br_tag)
+  dontTouch(mispredict_clear)*/
+  //when(io.flush || (!findVal.reduce(_||_) && mispredict_state)) {
+  //when(io.flush || mispredict_clear) {
   when(io.flush) {
     enq_ptr := 0.U
     deq_ptr := 0.U
@@ -1578,6 +1665,7 @@ class KernelPositionQueue(implicit p: Parameters) extends BoomModule
 
   io.enq_idx := enq_ptr
   io.enq.ready := !full
-  io.get := ram(WrapDec(enq_ptr, num_entries))
+  io.full := full
+  io.get := ram(WrapDec(enq_ptr, num_entries)).config
   io.empty := empty
 }

@@ -1025,7 +1025,8 @@ class MatRenameStage(
 
     uop.prs1       := Mux(uop.lrs1_rtype === RT_TR, trmappings.prs1, accmappings.prs1)
     uop.prs2       := Mux(uop.lrs2_rtype === RT_TR, trmappings.prs2, accmappings.prs2)
-    uop.prs3       := Mux(uop.dst_rtype  === RT_TR, trmappings.prs3, accmappings.prs3)
+    //uop.prs3       := Mux(uop.dst_rtype  === RT_TR, trmappings.prs3, accmappings.prs3)
+    uop.prs3       := Mux(uop.dst_rtype  === RT_TR, trmappings.stale_pdst, accmappings.stale_pdst)
     uop.stale_pdst := Mux(uop.dst_rtype  === RT_TR, trmappings.stale_pdst, accmappings.stale_pdst)
   }
 

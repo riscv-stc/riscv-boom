@@ -1541,12 +1541,18 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   val oldest_sk_idx = PriorityEncoder(dec_msk_valid)
   val skq_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
   val skq_stall = skq_is_stall.scanLeft(false.B)(_ | _)
+  val dec_msk_br_idx = Wire(UInt(brIdxSz.W))
+  val dec_msk_br_tag = Wire(Vec(coreWidth, UInt(brTagSz.W)))
+  //val dec_msk_br_tag = dec_uops.map(u => u.br_tag)
 
   skq_is_stall(oldest_sk_idx) := dec_msk_nums(youngest_sk_idx + 1.U) - dec_msk_nums(oldest_sk_idx + 1.U) > 0.U
   skq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_msk_valid), dec_msk)
+  skq.io.enq_br_idx := dec_msk_br_idx
+  skq.io.enq_br_tag := Mux1H(PriorityEncoderOH(dec_msk_valid), dec_msk_br_tag)
   skq.io.enq.valid := (dec_fire zip dec_uops).map { case (v, u) => v && (u.is_msetsk) }.reduce(_ | _)
   skq.io.deq := (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_msetsk, false.B) }.reduce(_ | _)
-  skq.io.flush := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  skq.io.flush := RegNext(rob.io.flush.valid)
+  skq.io.redirect := brupdate
   skq_empty := skq.io.empty
 
   for (w <- 0 until coreWidth) {
@@ -1693,7 +1699,8 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                       || tile_k_mask_full(w)
                       || moutsh_mask_full(w)
                       || minsh_mask_full(w)
-                      || msk_mask_full(w)
+                      //|| msk_mask_full(w)
+                      || (!skq.io.enq.ready && !dec_finished_mask(w) && dec_uops(w).is_msetsk)
                       || vcq_vl.io.full
                       || vcq_vtype.io.full
                       || vconfig_stall(w)
@@ -1708,6 +1715,7 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                       || brupdate.b2.mispredict
                       || io.ifu.redirect_flush))
 
+  dontTouch(dec_hazards)
   dec_stalls  := dec_hazards.scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
   dec_fe_fire := (0 until coreWidth).map(w => dec_valids(w) && !dec_stalls(w) && !dec_enq_stalls(w))
   dec_fire := (0 until coreWidth).map(w => dec_valids(w) && !dec_stalls(w))
@@ -1734,9 +1742,30 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
     dec_uops(w).br_tag  := dec_brmask_logic.io.br_tag(w)
     dec_uops(w).br_mask := dec_brmask_logic.io.br_mask(w)
     dec_vconfig_br_tag(w) := dec_brmask_logic.io.br_tag(w)
+    dec_msk_br_tag(w) := dec_brmask_logic.io.br_tag(w)
   }
   
   branch_mask_full := dec_brmask_logic.io.is_full
+
+  val last_br_idx = RegInit(~0.U(brIdxSz.W))
+  for (w <- 0 until coreWidth) {
+    when (dec_fire(w) && dec_uops(w).allocate_brtag) {
+      last_br_idx := dec_uops(w).ftq_idx
+    }
+  }
+
+  val br_in_pkg = WireInit(false.B)
+  val br_idx_in_pkg = WireInit(0.U(brIdxSz.W))
+  //val msk_in_pkg = dec_msk_valid.reduce(_ || _)
+  val msk_in_pkg = skq.io.enq.valid
+  val msk_idx_in_pkg = PriorityEncoder(dec_msk_valid)
+  for (w <- 0 until coreWidth) {
+    when (msk_in_pkg && (w.U < msk_idx_in_pkg) && dec_fire(w) && dec_uops(w).allocate_brtag) {
+      br_in_pkg := true.B
+      br_idx_in_pkg := dec_uops(w).ftq_idx
+    }
+  }
+  dec_msk_br_idx := Mux(br_in_pkg, br_idx_in_pkg, last_br_idx)
 
   //-------------------------------------------------------------
   //-------------------------------------------------------------
@@ -1861,7 +1890,8 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                             Mux(dis_uops(w).rt(RS2, isInt   ), i_uop.prs2,
                             Mux(dis_uops(w).rt(RS2, isMatrix), m_uop.prs2, 
                             Mux(dis_uops(w).rt(RS2, isVector), v_uop.pvs2(0).bits,dis_uops(w).lrs2))))
-        dis_uops(w).prs3 := Mux(dis_uops(w).rt(RD,  isAccTile), m_uop.prs3, f_uop.prs3)
+        //dis_uops(w).prs3 := Mux(dis_uops(w).rt(RD,  isAccTile), m_uop.prs3, f_uop.prs3)
+        dis_uops(w).prs3 := Mux(dis_uops(w).rt(RD,  isMatrix), m_uop.stale_pdst, f_uop.prs3)
         dis_uops(w).m_scalar_busy := dis_uops(w).is_rvm && dis_uops(w).uses_scalar
       }
     } else {

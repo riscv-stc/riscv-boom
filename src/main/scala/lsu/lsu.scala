@@ -4118,7 +4118,7 @@ class VecMem(implicit p: Parameters) extends LazyModule
 {
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
       name = s"l1-vec-memq",
-      sourceId = IdRange(0, 256),
+      sourceId = IdRange(0, 1024),
       supportsProbe = TransferSizes.none
   )))))
   lazy val module = new VecMemImp(this)

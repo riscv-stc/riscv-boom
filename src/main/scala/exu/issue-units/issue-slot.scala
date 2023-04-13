@@ -586,28 +586,36 @@ class IssueSlot(
         slot_uop.pdst        := slot_uop.pvd(slot_uop.mmv_count).bits  
       }
     }
+
     next_p1 := Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_)
     next_p2 := Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_)
     next_p3 := Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_)
     for (i <- 0 until 2) {
       for (j <- 0 until (memWidth + matWidth)) {
-      val ready_sig = WireInit(
-        io.wake_issue_valid(i)(j) &&
-      (io.in_uop.bits.is_rvm || slot_uop.is_rvm))
-      when(ready_sig) {
-        next_p1 := Mux((Mux(io.in_uop.valid ,io.in_uop.bits.prs1, slot_uop.prs1) === io.wake_issue_prs(i)(j) && 
-                      (Mux(io.in_uop.valid ,io.in_uop.bits.lrs1_rtype, slot_uop.lrs1_rtype) === io.wake_issue_rs_type(i)(j))), 
-                      Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_)  | ~io.wake_issue_data(i)(j), Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_))
-        next_p2 := Mux((Mux(io.in_uop.valid ,io.in_uop.bits.prs2, slot_uop.prs2) === io.wake_issue_prs(i)(j) && 
-                      (Mux(io.in_uop.valid ,io.in_uop.bits.lrs2_rtype, slot_uop.lrs2_rtype) === io.wake_issue_rs_type(i)(j))),
-                      Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_)  | ~io.wake_issue_data(i)(j), Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_))
-        next_p3 := Mux((Mux(io.in_uop.valid ,io.in_uop.bits.prs3, slot_uop.prs3) === io.wake_issue_prs(i)(j) &&
-                      (Mux(io.in_uop.valid ,io.in_uop.bits.dst_rtype, slot_uop.dst_rtype) === io.wake_issue_rs_type(i)(j))), 
-                      Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_)  | ~io.wake_issue_data(i)(j), Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_))
+        val ready_sig = io.wake_issue_valid(i)(j) && next_uop.is_rvm
+        val p1_wake_match = next_uop.prs1 === io.wake_issue_prs(i)(j) && (next_uop.lrs1_rtype === io.wake_issue_rs_type(i)(j))
+        val p2_wake_match = next_uop.prs2 === io.wake_issue_prs(i)(j) && (next_uop.lrs2_rtype === io.wake_issue_rs_type(i)(j))
+        val p3_wake_match = next_uop.prs3 === io.wake_issue_prs(i)(j) && (next_uop.dst_rtype === io.wake_issue_rs_type(i)(j))
+        val p1_wake_value = Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_) | ~io.wake_issue_data(i)(j)
+        val p2_wake_value = Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_) | ~io.wake_issue_data(i)(j)
+        val p3_wake_value = Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_) | ~io.wake_issue_data(i)(j)
+        dontTouch(p1_wake_match)
+        dontTouch(p2_wake_match)
+        dontTouch(p3_wake_match)
+        dontTouch(p1_wake_value)
+        dontTouch(p2_wake_value)
+        dontTouch(p3_wake_value)
+        when (ready_sig && p1_wake_match) {
+          next_p1 := p1_wake_value
+        }
+        when (ready_sig && p2_wake_match) {
+          next_p2 := p2_wake_value
+        }
+        when (ready_sig && p3_wake_match) {
+          next_p3 := p3_wake_value
+        }
       }
     }
-  }
-  
   } else if (usingVector) {
     io.uop.v_eidx := slot_uop.v_eidx
     if (vector) {
