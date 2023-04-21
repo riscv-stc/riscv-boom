@@ -115,6 +115,7 @@ class FetchBuffer(implicit p: Parameters) extends BoomModule
         }
       }
       in_uops(i).ftq_idx        := io.enq.bits.ftq_idx
+      in_uops(i).ftq_off        := i.U
       in_uops(i).inst           := io.enq.bits.exp_insts(i)
       in_uops(i).debug_inst     := io.enq.bits.insts(i)
       in_uops(i).is_rvc         := io.enq.bits.insts(i)(1,0) =/= 3.U

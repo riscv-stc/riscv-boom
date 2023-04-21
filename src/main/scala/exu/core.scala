@@ -1399,12 +1399,17 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   val oldest_tile_m_idx = PriorityEncoder(dec_mtile_valid)
   val mtilecq_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
   val mtilecq_stall = mtilecq_is_stall.scanLeft(false.B)(_|_)
+  val dec_tilem_br_idx = Wire(UInt(brIdxSz.W))
 
   mtilecq_is_stall(oldest_tile_m_idx) := dec_mtile_nums(youngest_tile_m_idx + 1.U) - dec_mtile_nums(oldest_tile_m_idx + 1.U) > 0.U
   mtilecq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_mtile_valid),dec_mtile)
+  mtilecq.io.enq_br_idx := dec_tilem_br_idx
   mtilecq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_settilem)}.reduce(_ | _)
   mtilecq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_settilem, false.B)}.reduce(_ | _)
-  mtilecq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  mtilecq.io.flush     := RegNext(rob.io.flush.valid)
+  mtilecq.io.redirect  := brupdate
+  mtilecq.io.ftq_head  := io.ifu.ftq_head
+  mtilecq.io.ftq_tail  := io.ifu.ftq_tail
   mtileq_empty         := mtilecq.io.empty
 
   for(w <- 0 until coreWidth) {
@@ -1426,12 +1431,17 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   val oldest_tile_n_idx = PriorityEncoder(dec_ntile_valid)
   val ntilecq_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
   val ntilecq_stall = ntilecq_is_stall.scanLeft(false.B)(_|_)
+  val dec_tilen_br_idx = Wire(UInt(brIdxSz.W))
 
   ntilecq_is_stall(oldest_tile_n_idx) := dec_ntile_nums(youngest_tile_n_idx + 1.U) - dec_ntile_nums(oldest_tile_n_idx + 1.U) > 0.U
   ntilecq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_ntile_valid),dec_ntile)
+  ntilecq.io.enq_br_idx := dec_tilen_br_idx
   ntilecq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_settilen)}.reduce(_ | _)
   ntilecq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_settilen, false.B)}.reduce(_ | _)
-  ntilecq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  ntilecq.io.flush     := RegNext(rob.io.flush.valid)
+  ntilecq.io.redirect  := brupdate
+  ntilecq.io.ftq_head  := io.ifu.ftq_head
+  ntilecq.io.ftq_tail  := io.ifu.ftq_tail
   ntileq_empty         := ntilecq.io.empty
 
   for(w <- 0 until coreWidth) {
@@ -1452,12 +1462,17 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   val oldest_tile_k_idx = PriorityEncoder(dec_ktile_valid)
   val ktilecq_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
   val ktilecq_stall = ktilecq_is_stall.scanLeft(false.B)(_|_)
+  val dec_tilek_br_idx = Wire(UInt(brIdxSz.W))
 
   ktilecq_is_stall(oldest_tile_k_idx) := dec_ktile_nums(youngest_tile_k_idx + 1.U) - dec_ktile_nums(oldest_tile_k_idx + 1.U) > 0.U
   ktilecq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_ktile_valid),dec_ktile)
+  ktilecq.io.enq_br_idx := dec_tilek_br_idx
   ktilecq.io.enq.valid := (dec_fire zip dec_uops).map{case(v,u) => v&&(u.is_settilek)}.reduce(_ | _)
   ktilecq.io.deq       := (rob.io.commit.valids zip rob.io.commit.uops).map{case(v,u) => Mux(v, u.is_settilek, false.B)}.reduce(_ | _)
-  ktilecq.io.flush     := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  ktilecq.io.flush     := RegNext(rob.io.flush.valid)
+  ktilecq.io.redirect  := brupdate
+  ktilecq.io.ftq_head  := io.ifu.ftq_head
+  ktilecq.io.ftq_tail  := io.ifu.ftq_tail
   ktileq_empty         := ktilecq.io.empty
 
   for(w <- 0 until coreWidth) {
@@ -1477,12 +1492,17 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   val oldest_outsh_idx = PriorityEncoder(dec_moutsh_valid)
   val outshq_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
   val outshq_stall = outshq_is_stall.scanLeft(false.B)(_ | _)
+  val dec_outsh_br_idx = Wire(UInt(brIdxSz.W))
 
   outshq_is_stall(oldest_outsh_idx) := dec_moutsh_nums(youngest_outsh_idx + 1.U) - dec_moutsh_nums(oldest_outsh_idx + 1.U) > 0.U
   outshq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_moutsh_valid), dec_moutsh)
+  outshq.io.enq_br_idx := dec_outsh_br_idx
   outshq.io.enq.valid := (dec_fire zip dec_uops).map { case (v, u) => v && (u.is_msetoutsh) }.reduce(_ | _)
   outshq.io.deq := (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_msetoutsh, false.B) }.reduce(_ | _)
-  outshq.io.flush := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  outshq.io.flush := RegNext(rob.io.flush.valid)
+  outshq.io.redirect := brupdate
+  outshq.io.ftq_head := io.ifu.ftq_head
+  outshq.io.ftq_tail := io.ifu.ftq_tail
   outshq_empty := outshq.io.empty
 
   for (w <- 0 until coreWidth) {
@@ -1509,12 +1529,17 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   val oldest_insh_idx = PriorityEncoder(dec_minsh_valid)
   val inshq_is_stall = WireInit(false.B).asTypeOf(Vec(coreWidth, Bool()))
   val inshq_stall = inshq_is_stall.scanLeft(false.B)(_ | _)
+  val dec_insh_br_idx = Wire(UInt(brIdxSz.W))
 
   inshq_is_stall(oldest_insh_idx) := dec_minsh_nums(youngest_insh_idx + 1.U) - dec_minsh_nums(oldest_insh_idx + 1.U) > 0.U
   inshq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_minsh_valid), dec_minsh)
+  inshq.io.enq_br_idx := dec_insh_br_idx
   inshq.io.enq.valid := (dec_fire zip dec_uops).map { case (v, u) => v && (u.is_msetinsh) }.reduce(_ | _)
   inshq.io.deq := (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_msetinsh, false.B) }.reduce(_ | _)
-  inshq.io.flush := RegNext(rob.io.flush.valid) || io.ifu.redirect_flush
+  inshq.io.flush := RegNext(rob.io.flush.valid)
+  inshq.io.redirect := brupdate
+  inshq.io.ftq_head := io.ifu.ftq_head
+  inshq.io.ftq_tail := io.ifu.ftq_tail
   inshq_empty := inshq.io.empty
 
   for (w <- 0 until coreWidth) {
@@ -1548,11 +1573,12 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   skq_is_stall(oldest_sk_idx) := dec_msk_nums(youngest_sk_idx + 1.U) - dec_msk_nums(oldest_sk_idx + 1.U) > 0.U
   skq.io.enq.bits := Mux1H(PriorityEncoderOH(dec_msk_valid), dec_msk)
   skq.io.enq_br_idx := dec_msk_br_idx
-  skq.io.enq_br_tag := Mux1H(PriorityEncoderOH(dec_msk_valid), dec_msk_br_tag)
   skq.io.enq.valid := (dec_fire zip dec_uops).map { case (v, u) => v && (u.is_msetsk) }.reduce(_ | _)
   skq.io.deq := (rob.io.commit.valids zip rob.io.commit.uops).map { case (v, u) => Mux(v, u.is_msetsk, false.B) }.reduce(_ | _)
   skq.io.flush := RegNext(rob.io.flush.valid)
   skq.io.redirect := brupdate
+  skq.io.ftq_head := io.ifu.ftq_head
+  skq.io.ftq_tail := io.ifu.ftq_tail
   skq_empty := skq.io.empty
 
   for (w <- 0 until coreWidth) {
@@ -1694,11 +1720,16 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                       || branch_mask_full(w)
                       || vconfig_mask_full(w)
                       || mconfig_mask_full(w)
-                      || tile_m_mask_full(w)
-                      || tile_n_mask_full(w)
-                      || tile_k_mask_full(w)
-                      || moutsh_mask_full(w)
-                      || minsh_mask_full(w)
+                      //|| tile_m_mask_full(w)
+                      || (!mtilecq.io.enq.ready && !dec_finished_mask(w) && dec_uops(w).is_settilem)
+                      //|| tile_n_mask_full(w)
+                      || (!ntilecq.io.enq.ready && !dec_finished_mask(w) && dec_uops(w).is_settilen)
+                      //|| tile_k_mask_full(w)
+                      || (!ktilecq.io.enq.ready && !dec_finished_mask(w) && dec_uops(w).is_settilek)
+                      //|| moutsh_mask_full(w)
+                      || (!outshq.io.enq.ready && !dec_finished_mask(w) && dec_uops(w).is_msetoutsh)
+                      //|| minsh_mask_full(w)
+                      || (!inshq.io.enq.ready && !dec_finished_mask(w) && dec_uops(w).is_msetinsh)
                       //|| msk_mask_full(w)
                       || (!skq.io.enq.ready && !dec_finished_mask(w) && dec_uops(w).is_msetsk)
                       || vcq_vl.io.full
@@ -1750,22 +1781,81 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
   val last_br_idx = RegInit(~0.U(brIdxSz.W))
   for (w <- 0 until coreWidth) {
     when (dec_fire(w) && dec_uops(w).allocate_brtag) {
-      last_br_idx := dec_uops(w).ftq_idx
+      last_br_idx := Cat(dec_uops(w).ftq_idx, dec_uops(w).ftq_off)
     }
   }
 
-  val br_in_pkg = WireInit(false.B)
-  val br_idx_in_pkg = WireInit(0.U(brIdxSz.W))
-  //val msk_in_pkg = dec_msk_valid.reduce(_ || _)
+  val moutsh_br_in_pkg = WireInit(false.B)
+  val moutsh_br_idx_in_pkg = WireInit(0.U(brIdxSz.W))
+  val moutsh_in_pkg = outshq.io.enq.valid
+  val moutsh_idx_in_pkg = PriorityEncoder(dec_moutsh_valid)
+  for (w <- 0 until coreWidth) {
+    when(moutsh_in_pkg && (w.U < moutsh_idx_in_pkg) && dec_fire(w) && dec_uops(w).allocate_brtag) {
+      moutsh_br_in_pkg := true.B
+      moutsh_br_idx_in_pkg := Cat(dec_uops(w).ftq_idx, dec_uops(w).ftq_off)
+    }
+  }
+  dec_outsh_br_idx := Mux(moutsh_br_in_pkg, moutsh_br_idx_in_pkg, last_br_idx)
+
+  val minsh_br_in_pkg = WireInit(false.B)
+  val minsh_br_idx_in_pkg = WireInit(0.U(brIdxSz.W))
+  val minsh_in_pkg = inshq.io.enq.valid
+  val minsh_idx_in_pkg = PriorityEncoder(dec_minsh_valid)
+  for (w <- 0 until coreWidth) {
+    when(minsh_in_pkg && (w.U < minsh_idx_in_pkg) && dec_fire(w) && dec_uops(w).allocate_brtag) {
+      minsh_br_in_pkg := true.B
+      minsh_br_idx_in_pkg := Cat(dec_uops(w).ftq_idx, dec_uops(w).ftq_off)
+    }
+  }
+  dec_insh_br_idx := Mux(minsh_br_in_pkg, minsh_br_idx_in_pkg, last_br_idx)
+
+  val msk_br_in_pkg = WireInit(false.B)
+  val msk_br_idx_in_pkg = WireInit(0.U(brIdxSz.W))
   val msk_in_pkg = skq.io.enq.valid
   val msk_idx_in_pkg = PriorityEncoder(dec_msk_valid)
   for (w <- 0 until coreWidth) {
     when (msk_in_pkg && (w.U < msk_idx_in_pkg) && dec_fire(w) && dec_uops(w).allocate_brtag) {
-      br_in_pkg := true.B
-      br_idx_in_pkg := dec_uops(w).ftq_idx
+      msk_br_in_pkg := true.B
+      msk_br_idx_in_pkg := Cat(dec_uops(w).ftq_idx, dec_uops(w).ftq_off)
     }
   }
-  dec_msk_br_idx := Mux(br_in_pkg, br_idx_in_pkg, last_br_idx)
+  dec_msk_br_idx := Mux(msk_br_in_pkg, msk_br_idx_in_pkg, last_br_idx)
+
+  val tilem_br_in_pkg = WireInit(false.B)
+  val tilem_br_idx_in_pkg = WireInit(0.U(brIdxSz.W))
+  val tilem_in_pkg = mtilecq.io.enq.valid
+  val tilem_idx_in_pkg = PriorityEncoder(dec_mtile_valid)
+  for (w <- 0 until coreWidth) {
+    when(tilem_in_pkg && (w.U < tilem_idx_in_pkg) && dec_fire(w) && dec_uops(w).allocate_brtag) {
+      tilem_br_in_pkg := true.B
+      tilem_br_idx_in_pkg := Cat(dec_uops(w).ftq_idx, dec_uops(w).ftq_off)
+    }
+  }
+  dec_tilem_br_idx := Mux(tilem_br_in_pkg, tilem_br_idx_in_pkg, last_br_idx)
+
+  val tilen_br_in_pkg = WireInit(false.B)
+  val tilen_br_idx_in_pkg = WireInit(0.U(brIdxSz.W))
+  val tilen_in_pkg = ntilecq.io.enq.valid
+  val tilen_idx_in_pkg = PriorityEncoder(dec_ntile_valid)
+  for (w <- 0 until coreWidth) {
+    when(tilen_in_pkg && (w.U < tilen_idx_in_pkg) && dec_fire(w) && dec_uops(w).allocate_brtag) {
+      tilen_br_in_pkg := true.B
+      tilen_br_idx_in_pkg := Cat(dec_uops(w).ftq_idx, dec_uops(w).ftq_off)
+    }
+  }
+  dec_tilen_br_idx := Mux(tilen_br_in_pkg, tilen_br_idx_in_pkg, last_br_idx)
+
+  val tilek_br_in_pkg = WireInit(false.B)
+  val tilek_br_idx_in_pkg = WireInit(0.U(brIdxSz.W))
+  val tilek_in_pkg = ktilecq.io.enq.valid
+  val tilek_idx_in_pkg = PriorityEncoder(dec_ktile_valid)
+  for (w <- 0 until coreWidth) {
+    when(tilek_in_pkg && (w.U < tilek_idx_in_pkg) && dec_fire(w) && dec_uops(w).allocate_brtag) {
+      tilek_br_in_pkg := true.B
+      tilek_br_idx_in_pkg := Cat(dec_uops(w).ftq_idx, dec_uops(w).ftq_off)
+    }
+  }
+  dec_tilek_br_idx := Mux(tilek_br_in_pkg, tilek_br_idx_in_pkg, last_br_idx)
 
   //-------------------------------------------------------------
   //-------------------------------------------------------------

@@ -318,8 +318,8 @@ class Rob(
 
     // one bank
     val rob_val       = RegInit(VecInit(Seq.fill(numRobRows){false.B}))
-    val rob_bsy       = Reg(Vec(numRobRows, Bool())) 
-    val rob_ud_bsy    = if (usingVector) Reg(Vec(numRobRows, Bool())) else null 
+    val rob_bsy       = Reg(Vec(numRobRows, Bool()))
+    val rob_ud_bsy    = if (usingVector) Reg(Vec(numRobRows, Bool())) else null
     val rob_ls_cnt    = if (usingVector) Reg(Vec(numRobRows, UInt((vLenSz+1).W))) else null  
     val rob_ls_wbs    = if (usingVector) Reg(Vec(numRobRows, UInt((vLenSz+1).W))) else null  
     val rob_unsafe    = Reg(Vec(numRobRows, Bool()))
@@ -380,6 +380,24 @@ class Rob(
               when(inc.bits.ls_cnt === 0.U) {
                 rob_bsy(cidx) := false.B
                 rob_unsafe(cidx) := false.B
+              }.otherwise {
+                val ld_wbs = WireInit(false.B).asTypeOf(Vec(numWakeupPorts, Bool()))
+                val wb_merge = WireInit(false.B).asTypeOf(Vec(numWakeupPorts, Bool()))
+                for (i <- 0 until numWakeupPorts) {
+                  val rob_match = io.wb_resps(i).valid &&
+                    MatchBank(GetBankIdx(io.wb_resps(i).bits.uop.rob_idx)) &&
+                    (GetRowIdx(io.wb_resps(i).bits.uop.rob_idx) === cidx)
+                  when ((io.wb_resps(i).bits.uop.uopc === uopMLUF) && io.wb_resps(i).bits.uop.uses_ldq && rob_match) {
+                    ld_wbs(i) := true.B
+                  }
+                  when (io.wb_resps(i).bits.is_merge && rob_match) {
+                    wb_merge(i) := true.B
+                  }
+                }
+                when (rob_ls_wbs(cidx) +& PopCount(ld_wbs) +& Mux(wb_merge.reduce(_ || _), 1.U, 0.U) >= inc.bits.ls_cnt) {
+                  rob_bsy(cidx) := false.B
+                  rob_unsafe(cidx) := false.B
+                }
               }
             }
           }

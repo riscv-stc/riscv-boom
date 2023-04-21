@@ -291,6 +291,8 @@ class BoomFrontendIO(implicit p: Parameters) extends BoomBundle
   val sfence = Valid(new SFenceReq)
 
   val brupdate          = Output(new BrUpdateInfo)
+  val ftq_head          = Input(UInt(log2Ceil(ftqSz).W))
+  val ftq_tail          = Input(UInt(log2Ceil(ftqSz).W))
 
   // Redirects change the PC
   val redirect_flush   = Output(Bool()) // Flush and hang the frontend?
@@ -1009,6 +1011,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   io.cpu.get_pc <> ftq.io.get_ftq_pc
   ftq.io.deq := io.cpu.commit
   ftq.io.brupdate := io.cpu.brupdate
+  io.cpu.ftq_head := ftq.io.enq_idx
+  io.cpu.ftq_tail := ftq.io.deq_idx
 
   ftq.io.redirect.valid   := io.cpu.redirect_val
   ftq.io.redirect.bits    := io.cpu.redirect_ftq_idx

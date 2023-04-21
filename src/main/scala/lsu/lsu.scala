@@ -312,6 +312,7 @@ class VLDQEntry(implicit p: Parameters) extends LDQEntry()(p)
   val shdir               = Bool()
   val shamt               = UInt(log2Ceil(vLenb.max(p(freechips.rocketchip.subsystem.CacheBlockBytes))).W)
   val ml_wbq_idx          = UInt(vldqAddrSz.W)
+  val ml_vagu_idx         = UInt(log2Ceil(memWidth).W)
 }
 
 class VSTQEntry(override val is_vst: Boolean = false)(implicit p: Parameters) extends STQEntry()(p)
@@ -1056,6 +1057,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       vldq(vldq_enq_idx).bits.shamt := vlagu(w).io.resp_shamt
       vldq(vldq_enq_idx).bits.shdir := vlagu(w).io.resp_shdir
       vldq(vldq_enq_idx).bits.ml_wbq_idx := ml_wbq_tail(w)
+      vldq(vldq_enq_idx).bits.ml_vagu_idx := w.U
     }
     vldq_enq_idx = Mux(vlagu(w).io.resp.fire, WrapInc(vldq_enq_idx, numVLdqEntries), vldq_enq_idx)
     // clear ml_wbq entry, ml_wbq records how many bytes has loaded from memory
@@ -1641,7 +1643,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         vmem_ld_req(w).shdir := vldq_lkup_e(w).bits.shdir
         vmem_ld_req(w).shamt := vldq_lkup_e(w).bits.shamt
         vmem_ld_req(w).vldq_idx := vldq_lkup_idx(w)
-        ml_wbq(w)(vldq_lkup_e(w).bits.ml_wbq_idx).ml_wbq_rob_idx := vldq_lkup_e(w).bits.uop.rob_idx
+        //ml_wbq(w)(vldq_lkup_e(w).bits.ml_wbq_idx).ml_wbq_rob_idx := vldq_lkup_e(w).bits.uop.rob_idx
+        ml_wbq(vldq_lkup_e(w).bits.ml_vagu_idx)(vldq_lkup_e(w).bits.ml_wbq_idx).ml_wbq_rob_idx := vldq_lkup_e(w).bits.uop.rob_idx
       }.elsewhen(will_fire_vlxq_lookup(w)) {
         vmem_ld_req(w).uop := vlxq_lkup_e(w).bits.uop
         vmem_ld_req(w).addr := vlxq_lkup_e(w).bits.addr.bits
@@ -1649,7 +1652,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         vmem_ld_req(w).shdir := vlxq_lkup_e(w).bits.shdir
         vmem_ld_req(w).shamt := vlxq_lkup_e(w).bits.shamt
         vmem_ld_req(w).vldq_idx := vlxq_lkup_idx(w)
-        ml_wbq(w)(vlxq_lkup_e(w).bits.ml_wbq_idx).ml_wbq_rob_idx := vlxq_lkup_e(w).bits.uop.rob_idx
+        //ml_wbq(w)(vlxq_lkup_e(w).bits.ml_wbq_idx).ml_wbq_rob_idx := vlxq_lkup_e(w).bits.uop.rob_idx
+        ml_wbq(vlxq_lkup_e(w).bits.ml_vagu_idx)(vlxq_lkup_e(w).bits.ml_wbq_idx).ml_wbq_rob_idx := vlxq_lkup_e(w).bits.uop.rob_idx
       }
       io.vmem_ld_ports(w).req.valid := io.vmem_ld_ports(w).req.ready && (will_fire_vldq_lookup(w) || will_fire_vlxq_lookup(w)) &&
         !exe_tlb_miss(w) && !exe_tlb_uncacheable(w) && !pf_ld(0) && !ae_ld(w)
@@ -1765,9 +1769,10 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
         val ldq_idx = vldq(vldq_idx).bits.uop.ldq_idx
         ldq(ldq_idx).bits.succeeded := true.B
       }
+      val wbq_idx = vload_resp_ml_wbq(w).bits.ml_vagu_idx
       when(vldq(vldq_idx).bits.uop.is_rvm && 
-          ml_wbq(w)(vload_resp_ml_wbq(w).bits.ml_wbq_idx).ml_wbq_rob_idx === vload_resp_ml_wbq(w).bits.uop.rob_idx) {
-        ml_wbq(w)(vldq(vldq_idx).bits.ml_wbq_idx).ml_wbq_count := ml_wbq(w)(vldq(vldq_idx).bits.ml_wbq_idx).ml_wbq_count + PopCount(vldq(vldq_idx).bits.vmask)
+          ml_wbq(wbq_idx)(vload_resp_ml_wbq(w).bits.ml_wbq_idx).ml_wbq_rob_idx === vload_resp_ml_wbq(w).bits.uop.rob_idx) {
+        ml_wbq(wbq_idx)(vldq(vldq_idx).bits.ml_wbq_idx).ml_wbq_count := ml_wbq(wbq_idx)(vldq(vldq_idx).bits.ml_wbq_idx).ml_wbq_count + PopCount(vldq(vldq_idx).bits.vmask)
       }
     }
 
@@ -2173,6 +2178,13 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     when(io.core.tile_wbk(w).valid) {
       assert(io.core.tile_wbk(w).ready)
     }
+    (0 until numVLdPorts).map{ i => {
+      val set_clear = (ml_wbq(i)(vload_resp_e(w).bits.ml_wbq_idx).ml_wbq_rob_idx === vload_resp_e(w).bits.uop.rob_idx) &&
+        io.core.tile_wbk(w).bits.uop.m_slice_done
+      when(set_clear) {
+        ml_wbq(i)(vload_resp_e(w).bits.ml_wbq_idx).ml_wbq_count := 0.U
+      }
+    }}
   }
 
   for (w <- 0 until numVLdPorts) {
@@ -2181,8 +2193,8 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     io.core.tile_wbk(numVLdPorts + w).bits.uop := vlagu(w).io.resp.bits.uop
     io.core.tile_wbk(numVLdPorts + w).bits.data := 0.U
     io.core.tile_wbk(numVLdPorts + w).bits.vmask := vlagu(w).io.resp.bits.vmask
-    //io.core.tile_wbk(numVLdPorts + w).bits.uop.m_slice_done := io.core.tile_wbk(numVLdPorts + w).bits.uop.m_split_last
-    io.core.tile_wbk(numVLdPorts + w).bits.uop.m_slice_done := true.B
+    //io.core.tile_wbk(numVLdPorts + w).bits.uop.m_slice_done := true.B
+    io.core.tile_wbk(numVLdPorts + w).bits.uop.m_slice_done := vlagu(w).io.resp.bits.uop.m_slice_done
     io.core.tile_wbk(numVLdPorts + w).bits.predicated := false.B
     io.core.tile_wbk(numVLdPorts + w).bits.is_merge := false.B
     io.core.tile_wbk(numVLdPorts + w).bits.fflags.valid := false.B
@@ -3831,7 +3843,7 @@ class VecLSAddrGenUnit(
   io.resp.bits.uop.m_sidx       := sliceCntCtr
   io.resp.bits.uop.m_split_last := (sliceCntCtr +& 1.U === uop.m_slice_cnt) && sliceLenLast
   io.resp.bits.uop.m_slice_quad := sliceBlockAddr >> rLenbSz.U
-  io.resp.bits.uop.m_slice_done := false.B
+  io.resp.bits.uop.m_slice_done := !misaligned
   io.resp_sfirst                := uop.is_rvm && uop.uses_ldq && sliceBlockAddr === 0.U
   io.resp_slast                 := uop.is_rvm && uop.uses_ldq && sliceLenLast
   io.resp_vm                    := Mux(uop.is_rvv,    VRegMask(uop.v_eidx, eew, eidxInc, vLenb) & activeByteMask,
@@ -4118,7 +4130,7 @@ class VecMem(implicit p: Parameters) extends LazyModule
 {
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
       name = s"l1-vec-memq",
-      sourceId = IdRange(0, 1024),
+      sourceId = IdRange(0, 256),
       supportsProbe = TransferSizes.none
   )))))
   lazy val module = new VecMemImp(this)

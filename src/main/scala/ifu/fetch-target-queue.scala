@@ -108,6 +108,7 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
     val enq_idx = Output(UInt(idx_sz.W))
     // ROB tells us the youngest committed ftq_idx to remove from FTQ.
     val deq = Flipped(Valid(UInt(idx_sz.W)))
+    val deq_idx = Output(UInt(idx_sz.W))
 
     // Give PC info to BranchUnit.
     val get_ftq_pc = Vec(2, new GetPCFromFtqIO())
@@ -204,6 +205,7 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
   }
 
   io.enq_idx := enq_ptr
+  io.deq_idx := deq_ptr
 
   io.bpdupdate.valid := false.B
   io.bpdupdate.bits  := DontCare
