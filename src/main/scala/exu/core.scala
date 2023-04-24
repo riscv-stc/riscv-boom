@@ -1734,19 +1734,19 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
                       || (!skq.io.enq.ready && !dec_finished_mask(w) && dec_uops(w).is_msetsk)
                       || vcq_vl.io.full
                       || vcq_vtype.io.full
-                      || vconfig_stall(w)
-                      || mconfig_stall(w)
-                      || mtilecq_stall(w)
-                      || ntilecq_stall(w)
-                      || ktilecq_stall(w)
-                      || outshq_stall(w)
-                      || inshq_stall(w)
-                      || skq_stall(w)
+                      //|| vconfig_stall(w)
+                      //|| mconfig_stall(w)
+                      //|| mtilecq_stall(w)
+                      //|| ntilecq_stall(w)
+                      //|| ktilecq_stall(w)
+                      //|| outshq_stall(w)
+                      //|| inshq_stall(w)
+                      //|| skq_stall(w)
                       || brupdate.b1.mispredict_mask =/= 0.U
                       || brupdate.b2.mispredict
                       || io.ifu.redirect_flush))
 
-  dontTouch(dec_hazards)
+  //dontTouch(dec_hazards)
   dec_stalls  := dec_hazards.scanLeft(false.B) ((s,h) => s || h).takeRight(coreWidth)
   dec_fe_fire := (0 until coreWidth).map(w => dec_valids(w) && !dec_stalls(w) && !dec_enq_stalls(w))
   dec_fire := (0 until coreWidth).map(w => dec_valids(w) && !dec_stalls(w))

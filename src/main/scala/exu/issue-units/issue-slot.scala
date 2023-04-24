@@ -599,12 +599,12 @@ class IssueSlot(
         val p1_wake_value = Mux(io.in_uop.valid, in_p1, p1) | wake_p1.reduce(_|_) | ~io.wake_issue_data(i)(j)
         val p2_wake_value = Mux(io.in_uop.valid, in_p2, p2) | wake_p2.reduce(_|_) | ~io.wake_issue_data(i)(j)
         val p3_wake_value = Mux(io.in_uop.valid, in_p3, p3) | wake_p3.reduce(_|_) | ~io.wake_issue_data(i)(j)
-        dontTouch(p1_wake_match)
-        dontTouch(p2_wake_match)
-        dontTouch(p3_wake_match)
-        dontTouch(p1_wake_value)
-        dontTouch(p2_wake_value)
-        dontTouch(p3_wake_value)
+        //dontTouch(p1_wake_match)
+        //dontTouch(p2_wake_match)
+        //dontTouch(p3_wake_match)
+        //dontTouch(p1_wake_value)
+        //dontTouch(p2_wake_value)
+        //dontTouch(p3_wake_value)
         when (ready_sig && p1_wake_match) {
           next_p1 := p1_wake_value
         }
