@@ -1360,7 +1360,7 @@ class TileQueue(implicit p: Parameters) extends BoomModule
 
       val cur_br_idx = ram(sel_idx(i)).br_idx
       val mis_br_idx = Cat(io.redirect.b2.uop.ftq_idx, io.redirect.b2.uop.ftq_off)
-      is_sel(i)  := !IsOlder(cur_br_idx, mis_br_idx, Cat(io.ftq_head, 0.U(log2Ceil(fetchWidth).W)))
+      is_sel(i)  := !IsOlder(cur_br_idx, mis_br_idx, Cat(io.ftq_head, ~0.U(log2Ceil(fetchWidth).W)))
       in_rang(i) := Mux(is_order, (sel_idx(i) >= deq_ptr) && (sel_idx(i) < enq_ptr),
                                   (sel_idx(i) >= deq_ptr) || (sel_idx(i) < enq_ptr))
 
@@ -1530,7 +1530,7 @@ class OutputShapeQueue(implicit p: Parameters) extends BoomModule
 
       val cur_br_idx = ram(sel_idx(i)).br_idx
       val mis_br_idx = Cat(io.redirect.b2.uop.ftq_idx, io.redirect.b2.uop.ftq_off)
-      is_sel(i)  := !IsOlder(cur_br_idx, mis_br_idx, Cat(io.ftq_head, 0.U(log2Ceil(fetchWidth).W)))
+      is_sel(i)  := !IsOlder(cur_br_idx, mis_br_idx, Cat(io.ftq_head, ~0.U(log2Ceil(fetchWidth).W)))
       in_rang(i) := Mux(is_order, (sel_idx(i) >= deq_ptr) && (sel_idx(i) < enq_ptr),
                                   (sel_idx(i) >= deq_ptr) || (sel_idx(i) < enq_ptr))
 
@@ -1635,7 +1635,7 @@ class InputShapeQueue(implicit p: Parameters) extends BoomModule
 
       val cur_br_idx = ram(sel_idx(i)).br_idx
       val mis_br_idx = Cat(io.redirect.b2.uop.ftq_idx, io.redirect.b2.uop.ftq_off)
-      is_sel(i)  := !IsOlder(cur_br_idx, mis_br_idx, Cat(io.ftq_head, 0.U(log2Ceil(fetchWidth).W)))
+      is_sel(i)  := !IsOlder(cur_br_idx, mis_br_idx, Cat(io.ftq_head, ~0.U(log2Ceil(fetchWidth).W)))
       in_rang(i) := Mux(is_order, (sel_idx(i) >= deq_ptr) && (sel_idx(i) < enq_ptr),
                                   (sel_idx(i) >= deq_ptr) || (sel_idx(i) < enq_ptr))
 
@@ -1741,7 +1741,7 @@ class KernelPositionQueue(implicit p: Parameters) extends BoomModule
 
       val cur_br_idx = ram(sel_idx(i)).br_idx
       val mis_br_idx = Cat(io.redirect.b2.uop.ftq_idx, io.redirect.b2.uop.ftq_off)
-      is_sel(i)  := !IsOlder(cur_br_idx, mis_br_idx, Cat(io.ftq_head, 0.U(log2Ceil(fetchWidth).W)))
+      is_sel(i)  := !IsOlder(cur_br_idx, mis_br_idx, Cat(io.ftq_head, ~0.U(log2Ceil(fetchWidth).W)))
       in_rang(i) := Mux(is_order, (sel_idx(i) >= deq_ptr) && (sel_idx(i) < enq_ptr),
                                   (sel_idx(i) >= deq_ptr) || (sel_idx(i) < enq_ptr))
 

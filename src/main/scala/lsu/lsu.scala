@@ -2203,16 +2203,40 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     }
   }
 
-    val vldq_done = Cat(vldq.map(x => x.valid && x.bits.executed && x.bits.succeeded && !x.bits.uop.exception).reverse)
-    when(vldq_done(vldq_head)) {
-      vldq_head := WrapInc(vldq_head, numVLdqEntries)
-      vldq(vldq_head).valid := false.B
-    }
-    val vlxq_done = Cat(vlxq.map(x => x.valid && x.bits.executed && x.bits.succeeded && !x.bits.uop.exception).reverse)
-    when(vlxq_done(vlxq_head)) {
-      vlxq_head := WrapInc(vlxq_head, numVLxqEntries)
-      vlxq(vlxq_head).valid := false.B
-    }
+//    val vldq_done = Cat(vldq.map(x => x.valid && x.bits.executed && x.bits.succeeded && !x.bits.uop.exception).reverse)
+//    when(vldq_done(vldq_head)) {
+//      vldq_head := WrapInc(vldq_head, numVLdqEntries)
+//      vldq(vldq_head).valid := false.B
+//    }
+//    val vlxq_done = Cat(vlxq.map(x => x.valid && x.bits.executed && x.bits.succeeded && !x.bits.uop.exception).reverse)
+//    when(vlxq_done(vlxq_head)) {
+//      vlxq_head := WrapInc(vlxq_head, numVLxqEntries)
+//      vlxq(vlxq_head).valid := false.B
+//    }
+
+  val vldq_done = Cat(vldq.map(x => x.valid && x.bits.executed && x.bits.succeeded && !x.bits.uop.exception).reverse)
+  val vlxq_done = Cat(vlxq.map(x => x.valid && x.bits.executed && x.bits.succeeded && !x.bits.uop.exception).reverse)
+
+	var vldq_deq_fire = Bool()
+	var vlxq_deq_fire = Bool()
+	var vldq_deq_idx =  vldq_head
+	var vlxq_deq_idx =  vldq_head
+	for (w <- 0 until memWidth) {
+		vldq_deq_fire = vldq_done(vldq_deq_idx)
+		vlxq_deq_fire = vlxq_done(vldq_deq_idx)
+		when(vldq_deq_fire) {
+			vldq(vldq_deq_idx).valid	:= false.B
+		}
+		when(vlxq_deq_fire) {
+			vlxq(vlxq_deq_idx).valid	:= false.B
+		}
+
+	vldq_deq_idx = Mux(vldq_deq_fire, WrapInc(vldq_deq_idx, numVLdqEntries), vldq_deq_idx)
+	vlxq_deq_idx = Mux(vlxq_deq_fire, WrapInc(vlxq_deq_idx, numVLxqEntries), vlxq_deq_idx)
+	}
+	vldq_head := vldq_deq_idx
+	vlxq_head := vlxq_deq_idx
+
 
 
     val vstq_done = Cat(vstq.map(x => x.valid && x.bits.committed && x.bits.succeeded && !x.bits.uop.exception).reverse)
@@ -4130,7 +4154,7 @@ class VecMem(implicit p: Parameters) extends LazyModule
 {
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
       name = s"l1-vec-memq",
-      sourceId = IdRange(0, 256),
+      sourceId = IdRange(0, 1024),
       supportsProbe = TransferSizes.none
   )))))
   lazy val module = new VecMemImp(this)
