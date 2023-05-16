@@ -661,7 +661,7 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     uop.msk_ready    := Mux(is_unfold, io.enq.uop.msk_ready, true.B)
     uop.m_is_split   := cs.can_be_split
     uop.m_slice_cnt  := Mux(is_mls,  sel_slice_cnt,
-                        Mux(is_mopa, csr_tilek, csr_tilem))
+                        Mux(is_mopa && !usingInnerProd.B, csr_tilek, csr_tilem))
     uop.m_slice_len  := Mux(is_mls, sel_slice_len,
                         Mux(is_mmv && mslice_dim === 2.U, csr_tilem,
                         Mux(is_mmv && mslice_dim === 3.U, csr_tilen, csr_tilek)))
@@ -685,6 +685,10 @@ class DecodeUnit(implicit p: Parameters) extends BoomModule
     when (cs.is_rvm && cs.uopc.isOneOf(uopMMV_V, uopMWMV_V, uopMQMV_V)) {
       uop.lrs1_rtype := Mux(uop.inst(27) || uop.inst(26), RT_TR, RT_ACC)
       uop.fu_code    := Mux(uop.inst(28).asBool(), FU_VSLICE, FU_HSLICE)
+    }
+
+    if (usingInnerProd) {
+      uop.xcol_mode  := mxb
     }
 
     //matrix illegal instruction handler

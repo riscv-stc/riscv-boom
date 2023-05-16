@@ -92,21 +92,34 @@ class TileRegisterRead(
     val numReadPorts = numReadPortsArray(w)
 
     // port 0
-    io.tileReadPorts(idx+0).msew      := io.iss_uops(w).ts1_eew
-    io.tileReadPorts(idx+0).tt        := Mux(io.iss_uops(w).uopc.isOneOf(uopMMV_V) && io.iss_uops(w).isHSlice, 2.U, 3.U)
-    io.tileReadPorts(idx+0).addr      := io.iss_uops(w).prs1
-    io.tileReadPorts(idx+0).index     := io.iss_uops(w).m_sidx
-    // port 1
-    io.tileReadPorts(idx+1).msew      := io.iss_uops(w).ts2_eew
-    io.tileReadPorts(idx+1).tt        := 2.U                          // tr_r, used in mopa instructions only
-    io.tileReadPorts(idx+1).addr      := io.iss_uops(w).prs2
-    io.tileReadPorts(idx+1).index     := io.iss_uops(w).m_sidx
+    io.tileReadPorts(idx + 0).msew := io.iss_uops(w).ts1_eew
+    if (!usingInnerProd) {
+      io.tileReadPorts(idx + 0).tt := Mux(io.iss_uops(w).uopc.isOneOf(uopMMV_V) && io.iss_uops(w).isHSlice, 2.U, 3.U)
+    } else {
+      io.tileReadPorts(idx + 0).tt := 2.U
+      io.tileReadPorts(idx + 0).xcol := false.B
+    }
+    io.tileReadPorts(idx + 0).addr := io.iss_uops(w).prs1
+    io.tileReadPorts(idx + 0).index := io.iss_uops(w).m_sidx
+
+    if (!usingInnerProd) {
+      // port 1
+      io.tileReadPorts(idx + 1).msew := io.iss_uops(w).ts2_eew
+      io.tileReadPorts(idx + 1).tt := 2.U // tr_r, used in mopa instructions only
+      io.tileReadPorts(idx + 1).addr := io.iss_uops(w).prs2
+      io.tileReadPorts(idx + 1).index := io.iss_uops(w).m_sidx
+    }
 
     io.vec_rport(idx+0).addr := io.iss_uops(w).pvs1(0).bits
     io.vec_rport(idx+1).addr := io.iss_uops(w).pvs2(0).bits
 
-    rrd_ts1_data(w) := Mux(rrd_uops(w).rt(RS1, isVector), io.vec_rport(idx+0).data,io.tileReadPorts(idx+0).data)
-    rrd_ts2_data(w) := Mux(rrd_uops(w).rt(RS2, isVector), io.vec_rport(idx+1).data,io.tileReadPorts(idx+1).data)
+    if (!usingInnerProd) {
+      rrd_ts1_data(w) := Mux(rrd_uops(w).rt(RS1, isVector), io.vec_rport(idx+0).data, io.tileReadPorts(idx+0).data)
+      rrd_ts2_data(w) := Mux(rrd_uops(w).rt(RS2, isVector), io.vec_rport(idx + 1).data, io.tileReadPorts(idx + 1).data)
+    } else {
+      rrd_ts1_data(w) := Mux(rrd_uops(w).rt(RS1, isVector), io.vec_rport(idx+0).data, RegNext(io.tileReadPorts(idx+0).data))
+      rrd_ts2_data(w) := 0.U(registerWidth.W)
+    }
 
     val rrd_kill = io.kill || IsKilledByBranch(io.brupdate, rrd_uops(w))
 

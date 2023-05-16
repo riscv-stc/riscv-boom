@@ -8,22 +8,24 @@ import chisel3.util._
 import freechips.rocketchip.util._
 
 class TrTileRegReadPortIO(implicit p: Parameters) extends BoomBundle {
-  val addr: UInt = Input(UInt(log2Ceil(numMatTrPhysRegs).W)) // value of td num
-  val data: UInt = Output(UInt(rLen.W))
-  val index: UInt = Input(UInt(32.W))       //index slice number, value is rs2
-  val tt: UInt = Input(UInt(2.W))           //2: tr_r, 3: tr_c
-  val msew: UInt = Input(UInt(2.W))
-  val quad     = Input(UInt(2.W))           // tr may support duoble-width access in Col
+  val addr = Input(UInt(log2Ceil(numMatTrPhysRegs).W)) // value of td num
+  val data = Output(UInt(rLen.W))
+  val index = Input(UInt(32.W)) //index slice number, value is rs2
+  val tt = Input(UInt(2.W))     //2: tr_r, 3: tr_c
+  val msew = Input(UInt(2.W))
+  val quad = Input(UInt(2.W))   // tr may support duoble-width access in Col
+  val xcol = if (usingInnerProd) Input(Bool()) else null
 }
 
 class TrTileRegWritePortIO(implicit p: Parameters) extends BoomBundle {
-  val addr: UInt = UInt(log2Ceil(numMatTrPhysRegs).W) // value of td num
-  val data: UInt = UInt(rLen.W)
-  val index: UInt = UInt(32.W) //index slice number, value is rs2
-  val tt: UInt = UInt(2.W) //2: tr_r, 3: tr_c
-  val msew: UInt = UInt(2.W)
-  val byteMask: UInt = UInt(rLenb.W)
-  val quad     = UInt(2.W)          // tr may support duoble-width access in Col
+  val addr = UInt(log2Ceil(numMatTrPhysRegs).W) // value of td num
+  val data = UInt(rLen.W)
+  val index = UInt(32.W)  // index slice number, value is rs2
+  val tt = UInt(2.W)      // 2: tr_r, 3: tr_c
+  val msew = UInt(2.W)
+  val byteMask = UInt(rLenb.W)
+  val quad = UInt(2.W)    // tr may support duoble-width access in Col
+  val xcol = if (usingInnerProd) Bool() else null
 }
 
 class TrTileReg(val numReadPorts: Int, val numWritePorts: Int)(implicit p: Parameters)  extends BoomModule {

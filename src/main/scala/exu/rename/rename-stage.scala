@@ -200,8 +200,11 @@ abstract class AbstractRenameStage(
    // if (matrix) {
         when(io.mtype_wakeup.valid && r_valid && !r_uop.mtype_ready && !ren2_ready &&
           (io.mtype_wakeup.bits.mconfig_tag + 1.U) === r_uop.mconfig_tag) {
-            r_uop.mtype_ready := true.B
-            r_uop.mconfig := io.mtype_wakeup.bits.mconfig
+          r_uop.mtype_ready := true.B
+          r_uop.mconfig := io.mtype_wakeup.bits.mconfig
+          r_uop.ts1_eew := io.mtype_wakeup.bits.mconfig.mtype.msew + Mux(r_uop.uopc === uopMFNCVT, 1.U, 0.U)
+          r_uop.ts2_eew := io.mtype_wakeup.bits.mconfig.mtype.msew
+          r_uop.td_eew := io.mtype_wakeup.bits.mconfig.mtype.msew + Mux(r_uop.mqwiden, 2.U, Mux(r_uop.mwwiden, 1.U, 0.U))
         }
         when(io.tile_m_wakeup.valid && r_valid && !r_uop.tile_m_ready && !ren2_ready &&
             (io.tile_m_wakeup.bits.tile_tag + 1.U) === r_uop.tile_m_tag) {
@@ -261,7 +264,7 @@ abstract class AbstractRenameStage(
           val sel_slice_len = Mux(slice_len_tilem, sel_m,
                               Mux(slice_len_tilen, sel_n, sel_k))
           r_uop.m_slice_cnt   := Mux(is_mls,  sel_slice_cnt,
-                                    Mux(is_mopa, sel_k, sel_m))
+                                    Mux(is_mopa && !usingInnerProd.B, sel_k, sel_m))
           r_uop.m_slice_len   := Mux(is_mls, sel_slice_len,
                                     Mux(is_mmv && mslice_dim === 2.U, sel_m,
                                     Mux(is_mmv && mslice_dim === 3.U, sel_n, sel_k)))
@@ -1111,7 +1114,11 @@ class MatRenameStage(
 
     when(uop.lrs1_rtype === RT_TR) {
       uop.pts1_busy    := trbusy.prs1_busy
-      uop.pts1DirCross := Mux(uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), trbusy.prs1_busy(vLenb), uop.isHSlice =/= trbusy.prs1_busy(vLenb))
+      if (!usingInnerProd) {
+        uop.pts1DirCross := Mux(uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), trbusy.prs1_busy(vLenb), uop.isHSlice =/= trbusy.prs1_busy(vLenb))
+      } else {
+        uop.pts1DirCross := Mux(uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), !trbusy.prs1_busy(vLenb), uop.isHSlice =/= trbusy.prs1_busy(vLenb))
+      }
     } .elsewhen(uop.lrs1_rtype === RT_ACC) {
       uop.pts1_busy    := accbusy.prs1_busy
       uop.pts1DirCross := uop.isHSlice =/= accbusy.prs1_busy(vLenb)
@@ -1119,7 +1126,11 @@ class MatRenameStage(
 
     when(uop.lrs2_rtype === RT_TR) {
       uop.pts2_busy    := trbusy.prs2_busy
-      uop.pts2DirCross := Mux(uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), !trbusy.prs2_busy(vLenb), uop.isHSlice =/= trbusy.prs2_busy(vLenb))
+      if (!usingInnerProd) {
+        uop.pts2DirCross := Mux(uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), !trbusy.prs2_busy(vLenb), uop.isHSlice =/= trbusy.prs2_busy(vLenb))
+      } else {
+        uop.pts2DirCross := Mux(uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA), trbusy.prs2_busy(vLenb), uop.isHSlice =/= trbusy.prs2_busy(vLenb))
+      }
     } .elsewhen(uop.lrs2_rtype === RT_ACC) {
       uop.pts2_busy    := accbusy.prs2_busy
       uop.pts2DirCross := uop.isHSlice =/= accbusy.prs2_busy(vLenb)

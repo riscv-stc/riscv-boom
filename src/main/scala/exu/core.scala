@@ -1122,21 +1122,21 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
                                 ((dec_fbundle.uops(w).bits.inst(31, 28) === 2.U) ||
                                 (dec_fbundle.uops(w).bits.inst(31, 28) === 3.U))
       dec_mtile(w).tile_ready :=  (dec_fbundle.uops(w).bits.inst(31,28) === 2.U)
-      dec_mtile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 2.U),dec_fbundle.uops(w).bits.inst(27, 15), numTrTileRows.U)
+      dec_mtile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 2.U),dec_fbundle.uops(w).bits.inst(27, 15), maxNumTrCnt.U)
 
       dec_ntile_valid(w)      := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 119.U) && 
                                 (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && 
                                 ((dec_fbundle.uops(w).bits.inst(31, 28) === 6.U) ||
                                 (dec_fbundle.uops(w).bits.inst(31, 28) === 7.U))
       dec_ntile(w).tile_ready :=  (dec_fbundle.uops(w).bits.inst(31,28) === 6.U)
-      dec_ntile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 6.U),dec_fbundle.uops(w).bits.inst(27, 15), numTrTileRows.U)
+      dec_ntile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 6.U),dec_fbundle.uops(w).bits.inst(27, 15), maxNumTrCnt.U)
 
       dec_ktile_valid(w)      := dec_valids(w) && (dec_fbundle.uops(w).bits.inst(6, 0) === 119.U) && 
                                 (dec_fbundle.uops(w).bits.inst(14, 12) === 7.U) && 
                                 ((dec_fbundle.uops(w).bits.inst(31, 28) === 4.U) ||
                                 (dec_fbundle.uops(w).bits.inst(31, 28) === 5.U))
       dec_ktile(w).tile_ready :=  (dec_fbundle.uops(w).bits.inst(31,28) === 4.U)
-      dec_ktile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 4.U),dec_fbundle.uops(w).bits.inst(27, 15), numTrTileRows.U)
+      dec_ktile(w).tile_len   :=  Mux((dec_fbundle.uops(w).bits.inst(31,28) === 4.U),dec_fbundle.uops(w).bits.inst(27, 15), maxNumTrCnt.U)
 
       decode_units(w).io.csr_mconfig := mcq_data(w).mconfig
       decode_units(w).io.enq.uop.mtype_ready := mcq_data(w).mtype_ready
@@ -1189,8 +1189,11 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     }
     when(mtype_wakeup.valid && !decode_units(w).io.deq.uop.mtype_ready && 
         (mtype_wakeup.bits.mconfig_tag + 1.U) === dec_uops(w).mconfig_tag) {
-          dec_uops(w).mtype_ready := true.B 
-          dec_uops(w).mconfig := mtype_wakeup.bits.mconfig
+      dec_uops(w).mtype_ready := true.B
+      dec_uops(w).mconfig := mtype_wakeup.bits.mconfig
+      dec_uops(w).ts1_eew := mtype_wakeup.bits.mconfig.mtype.msew + Mux(dec_uops(w).uopc === uopMFNCVT, 1.U, 0.U)
+      dec_uops(w).ts2_eew := mtype_wakeup.bits.mconfig.mtype.msew
+      dec_uops(w).td_eew := mtype_wakeup.bits.mconfig.mtype.msew + Mux(dec_uops(w).mqwiden, 2.U, Mux(dec_uops(w).mwwiden, 1.U, 0.U))
     }
     when(tile_m_wakeup.valid && !decode_units(w).io.deq.uop.tile_m_ready && 
         (tile_m_wakeup.bits.tile_tag + 1.U) === dec_uops(w).tile_m_tag) {
@@ -2002,6 +2005,9 @@ val dec_ktile_nums  = dec_ktile_fires.scanLeft(0.U)(_ + _)
     when(mtype_wakeup.valid && (mtype_wakeup.bits.mconfig_tag + 1.U) === m_uop.mconfig_tag && !m_uop.mtype_ready) {
       dis_uops(w).mtype_ready := true.B
       dis_uops(w).mconfig := mtype_wakeup.bits.mconfig
+      dis_uops(w).ts1_eew := mtype_wakeup.bits.mconfig.mtype.msew + Mux(dis_uops(w).uopc === uopMFNCVT, 1.U, 0.U)
+      dis_uops(w).ts2_eew := mtype_wakeup.bits.mconfig.mtype.msew
+      dis_uops(w).td_eew := mtype_wakeup.bits.mconfig.mtype.msew + Mux(dis_uops(w).mqwiden, 2.U, Mux(dis_uops(w).mwwiden, 1.U, 0.U))
     }.otherwise {
       dis_uops(w).mtype_ready := m_uop.mtype_ready
       dis_uops(w).mconfig :=  m_uop.mconfig

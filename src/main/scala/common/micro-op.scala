@@ -265,6 +265,8 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   val m_auto_clr       = if (usingMatrix) Bool()          else null
   val m_auto_cvt       = if (usingMatrix) Bool()          else null
   val fusion_code      = if (usingMatrix) UInt(FusionCode.FUS_SZ.W) else null
+  val xcol_mode        = if (usingInnerProd) Bool()       else null
+
   // purely debug information
   val debug_wdata      = UInt(xLen.W)
   val debug_events     = new DebugStageEvents
@@ -311,6 +313,9 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   // for convenience in matrix multiply control
   def m_tilem  = m_slice_cnt
   def m_tilek  = m_slice_len
+
+  def mqwiden = uopc.isOneOf(MicroOpcodes.uopMQMA, MicroOpcodes.uopMQMV_T, MicroOpcodes.uopMQMV_V, MicroOpcodes.uopMQADD, MicroOpcodes.uopMQSUB, MicroOpcodes.uopMQRSUB)
+  def mwwiden = uopc.isOneOf(MicroOpcodes.uopMWMA, MicroOpcodes.uopMWMV_T, MicroOpcodes.uopMWMV_V, MicroOpcodes.uopMWADD, MicroOpcodes.uopMWSUB, MicroOpcodes.uopMWRSUB)
 
   def match_group(prd: UInt): Bool = {
     val ret = Wire(Bool())

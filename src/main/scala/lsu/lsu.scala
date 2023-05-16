@@ -2066,6 +2066,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     io.core.tile_rport(0).tt             := vsagu.io.tile_rreq.bits.tt
     io.core.tile_rport(0).msew           := vsagu.io.tile_rreq.bits.sew
     io.core.tile_rport(0).quad           := vsagu.io.tile_rreq.bits.quad
+    if (usingInnerProd) io.core.tile_rport(0).xcol := vsagu.io.tile_rreq.bits.xcol
     // read acc register
     io.core.acc_rreq.valid            := vsagu.io.tile_rreq.valid && !vsagu.io.tile_rreq.bits.tt(1).asBool
     io.core.acc_rreq.bits.sCtrls.ridx := vsagu.io.tile_rreq.bits.ridx
@@ -2180,7 +2181,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     }
     (0 until numVLdPorts).map{ i => {
       val set_clear = (ml_wbq(i)(vload_resp_e(w).bits.ml_wbq_idx).ml_wbq_rob_idx === vload_resp_e(w).bits.uop.rob_idx) &&
-        io.core.tile_wbk(w).bits.uop.m_slice_done
+        io.core.tile_wbk(w).bits.uop.m_slice_done && io.core.tile_wbk(w).valid
       when(set_clear) {
         ml_wbq(i)(vload_resp_e(w).bits.ml_wbq_idx).ml_wbq_count := 0.U
       }
@@ -3818,6 +3819,7 @@ class VecLSAddrGenUnit(
   io.tile_rreq.bits.tt       := uop.rt(RD, isTrTile).asUInt ## !uop.isHSlice.asUInt
   io.tile_rreq.bits.quad     := sliceBlockAddr >> rLenbSz.U
   io.tile_rreq.bits.vstq_idx := DontCare
+  if (usingInnerProd) io.tile_rreq.bits.xcol := uop.xcol_mode
 
   // update ls count in rob
 
@@ -4154,7 +4156,7 @@ class VecMem(implicit p: Parameters) extends LazyModule
 {
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
       name = s"l1-vec-memq",
-      sourceId = IdRange(0, 1024),
+      sourceId = IdRange(0, 256),
       supportsProbe = TransferSizes.none
   )))))
   lazy val module = new VecMemImp(this)

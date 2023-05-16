@@ -22,6 +22,7 @@ import boom.exu.FUConstants._
 import boom.common._
 import boom.common.MicroOpcodes._
 import boom.util._
+import exu.matrix.AccReg
 
 /**
  * Top level datapath that wraps the floating point issue window, regfile, and arithmetic units.
@@ -90,18 +91,29 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
     })
   })
 
+  val exTrReadPorts = if (usingInnerProd) 1 else 2
+
   //**********************************
   // construct all of the modules
   val issue_unit = Module(new IssueUnitCollapsing(matIssueParams, numWakeupPorts, vector = false, matrix = true))
+  issue_unit.suggestName("mat_issue_unit")
   val exe_units = new boom.exu.ExecutionUnits(matrix = true)
-  val trtileReg = Module(new TrTileReg(exe_units.numTrTileReadPorts + memWidth, numVLdPorts))
+
+  val accReg = if (usingInnerProd) Module(new AccReg(
+    exe_units.numAccRegReadPorts + 1,
+    exe_units.numAccRegWritePorts + numVLdPorts)
+  ) else null
+  val trtileReg = if (!usingInnerProd) Module(new TrTileReg(
+    exe_units.numTrTileReadPorts + memWidth,
+    numVLdPorts)
+  ) else null
   val trtileReader = Module(new TileRegisterRead(
     matWidth,
     exe_units.withFilter(_.readsTrTile).map(_.supportedFuncUnits),
     exe_units.numTrTileReadPorts,
-    exe_units.withFilter(_.readsTrTile).map(_ => 2),
-    vLen))
-  issue_unit.suggestName("mat_issue_unit")
+    exe_units.withFilter(_.readsTrTile).map(_ => exTrReadPorts),
+    rLen)
+  )
 
   //*************************************************************
   // Issue window logic
@@ -192,18 +204,64 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
   trtileReader.io.brupdate := io.brupdate
   trtileReader.io.kill := io.flush_pipeline
 
-  // Only one port for vector load write back.
-  for (i <- 0 until exe_units.numTrTileReadPorts) {
-    trtileReader.io.tileReadPorts(i) <> trtileReg.io.readPorts(i)
+  // TR read.
+  if (!usingInnerProd) {
+    for (i <- 0 until exe_units.numTrTileReadPorts) {
+      trtileReader.io.tileReadPorts(i) <> trtileReg.io.readPorts(i)
+    }
+
+    for(w <- 0 until memWidth) {
+      io.lsu_tile_rport(w) <> trtileReg.io.readPorts(exe_units.numTrTileReadPorts + w)
+    }
+  } else {
+    for (w <- 0 until matWidth) {
+      for (i <- 0 until exTrReadPorts) {
+        trtileReader.io.tileReadPorts(exTrReadPorts * w + i) <> exe_units(w).io.trRead(i)
+      }
+    }
+
+    for (w <- 0 until memWidth) {
+      io.lsu_tile_rport(w) <> exe_units(0).io.trRead(exe_units.numTrTileReadPorts + w)
+    }
   }
-  for(w <- 0 until memWidth) {
-    io.lsu_tile_rport(w) <> trtileReg.io.readPorts(exe_units.numTrTileReadPorts + w)
-  }
-  for(w <- 0 until 2) {
+
+  // Vec read.
+  for (w <- 0 until 2) {
     io.vec_rport(w).addr := trtileReader.io.vec_rport(w).addr
     trtileReader.io.vec_rport(w).data := io.vec_rport(w).data
   }
-  trtileReg.io.clearPorts := io.trclr
+
+  // TR clear.
+  if (!usingInnerProd) {
+    trtileReg.io.clearPorts := io.trclr
+  } else {
+    exe_units.map(eu => eu.io.trClear := io.trclr)
+  }
+
+  // ACC read.
+  if (usingInnerProd) {
+    for ((eu, w) <- exe_units.zipWithIndex) {
+      eu.io.accRead(0) <> accReg.io.readPorts(w * 2)
+      eu.io.accRead(1) <> accReg.io.readPorts(w * 2 + 1)
+    }
+
+    val lsuAccReadStart = matWidth * 2
+    val lsuAccReadMsew = io.lsu_acc_rreq.bits.sCtrls.sew
+    val lsuAccReadMsft = Mux(lsuAccReadMsew > 2.U, lsuAccReadMsew - 2.U, 0.U)
+    val lsuAccReadQuad = io.lsu_acc_rreq.bits.quad
+    accReg.io.readPorts(lsuAccReadStart).addr := io.lsu_acc_rreq.bits.sCtrls.ridx
+    accReg.io.readPorts(lsuAccReadStart).index := (io.lsu_acc_rreq.bits.sCtrls.sidx << lsuAccReadMsft) + lsuAccReadQuad(1)
+    accReg.io.readPorts(lsuAccReadStart).msew := io.lsu_acc_rreq.bits.sCtrls.sew
+    accReg.io.readPorts(lsuAccReadStart).tt := io.lsu_acc_rreq.bits.tt
+
+    val lsuAccReadData = Mux(lsuAccReadMsew > 1.U && lsuAccReadQuad(0) =/= 0.U,
+                             accReg.io.readPorts(lsuAccReadStart).data(accRLen - 1, rLen),
+                             accReg.io.readPorts(lsuAccReadStart).data(rLen - 1, 0))
+    io.lsu_acc_rresp.valid := RegNext(io.lsu_acc_rreq.valid)
+    io.lsu_acc_rresp.bits.vstq_idx := RegNext(io.lsu_acc_rreq.bits.vstq_idx)
+    io.lsu_acc_rresp.bits.data := RegNext(lsuAccReadData)
+  }
+
   //-------------------------------------------------------------
   // **** Execute Stage ****
   //-------------------------------------------------------------
@@ -228,23 +286,61 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
   // Wakeup signal is sent on cycle S0, write is now delayed until end of S1,
   // but Issue happens on S1 and RegRead doesn't happen until S2 so we're safe.
   // TODO: wrap vlsu write with uops for tr_tile write control
+
+  // Write ACC by EXU.
+  if (usingInnerProd) {
+    for ((eu, w) <- exe_units.zipWithIndex) {
+      accReg.io.writePorts(w) := eu.io.accWrite
+    }
+  }
+
+  val lsuAccWriteStart = matWidth
   for (w <- 0 until numVLdPorts) {
     val lsuWbkBits = io.lsu_tile_wbk(w).bits
-    trtileReg.io.writePorts(w).valid := io.lsu_tile_wbk(w).valid && lsuWbkBits.uop.rt(RD, isTrTile)
-    trtileReg.io.writePorts(w).bits.msew := lsuWbkBits.uop.m_ls_ew
-    trtileReg.io.writePorts(w).bits.tt := lsuWbkBits.uop.rt(RD, isTrTile).asUInt ## !lsuWbkBits.uop.isHSlice.asUInt
-    trtileReg.io.writePorts(w).bits.addr := lsuWbkBits.uop.pdst
-    trtileReg.io.writePorts(w).bits.index := lsuWbkBits.uop.m_sidx
-    trtileReg.io.writePorts(w).bits.data := lsuWbkBits.data
-    trtileReg.io.writePorts(w).bits.byteMask := lsuWbkBits.vmask
-    trtileReg.io.writePorts(w).bits.quad := lsuWbkBits.uop.m_slice_quad
+    if (!usingInnerProd) {
+      // Write TR by LSU.
+      trtileReg.io.writePorts(w).valid := io.lsu_tile_wbk(w).valid && lsuWbkBits.uop.rt(RD, isTrTile)
+      trtileReg.io.writePorts(w).bits.msew := lsuWbkBits.uop.m_ls_ew
+      trtileReg.io.writePorts(w).bits.tt := lsuWbkBits.uop.rt(RD, isTrTile).asUInt ## !lsuWbkBits.uop.isHSlice.asUInt
+      trtileReg.io.writePorts(w).bits.addr := lsuWbkBits.uop.pdst
+      trtileReg.io.writePorts(w).bits.index := lsuWbkBits.uop.m_sidx
+      trtileReg.io.writePorts(w).bits.data := lsuWbkBits.data
+      trtileReg.io.writePorts(w).bits.byteMask := lsuWbkBits.vmask
+      trtileReg.io.writePorts(w).bits.quad := lsuWbkBits.uop.m_slice_quad
 
-    exe_units.withFilter(_.writesAccTile).map(eu => {
-      eu.io.mlsuWbk(w).valid := io.lsu_tile_wbk(w).valid && lsuWbkBits.uop.rt(RD, isAccTile)
-      eu.io.mlsuWbk(w).bits := io.lsu_tile_wbk(w).bits
-      eu.io.accReadReq := io.lsu_acc_rreq
-      io.lsu_acc_rresp := eu.io.accReadResp
-    })
+      exe_units.withFilter(_.writesAccTile).map(eu => {
+        // Write ACC by LSU.
+        eu.io.mlsuWbk(w).valid := io.lsu_tile_wbk(w).valid && lsuWbkBits.uop.rt(RD, isAccTile)
+        eu.io.mlsuWbk(w).bits := io.lsu_tile_wbk(w).bits
+        // Read ACC by LSU.
+        eu.io.accReadReq := io.lsu_acc_rreq
+        io.lsu_acc_rresp := eu.io.accReadResp
+      })
+    } else {
+      // Write TR by LSU.
+      exe_units.map(eu => {
+        eu.io.trWrite(w).valid := io.lsu_tile_wbk(w).valid && lsuWbkBits.uop.rt(RD, isTrTile)
+        eu.io.trWrite(w).bits.msew := lsuWbkBits.uop.m_ls_ew
+        eu.io.trWrite(w).bits.tt := lsuWbkBits.uop.rt(RD, isTrTile).asUInt ## !lsuWbkBits.uop.isHSlice.asUInt
+        eu.io.trWrite(w).bits.addr := lsuWbkBits.uop.pdst
+        eu.io.trWrite(w).bits.index := lsuWbkBits.uop.m_sidx
+        eu.io.trWrite(w).bits.data := lsuWbkBits.data
+        eu.io.trWrite(w).bits.byteMask := lsuWbkBits.vmask
+        eu.io.trWrite(w).bits.quad := lsuWbkBits.uop.m_slice_quad
+        eu.io.trWrite(w).bits.xcol := lsuWbkBits.uop.xcol_mode
+      })
+
+      // Write ACC by LSU.
+      accReg.io.writePorts(lsuAccWriteStart + w).valid := io.lsu_tile_wbk(w).valid && lsuWbkBits.uop.rt(RD, isAccTile)
+      accReg.io.writePorts(lsuAccWriteStart + w).bits.addr := io.lsu_tile_wbk(w).bits.uop.pdst
+      accReg.io.writePorts(lsuAccWriteStart + w).bits.index := io.lsu_tile_wbk(w).bits.uop.m_sidx >> 1.U
+      accReg.io.writePorts(lsuAccWriteStart + w).bits.msew := io.lsu_tile_wbk(w).bits.uop.td_eew
+      accReg.io.writePorts(lsuAccWriteStart + w).bits.tt := lsuWbkBits.uop.rt(RD, isTrTile).asUInt ## !lsuWbkBits.uop.isHSlice.asUInt
+      accReg.io.writePorts(lsuAccWriteStart + w).bits.data := Mux(io.lsu_tile_wbk(w).bits.uop.m_sidx(0),
+        Cat(io.lsu_tile_wbk(w).bits.data, 0.U(rLen.W)), Cat(0.U(rLen.W), io.lsu_tile_wbk(w).bits.data))
+      accReg.io.writePorts(lsuAccWriteStart + w).bits.byteMask := Mux(io.lsu_tile_wbk(w).bits.uop.m_sidx(0),
+        Cat(io.lsu_tile_wbk(w).bits.vmask, 0.U(rLenb.W)), Cat(0.U(rLenb.W), io.lsu_tile_wbk(w).bits.vmask))
+    }
 
     //-------------------------------------------------------------
     //-------------------------------------------------------------
@@ -269,11 +365,24 @@ class MatPipeline(implicit p: Parameters) extends BoomModule {
 
   // from MatExeUnit
   var w_cnt = numVLdPorts * 2
-  for(eu <- exe_units) {
-    io.wakeups(w_cnt)   := eu.io.mclrResp
-    io.wakeups(w_cnt+1) := eu.io.mopaResp
-    for (w <- 0 until numVLdPorts){
-      io.wakeups(w_cnt+ 2+ w) := eu.io.mlsuResp(w)
+  for (eu <- exe_units) {
+    if (!usingInnerProd) {
+      io.wakeups(w_cnt) := eu.io.mclrResp
+    } else {
+      io.wakeups(w_cnt).valid := false.B
+      io.wakeups(w_cnt).bits := DontCare
+    }
+    io.wakeups(w_cnt + 1) := eu.io.mopaResp
+    for (w <- 0 until numVLdPorts) {
+      if (!usingInnerProd) {
+        io.wakeups(w_cnt + 2 + w) := eu.io.mlsuResp(w)
+      } else {
+        io.wakeups(w_cnt + 2 + w).valid := RegNext(io.lsu_tile_wbk(w).valid && io.lsu_tile_wbk(w).bits.uop.rt(RD, isAccTile))
+        io.wakeups(w_cnt + 2 + w).bits := DontCare
+        io.wakeups(w_cnt + 2 + w).bits.uop := RegNext(io.lsu_tile_wbk(w).bits.uop)
+        io.wakeups(w_cnt + 2 + w).bits.data := 0.U
+        io.wakeups(w_cnt + 2 + w).bits.predicated := false.B
+      }
     }
     w_cnt += 2 + numVLdPorts
   }

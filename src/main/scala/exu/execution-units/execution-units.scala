@@ -167,14 +167,17 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val 
   }
   else { // matrix
     for(w <- 0 until matWidth) {
-      val mat_exe_unit = Module(new MatExeUnit())
+      val mat_exe_unit = Module(new MatExeUnit(
+        numTrTileReadPorts = if (usingInnerProd) (1 + memWidth) else 0,
+        numTrTileWritePorts = if (usingInnerProd) (numVLdPorts) else 0
+      ))
       mat_exe_unit.suggestName("mat_exe_unit")
       exe_units += mat_exe_unit
       //FIX ME
-      mat_exe_unit.io.mclrResp.ready := DontCare
+      if (!usingInnerProd) mat_exe_unit.io.mclrResp.ready := DontCare
       mat_exe_unit.io.mopaResp.ready := DontCare
       for (w <- 0 until numVLdPorts) {
-        mat_exe_unit.io.mlsuResp(w).ready := DontCare
+        if (!usingInnerProd) mat_exe_unit.io.mlsuResp(w).ready := DontCare
       }
     }
   }
@@ -223,7 +226,11 @@ class ExecutionUnits(val fpu: Boolean = false, val vector: Boolean = false, val 
   val numLlVrfWritePorts  = exe_units.count(_.writesLlVrf)
 
   val numTrTileReaders    = exe_units.count(_.readsTrTile)
-  val numTrTileReadPorts  = exe_units.count(_.readsTrTile) * 2
+  val numTrTileReadPorts  = exe_units.count(_.readsTrTile) * (if (usingInnerProd) 1 else 2)
+
+  val numAccRegReaders    = exe_units.count(_.readsAccTile)
+  val numAccRegReadPorts  = exe_units.count(_.readsAccTile) * 2
+  val numAccRegWritePorts = exe_units.count(_.writesAccTile)
 
   // The mem-unit will also bypass writes to readers in the RRD stage.
   // NOTE: This does NOT include the ll_wport

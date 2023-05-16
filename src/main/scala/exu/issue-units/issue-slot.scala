@@ -149,14 +149,16 @@ class IssueSlot(
   val next_uop_mma        = if (matrix) next_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA) else null
   val next_uop_ts1_hslice = if (matrix) Mux(next_uop_mma, false.B, next_uop.isHSlice) else null
   val next_uop_ts2_hslice = if (matrix) Mux(next_uop_mma, true.B,  next_uop.isHSlice) else null
-  val slot_uop_mma        = if (matrix) slot_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA,uopMFMACCCR_MV) else null
+  val slot_uop_mma        = if (matrix) slot_uop.uopc.isOneOf(uopMMA, uopMWMA, uopMQMA, uopMFMACCCR_MV) else null
   val slot_uop_mmv        = if (matrix) slot_uop.uopc.isOneOf(uopMMV_T,uopMMV_V,uopMWMV_T,uopMWMV_V,uopMQMV_T,uopMQMV_V) else null
+  val slot_uop_mec        = if (matrix && usingInnerProd) slot_uop.uopc.isOneOf(uopMADD, uopMWADD, uopMQADD,
+    uopMSUB, uopMWSUB, uopMQSUB, uopMRSUB, uopMWRSUB, uopMQRSUB, uopMEMUL, uopMWEMUL, uopMQEMUL, uopMFNCVT) else null
 
   val last_check: Bool = {
     val ret = Wire(Bool())
     if (vector) {
       ret := io.uop.v_split_last || io.uop.is_reduce || vcompress
-    } else if(matrix) {
+    } else if (matrix) {
       ret := io.uop.m_split_last
     } else {
       ret := true.B
@@ -564,13 +566,13 @@ class IssueSlot(
     io.uop.m_scalar_data     := sdata
     // val vlmul_mag  = io.csr_vconfig.vtype.vlmul_mag
     when(io.request && io.grant) {
-      when(slot_uop_mma){
+      when(slot_uop_mma || (if (usingInnerProd) slot_uop_mec else false.B)) {
         io.uop.m_split_last  := slot_uop.m_sidx === slot_uop.m_slice_cnt - 1.U
         io.uop.m_sidx        := slot_uop.m_sidx
         io.out_uop.m_sidx    := slot_uop.m_sidx + 1.U
-        io.out_uop.prs3      := slot_uop.pdst
+        if (!usingInnerProd) io.out_uop.prs3 := slot_uop.pdst
         slot_uop.m_sidx      := slot_uop.m_sidx + 1.U
-        slot_uop.prs3        := slot_uop.pdst
+        if (!usingInnerProd) slot_uop.prs3 := slot_uop.pdst
       }.elsewhen(slot_uop_mmv) {
         io.uop.m_split_last  := (1.U << slot_uop.vconfig.vtype.vlmul_mag) -1.U === slot_uop.mmv_count
         io.uop.m_sidx        := slot_uop.m_sidx
@@ -699,7 +701,11 @@ class IssueSlot(
   when(io.mtype_wakeup.valid && !next_uop.mtype_ready && (io.mtype_wakeup.bits.mconfig_tag + 1.U) === next_uop.mconfig_tag) {
     slot_uop.mtype_ready := true.B
     slot_uop.mconfig := io.mtype_wakeup.bits.mconfig
+    slot_uop.ts1_eew := io.mtype_wakeup.bits.mconfig.mtype.msew + Mux(slot_uop.uopc === uopMFNCVT, 1.U, 0.U)
+    slot_uop.ts2_eew := io.mtype_wakeup.bits.mconfig.mtype.msew
+    slot_uop.td_eew := io.mtype_wakeup.bits.mconfig.mtype.msew + Mux(slot_uop.mqwiden, 2.U, Mux(slot_uop.mwwiden, 1.U, 0.U))
   }
+
   val m_ok = io.tile_m_wakeup.valid && !next_uop.tile_m_ready && (io.tile_m_wakeup.bits.tile_tag + 1.U) === next_uop.tile_m_tag
   when(m_ok) {
     slot_uop.tile_m_ready := true.B
@@ -777,7 +783,7 @@ class IssueSlot(
                           Mux(slice_len_tilem, sel_m,
                           Mux(slice_len_tilen, sel_n, sel_k)))
       slot_uop.m_slice_cnt   := Mux(is_mls,  sel_slice_cnt,
-                                Mux(is_mopa, sel_k, sel_m))
+                                Mux(is_mopa && !usingInnerProd.B, sel_k, sel_m))
       slot_uop.m_slice_len   := Mux(is_mls, sel_slice_len,
                                 Mux(is_mmv && mslice_dim === 2.U, sel_m,
                                 Mux(is_mmv && mslice_dim === 3.U, sel_n, sel_k)))

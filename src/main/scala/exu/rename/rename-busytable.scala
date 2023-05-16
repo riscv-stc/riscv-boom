@@ -178,11 +178,11 @@ class MatRenameBusyTable(
     busy_table_next(r) := busy_table_wb(r) | (io.ren_uops zip io.rebusy_reqs)
       .map { case (uop, req) => Cat(Mux((r.U === uop.pdst) && req, uop.isHSlice, busy_table(r)(vLenb)) ,
         Fill(vLenb, ((r.U === uop.pdst) && req).asUInt()) &
-          Mux(uop.dst_rtype === RT_ACC && !uop.m_is_split, Fill(vLenb, 1.U(1.W)), MaskGen(uop.m_sidx, uop.m_slice_cnt, vLenb))) }.reduce(_ | _)
+          Mux(uop.dst_rtype === RT_ACC && !uop.m_is_split, Fill(vLenb, 1.U(1.W)),
+            MaskGen(uop.m_sidx, uop.m_slice_cnt, vLenb))) }.reduce(_ | _)
 
-           
     // Read the busy table.
-    for (i <- 0 until plWidth) {                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+    for (i <- 0 until plWidth) {
       val prs1_was_bypassed = (0 until i).map(j =>
         (io.ren_uops(i).lrs1 === io.ren_uops(j).ldst) && (io.ren_uops(i).m_sidx === io.ren_uops(j).m_sidx)
          && (io.ren_uops(i).isHSlice === io.ren_uops(j).isHSlice) && io.rebusy_reqs(j)).foldLeft(false.B)(_ || _)
@@ -233,7 +233,8 @@ class MatRenameBusyTable(
     mem_wake_pdst(j) := 0.U
     mem_wake_type(j) := 0.U
     when(~(io.mem_iss_uop(j).dst_rtype === RT_ACC && !io.mem_iss_uop(j).m_is_split) && (io.mem_iss_valid(j))) {
-        mem_value(j)  := busy_table_next(io.mem_iss_uop(j).pdst) & Cat(busy_table_next(io.mem_iss_uop(j).pdst)(vLenb),Fill(vLenb, 1.U(1.W)) &  MaskGen(0.U, io.mem_iss_uop(j).m_slice_cnt, vLenb))
+        mem_value(j)  := busy_table_next(io.mem_iss_uop(j).pdst) & Cat(busy_table_next(io.mem_iss_uop(j).pdst)(vLenb),
+          Fill(vLenb, 1.U(1.W)) & MaskGen(0.U, io.mem_iss_uop(j).m_slice_cnt, vLenb))
         mem_wake_pdst(j) := io.mem_iss_uop(j).pdst
         mem_wake_type(j) := io.mem_iss_uop(j).dst_rtype
         busy_table(io.mem_iss_uop(j).pdst) := mem_value(j)
