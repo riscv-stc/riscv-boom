@@ -14,6 +14,8 @@ import boom.common.MicroOpcodes._
 import exu.matrix._
 import boom.util._
 
+import scala.collection.mutable.ArrayBuffer
+
 // acc buffer related command
 object AccTileConstants {
   // access cmd
@@ -484,7 +486,7 @@ class PE(
   when (fpMac.io.validout) {
     c0(fpMac.io.idx) := fpMac.io.out
   }
-  
+
   when (macReqValid && (!macReqCtrls.srcType(2))) {
     c0(macReqCtrls.dstRidx) := intMac0.io.out
     c1(macReqCtrls.dstRidx) := intMac1.io.out
@@ -1033,11 +1035,11 @@ class OuterProductUnit(implicit p: Parameters) extends BoomModule {
     val rowReadData = Decoupled(UInt(rLen.W))
     val rowReadMask = Output(UInt(rLenb.W))
     // write row slices
-    val rowWriteReq = Flipped(Vec(numVLdPorts,Decoupled(new SliceCtrls())))  
-    val rowWriteReqUop = Input(Vec(numVLdPorts,new MicroOp())) 
+    val rowWriteReq = Flipped(Vec(numVLdPorts,Decoupled(new SliceCtrls())))
+    val rowWriteReqUop = Input(Vec(numVLdPorts,new MicroOp()))
     val rowWriteData = Input(Vec(numVLdPorts,UInt(rLen.W)))
     val rowWriteMask = Input(Vec(numVLdPorts,UInt(rLenb.W)))
-    val rowWriteResp = Output(Vec(numVLdPorts,Valid(new SliceCtrls()))) 
+    val rowWriteResp = Output(Vec(numVLdPorts,Valid(new SliceCtrls())))
     val rowWriteRespUop = Output(Vec(numVLdPorts,new MicroOp()))
     // read col slices, m-pipeline
     val colReadReq = Flipped(Decoupled(new SliceCtrls()))
@@ -1054,8 +1056,8 @@ class OuterProductUnit(implicit p: Parameters) extends BoomModule {
     val colWriteResp = Output(Vec(numVLdPorts,Valid(new SliceCtrls())))
     val colWriteRespUop = Output(Vec(numVLdPorts,new MicroOp()))
     // read row slices from acc, lsu
-    val accReadReq = Input(Valid(new AccReadReq()))  
-    val accReadResp = Output(Valid(new AccReadResp())) 
+    val accReadReq = Input(Valid(new AccReadReq()))
+    val accReadResp = Output(Valid(new AccReadResp()))
   })
 
   require(rLen >= mxuPERows * 16)
@@ -1277,7 +1279,7 @@ class OuterProductUnit(implicit p: Parameters) extends BoomModule {
   }
 
   // -----------------------------------------------------------------------------------
-  // mopa 
+  // mopa
   // -----------------------------------------------------------------------------------
   mesh.io.clrReq.valid := clrReqFire
   mesh.io.clrReq.bits := io.clrReq.bits
@@ -1339,7 +1341,7 @@ class OuterProductUnit(implicit p: Parameters) extends BoomModule {
       shuffSrcC(2 * i + 1) := io.macReqSrcA(8 * mxuMeshCols * mxuTileCols + 8 * i + 7, 8 * mxuMeshCols * mxuTileCols + 8 * i)
     }
   }
-  
+
   val muxSrcB = Mux(!rs2_is_vec, shuffSrcB.asUInt, Mux(io.macReqUop.m_sidx === 0.U && is_transpose, shuffSrcB.asUInt & Fill(128,1.U), Fill(8,0x0.U(16.W))))
   val muxSrcC = Mux(!rs1_is_vec, shuffSrcB.asUInt, Mux(io.macReqUop.m_sidx === 0.U && is_transpose, shuffSrcC.asUInt& Fill(128,1.U), 0.U))
   for (c <- 0 until mxuMeshCols) {
@@ -1739,6 +1741,130 @@ class FpAddUnit(implicit p: Parameters) extends BoomModule {
   io.out := Mux(io.outType === FP16TYPE, Cat(0.U(16.W), fpOut16), fpOut32)
 }
 
+class FpRecMulUnit(e: Int = 5, s: Int = 11)(implicit p: Parameters) extends BoomModule {
+  val io = IO(new Bundle {
+    val src1 = Input(UInt((e + s + 1).W))
+    val src2 = Input(UInt((e + s + 1).W))
+    val outType = Input(UInt(3.W))
+    val roundingMode = Input(UInt(3.W))
+    val detectTininess = Input(UInt(1.W))
+    val out = Output(UInt(33.W))
+  })
+
+  val H = new FType(5, 11)
+  val S = new FType(8, 24)
+
+  // Multiplier.
+  val mulRawFN = Module(new MulFullRawFN(e, s))
+  val mulRawToRec16 = Module(new RoundAnyRawFNToRecFN(e, s * 2 - 1, H.exp, H.sig, 0))
+  val mulRawToRec32 = Module(new RoundAnyRawFNToRecFN(e, s * 2 - 1, S.exp, S.sig, 0))
+
+  // ----------------- Recoded fp16 * fp16. -----------------
+  val mulRecSrcA = io.src1
+  val mulRecSrcB = io.src2
+  val mulRawSrcA = rawFloatFromRecFN(e, s, mulRecSrcA)
+  val mulRawSrcB = rawFloatFromRecFN(e, s, mulRecSrcB)
+  mulRawFN.io.a := mulRawSrcA
+  mulRawFN.io.b := mulRawSrcB
+
+  // Round mul raw results to recFN(16)
+  mulRawToRec16.io.invalidExc := mulRawFN.io.invalidExc
+  mulRawToRec16.io.infiniteExc := false.B
+  mulRawToRec16.io.in := mulRawFN.io.rawOut
+  mulRawToRec16.io.roundingMode := io.roundingMode
+  mulRawToRec16.io.detectTininess := io.detectTininess
+
+  // Round mul raw results to recFN(32)
+  mulRawToRec32.io.invalidExc := mulRawFN.io.invalidExc
+  mulRawToRec32.io.infiniteExc := false.B
+  mulRawToRec32.io.in := mulRawFN.io.rawOut
+  mulRawToRec32.io.roundingMode := io.roundingMode
+  mulRawToRec32.io.detectTininess := io.detectTininess
+
+  // Output result.
+  io.out := Mux(io.outType === FP16TYPE, Cat(0.U(16.W), mulRawToRec16.io.out), mulRawToRec32.io.out)
+}
+
+class FpRecAddUnit(e: Int = 5, s: Int = 11)(implicit p: Parameters) extends BoomModule {
+  val io = IO(new Bundle {
+    val src1 = Input(UInt((e + s + 1).W))
+    val src2 = Input(UInt((e + s + 1).W))
+    val opSub = Input(Bool())
+    val outType = Input(UInt(3.W))
+    val roundingMode = Input(UInt(3.W))
+    val detectTininess = Input(UInt(1.W))
+    val out = Output(UInt(33.W))
+  })
+
+  val H = new FType(5, 11)
+  val S = new FType(8, 24)
+
+  // Adder.
+  val addRawFN = Module(new AddRawFN(e, s))
+  val addRawToRec16 = Module(new RoundAnyRawFNToRecFN(e, s + 2, H.exp, H.sig, 0))
+  val addRawToRec32 = Module(new RoundAnyRawFNToRecFN(e, s + 2, S.exp, S.sig, 0))
+
+  // ----------------- Recoded fp32 + fp32. -----------------
+  addRawFN.io.a := rawFloatFromRecFN(e, s, io.src1)
+  addRawFN.io.b := rawFloatFromRecFN(e, s, io.src2)
+  addRawFN.io.subOp := io.opSub
+  addRawFN.io.roundingMode := io.roundingMode
+
+  // Raw to rec16 & rec32.
+  addRawToRec16.io.invalidExc := addRawFN.io.invalidExc
+  addRawToRec16.io.infiniteExc := false.B
+  addRawToRec16.io.in := addRawFN.io.rawOut
+  addRawToRec16.io.roundingMode := io.roundingMode
+  addRawToRec16.io.detectTininess := io.detectTininess
+
+  addRawToRec32.io.invalidExc := addRawFN.io.invalidExc
+  addRawToRec32.io.infiniteExc := false.B
+  addRawToRec32.io.in := addRawFN.io.rawOut
+  addRawToRec32.io.roundingMode := io.roundingMode
+  addRawToRec32.io.detectTininess := io.detectTininess
+
+  // Output result.
+  val recFpOut16 = addRawToRec16.io.out
+  val recFpOut32 = addRawToRec32.io.out
+  io.out := Mux(io.outType === FP16TYPE, Cat(0.U(16.W), recFpOut16), recFpOut32)
+}
+
+class FpRawMulUnit(e: Int = 5, s: Int = 11)(implicit p: Parameters) extends BoomModule {
+  val io = IO(new Bundle {
+    val src1 = Input(new RawFloat(e, s))
+    val src2 = Input(new RawFloat(e, s))
+    val out = Output(new RawFloat(e, s * 2 - 1))
+  })
+
+  // Raw multiplier.
+  val mulRawFN = Module(new MulFullRawFN(e, s))
+  mulRawFN.io.a := io.src1
+  mulRawFN.io.b := io.src2
+
+  // Output result.
+  io.out := mulRawFN.io.rawOut
+}
+
+class FpRawAddUnit(e: Int = 8, s: Int = 24)(implicit p: Parameters) extends BoomModule {
+  val io = IO(new Bundle {
+    val src1 = Input(new RawFloat(e, s))
+    val src2 = Input(new RawFloat(e, s))
+    val opSub = Input(Bool())
+    val roundingMode = Input(UInt(3.W))
+    val out = Output(new RawFloat(e, s + 2))
+  })
+
+  // Raw adder.
+  val addRawFN = Module(new AddRawFN(e, s))
+  addRawFN.io.a := io.src1
+  addRawFN.io.b := io.src2
+  addRawFN.io.subOp := io.opSub
+  addRawFN.io.roundingMode := io.roundingMode
+
+  // Output result.
+  io.out := addRawFN.io.rawOut
+}
+
 class Tree(treeIndex: Int = 0, numTrReadPorts: Int = 1, numTrWritePorts: Int = 1)(implicit p: Parameters) extends BoomModule {
   val io = IO(new Bundle{
     val trRead = Vec(numTrReadPorts, new TrTileRegReadPortIO)
@@ -1753,6 +1879,9 @@ class Tree(treeIndex: Int = 0, numTrReadPorts: Int = 1, numTrWritePorts: Int = 1
     val macReq = Flipped(Valid(new MacCtrls))
     val macReqUop = Input(new MicroOp)
   })
+
+  val H = new FType(5, 11)
+  val S = new FType(8, 24)
 
   // Params.
   val numRows = mLen / rLen
@@ -1771,8 +1900,9 @@ class Tree(treeIndex: Int = 0, numTrReadPorts: Int = 1, numTrWritePorts: Int = 1
   val intPreAddUnits = Seq.fill(numIntPreAdds)(Module(new IntAddUnit(16, 32)))
   val intPstAddUnits = Seq.fill(numIntPstAdds)(Module(new IntAddUnit(32, 32)))
 
-  val fpMulUnits = Seq.fill(numFpMuls)(Module(new FpMulUnit))
-  val fpAddUnits = Seq.fill(numFpAdds)(Module(new FpAddUnit))
+  val fpMulUnits = Seq.fill(numFpMuls)(Module(new FpRecMulUnit(H.exp, H.sig)))
+  val fpAddUnits = Seq.fill(numFpAdds)(Module(new FpRecAddUnit(S.exp, S.sig)))
+  //val fpAddUnits = ArrayBuffer[FpRawAddUnit]()
 
   val src1RegIdx = io.macReq.bits.src1Ridx
   val src2RegIdx = io.macReq.bits.src2Ridx
@@ -1782,7 +1912,15 @@ class Tree(treeIndex: Int = 0, numTrReadPorts: Int = 1, numTrWritePorts: Int = 1
   val stageCnt = stageSize.scan(0)(_ + _)
 
   val lastMacReq = Pipe(io.macReq.valid, io.macReq.bits, numStages)
-  val finalOutType = Pipe(true.B, lastMacReq.bits.outType, 1).bits
+  val postMacReq = Pipe(lastMacReq.valid, lastMacReq.bits, 1)
+  val lastMacReqUop = Pipe(io.macReq.valid, io.macReqUop, numStages).bits
+  val postMacReqUop = Pipe(lastMacReq.valid, lastMacReqUop, 1).bits
+
+  val finalOutType = Pipe(true.B, lastMacReq.bits.outType, 2).bits
+  val finalRoundingMode = Pipe(true.B, lastMacReq.bits.rm, 2).bits
+
+  val lastBypSrcA = postMacReq.valid && lastMacReq.bits.src1Ridx === postMacReq.bits.dstRidx && lastMacReqUop.m_sidx === postMacReqUop.m_sidx
+  val lastBypSrcB = postMacReq.valid && lastMacReq.bits.src2Ridx === postMacReq.bits.dstRidx && lastMacReqUop.m_sidx === postMacReqUop.m_sidx
 
   //****************************************************
   // Int pipeline.
@@ -1822,25 +1960,31 @@ class Tree(treeIndex: Int = 0, numTrReadPorts: Int = 1, numTrWritePorts: Int = 1
 
   // Last stage.
   val lastIntAdd = intPstAddUnits(numIntPstAdds - 1)
-  val lastIntSrc = Mux(lastMacReq.bits.aluType === CVT, 0.U,
-                   Mux(lastMacReq.bits.aluType(1), io.accSrcB,
-                   intPstAddUnits(numIntPstAdds - 2).io.out))
-  lastIntAdd.io.src1    := Pipe(true.B, io.accSrcA, 1).bits
-  lastIntAdd.io.src2    := Pipe(true.B, lastIntSrc, 1).bits
-  lastIntAdd.io.opSub   := Pipe(true.B, lastMacReq.bits.aluType === SUB, 1).bits
+  val lastIntSrc1 = Mux(lastBypSrcA, lastIntAdd.io.out, io.accSrcA)
+  val lastIntSrc2 = Mux(lastMacReq.bits.aluType === CVT, 0.U,
+                    Mux(lastMacReq.bits.aluType(1), Mux(lastBypSrcB, lastIntAdd.io.out, io.accSrcB),
+                    intPstAddUnits(numIntPstAdds - 2).io.out))
+  lastIntAdd.io.src1    := RegNext(lastIntSrc1)
+  lastIntAdd.io.src2    := RegNext(lastIntSrc2)
+  lastIntAdd.io.opSub   := RegNext(lastMacReq.bits.aluType === SUB)
   lastIntAdd.io.srcType := INT32TYPE
-  lastIntAdd.io.outType := finalOutType
-  val intRes = lastIntAdd.io.out
+  lastIntAdd.io.outType := RegNext(lastMacReq.bits.outType)
+  val intRes = RegNext(lastIntAdd.io.out)
 
   //****************************************************
   // Float pipeline.
   for (i <- 0 until numFpMuls) {
-    fpMulUnits(i).io.src1 := Mux(i.U < io.macReq.bits.prodLen, io.trSrc(i * 16 + 15, i * 16), 0.U)
-    fpMulUnits(i).io.src2 := Mux(i.U < io.macReq.bits.prodLen, tileRegs(src2RegIdx)(i), 0.U)
+    fpMulUnits(i).io.src1 := recFNFromFN(H.exp, H.sig, Mux(i.U < io.macReq.bits.prodLen, io.trSrc(i * 16 + 15, i * 16), 0.U))
+    fpMulUnits(i).io.src2 := recFNFromFN(H.exp, H.sig, Mux(i.U < io.macReq.bits.prodLen, tileRegs(src2RegIdx)(i), 0.U))
     fpMulUnits(i).io.outType := FP32TYPE
     fpMulUnits(i).io.roundingMode := io.macReq.bits.rm
     fpMulUnits(i).io.detectTininess := hardfloat.consts.tininess_afterRounding
   }
+
+  val fpMulOut = fpMulUnits.map(i => fNFromRecFN(S.exp, S.sig, i.io.out))
+  val fpAddOut = fpAddUnits.map(i => fNFromRecFN(S.exp, S.sig, i.io.out))
+  for (o <- fpMulOut) dontTouch(o)
+  for (o <- fpAddOut) dontTouch(o)
 
   for (s <- 0 until numStages) {
     for (t <- 0 until stageSize(s)) {
@@ -1857,7 +2001,7 @@ class Tree(treeIndex: Int = 0, numTrReadPorts: Int = 1, numTrWritePorts: Int = 1
         fpAddUnits(curIndex).io.src1 := Pipe(true.B, fpAddUnits(preStart + t * 2).io.out, 1).bits
         fpAddUnits(curIndex).io.src2 := Pipe(true.B, fpAddUnits(preStart + t * 2 + 1).io.out, 1).bits
         fpAddUnits(curIndex).io.opSub := false.B
-        fpAddUnits(curIndex).io.outType := INT32TYPE
+        fpAddUnits(curIndex).io.outType := FP32TYPE
         fpAddUnits(curIndex).io.roundingMode := Pipe(true.B, io.macReq.bits.rm, s + 1).bits
         fpAddUnits(curIndex).io.detectTininess := hardfloat.consts.tininess_afterRounding
       }
@@ -1865,18 +2009,25 @@ class Tree(treeIndex: Int = 0, numTrReadPorts: Int = 1, numTrWritePorts: Int = 1
   }
 
   // Last stage.
-  val lastFpAdd = fpAddUnits(numFpAdds - 1)
-  val lastFpSrc = Mux(lastMacReq.bits.aluType === CVT, 0.U,
-                  Mux(lastMacReq.bits.aluType(1), io.accSrcB,
-                    fpAddUnits(numFpAdds - 2).io.out))
+  val lastFpAdd  = fpAddUnits(numFpAdds - 1)
+  val recAccSrcA = recFNFromFN(S.exp, S.sig, io.accSrcA)
+  val recAccSrcB = recFNFromFN(S.exp, S.sig, io.accSrcB)
+  val lastFpSrc1 = Mux(lastBypSrcA, lastFpAdd.io.out, recAccSrcA)
+  val lastFpSrc2 = Mux(lastMacReq.bits.aluType === CVT, 0.U,
+                   Mux(lastMacReq.bits.aluType(1), Mux(lastBypSrcB, lastFpAdd.io.out, recAccSrcB),
+                   fpAddUnits(numFpAdds - 2).io.out))
 
-  lastFpAdd.io.src1    := Pipe(true.B, io.accSrcA, 1).bits
-  lastFpAdd.io.src2    := Pipe(true.B, lastFpSrc , 1).bits
-  lastFpAdd.io.opSub   := Pipe(true.B, lastMacReq.bits.aluType === SUB, 1).bits
-  lastFpAdd.io.outType := finalOutType
-  lastFpAdd.io.roundingMode := Pipe(true.B, lastMacReq.bits.rm, 1).bits
+  lastFpAdd.io.src1    := RegNext(lastFpSrc1)
+  lastFpAdd.io.src2    := RegNext(lastFpSrc2)
+  lastFpAdd.io.opSub   := RegNext(lastMacReq.bits.aluType === SUB)
+  lastFpAdd.io.outType := RegNext(lastMacReq.bits.outType)
+  lastFpAdd.io.roundingMode := RegNext(lastMacReq.bits.rm)
   lastFpAdd.io.detectTininess := hardfloat.consts.tininess_afterRounding
-  val fpRes = lastFpAdd.io.out
+  val fpRecRes = RegNext(lastFpAdd.io.out)
+
+  val fpOut16 = fNFromRecFN(H.exp, H.sig, fpRecRes(H.exp + H.sig, 0))
+  val fpOut32 = fNFromRecFN(S.exp, S.sig, fpRecRes(S.exp + S.sig, 0))
+  val fpRes = Mux(finalOutType === FP16TYPE, Cat(0.U(16.W), fpOut16), fpOut32)
 
   // ACC output.
   io.accDst := Mux(finalOutType(2), fpRes, intRes)
@@ -1972,7 +2123,7 @@ class TreeArray(numTrReadPorts: Int = 1, numTrWritePorts: Int = 1)(implicit p: P
 
   val numTreeStages = log2Ceil(numRows)
   val lastMacReq    = Pipe(io.macReq.valid, io.macReq.bits, numTreeStages)
-  val finalMacReq   = Pipe(lastMacReq.valid, lastMacReq.bits, 1)
+  val finalMacReq   = Pipe(lastMacReq.valid, lastMacReq.bits, 2)
 
   for (i <- 0 until numTrees) {
     (trees(i).io.trRead zip io.trRead).foreach {
@@ -2050,8 +2201,8 @@ class InnerProductUnit(numTrReadPorts: Int = 1, numTrWritePorts: Int = 1)(implic
 
   val lastMacReq = Pipe(io.macReq.valid, io.macReq.bits, numTreeStages)
   val lastMacReqUop = Pipe(io.macReq.valid, io.macReqUop, numTreeStages)
-  val finalMacReq = Pipe(lastMacReq.valid, lastMacReq.bits, 1)
-  val finalMacReqUop = Pipe(lastMacReq.valid, lastMacReqUop.bits, 1)
+  val finalMacReq = Pipe(lastMacReq.valid, lastMacReq.bits, 2)
+  val finalMacReqUop = Pipe(lastMacReq.valid, lastMacReqUop.bits, 2)
 
   val treeArray = Module(new TreeArray(numTrReadPorts, numTrWritePorts))
 
