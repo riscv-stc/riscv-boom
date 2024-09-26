@@ -575,7 +575,7 @@ class WithNStcBooms(n: Int = 1, overrideIdOffset: Option[Int] = None) extends Co
               vMemDataBits = 64,
               numVecPhysRegisters = 97,
               useMatrix = true,
-              useInnerProd = true,
+              useInnerProd = false,
               rLen = 128,
               mLen = 1024, // rLen * 8
               numMatTrRegisters = 12,
